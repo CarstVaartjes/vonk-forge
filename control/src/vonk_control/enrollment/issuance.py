@@ -9,7 +9,7 @@ import secrets
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -156,7 +156,7 @@ class EnrollmentCore:
         self._sqlite_transaction_lock = threading.RLock()
 
     @contextmanager
-    def _transaction(self) -> Iterator[Session]:
+    def _transaction(self) -> Generator[Session]:
         with self._sessions() as session:
             local = session.get_bind().dialect.name == "sqlite"
             if local and not self._sqlite_transaction_lock.acquire(timeout=1):

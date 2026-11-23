@@ -6,7 +6,7 @@ import json
 import os
 import tarfile
 import tempfile
-from collections.abc import Collection, Iterator, Mapping
+from collections.abc import Collection, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -199,7 +199,7 @@ class SourceBundleStore:
 
     @staticmethod
     @contextmanager
-    def _storage_access() -> Iterator[None]:
+    def _storage_access() -> Generator[None]:
         """Preserve the storage boundary's explicit denial and unavailable causes."""
         try:
             yield

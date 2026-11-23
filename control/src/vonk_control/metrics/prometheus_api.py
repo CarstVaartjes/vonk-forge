@@ -4,7 +4,7 @@ import asyncio
 import math
 import re
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -415,7 +415,7 @@ class PrometheusReader:
             self._attention = ([], True, time.monotonic() + 15)
 
     @asynccontextmanager
-    async def lifespan(self) -> AsyncIterator[None]:
+    async def lifespan(self) -> AsyncGenerator[None]:
         # Only the production server owns polling; reads never dispatch work.
         async def refresh() -> None:
             while True:

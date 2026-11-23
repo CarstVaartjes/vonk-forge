@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Generator, Iterable, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime
@@ -118,7 +118,7 @@ _FAILED_COPY_SCOPE: ContextVar[list[tuple[_FailedCopy, ...]] | None] = ContextVa
 
 
 @contextmanager
-def failed_copies_read_once() -> Iterator[None]:
+def failed_copies_read_once() -> Generator[None]:
     """Read the recent failed target copies once inside this read.
 
     The scan is independent of the model, so a pass that inspects many

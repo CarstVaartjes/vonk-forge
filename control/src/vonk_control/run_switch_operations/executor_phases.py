@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from functools import partial
 from typing import (
@@ -76,7 +76,7 @@ if TYPE_CHECKING:
 
 
 @contextmanager
-def _replans_when_superseded() -> Iterator[None]:
+def _replans_when_superseded() -> Generator[None]:
     """A phase whose authority moved on in the Controller's own records re-plans.
 
     Nothing was issued: the Run/Switch reads the intent again under a fresh

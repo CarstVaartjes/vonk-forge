@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime
@@ -78,7 +78,7 @@ class CoreMixin:
         return math.ceil(total_bytes * cache._free_fraction)
 
     @contextmanager
-    def _session(self, *, write: bool = False) -> Iterator[Session]:
+    def _session(self, *, write: bool = False) -> Generator[Session]:
         cache = cast("ModelCacheService", self)
         active = _CACHE_SESSION.get()
         if active is not None and active[0] is cache and (active[2] or not write):

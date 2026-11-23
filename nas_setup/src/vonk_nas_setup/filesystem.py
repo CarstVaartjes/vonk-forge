@@ -9,7 +9,7 @@ import shutil
 import stat
 import tempfile
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager, suppress
 from pathlib import Path
 
@@ -193,7 +193,7 @@ def write_member(root: Path, relative: str, content: bytes) -> None:
 
 
 @contextmanager
-def acquire_owner(root: Path) -> Iterator[None]:
+def acquire_owner(root: Path) -> Generator[None]:
     path = root / ".vonk-setup.lock"
     entry = metadata(path)
     if entry and (not stat.S_ISREG(entry.st_mode) or entry.st_nlink != 1):

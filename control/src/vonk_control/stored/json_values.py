@@ -31,7 +31,7 @@ import collections.abc as cabc
 import json
 import logging
 import types
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import (
@@ -356,7 +356,7 @@ def set_write_guard_mode(*, strict: bool) -> None:
 
 
 @contextmanager
-def write_guard_mode(*, strict: bool) -> Iterator[None]:
+def write_guard_mode(*, strict: bool) -> Generator[None]:
     """Run a block under one guard mode (a test that writes damaged rows on purpose)."""
 
     previous = _GUARD_MODE

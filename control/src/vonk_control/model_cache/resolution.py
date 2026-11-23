@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime
@@ -121,7 +121,7 @@ _READ_SCOPE_SETS: ContextVar[
 
 
 @contextmanager
-def artifact_sets_resolved_once() -> Iterator[None]:
+def artifact_sets_resolved_once() -> Generator[None]:
     """Resolve each exact artifact set at most once inside this read."""
 
     token = _READ_SCOPE_SETS.set({})

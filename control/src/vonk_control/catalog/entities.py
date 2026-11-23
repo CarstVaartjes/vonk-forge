@@ -6,7 +6,7 @@ import copy
 import hashlib
 import json
 import logging
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
 from types import MappingProxyType
@@ -126,7 +126,7 @@ class CatalogEntityService:
         self._clock, self._cursors = clock, cursors
 
     @contextmanager
-    def _write(self) -> Iterator[Session]:
+    def _write(self) -> Generator[Session]:
         if self._session is not None:
             yield self._session
             self._session.flush()
@@ -136,7 +136,7 @@ class CatalogEntityService:
             yield session
 
     @contextmanager
-    def _read(self) -> Iterator[Session]:
+    def _read(self) -> Generator[Session]:
         if self._session is not None:
             self._session.flush()
             yield self._session

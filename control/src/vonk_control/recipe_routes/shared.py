@@ -7,7 +7,7 @@ import logging
 import re
 import threading
 import uuid
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -283,7 +283,7 @@ def lock_route_publication_owner_in_session(
 def route_publication_transaction(
     sessions: sessionmaker[Session],
     pauses: Sequence[float] = REQUEST_PAUSES,
-) -> Iterator[Session]:
+) -> Generator[Session]:
     """Reobserve acquisition in fresh transactions; never retry the caller's body.
 
     ``pauses=()`` tries once, for a caller that paces a held owner itself.

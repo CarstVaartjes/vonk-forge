@@ -38,7 +38,7 @@ import shutil
 import stat
 import subprocess
 import time
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
@@ -422,7 +422,7 @@ class OciImageStore:
         return {item.removeprefix("sha256:") for item in image.blob_digests}
 
     @contextmanager
-    def _lock(self) -> Iterator[bool]:
+    def _lock(self) -> Generator[bool]:
         """One writer at a time: skopeo rewrites the layout's index.
 
         Never waits: it yields ``False`` for a busy store, and the caller

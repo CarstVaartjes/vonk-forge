@@ -8,7 +8,7 @@ import shutil
 import stat
 import threading
 import uuid
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
@@ -360,7 +360,7 @@ class RemovalAcceptanceMixin:
     @contextmanager
     def _model_storage_lock(
         self, digest: str, *, model_set: bool = False, shared: bool = False
-    ) -> Iterator[None]:
+    ) -> Generator[None]:
         """Take one stable managed-storage lock without waiting for its owner.
 
         A model-set lock names a partials owner: a set digest or a repair

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -119,7 +119,7 @@ class LocalCertificateAuthority(NodeCertificateAuthority):
         """No transport resources to close."""
 
     @contextmanager
-    def _session(self, *, write: bool = False) -> Iterator[Session]:
+    def _session(self, *, write: bool = False) -> Generator[Session]:
         try:
             with self._sessions() as session:
                 if write:

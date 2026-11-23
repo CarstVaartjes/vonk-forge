@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
@@ -149,7 +149,7 @@ class FleetProfileService:
         *,
         node_ids: Sequence[str] = (),
         platform_maintenance: bool = False,
-    ) -> Iterator[Session]:
+    ) -> Generator[Session]:
         """Open the short transaction used to accept a reviewed profile plan.
 
         Node advisory locks and the explicit row locks below serialize the

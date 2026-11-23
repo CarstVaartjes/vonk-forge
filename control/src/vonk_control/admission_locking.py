@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Collection, Iterator, Mapping
+from collections.abc import Callable, Collection, Generator, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -103,7 +103,7 @@ _PATIENCE_MS: ContextVar[int] = ContextVar("vonk_admission_patience_ms", default
 
 
 @contextmanager
-def patient_admission(refused_retries: int) -> Iterator[None]:
+def patient_admission(refused_retries: int) -> Generator[None]:
     """Let admission transactions in this context queue for their locks.
 
     A try-lock never queues, so a background writer that takes and releases a
@@ -325,7 +325,7 @@ def constraint_conflict(error: IntegrityError) -> tuple[Conflict, str]:
 
 
 @contextmanager
-def admitting() -> Iterator[None]:
+def admitting() -> Generator[None]:
     """Turn a constraint violation inside this block into its typed conflict.
 
     Enter it outside the transaction (``with admitting(), sessions.begin()``)

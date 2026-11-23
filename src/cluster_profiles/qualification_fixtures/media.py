@@ -15,7 +15,7 @@ import time
 import wave
 import zipfile
 import zlib
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from importlib.resources.abc import Traversable
@@ -32,7 +32,7 @@ _MEDIA_DEADLINE: ContextVar[float | None] = ContextVar(
 
 
 @contextmanager
-def media_budget(timeout_seconds: float) -> Iterator[None]:
+def media_budget(timeout_seconds: float) -> Generator[None]:
     token = _MEDIA_DEADLINE.set(time.monotonic() + timeout_seconds)
     try:
         yield

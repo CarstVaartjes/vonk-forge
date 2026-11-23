@@ -9,7 +9,12 @@ import os
 import tempfile
 import time
 import uuid
-from collections.abc import AsyncIterable, AsyncIterator, Iterator
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterable,
+    Generator,
+    Iterator,
+)
 from contextlib import AbstractContextManager, asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -137,13 +142,13 @@ class ArtifactBlobStore:
             )
 
     @contextmanager
-    def reference_attachment(self) -> Iterator[None]:
+    def reference_attachment(self) -> Generator[None]:
         """Fence one blob verification plus its durable database attachment."""
         with self._reference_lock(exclusive=False):
             yield
 
     @asynccontextmanager
-    async def reference_attachment_async(self) -> AsyncIterator[None]:
+    async def reference_attachment_async(self) -> AsyncGenerator[None]:
         """``reference_attachment`` for async callers.
 
         The flock belongs to the open file description, not to a thread, so the
@@ -175,7 +180,7 @@ class ArtifactBlobStore:
             await asyncio.shield(asyncio.to_thread(guard.__exit__, None, None, None))
 
     @contextmanager
-    def reference_reconciliation(self) -> Iterator[None]:
+    def reference_reconciliation(self) -> Generator[None]:
         """Exclude new database attachments while references are reconciled."""
         with self._reference_lock(exclusive=True):
             yield
@@ -526,7 +531,7 @@ class ArtifactBlobStore:
         )
 
     @contextmanager
-    def _reference_lock(self, *, exclusive: bool) -> Iterator[None]:
+    def _reference_lock(self, *, exclusive: bool) -> Generator[None]:
         """Hold the shared reference fence for one bounded claim.
 
         The fence is a kernel file lock shared with any other Controller

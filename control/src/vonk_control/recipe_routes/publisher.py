@@ -6,7 +6,7 @@ import hashlib
 import ipaddress
 import json
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime
@@ -64,7 +64,7 @@ class AtomicRecipeRoutePublisher:
     )
 
     @contextmanager
-    def fenced(self, check: Callable[[], bool]) -> Iterator[None]:
+    def fenced(self, check: Callable[[], bool]) -> Generator[None]:
         token = self._ownership.set(check)
         try:
             yield

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -97,7 +97,7 @@ def create_app(
     prometheus = prometheus or PrometheusReader(prometheus_url)
 
     @asynccontextmanager
-    async def monitoring_lifespan(app: FastAPI) -> AsyncIterator[None]:
+    async def monitoring_lifespan(app: FastAPI) -> AsyncGenerator[None]:
         async with prometheus.lifespan():
             if lifespan is None:
                 yield

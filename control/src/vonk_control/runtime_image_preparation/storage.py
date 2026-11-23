@@ -6,7 +6,7 @@ import errno
 import fcntl
 import os
 import stat
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager, suppress
 from pathlib import Path
 
@@ -125,7 +125,7 @@ class FilesystemRuntimeImageStorage:
         return descriptor
 
     @contextmanager
-    def publication_lock(self, archive_sha256: str) -> Iterator[None]:
+    def publication_lock(self, archive_sha256: str) -> Generator[None]:
         """Observe lock availability three times; never replay a yielded effect."""
         last_error = None
         descriptor = None

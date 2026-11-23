@@ -19,7 +19,7 @@ import re
 import secrets
 import tempfile
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -932,7 +932,7 @@ class GatewayKeyService:
         return GatewayKeyRevoked(name=name)
 
     @contextmanager
-    def _mutation_claim(self, name: str) -> Iterator[bool]:
+    def _mutation_claim(self, name: str) -> Generator[bool]:
         descriptor: int | None = None
         acquired = False
         try:
