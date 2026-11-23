@@ -1623,12 +1623,11 @@ def _rclone_copy(source: Path, remote: str, entry: dict[str, Any]) -> None:
         # object is absent, so the immutable guard still applies.
         if _rclone_upload(source, remote, key, immutable=immutable):
             observed = _await_digest(remote, key, expected)
-    else:
-        # The key holds bytes we did not just write (a partial first attempt).
-        # Our copy is the signed truth for this content-addressed key, so
-        # replace that one object once; verification below stays exact.
-        if _rclone_upload(source, remote, key, immutable=False):
-            observed = _await_digest(remote, key, expected)
+    # The key holds bytes we did not just write (a partial first attempt).
+    # Our copy is the signed truth for this content-addressed key, so
+    # replace that one object once; verification below stays exact.
+    elif _rclone_upload(source, remote, key, immutable=False):
+        observed = _await_digest(remote, key, expected)
     if observed != expected:
         raise PublicationError(f"R2 verification failed for {key}")
 

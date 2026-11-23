@@ -64,7 +64,7 @@ class CopyBoundedChunk(bytes):
         if isinstance(key, slice):
             start = key.start or 0
             stop = len(self) if key.stop is None else key.stop
-            self.largest_slice = max(self.largest_slice, max(0, stop - start))
+            self.largest_slice = max(self.largest_slice, 0, stop - start)
         return super().__getitem__(key)
 
     def __radd__(self, _other):

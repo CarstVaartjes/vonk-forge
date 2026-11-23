@@ -500,9 +500,11 @@ class FleetProfileService:
                                     for child in document.children
                                     if child.queue_index == stop.queue_index
                                     and (
-                                        child.operation_id == stop.operation_id
-                                        or child.original_operation_id
-                                        == stop.operation_id
+                                        stop.operation_id
+                                        in (
+                                            child.operation_id,
+                                            child.original_operation_id,
+                                        )
                                     )
                                     and child.kind == ProfileChildPhase.STOP.value
                                 ),

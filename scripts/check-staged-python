@@ -48,8 +48,7 @@ def type_checked(files: list[str]) -> list[str]:
         path
         for path in files
         if any(
-            entry == "." or path == entry or path.startswith(entry + "/")
-            for entry in include
+            entry in (".", path) or path.startswith(entry + "/") for entry in include
         )
         and not any(fnmatch.fnmatch(path, pattern) for pattern in exclude)
     ]

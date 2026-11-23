@@ -373,7 +373,7 @@ def test_pr_image_references_pass_the_publication_ingress_check(
         )
         publication._validate_image(reference, role)
         with pytest.raises(publication.PublicationError):
-            publication._validate_image(reference.split("@")[0], role)
+            publication._validate_image(reference.split("@", maxsplit=1)[0], role)
         # An invalid ingress reference leaves no state blocking a fresh one.
         publication._validate_image(reference, role)
 

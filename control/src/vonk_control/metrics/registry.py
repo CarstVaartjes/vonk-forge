@@ -135,7 +135,7 @@ def runnable_job_ages(
         created = created_at
         if created.tzinfo is None:
             created = created.replace(tzinfo=UTC)
-        ages[kind] = max(ages.get(kind, 0.0), max(0.0, (now - created).total_seconds()))
+        ages[kind] = max(ages.get(kind, 0.0), 0.0, (now - created).total_seconds())
     return ages
 
 

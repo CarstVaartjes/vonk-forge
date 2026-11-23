@@ -59,7 +59,8 @@ def range_partial_bytes(target: Path, expected_bytes: int, *, workers: int = 4) 
             min(path.stat().st_size, end - start + 1)
             if not path.is_symlink() and path.is_file()
             else 0,
-            max(0, min(prefix, end + 1) - start),
+            0,
+            min(prefix, end + 1) - start,
         )
         for start, end, path in _segments(target, expected_bytes, workers)
     )

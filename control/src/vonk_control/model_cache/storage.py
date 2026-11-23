@@ -189,7 +189,7 @@ class StorageMixin:
                 # A split file is assembled part by part, each part deleted
                 # once appended: the disk peaks at its largest part.
                 split_peak = max(
-                    split_peak, max(part.expected_bytes for part in spec.parts)
+                    split_peak, *(part.expected_bytes for part in spec.parts)
                 )
             if replaces and ledger < spec.expected_bytes:
                 # A refresh or repair writes a stored object again beside its

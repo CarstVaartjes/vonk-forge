@@ -722,8 +722,7 @@ def _unguarded_fixture_imports(node, enclosing: tuple = ()) -> list[str]:
             continue
         functions = (*enclosing, child)
         if (
-            child.name != "_import_canary_catalog"
-            and child.name != "_import_candidate_library"
+            child.name not in {"_import_canary_catalog", "_import_candidate_library"}
             and _calls(child, "_import_canary_catalog")
             and not any(_calls(f, "_offered_once_more") for f in functions)
         ):

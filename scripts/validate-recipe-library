@@ -410,11 +410,7 @@ def _validate_v2_package(
             return True
 
         for name in names:
-            if (
-                name == "manifest.json"
-                or name == "recipe.json"
-                or name in expected_models
-            ):
+            if name in {"manifest.json", "recipe.json"} or name in expected_models:
                 continue
             member = archive.extractfile(name)
             content = member.read() if member is not None else b""

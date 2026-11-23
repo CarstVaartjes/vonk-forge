@@ -499,7 +499,12 @@ def _review_assets_for_selection(
     assets: list[CacheRemovalAsset] = []
     for identity, (expected_bytes, disposition) in sorted(expected.items()):
         observed = by_identity.get(identity)
-        if observed is None or observed.disposition != disposition:
+        if (
+            observed is None
+            or observed.disposition != disposition
+            or expected_bytes is not None
+            and observed.expected_bytes != expected_bytes
+        ):
             assets.append(
                 CacheRemovalAsset(
                     kind=identity[0],
@@ -511,19 +516,7 @@ def _review_assets_for_selection(
                 )
             )
         else:
-            if expected_bytes is not None and observed.expected_bytes != expected_bytes:
-                assets.append(
-                    CacheRemovalAsset(
-                        kind=identity[0],
-                        sha256=identity[1],
-                        expected_bytes=expected_bytes,
-                        availability=AssetAvailability.UNKNOWN,
-                        available_bytes=None,
-                        disposition=disposition,
-                    )
-                )
-            else:
-                assets.append(observed)
+            assets.append(observed)
     return tuple(assets)
 
 

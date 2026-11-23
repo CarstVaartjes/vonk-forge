@@ -52,7 +52,7 @@ def _select_release(
         tag = _RELEASE_TAG.fullmatch(release.tag_name)
         if release.draft or tag is None or int(tag[1]) != CONTRACT_MAJOR:
             continue
-        if selector != "latest" and release.tag_name != selector:
+        if selector not in ("latest", release.tag_name):
             continue
         key = (int(tag[2]), int(tag[3]))
         if best is None or key > best[0]:

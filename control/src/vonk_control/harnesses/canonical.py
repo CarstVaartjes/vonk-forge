@@ -507,9 +507,8 @@ def compile_canonical_harness(
             command.extend(("--port", str(port)))
         else:
             command = rebind_port_argument(command, interface.port, port)
-    else:
-        if "--output-dir" not in command:
-            command.extend(("--output-dir", "/outputs"))
+    elif "--output-dir" not in command:
+        command.extend(("--output-dir", "/outputs"))
     _validate_argv_size(command)
     model_mounts: list[HarnessMount] = []
     for _artifact, mount in mounts:

@@ -190,9 +190,7 @@ class CheckpointsMixin:
                         previous_received = 0 if entry is None else entry.received_bytes
                         artifacts[ledger_digest] = ModelCacheTransferArtifact(
                             baseline_bytes=baseline,
-                            received_bytes=max(
-                                previous_received, max(0, landed - baseline)
-                            ),
+                            received_bytes=max(previous_received, 0, landed - baseline),
                             started_at=entry.started_at
                             if entry is not None
                             else _iso_now(cache._clock()),
