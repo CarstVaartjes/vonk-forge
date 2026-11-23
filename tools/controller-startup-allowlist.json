@@ -35,6 +35,7 @@
         "Settings.from_env_and_secrets",
         "SpaFiles",
         "TelemetryRepository",
+        "UpgradeAvailability",
         "asyncio.Event",
         "build_agent_services",
         "build_engine",

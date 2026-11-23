@@ -25,6 +25,7 @@ from ..library.contract import (
     LibraryResourceProjection,
     _utc,
     model_actions,
+    recipe_actions,
 )
 from ..model_cache.contract import (
     CacheManifest,
@@ -155,6 +156,9 @@ def _recipe_projection(
         projected.api,
     )
     resources = self._recipe_resources(document)
+    local = self._local(
+        revision.content_digest, kind=ReceiptOwner.RECIPE, snapshot=snapshot
+    )
     return LibraryRecipeProjection(
         selector=self.selector(document.identity.publisher, document.identity.slug),
         identity=LibraryRecipeIdentity(
@@ -185,9 +189,8 @@ def _recipe_projection(
         model_selectors=model_selectors,
         usage=usage,
         resources=resources,
-        local=self._local(
-            revision.content_digest, kind=ReceiptOwner.RECIPE, snapshot=snapshot
-        ),
+        local=local,
+        actions=recipe_actions(local),
         updated_at=_utc(revision.created_at),
         alignment=None if text.recipe is None else text.recipe.alignment,
         node_count=document.topology.node_count,

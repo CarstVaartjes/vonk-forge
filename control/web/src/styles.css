@@ -1110,6 +1110,10 @@ progress {
   background: var(--bad);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--bad) 20%, var(--panel));
 }
+.activity-event.is-called_off .activity-marker {
+  background: var(--bg);
+  box-shadow: 0 0 0 2px var(--line-control);
+}
 .activity-event.is-unknown .activity-marker {
   background: var(--faint);
   box-shadow: 0 0 0 2px var(--line-control);

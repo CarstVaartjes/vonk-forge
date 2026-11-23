@@ -281,6 +281,12 @@ def adopt_state(subject: LifecycleSubject, stored: str) -> LifecycleState | None
         return None
 
 
+#: The terminal states that are a failure. ``cancelled`` is an operator's own
+#: request and ``superseded`` a replacement, so neither is one.
+UNSUCCESSFUL_LIFECYCLE_STATES: frozenset[LifecycleState] = frozenset(
+    {LifecycleState.FAILED}
+)
+
 #: The states of a row that has not ended.
 LIVE_LIFECYCLE_STATES: frozenset[LifecycleState] = frozenset(LifecycleState) - (
     TERMINAL_LIFECYCLE_STATES
@@ -738,6 +744,7 @@ __all__ = [
     "LIVE_LIFECYCLE_STATES",
     "SECURITY_REFUSAL_SUFFIXES",
     "TERMINAL_LIFECYCLE_STATES",
+    "UNSUCCESSFUL_LIFECYCLE_STATES",
     "AgentResultState",
     "ArtifactPreparation",
     "BlockerCategory",

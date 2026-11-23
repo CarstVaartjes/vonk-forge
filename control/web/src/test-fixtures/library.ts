@@ -1,4 +1,4 @@
-import { CacheOperationKind } from "../api/vocabulary.generated";
+import { CacheOperationKind, LibraryCacheState } from "../api/vocabulary.generated";
 import type {
   ModelDefinition,
   RecipeDefinition,
@@ -160,8 +160,16 @@ function syntheticModelTarget(recipeIndex: number): number {
   ]!;
 }
 
+const seedLocal = {
+  controller: LibraryCacheState.NOT_CACHED,
+  running_on: [],
+  preparation: null,
+};
+const seedActions = [CacheOperationKind.DOWNLOAD];
+
 function recipe(index: number): RecipeSeed {
-  if (index < actualLtxRecipes.length) return clone(actualLtxRecipes[index]!);
+  if (index < actualLtxRecipes.length)
+    return { ...clone(actualLtxRecipes[index]!), local: seedLocal, actions: seedActions };
   const id = index === 0 ? actualRecipeDocumentSeed.identity.slug : `recipe-${index + 1}`;
   const seedRecipeDisplay = recipeDisplays.get(actualRecipeDocumentSeed.identity.slug)!;
   const title =
@@ -192,6 +200,8 @@ function recipe(index: number): RecipeSeed {
       slug: id,
       title,
       topology_name: definition.topology.name,
+      local: seedLocal,
+      actions: seedActions,
     };
   definition.identity = { ...definition.identity, slug: id };
   const description = `${title} canonical RecipeDefinition from the Controller catalog corpus.`;
@@ -237,6 +247,8 @@ function recipe(index: number): RecipeSeed {
     slug: id,
     title,
     topology_name: definition.topology.name,
+    local: seedLocal,
+    actions: seedActions,
   };
 }
 
@@ -293,7 +305,6 @@ const projectionResources = {
   memory_bytes: null,
   runtime_memory_bytes: null,
 };
-const projectionLocal = { controller: "cached" as const, preparation: null, running_on: [] };
 const facetValues = { family: [], line: [], quantization: [], usage: [], version: [] };
 export const modelLibrary: ModelLibrary = {
   generated_at: libraryViewSnapshot.generated_at,
@@ -366,7 +377,8 @@ export const recipeLibrary: RecipeLibrary = {
     ),
     usage: entry.capabilities,
     resources: projectionResources,
-    local: projectionLocal,
+    local: entry.local,
+    actions: entry.actions,
     alignment: entry.recipe_display?.alignment ?? null,
     node_count: entry.recipe_document.topology.node_count,
     engine: entry.recipe_document.runtime.engine,
@@ -422,7 +434,8 @@ export const currentRecipeDetail: RecipeDetail = {
   model_documents: detailModelDocuments,
   usage: recipeLibrary.recipes[0]!.usage,
   resources: projectionResources,
-  local: projectionLocal,
+  local: recipeLibrary.recipes[0]!.local,
+  actions: recipeLibrary.recipes[0]!.actions,
   alignment: recipeLibrary.recipes[0]!.alignment ?? null,
   node_count: recipeLibrary.recipes[0]!.node_count,
   engine: recipeLibrary.recipes[0]!.engine,
