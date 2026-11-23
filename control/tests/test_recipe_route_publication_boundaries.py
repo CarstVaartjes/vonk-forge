@@ -28,7 +28,7 @@ from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
 
 from .observed_actions import observe_action
-from .test_recipe_routes import (
+from .recipe_routes_support import (
     NOW,
     MutableClock,
     _publication,
