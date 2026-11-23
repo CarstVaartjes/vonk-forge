@@ -81,6 +81,11 @@ function csrfToken(): string | undefined {
   return cookie?.slice(cookie.indexOf("=") + 1);
 }
 
+/** An absent signal is an absent key: `signal: undefined` is not an absent key under exactOptionalPropertyTypes. */
+function signalOption(signal: AbortSignal | undefined): { signal?: AbortSignal } {
+  return signal ? { signal } : {};
+}
+
 const REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 /** The Controller's correlation ID for a response, when it sent a well-formed one. */
@@ -162,7 +167,7 @@ function resultData<T>(result: { data?: T; error?: unknown; response: Response }
 }
 
 export class ApiClient implements ControlApi {
-  private authenticationRequired?: () => void;
+  private authenticationRequired?: (() => void) | undefined;
   private readonly generated = createClient<paths>({
     baseUrl: location.origin,
     credentials: "same-origin",
@@ -416,7 +421,7 @@ export class ApiClient implements ControlApi {
     signal?: AbortSignal,
   ): Promise<unknown> {
     const response = await fetch(path, {
-      signal,
+      ...signalOption(signal),
       credentials: "same-origin",
       headers: { Accept: "application/x-vonk-observation+ndjson" },
     });
@@ -449,13 +454,15 @@ export class ApiClient implements ControlApi {
   }
 
   async enrollFleetNode(input: FleetEnrollRequest, signal?: AbortSignal) {
-    return resultData(await this.generated.POST("/api/fleet/enroll", { body: input, signal }));
+    return resultData(
+      await this.generated.POST("/api/fleet/enroll", { body: input, ...signalOption(signal) }),
+    );
   }
 
   async metricsSeries(metric: Metric, range: MetricRange, node?: string, signal?: AbortSignal) {
     return resultData(
       await this.generated.GET("/api/metrics/series", {
-        params: { query: { metric, range, node } },
+        params: { query: { metric, range, ...(node !== undefined ? { node } : {}) } },
         signal: signal
           ? AbortSignal.any([signal, AbortSignal.timeout(10000)])
           : AbortSignal.timeout(10000),
@@ -501,7 +508,7 @@ export class ApiClient implements ControlApi {
     return resultData(
       await this.generated.GET("/api/fleet/{selector}/loginfo", {
         params: { path: { selector }, query: { lines: 100 } },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -522,7 +529,7 @@ export class ApiClient implements ControlApi {
     return resultData(
       await this.generated.GET("/api/fleet/enrollments/{grant_id}", {
         params: { path: { grant_id: grantId } },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -540,7 +547,7 @@ export class ApiClient implements ControlApi {
   }
 
   async gatewayKeys(signal?: AbortSignal): Promise<GatewayKeyList> {
-    return gatewayData(await this.generated.GET("/api/key", { signal }));
+    return gatewayData(await this.generated.GET("/api/key", { ...signalOption(signal) }));
   }
 
   async createGatewayKey(
@@ -574,7 +581,7 @@ export class ApiClient implements ControlApi {
   }
 
   async profiles(signal?: AbortSignal): Promise<FleetProfileList> {
-    const first = resultData(await this.generated.GET("/api/profile", { signal }));
+    const first = resultData(await this.generated.GET("/api/profile", { ...signalOption(signal) }));
     const profiles = [...first.profiles];
     let after = first.next_after;
     let previous = 0;
@@ -584,7 +591,7 @@ export class ApiClient implements ControlApi {
       const page = resultData(
         await this.generated.GET("/api/profile", {
           params: { query: { after } },
-          signal,
+          ...signalOption(signal),
         }),
       );
       profiles.push(...page.profiles);
@@ -597,7 +604,7 @@ export class ApiClient implements ControlApi {
     return resultData(
       await this.generated.GET("/api/profile/{number}", {
         params: { path: { number } },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -611,7 +618,7 @@ export class ApiClient implements ControlApi {
       await this.generated.PUT("/api/profile/{number}", {
         params: { path: { number } },
         body: input,
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -625,7 +632,7 @@ export class ApiClient implements ControlApi {
       await this.generated.POST("/api/profile/{number}/delete", {
         params: { path: { number } },
         body: expectedRevision === undefined ? {} : { expected_revision: expectedRevision },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -637,7 +644,7 @@ export class ApiClient implements ControlApi {
     return resultData(
       await this.generated.POST("/api/profile/{number}/preview", {
         params: { path: { number } },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -651,7 +658,7 @@ export class ApiClient implements ControlApi {
       await this.generated.POST("/api/profile/{number}/load", {
         params: { path: { number } },
         body: input,
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -664,7 +671,7 @@ export class ApiClient implements ControlApi {
     return resultData(
       await this.generated.GET("/api/profile/{number}/requests/{request_key}", {
         params: { path: { number, request_key: requestKey } },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -676,7 +683,7 @@ export class ApiClient implements ControlApi {
     return resultData(
       await this.generated.GET("/api/profile/{number}/progress", {
         params: { path: { number } },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -688,21 +695,23 @@ export class ApiClient implements ControlApi {
     return resultData(
       await this.generated.GET("/api/profile/{number}/endpoints", {
         params: { path: { number } },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
 
   async catalogSyncStatus(signal?: AbortSignal): Promise<CatalogSyncStatus | null> {
     // 404 means the sync has never run, which is a state, not a failure.
-    const result = await this.generated.GET("/api/catalog/managed-recipes/sync-status", { signal });
+    const result = await this.generated.GET("/api/catalog/managed-recipes/sync-status", {
+      ...signalOption(signal),
+    });
     if (result.response.status === 404) return null;
     return resultData(result);
   }
 
   async libraryVocabulary(signal?: AbortSignal): Promise<LibraryVocabulary | null> {
     // 404 means the synced release publishes none: the words are then the names.
-    const result = await this.generated.GET("/api/library/vocabulary", { signal });
+    const result = await this.generated.GET("/api/library/vocabulary", { ...signalOption(signal) });
     if (result.response.status === 404) return null;
     return resultData(result);
   }
@@ -716,7 +725,7 @@ export class ApiClient implements ControlApi {
       await this.generated.POST("/api/model/operations/{operation_id}/cancel", {
         params: { path: { operation_id: operationId } },
         body: { request_key: requestKey, reason: "operator requested cancellation" },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -730,7 +739,7 @@ export class ApiClient implements ControlApi {
       await this.generated.POST("/api/recipe/operations/{operation_id}/cancel", {
         params: { path: { operation_id: operationId } },
         body: { request_key: requestKey, reason: "operator requested cancellation" },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -742,7 +751,7 @@ export class ApiClient implements ControlApi {
     return resultData(
       await this.generated.POST("/api/recipe/installations/{installation_id}/reconcile/preview", {
         params: { path: { installation_id: installationId } },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -757,7 +766,7 @@ export class ApiClient implements ControlApi {
       await this.generated.POST("/api/recipe/installations/{installation_id}/reconcile", {
         params: { path: { installation_id: installationId } },
         body: { request_key: requestKey, plan_digest: planDigest },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -769,7 +778,7 @@ export class ApiClient implements ControlApi {
     return resultData(
       await this.generated.GET("/api/profile/{number}/definition", {
         params: { path: { number } },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -784,7 +793,7 @@ export class ApiClient implements ControlApi {
       await this.generated.POST("/api/profile/applications/{application_id}/cancel", {
         params: { path: { application_id: applicationId } },
         body: { profile_number: profileNumber, request_key: requestKey },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -797,8 +806,15 @@ export class ApiClient implements ControlApi {
   ): Promise<ModelLibrary> {
     return resultData(
       await this.generated.GET("/api/model/library", {
-        params: { query: { cursor, limit: 100, sort, updated_since: updatedSince } },
-        signal,
+        params: {
+          query: {
+            limit: 100,
+            ...(cursor !== undefined ? { cursor } : {}),
+            ...(sort !== undefined ? { sort } : {}),
+            ...(updatedSince !== undefined ? { updated_since: updatedSince } : {}),
+          },
+        },
+        ...signalOption(signal),
       }),
     );
   }
@@ -813,9 +829,15 @@ export class ApiClient implements ControlApi {
     return resultData(
       await this.generated.GET("/api/recipe/library", {
         params: {
-          query: { cursor, limit: 100, sort, updated_since: updatedSince, fits_fleet: fitsFleet },
+          query: {
+            limit: 100,
+            ...(cursor !== undefined ? { cursor } : {}),
+            ...(sort !== undefined ? { sort } : {}),
+            ...(updatedSince !== undefined ? { updated_since: updatedSince } : {}),
+            ...(fitsFleet !== undefined ? { fits_fleet: fitsFleet } : {}),
+          },
         },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -824,7 +846,7 @@ export class ApiClient implements ControlApi {
     return resultData(
       await this.generated.GET("/api/recipe/{selector}", {
         params: { path: { selector } },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -838,7 +860,7 @@ export class ApiClient implements ControlApi {
       await this.generated.POST("/api/model/{selector}/download", {
         params: { path: { selector } },
         body: { request_key: requestKey },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -851,7 +873,7 @@ export class ApiClient implements ControlApi {
     return resultData(
       await this.generated.GET("/api/model/{selector}/remove-review", {
         params: { path: { selector }, query: fleet ? { fleet: true } : {} },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -870,7 +892,7 @@ export class ApiClient implements ControlApi {
           request_key: requestKey,
           ...(fleetReviewDigest ? { fleet: true, review_digest: fleetReviewDigest } : {}),
         },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -882,7 +904,7 @@ export class ApiClient implements ControlApi {
     return resultData(
       await this.generated.GET("/api/model/requests/{request_key}", {
         params: { path: { request_key: requestKey } },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -894,7 +916,7 @@ export class ApiClient implements ControlApi {
     return resultData(
       await this.generated.GET("/api/model/operations/{operation_id}", {
         params: { path: { operation_id: operationId } },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -910,7 +932,7 @@ export class ApiClient implements ControlApi {
       await this.generated.POST("/api/recipe/{selector}/download", {
         params: { path: { selector } },
         body: { request_key: requestKey },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -923,7 +945,7 @@ export class ApiClient implements ControlApi {
     return resultData(
       await this.generated.GET("/api/recipe/{selector}/remove-review", {
         params: { path: { selector }, query: { with_model: withModel } },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -941,7 +963,7 @@ export class ApiClient implements ControlApi {
       await this.generated.POST("/api/recipe/{selector}/remove", {
         params: { path: { selector } },
         body: { request_key: requestKey, with_model: withModel },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -958,7 +980,7 @@ export class ApiClient implements ControlApi {
       await this.generated.POST("/api/recipe/update", {
         params: {},
         body: { all, selectors, request_key: requestKey },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -970,7 +992,7 @@ export class ApiClient implements ControlApi {
     return resultData(
       await this.generated.GET("/api/recipe/operations/{operation_id}", {
         params: { path: { operation_id: operationId } },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -982,7 +1004,7 @@ export class ApiClient implements ControlApi {
     return resultData(
       await this.generated.GET("/api/recipe/requests/{request_key}", {
         params: { path: { request_key: requestKey } },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -994,20 +1016,24 @@ export class ApiClient implements ControlApi {
   ): Promise<ArtifactJobList> {
     const query = limit === undefined ? "" : `?limit=${limit}`;
     return this.request(`/api/recipe/runs/${encodeURIComponent(runId)}/artifact-jobs${query}`, {
-      signal,
+      ...signalOption(signal),
     });
   }
 
   artifactJobByRequestId(requestId: string, signal?: AbortSignal): Promise<ArtifactJob> {
-    return this.request(`/api/artifact-jobs/requests/${encodeURIComponent(requestId)}`, { signal });
+    return this.request(`/api/artifact-jobs/requests/${encodeURIComponent(requestId)}`, {
+      ...signalOption(signal),
+    });
   }
 
   artifactJobCapabilities(signal?: AbortSignal): Promise<ArtifactJobCapabilities> {
-    return this.request("/api/artifact-jobs/capabilities", { signal });
+    return this.request("/api/artifact-jobs/capabilities", { ...signalOption(signal) });
   }
 
   artifactJobContract(runId: string, signal?: AbortSignal): Promise<ArtifactJobContractRead> {
-    return this.request(`/api/artifact-jobs/contract/run/${encodeURIComponent(runId)}`, { signal });
+    return this.request(`/api/artifact-jobs/contract/run/${encodeURIComponent(runId)}`, {
+      ...signalOption(signal),
+    });
   }
 
   createArtifactJob(
@@ -1020,7 +1046,7 @@ export class ApiClient implements ControlApi {
       method: "POST",
       body: stringifyContractJson(input),
       headers: { "X-Request-ID": requestId },
-      signal,
+      ...signalOption(signal),
     });
   }
 
@@ -1114,7 +1140,7 @@ export class ApiClient implements ControlApi {
   finalizeArtifactJob(jobId: string, signal?: AbortSignal): Promise<ArtifactJob> {
     return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/finalize`, {
       method: "POST",
-      signal,
+      ...signalOption(signal),
     });
   }
 
@@ -1122,12 +1148,14 @@ export class ApiClient implements ControlApi {
     return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/submit`, {
       method: "POST",
       headers: { "X-Request-ID": requestId },
-      signal,
+      ...signalOption(signal),
     });
   }
 
   artifactJob(jobId: string, signal?: AbortSignal): Promise<ArtifactJob> {
-    return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}`, { signal });
+    return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}`, {
+      ...signalOption(signal),
+    });
   }
 
   cancelArtifactJob(
@@ -1140,7 +1168,7 @@ export class ApiClient implements ControlApi {
       method: "POST",
       body: stringifyContractJson({ reason }),
       headers: { "X-Request-ID": requestId },
-      signal,
+      ...signalOption(signal),
     });
   }
 
@@ -1163,14 +1191,14 @@ export class ApiClient implements ControlApi {
       await this.generated.GET("/api/operations", {
         params: {
           query: {
-            cursor,
             limit: 20,
-            state: filters.state,
-            node_id: filters.target,
-            request_id: filters.requestId,
+            ...(cursor !== undefined ? { cursor } : {}),
+            ...(filters.state !== undefined ? { state: filters.state } : {}),
+            ...(filters.target !== undefined ? { node_id: filters.target } : {}),
+            ...(filters.requestId !== undefined ? { request_id: filters.requestId } : {}),
           },
         },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -1179,7 +1207,7 @@ export class ApiClient implements ControlApi {
     return resultData(
       await this.generated.GET("/api/operations/{operation_id}", {
         params: { path: { operation_id: operationId } },
-        signal,
+        ...signalOption(signal),
       }),
     );
   }
@@ -1189,7 +1217,11 @@ export class ApiClient implements ControlApi {
       await this.generated.GET("/api/jobs/{job_id}", {
         params: {
           path: { job_id: jobId },
-          query: { limit: 20, operation_cursor: operationCursor, target_cursor: targetCursor },
+          query: {
+            limit: 20,
+            ...(operationCursor !== undefined ? { operation_cursor: operationCursor } : {}),
+            ...(targetCursor !== undefined ? { target_cursor: targetCursor } : {}),
+          },
         },
       }),
     );

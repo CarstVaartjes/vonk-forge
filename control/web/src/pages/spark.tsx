@@ -51,7 +51,7 @@ export function SparkPage({
 }: {
   api: ControlApi;
   id: string;
-  onLive?(status: LiveStatus | null): void;
+  onLive?: ((status: LiveStatus | null) => void) | undefined;
   onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void;
   onGone(): void;
 }) {

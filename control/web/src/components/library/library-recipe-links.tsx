@@ -8,7 +8,7 @@ function Address({ value, children }: { value: string | null | undefined; childr
       {children}
     </a>
   ) : (
-    <>{value || children}</>
+    value || children
   );
 }
 

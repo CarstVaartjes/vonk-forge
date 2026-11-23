@@ -7,8 +7,8 @@
       "src/**/*.css",
       "e2e/**/*.ts",
       "*.ts",
-      "!src/api/generated/**",
-      "!src/generated/**",
+      "!src/api/generated",
+      "!src/generated",
       "!src/**/vocabulary.generated.ts",
       "!src/api/generated.d.ts",
       "!src/api/runtime.generated.d.ts"
@@ -27,21 +27,42 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": false,
-      "correctness": {
-        "noUnreachable": "error",
-        "noUnsafeFinally": "error",
-        "useValidTypeof": "error"
+      "preset": "recommended",
+      "style": {
+        "noNonNullAssertion": "off",
+        "noDescendingSpecificity": "off"
       },
-      "suspicious": {
-        "noDebugger": "error",
-        "noDuplicateCase": "error",
-        "noCompareNegZero": "error",
-        "noDoubleEquals": "error"
+      "complexity": {
+        "noImportantStyles": "off"
+      },
+      "correctness": {
+        "useExhaustiveDependencies": {
+          "level": "error",
+          "options": {
+            "reportUnnecessaryDependencies": false
+          }
+        }
       }
     }
   },
   "assist": {
     "enabled": false
-  }
+  },
+  "css": {
+    "linter": {
+      "enabled": true
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["**/*.test.ts", "**/*.test.tsx"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noDocumentCookie": "off"
+          }
+        }
+      }
+    }
+  ]
 }

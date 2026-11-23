@@ -43,12 +43,12 @@ export function AreaChart({
   start: number;
   end: number;
   format: (value: number) => string;
-  threshold?: { value: number; label: string };
+  threshold?: { value: number; label: string } | undefined;
   /** The newest reading is live: the end dot gets a halo (off under reduced motion). */
   live?: boolean;
   emptyText?: string;
   /** Charts of one page share a cursor time: the page holds it, each chart snaps to its own nearest sample. */
-  crosshair?: { at: number | null; onChange(at: number | null): void };
+  crosshair?: { at: number | null; onChange(at: number | null): void } | undefined;
 }) {
   const gradient = useId();
   const [ownAt, setOwnAt] = useState<number | null>(null);
@@ -61,7 +61,8 @@ export function AreaChart({
   if (!times.length) return <p role="status">{emptyText}</p>;
   const values = series.flatMap((s) => s.points.flatMap((p) => (p.v === null ? [] : [p.v])));
   const ticks = niceTicks(Math.min(0, ...values), Math.max(1, ...values));
-  const domain = [ticks[0], ticks[ticks.length - 1]] as const;
+  // niceTicks always returns at least two ticks.
+  const domain = [ticks[0] ?? 0, ticks.at(-1) ?? 1] as const;
   const x = linearScale([start, end], [LEFT, W - RIGHT]);
   const y = linearScale(domain, [H - BOTTOM, TOP]);
   const span = end - start;
@@ -97,6 +98,7 @@ export function AreaChart({
     const runs = runsOf(s.points, x, y);
     return { s, runs, tail: runs.at(-1)?.at(-1) };
   });
+  const only = series.length === 1 ? series[0] : undefined;
   // Each series' samples by time, for the tooltip and the table.
   const valueAt = new Map(series.map((s) => [s.key, new Map(s.points.map((p) => [p.t, p.v]))]));
   const readout = (s: ChartSeries, t: number) => {
@@ -111,6 +113,7 @@ export function AreaChart({
           viewBox={`0 0 ${W} ${H}`}
           role="img"
           aria-label={label}
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users step the cursor along the chart with the arrow keys
           tabIndex={0}
           onPointerMove={move}
           onPointerLeave={() => setCursorTime(null)}
@@ -144,15 +147,15 @@ export function AreaChart({
               </text>
             </g>
           )}
-          {series.length === 1 && (
+          {only && (
             <>
               <defs>
                 <linearGradient id={gradient} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0" style={{ stopColor: series[0].color, stopOpacity: 0.18 }} />
-                  <stop offset="1" style={{ stopColor: series[0].color, stopOpacity: 0 }} />
+                  <stop offset="0" style={{ stopColor: only.color, stopOpacity: 0.18 }} />
+                  <stop offset="1" style={{ stopColor: only.color, stopOpacity: 0 }} />
                 </linearGradient>
               </defs>
-              <path d={washPath(drawn[0].runs, y(domain[0]))} fill={`url(#${gradient})`} />
+              <path d={washPath(drawn[0]?.runs ?? [], y(domain[0]))} fill={`url(#${gradient})`} />
             </>
           )}
           {drawn.map(({ s, runs, tail }) => (

@@ -105,7 +105,7 @@ export function LibraryProfileComposer({
       recipe_selector: recipeSelector,
       spark_ids: group.nodes.map((node) => node.node_id).sort(),
       assignment_name: assignmentName.trim(),
-      model_variant: modelVariant,
+      ...(modelVariant !== undefined ? { model_variant: modelVariant } : {}),
       desired_state: desiredState,
       // Every option is sent explicitly; untouched ones carry the recipe default.
       ...(recipeOptions.length > 0

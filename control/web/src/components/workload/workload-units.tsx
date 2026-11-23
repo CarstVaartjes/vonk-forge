@@ -23,7 +23,7 @@ export function ClusterUnit({
   reads: WorkloadReads;
   now: Date;
   live: boolean;
-  onOpen?(id: string): void;
+  onOpen?: ((id: string) => void) | undefined;
   /** Opened under its own row: no repeated header and figures. */
   compact?: boolean;
 }) {
@@ -62,7 +62,7 @@ export function WorkloadUnits({
   reads: WorkloadReads;
   now: Date;
   live: boolean;
-  onOpen?(id: string): void;
+  onOpen?: ((id: string) => void) | undefined;
 }) {
   const { clusters, idle } = groupByWorkload(nodes);
   const order = new Map(nodes.map((node, index) => [node.id, index]));

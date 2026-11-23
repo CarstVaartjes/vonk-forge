@@ -14,14 +14,14 @@ export type AvailabilityFailure = {
   detail: string;
   recovery: string[];
   recoveryCodes: string[];
-  retryAt?: string;
-  retryAfterSeconds?: WireNumber;
-  operationId?: string;
-  preserved?: string;
-  logExcerpt?: string;
-  requiredBytes?: WireNumber;
-  freeBytes?: WireNumber;
-  shortfallBytes?: WireNumber;
+  retryAt?: string | undefined;
+  retryAfterSeconds?: WireNumber | undefined;
+  operationId?: string | undefined;
+  preserved?: string | undefined;
+  logExcerpt?: string | undefined;
+  requiredBytes?: WireNumber | undefined;
+  freeBytes?: WireNumber | undefined;
+  shortfallBytes?: WireNumber | undefined;
 };
 
 type RecoveryAction = NonNullable<AvailabilityOperationFailure["recovery_actions"]>[number];
@@ -159,6 +159,7 @@ export function LibraryAvailabilityFeedback({
       {failure.recovery.length > 0 && (
         <ul aria-label="Recovery steps">
           {failure.recovery.map((step, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: the same step text can repeat; the position tells the copies apart
             <li key={`${index}-${step}`}>
               {step}
               {failure.recoveryCodes[index] === "open_model_access" && modelAccessUrl && (

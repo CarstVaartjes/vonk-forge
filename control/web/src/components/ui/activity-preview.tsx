@@ -32,8 +32,8 @@ export function ActivityPreview({
   nodes: VisualFleetNode[];
   now: Date;
   /** How many operations in the page this rail reads ended unsuccessfully, for the page's link to Activity. */
-  onUnsuccessful?(count: number): void;
-  onViewAll?(event: MouseEvent<HTMLAnchorElement>): void;
+  onUnsuccessful?: ((count: number) => void) | undefined;
+  onViewAll?: ((event: MouseEvent<HTMLAnchorElement>) => void) | undefined;
 }) {
   // undefined: not read yet; null: the last read failed, which is not the same as nothing happening
   const [rows, setRows] = useState<Rows | null>();

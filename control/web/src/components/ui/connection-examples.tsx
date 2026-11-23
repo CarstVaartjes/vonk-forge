@@ -47,9 +47,11 @@ export function ConnectionExamples({ apiBase, alias }: { apiBase: string; alias:
     <div className="connection-examples">
       {examples.map(({ label, code }) => (
         <div key={label}>
-          <pre aria-label={label}>
-            <code>{code}</code>
-          </pre>
+          <figure aria-label={label}>
+            <pre>
+              <code>{code}</code>
+            </pre>
+          </figure>
           <CopyButton label={label} value={code} />
         </div>
       ))}

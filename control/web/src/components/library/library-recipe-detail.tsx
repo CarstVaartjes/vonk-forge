@@ -21,7 +21,7 @@ export function LibraryRecipeAlternatives({
   onNavigate,
 }: {
   alternatives: NonNullable<RecipeDetail["alternatives"]>;
-  onNavigate?: (event: MouseEvent<HTMLAnchorElement>, path: string) => void;
+  onNavigate?: ((event: MouseEvent<HTMLAnchorElement>, path: string) => void) | undefined;
 }) {
   if (alternatives.length === 0) return null;
   return (
@@ -66,8 +66,8 @@ export function LibraryRecipeAuthority({
 }: {
   api: ControlApi;
   detail: RecipeDetail;
-  onBusyChange?(busy: boolean): void;
-  onNavigate?: (event: MouseEvent<HTMLAnchorElement>, path: string) => void;
+  onBusyChange?: ((busy: boolean) => void) | undefined;
+  onNavigate?: ((event: MouseEvent<HTMLAnchorElement>, path: string) => void) | undefined;
 }) {
   const documents = detail.model_documents;
   const files = documents.flatMap((model) => model.model_document.files);

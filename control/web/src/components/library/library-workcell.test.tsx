@@ -577,7 +577,7 @@ test("the Models list starts with one page and Show more reveals the rest", () =
   render(renderBulk(bulkSnapshot(45), 0));
   const list = within(screen.getByLabelText("Models"));
   expect(list.getAllByRole("listitem")).toHaveLength(40);
-  fireEvent.click(list.getByRole("button", { name: "Show more (5 more models)" }));
+  fireEvent.click(screen.getByRole("button", { name: "Show more (5 more models)" }));
   expect(list.getAllByRole("listitem")).toHaveLength(45);
 });
 
@@ -592,7 +592,7 @@ test("Show more starts over when a filter changes", () => {
   const snapshot = bulkSnapshot(45);
   const { rerender } = render(renderBulk(snapshot, 0));
   const list = within(screen.getByLabelText("Models"));
-  fireEvent.click(list.getByRole("button", { name: /^Show more/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^Show more/ }));
   expect(list.getAllByRole("listitem")).toHaveLength(45);
   rerender(renderBulk(snapshot, 0, { ...EMPTY_LIBRARY_WORKCELL_FILTERS, sort: "name" }));
   expect(list.getAllByRole("listitem")).toHaveLength(40);

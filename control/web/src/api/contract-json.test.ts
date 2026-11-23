@@ -85,7 +85,7 @@ describe("canonical numeric boundary", () => {
   test("compares extreme exponents without allocating expanded decimals", () => {
     expect(compareNumeric("1e999999999", "9e999999998")).toBe(1);
     expect(compareNumeric("1e-999999999", "0")).toBe(1);
-    expect(compareNumeric("1e" + "9".repeat(100_000), "1e999999999")).toBe(1);
+    expect(compareNumeric(`1e${"9".repeat(100_000)}`, "1e999999999")).toBe(1);
     expect(contractType(parseContractJson("1e999999999"), ["number"])).toBe(false);
     expect(contractEqual(parseContractJson("1.00e2"), parseContractJson("100"))).toBe(true);
   });

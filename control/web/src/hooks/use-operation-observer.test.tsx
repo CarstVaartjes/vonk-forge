@@ -12,7 +12,10 @@ function Probe({ fetch, onTerminal }: { fetch: () => Promise<Op>; onTerminal?: (
   });
   return (
     <>
-      <button onClick={() => observer.start({ state: LifecycleState.RUNNING }, fetch)}>
+      <button
+        type="button"
+        onClick={() => observer.start({ state: LifecycleState.RUNNING }, fetch)}
+      >
         start
       </button>
       <span data-testid="state">{observer.value?.state}</span>

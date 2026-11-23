@@ -20,7 +20,7 @@ export function hashArtifactBlob(
   blob: Blob,
   options: {
     signal: AbortSignal;
-    onProgress?(progress: ArtifactHashProgress): void;
+    onProgress?: ((progress: ArtifactHashProgress) => void) | undefined;
     workerFactory?: HashWorkerFactory;
     chunkSize?: number;
   },
