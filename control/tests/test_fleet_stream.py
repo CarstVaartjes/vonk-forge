@@ -85,9 +85,7 @@ class Projection(FleetProjection):
         )
 
 
-def _events(
-    stream: FleetStream, last_event_id: int | None
-) -> AsyncGenerator[str, None]:
+def _events(stream: FleetStream, last_event_id: int | None) -> AsyncGenerator[str]:
     """``FleetStream.events`` is an async generator, so the caller owns ``aclose``."""
 
     generator = stream.events(last_event_id)

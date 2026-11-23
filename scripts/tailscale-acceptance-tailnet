@@ -21,10 +21,11 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 API_BASE = "https://api.tailscale.com/api/v2"
 FACTORY_CLIENT_ID_VARIABLE = "VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID"
