@@ -785,6 +785,12 @@ imported names (`from .x import Y`, `from vonk_control.x import Y`) or declares 
 from the module that defines the name. The only `__init__` that imports anything is `models/`,
 which imports modules (not names) so every mapped table registers on `Base.metadata`.
 
+A test module that grows past about 1,500 lines is split by topic into `test_<area>_<topic>.py`
+files next to it, never by line count. The helpers, constants and fixtures the files share live
+in `<area>_support.py` (a module without `test_` in its name) and are imported by name. Fixtures
+are registered once, by importing them into the directory's `conftest.py`, so no test module
+rebinds them. A moved test keeps its body, so the per-test time budget does not re-apply to it.
+
 ### Cross-repo nightly
 
 Every other lane pins `vonk-forge-recipes` to a reviewed revision.
