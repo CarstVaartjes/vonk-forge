@@ -79,7 +79,7 @@ def _prepared_build(
         recipe.model_dump(mode="json"),
         runtime=_runtime(),
         storage=storage,
-        transport=Transport(),  # type: ignore[arg-type]
+        transport=Transport(),
         build_receipt={
             "state": "succeeded",
             "build_id": _build_id(revision_id),

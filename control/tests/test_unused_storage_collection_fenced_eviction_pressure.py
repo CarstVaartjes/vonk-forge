@@ -934,7 +934,7 @@ def _switch_job(world: Catalog, set_digest: str, tmp_path: Path, *, state: str) 
     with sessions() as session:
         source = session.get(Job, parent.operation_id)
         assert source is not None
-        payload: dict[str, Any] = copy.deepcopy(source.payload)  # type: ignore[assignment]
+        payload: dict[str, Any] = copy.deepcopy(source.payload)
         kind, targets = source.kind, list(source.targets)
         authority, digest = source.authority_revision, source.payload_digest
     payload["plan"]["storage"]["artifact_set_sha256"] = set_digest

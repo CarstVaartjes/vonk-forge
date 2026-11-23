@@ -973,7 +973,7 @@ def test_jobs_lane_resumes_in_a_restarted_worker_process_with_the_same_digest(
             raise ValueError("malformed persisted row")
         return claim(*args, **kwargs)
 
-    jobs.claim = faulty_claim  # type: ignore[method-assign]
+    jobs.claim = faulty_claim
 
     def worker(name: str) -> Worker:
         return Worker(

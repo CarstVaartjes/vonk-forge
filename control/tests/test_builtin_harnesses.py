@@ -199,7 +199,7 @@ def test_platform_metadata_is_immutable_and_digest_bound() -> None:
         digest = metadata.content_sha256
         before = _projection(metadata.slug, model=model)
         with pytest.raises(Exception) as _ending:
-            metadata.slug = "mutated"  # type: ignore[misc]
+            metadata.slug = "mutated"
         assert metadata.content_sha256 == digest
         assert _projection(metadata.slug, model=model) == before
 

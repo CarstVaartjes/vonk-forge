@@ -304,7 +304,7 @@ def test_a_blocked_placement_read_degrades_the_recipe_not_the_listing(
             Event=threading.Event,
         ),
     )
-    service.inspect_candidate = blocked_inspect  # type: ignore[method-assign]
+    service.inspect_candidate = blocked_inspect
     projection = LibraryProjection(
         sessions,
         cursors=TokenCodec(b"b" * 32).cursor_codec(),
@@ -380,7 +380,7 @@ def test_the_next_assessment_waits_out_an_overrun_worker_and_is_assessed(
             Thread=FirstJoinExpires, Lock=OverrunEndsWhileWaited, Event=threading.Event
         ),
     )
-    service.inspect_candidate = first_inspection_blocks  # type: ignore[method-assign]
+    service.inspect_candidate = first_inspection_blocks
     assess = LibraryAssessment(
         sessions,
         run_switch=service,

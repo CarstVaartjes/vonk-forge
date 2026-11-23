@@ -591,7 +591,7 @@ def test_model_a_load_reaches_after_the_sweep_looked_is_not_fenced(
         )
         return real(digest, **kwargs)
 
-    service.accept_unused_removal = load_arrives_first  # type: ignore[method-assign]
+    service.accept_unused_removal = load_arrives_first
 
     result = _models(world, service).collect()
 

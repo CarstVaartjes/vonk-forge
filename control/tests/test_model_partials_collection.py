@@ -314,7 +314,7 @@ def test_transfers_take_the_shared_owner_lock(collector, tmp_path: Path) -> None
             seen.append(True)
         return original(spec, set_digest, **kwargs)
 
-    service._download_locked = probe  # type: ignore[method-assign]
+    service._download_locked = probe
     service._run_download(started.id, force=False, interrupt_after_bytes=_HALF_MEBIBYTE)
     assert seen
     assert all(seen)

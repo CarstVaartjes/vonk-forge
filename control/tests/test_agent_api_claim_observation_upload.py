@@ -668,7 +668,7 @@ def test_unauthenticated_agent_gate_returns_without_reading_request_body() -> No
     start = next(
         message for message in sent if message["type"] == "http.response.start"
     )
-    headers = dict(start["headers"])  # type: ignore[arg-type]
+    headers = dict(start["headers"])
     assert start["status"] == 401
     assert body_reads == 0
     assert headers[b"x-content-type-options"] == b"nosniff"

@@ -325,7 +325,7 @@ def test_stale_receipt_that_cannot_be_discarded_is_reported_once_with_its_cause(
     assert receipt_path.exists()
 
     # Once the lock is usable again the next scan removes it.
-    storage.publication_lock = original_lock  # type: ignore[method-assign]
+    storage.publication_lock = original_lock
     scan()
     assert not receipt_path.exists()
 

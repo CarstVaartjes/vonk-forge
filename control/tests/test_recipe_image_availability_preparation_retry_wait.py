@@ -150,7 +150,7 @@ def test_archive_integrity_failure_builds_the_image_again(tmp_path: Path) -> Non
     )
     service.run_pending()
     assert service.get(first.id).state == "succeeded"
-    storage.existing_archive = verify_once  # type: ignore[method-assign]
+    storage.existing_archive = verify_once
     again = service.start_selector(
         recipe.identity.slug, actor="operator", request_id="4" * 36
     )

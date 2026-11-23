@@ -596,7 +596,7 @@ def test_an_earlier_bundle_is_republished_once_by_maintenance(
     ).encode()
     runtime = AtomicRouteBundlePublisher(live)
     # The current validator refuses these bytes; the earlier Controller's did not.
-    runtime._validate_litellm = lambda _bytes: True  # type: ignore[method-assign]
+    runtime._validate_litellm = lambda _bytes: True
     with runtime._locked() as uncertainty:
         assert uncertainty is None
         marker = runtime._activate(
@@ -691,7 +691,7 @@ def test_a_route_published_without_facts_gets_them_once_after_an_upgrade(
         json.dumps(earlier, sort_keys=True, separators=(",", ":")) + "\n"
     ).encode()
     runtime = AtomicRouteBundlePublisher(live)
-    runtime._validate_litellm = lambda _bytes: True  # type: ignore[method-assign]
+    runtime._validate_litellm = lambda _bytes: True
     with runtime._locked() as uncertainty:
         assert uncertainty is None
         marker = runtime._activate(

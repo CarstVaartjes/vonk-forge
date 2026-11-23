@@ -585,7 +585,7 @@ def test_an_error_nobody_classified_is_retried_by_the_tick_guard(
             )
         return original(operation_id)
 
-    harness.service._advance = advance  # type: ignore[method-assign]
+    harness.service._advance = advance
     harness.service.tick()
     held = harness.view()
     assert _retrying(held), (held.state, held.status_reason)
@@ -803,7 +803,7 @@ def test_an_unknown_outcome_outside_the_phase_handler_is_retried_by_the_tick(
             raise OperationInterrupted("the observation was interrupted")
         return original(operation_id)
 
-    harness.service._advance = advance  # type: ignore[method-assign]
+    harness.service._advance = advance
     harness.service.tick()
     held = harness.view()
     assert _retrying(held), (held.state, held.status_reason)

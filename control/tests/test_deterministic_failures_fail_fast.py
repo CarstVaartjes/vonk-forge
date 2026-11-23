@@ -180,7 +180,7 @@ def test_a_deterministic_advance_error_fails_once_through_the_tick_guard(
         calls.append(operation_id)
         raise TypeError("'NoneType' object is not subscriptable")
 
-    harness.service._advance = broken  # type: ignore[method-assign]
+    harness.service._advance = broken
     for _ in range(4):
         harness.service.tick()
         harness.advance_to_due()

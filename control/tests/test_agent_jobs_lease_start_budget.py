@@ -147,7 +147,7 @@ def test_revoked_expired_or_node_mismatched_certificate_cannot_claim(service) ->
         parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
     with sessions.begin() as session:
-        session.get(AgentCertificate, "serial-a").revoked_at = clock.now  # type: ignore[union-attr]
+        session.get(AgentCertificate, "serial-a").revoked_at = clock.now
 
     assert claim_agent(jobs, NODE_A, "serial-a") is None
     assert claim_agent(jobs, NODE_A, "serial-b") is None
@@ -189,7 +189,7 @@ def test_sqlite_enqueue_rejects_terminal_parent(service, terminal_state: str) ->
     jobs, sessions, clock = service
     parent_job = parent(sessions, clock)
     with sessions.begin() as session:
-        session.get(Job, parent_job.id).state = terminal_state  # type: ignore[union-attr]
+        session.get(Job, parent_job.id).state = terminal_state
 
     with pytest.raises(ValueError):
         jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)

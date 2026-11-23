@@ -258,7 +258,7 @@ def _crash_between_effect_and_completion_is_recovered(
     def die(*_args, **_kwargs):
         raise _Crash
 
-    service.projection_in_session = die  # type: ignore[method-assign]
+    service.projection_in_session = die
     with base.sessions.begin() as session:
         _recipe_run(session, run_id).route_state = "pending"
     with contextlib.suppress(_Crash):

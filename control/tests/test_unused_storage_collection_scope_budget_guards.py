@@ -409,7 +409,7 @@ def test_a_slow_nas_inventory_step_never_spends_the_pass_budget(
             frozen_pass_budgets.advance(_PASS_BUDGET + 1)
             return measure(digest)
 
-        service.unused_set_bytes = slow_bytes  # type: ignore[method-assign]
+        service.unused_set_bytes = slow_bytes
     else:
         images = collector._image_items
 
@@ -417,7 +417,7 @@ def test_a_slow_nas_inventory_step_never_spends_the_pass_budget(
             frozen_pass_budgets.advance(_PASS_BUDGET + 1)
             return images(*args, **kwargs)
 
-        collector._image_items = slow_images  # type: ignore[method-assign]
+        collector._image_items = slow_images
 
     result = collector.collect()
 
@@ -458,7 +458,7 @@ def test_a_slow_inventory_step_still_attempts_an_installation_removal(
             UnusedStorageCollector, "_spark_items", staticmethod(slowed(original))
         )
     else:
-        collector._image_items = slowed(collector._image_items)  # type: ignore[method-assign]
+        collector._image_items = slowed(collector._image_items)
 
     result = collector.collect()
 
@@ -543,7 +543,7 @@ def test_many_scopes_share_one_attempt_budget_and_each_attempts_its_first_item(
             "_spark_items",
             staticmethod(slow(UnusedStorageCollector._spark_items)),
         )
-        collector._image_items = slow(collector._image_items)  # type: ignore[method-assign]
+        collector._image_items = slow(collector._image_items)
         before = frozen_pass_budgets.seconds
         result = collector.collect()
     finally:
@@ -942,7 +942,7 @@ def test_receipt_no_recipe_needs_is_removed_when_disk_is_short_and_recent_ones_l
     path = _receipt(tmp_path, AN_IMAGE)
     recent = _receipt(tmp_path, "e" * 64, age=timedelta(hours=2))
     blobs = SimpleNamespace(calls=0)
-    blobs.collect = lambda: setattr(blobs, "calls", blobs.calls + 1)  # type: ignore[attr-defined]
+    blobs.collect = lambda: setattr(blobs, "calls", blobs.calls + 1)
     exact = {"reserve_floor_bytes": 0, "reserve_fraction": 0.0}
 
     # One byte short of the 100 GiB low line: the idle receipt covers it.

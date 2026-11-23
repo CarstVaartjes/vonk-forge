@@ -59,7 +59,7 @@ def _model_partials(
     test_clock.advance(days=3)
     scandir = os.scandir
 
-    def slow(path):  # type: ignore[no-untyped-def]
+    def slow(path):
         clock.advance(partials_collection.PASS_BUDGET_SECONDS + 1)
         return scandir(path)
 

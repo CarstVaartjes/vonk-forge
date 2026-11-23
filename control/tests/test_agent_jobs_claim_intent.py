@@ -911,7 +911,7 @@ def test_long_poll_rechecks_database_for_another_process_enqueue(service) -> Non
         first_poll.set()
         return result
 
-    jobs._claim_once = observed_claim_once  # type: ignore[method-assign]
+    jobs._claim_once = observed_claim_once
     pool = ThreadPoolExecutor(max_workers=1)
     try:
         waiting = pool.submit(claim_agent, jobs, NODE_A, "serial-a", 2.0)

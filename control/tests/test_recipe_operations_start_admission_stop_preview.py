@@ -369,7 +369,7 @@ def test_start_orders_carry_the_saved_runs_plan_digest_when_admission_replans(
             )
         return fresh
 
-    service._run_admission.plan_run = replanning  # type: ignore[method-assign]
+    service._run_admission.plan_run = replanning
     started = service.start(
         plan,
         plan_digest=plan.plan_digest,

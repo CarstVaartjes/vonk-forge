@@ -312,7 +312,7 @@ def test_protected_agent_routes_gate_untrusted_invalid_bodies_before_parsing(
 def test_revoked_identity_is_gated_before_invalid_json_is_parsed(agent_system) -> None:
     client, services, _, clock = agent_system
     with services.sessions.begin() as session:
-        session.get(AgentCertificate, "serial-a").revoked_at = clock.now  # type: ignore[union-attr]
+        session.get(AgentCertificate, "serial-a").revoked_at = clock.now
     assert (
         client.post(
             "/agent/result",

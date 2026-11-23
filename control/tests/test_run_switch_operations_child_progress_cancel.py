@@ -1042,7 +1042,7 @@ def test_cancel_queued_start_is_idempotent_and_active_cancel_starts_stop(tmp_pat
 
     # Cancellation is committed only together with an accepted Stop: a Stop
     # that cannot be admitted leaves the operation active and cancellable.
-    service.apply_stop = unavailable_stop  # type: ignore[method-assign]
+    service.apply_stop = unavailable_stop
     with pytest.raises(Exception) as _ending:
         service.cancel(
             active.operation_id,
@@ -1051,7 +1051,7 @@ def test_cancel_queued_start_is_idempotent_and_active_cancel_starts_stop(tmp_pat
             reason="Stop running",
         )
     assert service.get(active.operation_id).state != "cancelled"
-    service.apply_stop = original_apply_stop  # type: ignore[method-assign]
+    service.apply_stop = original_apply_stop
     stopped = service.cancel(
         active.operation_id,
         actor="admin",

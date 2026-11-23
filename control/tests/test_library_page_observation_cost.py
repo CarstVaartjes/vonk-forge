@@ -83,7 +83,7 @@ def _counting_projection(fixture, counted: _Counted) -> LibraryProjection:
         counted.local_state.append(len(digests))
         return database_local_state(digests)
 
-    projection._database_local_state = local_state  # type: ignore[method-assign]
+    projection._database_local_state = local_state
     return projection
 
 

@@ -100,7 +100,7 @@ def _row(**fields: object) -> Lifecycle:
     base = Lifecycle(
         id="op-1", kind="fake", fence="f1", attempt=1, effect=Effect.ISSUED
     )
-    return replace(base, **fields)  # type: ignore[arg-type]
+    return replace(base, **fields)
 
 
 EVENTS: tuple[Event, ...] = (
