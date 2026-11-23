@@ -25,30 +25,13 @@ from ..control_client.errors import (
     ControlTransportError,
 )
 from ..error_reporting import ErrorContext, protocol_context, transport_context
-from .common import ControllerClient
+from .common import ControllerClient, _known_http_refusal_status
+from .observation import _poll_path
 
 
 def _accepted_submission(args: argparse.Namespace, operation_id: str) -> None:
     args.submission.acceptance = SubmissionAcceptance.ACCEPTED
     args.submission.operation_id = operation_id
-
-
-def _known_http_refusal_status(error: ControlClientError) -> int | None:
-    status = (
-        error.status_code
-        if isinstance(error, ControlHTTPError)
-        else (error.context.http_status if error.context else None)
-    )
-    # HTTP evidence on a malformed body is not an owner decision.
-    return (
-        status
-        if status is not None
-        and (
-            status in {401, 403}
-            or (isinstance(error, ControlHTTPError) and 400 <= status <= 499)
-        )
-        else None
-    )
 
 
 def _submit_idempotent_request(
@@ -80,8 +63,6 @@ def _submit_idempotent_request(
     )
 
     def end_unknown(*, interrupted: bool = False) -> None:
-        from .observation import _poll_path
-
         _poll_path(
             client, lookup, {}, args, deadline=time.monotonic(), fetch_initial=True
         )
@@ -220,7 +201,6 @@ def _submit_idempotent_request(
         # reconciles an unreadable receipt without authorizing another effect.
         may_replay = True
     else:
-        from .observation import _poll_path
 
         def reconcile(_remaining: float) -> object:
             return request("GET", lookup, "lookup", receipt_validator=lookup_validate)

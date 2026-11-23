@@ -19,8 +19,7 @@ from ..generated_control.models.recipe_image_availability_response import (
     RecipeImageAvailabilityResponse,
 )
 from ..generated_control.models.recipe_retry_intent import RecipeRetryIntent
-from .cache_removal import _cache_operation_id
-from .common import ControllerClient, _quoted, _request_key
+from .common import ControllerClient, _cache_operation_id, _quoted, _request_key
 from .confirmation import _confirm_action
 from .submission import _submit_idempotent_request
 

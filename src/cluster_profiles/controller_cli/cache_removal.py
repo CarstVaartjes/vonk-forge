@@ -24,27 +24,16 @@ from ..control_client.errors import (
     ControlNotFound,
 )
 from ..control_client.schema import validate_control_document
-from .common import ControllerClient, _quoted, _request_key
+from .common import (
+    ControllerClient,
+    _cache_operation_id,
+    _known_http_refusal_status,
+    _quoted,
+    _request_key,
+)
 from .confirmation import _can_prompt, _confirm_action
-from .submission import _known_http_refusal_status, _submit_idempotent_request
-
-
-def _cache_operation_id(noun: str, result: Mapping[str, object]) -> str:
-    if noun == "model":
-        field = "operation_id"
-    elif result.get("kind") in {
-        "recipe.image.availability.v2",
-        "recipe.cache.update.v2",
-    }:
-        field = "id"
-    elif result.get("action") == "remove":
-        field = "operation_id"
-    else:
-        raise ControlMalformedResponse("recipe response does not identify an operation")
-    operation_id = result.get(field)
-    if not isinstance(operation_id, str) or not operation_id:
-        raise ControlMalformedResponse("cache response does not identify an operation")
-    return operation_id
+from .observation import _poll_path
+from .submission import _submit_idempotent_request
 
 
 def _validate_cache_removal_receipt(
@@ -166,7 +155,6 @@ def _confirm_removal(
     *,
     with_model: bool | None,
 ) -> bool:
-    from .observation import _poll_path
 
     interactive = _can_prompt(args)
     if not args.yes and not interactive:
@@ -239,7 +227,6 @@ def _existing_cache_removal(
     )
     args.submission = submission
     deadline = time.monotonic() + submission.timeout_seconds
-    from .observation import _poll_path
 
     try:
         existing = client.request("GET", lookup, timeout_seconds=timeout)
@@ -408,10 +395,6 @@ def _remove_model(
     args: argparse.Namespace,
     factory: Callable[[], str],
 ) -> dict[str, object]:
-    if args.unused:
-        from .unused_removal import _remove_unused
-
-        return _remove_unused(client, args, factory)
     selector = (args.selector or "").strip()
     if not selector:
         raise ValueError("model remove requires a selector or --unused")
@@ -425,7 +408,6 @@ def _remove_model(
             raise ValueError("model remove --review cannot be detached")
         args.outcome_context = "read"
         args.model_action = "preview"
-        from .observation import _poll_path
 
         return _poll_path(
             client,
@@ -493,7 +475,6 @@ def _remove_recipe(
             raise ValueError("recipe remove --review cannot be detached")
         args.outcome_context = "read"
         args.recipe_action = "preview"
-        from .observation import _poll_path
 
         return _poll_path(
             client,
