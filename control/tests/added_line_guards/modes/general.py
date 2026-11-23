@@ -83,9 +83,9 @@ def check_noexit(ctx: CheckContext) -> None:
         if path.endswith(".rs"):
             patterns.extend(
                 [
-                    # Clippy's exit, panic, expect_used and unwrap_used cover the
-                    # rest; abort and unreachable have no lint in the set.
-                    r"(?:std::)?process::abort\s*\(",
+                    # Clippy's panic, expect_used and unwrap_used cover the rest. Its
+                    # exit skips `fn main` and impl methods, so exit stays here.
+                    r"(?:std::)?process::(?:exit|abort)\s*\(",
                     r"ExitCode::(?:from|FAILURE)",
                     r"\bunreachable!\s*\(",
                 ]

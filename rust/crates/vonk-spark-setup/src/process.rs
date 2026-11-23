@@ -15,10 +15,6 @@ impl CommandRunner for SystemCommandRunner {
     }
 }
 
-#[expect(
-    clippy::unwrap_used,
-    reason = "the settlement is carved out of the deadline when it is set"
-)]
 pub(super) fn run_process(command: Command, timeout: Duration) -> Result<CommandOutput, String> {
     let deadline = Instant::now() + timeout;
     let program = command.program.clone();
@@ -48,7 +44,7 @@ pub(super) fn run_process(command: Command, timeout: Duration) -> Result<Command
     let result = capture_process(
         &mut child,
         &command.stdin,
-        deadline.checked_sub(settlement).unwrap(),
+        deadline.checked_sub(settlement).unwrap_or(deadline),
     );
     terminate_process_group_until(&mut child, deadline);
     result.map_err(|_| program.display().to_string())

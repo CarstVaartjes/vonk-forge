@@ -517,6 +517,12 @@ fn later() { ExitCode::from(78); }
         ("packaging/systemd/new.service", "TimeoutStartSec=0\n", 1),
         ("packaging/systemd/new.service", "Restart=no\n", 1),
         ("packaging/debian/postinst", "exit 78\n", 1),
+        ("rust/crates/vonk-agent/src/main.rs", "std::process::exit(78);\n", 1),
+        (
+            "rust/crates/vonk-agent/src/main.rs",
+            "fn main() { std::process::exit(78); }\n",
+            1,
+        ),
         ("rust/crates/vonk-agent/src/main.rs", "std::process::abort();\n", 1),
         ("rust/crates/vonk-agent/src/main.rs", "ExitCode::from(78)\n", 1),
         ("rust/crates/vonk-agent/src/main.rs", "unreachable!();\n", 1),

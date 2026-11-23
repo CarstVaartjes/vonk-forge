@@ -319,10 +319,6 @@ fn run_line_command(
     Ok(output)
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "the pipe was requested when the child was spawned"
-)]
 fn drive_command(
     command: &mut Command,
     timeout: Duration,
@@ -362,8 +358,8 @@ fn drive_command(
                 return Err(RunnerFailure::Deadline);
             }
             let mut buffer = [0_u8; 1024];
-            if !output_closed {
-                match output.as_mut().expect("piped output").read(&mut buffer) {
+            if let Some(pipe) = output.as_mut().filter(|_| !output_closed) {
+                match pipe.read(&mut buffer) {
                     Ok(0) => output_closed = true,
                     Ok(count) => on_stdout(&buffer[..count])?,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}

@@ -179,10 +179,6 @@ impl<R: ProcessRunner + ?Sized> RuntimePreflight<'_, R> {
         )
     }
 
-    #[expect(
-        clippy::unwrap_used,
-        reason = "a cached result implies a previous observation"
-    )]
     pub fn run_until(
         &self,
         request: &RuntimePreflightRequest,
@@ -321,8 +317,8 @@ impl<R: ProcessRunner + ?Sized> RuntimePreflight<'_, R> {
         };
         // Never extend the observed age when reusing a successful build result.
         let mut cache_result = result.clone();
-        if cached {
-            cache_result.observed_at = previous.as_ref().unwrap().observed_at;
+        if let Some(previous) = previous.as_ref().filter(|_| cached) {
+            cache_result.observed_at = previous.observed_at;
         }
         #[expect(
             clippy::let_underscore_must_use,

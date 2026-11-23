@@ -58,10 +58,6 @@ impl<'a, R: ProcessRunner + ?Sized> BuildEgress<'a, R> {
         clippy::needless_pass_by_value,
         reason = "the call takes ownership at this boundary; the caller's value is consumed"
     )]
-    #[expect(
-        clippy::unwrap_used,
-        reason = "the service argv was built with the podman path"
-    )]
     pub(super) fn start(
         runner: &'a R,
         context: BuildEgressStart<'a>,
@@ -168,6 +164,10 @@ impl<'a, R: ProcessRunner + ?Sized> BuildEgress<'a, R> {
             remaining_build_time(context.deadline)?,
             false,
         );
+        #[expect(
+            clippy::unwrap_used,
+            reason = "the service argv was built with the podman path"
+        )]
         let podman = service
             .iter()
             .position(|value| value == "/usr/bin/podman")

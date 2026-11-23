@@ -86,10 +86,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     /// resuming across a process restart, replay the preceding entry and verify
     /// its exact name, inode and next cookie. Mutation invalidates coverage but
     /// does not rewind a verified position and starve the history tail.
-    #[expect(
-        clippy::expect_used,
-        reason = "the run id was validated as a UUID before this point"
-    )]
     pub fn recipe_run_inspection_page(
         &self,
         checkpoint: Option<&RecipeRunObservationCheckpoint>,
@@ -184,15 +180,16 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             let run_id = std::str::from_utf8(name)
                 .ok()
                 .filter(|id| canonical_uuid(id));
-            if entry.file_type() != rustix::fs::FileType::Directory || run_id.is_none() {
+            let Some(run_id) =
+                run_id.filter(|_| entry.file_type() == rustix::fs::FileType::Directory)
+            else {
                 progress.had_failures = true;
                 failures.push(RecipeRunInspectionFailure {
                     run_id: None,
                     error: OciError::Artifact,
                 });
                 continue;
-            }
-            let run_id = run_id.expect("validated UUID");
+            };
             match self.recipe_run_inspection_plan(run_id) {
                 Ok(Some(plan)) => {
                     bytes += plan.target.command.iter().map(String::len).sum::<usize>()

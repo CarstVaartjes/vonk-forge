@@ -472,8 +472,13 @@ def test_staged_added_line_violation_fails_the_hook(
         tmp_path / "control/tests",
         ignore=shutil.ignore_patterns("test_*", "__pycache__"),
     )
+    # The exit-cause guard reads its owner file; without it the guard crashes
+    # instead of reporting the added line.
+    owner = "rust/crates/vonk-agent-protocol/src/failure_evidence.rs"
+    (tmp_path / owner).parent.mkdir(parents=True)
+    shutil.copy(ROOT / owner, tmp_path / owner)
     target = tmp_path / file
-    target.parent.mkdir(parents=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(source)
     patch = (
         f"diff --git a/{file} b/{file}\n--- /dev/null\n+++ b/{file}\n"
@@ -492,8 +497,9 @@ def test_staged_added_line_violation_fails_the_hook(
     monkeypatch.setenv(
         "UV_PROJECT_ENVIRONMENT", str(Path(sys.executable).parent.parent)
     )
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(subprocess.CalledProcessError) as raised:
         module.check_added_lines([file])
+    assert raised.value.returncode == 1
 
     # Unstaged edits on the file: skipped with its name, CI still gates.
     unstaged.append(file)

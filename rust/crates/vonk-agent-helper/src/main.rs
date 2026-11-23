@@ -319,10 +319,6 @@ fn main() {
     }
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "the length was checked on the line above"
-)]
 fn run() -> Result<(), String> {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     if let Some(("--package-hook", hook)) = arguments.split_first().map(|(a, r)| (a.as_str(), r)) {
@@ -374,10 +370,9 @@ fn run() -> Result<(), String> {
     vonk_agent_helper::host_memory_guard::spawn(Path::new(DATA_ROOT).to_path_buf());
 
     let mut sockets = sd_listen_fds::get().map_err(display)?;
-    if sockets.len() != 1 {
+    let Some((name, descriptor)) = sockets.pop().filter(|_| sockets.is_empty()) else {
         return Err("exactly one systemd socket is required".to_owned());
-    }
-    let (name, descriptor) = sockets.pop().expect("length checked");
+    };
     if name.as_deref().is_some_and(|value| value != "helper") {
         return Err("systemd socket name is invalid".to_owned());
     }

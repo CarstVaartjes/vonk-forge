@@ -626,7 +626,8 @@ crate through `[lints] workspace = true`, with `clippy.toml` holding the lint
 configuration (unwrap, expect and panic allowed inside tests; raw `flock`
 disallowed outside `held_lock.rs`). The hook and every CI clippy step run the
 identical `cargo clippy --workspace --all-targets --frozen -- -D warnings`
-after `cargo fetch --locked`, so a new warning fails both. Silence a lint only
+(CI runs it after `cargo fetch --locked`; the hook is offline), so a new
+warning fails both. Silence a lint only
 with a narrow `#[expect(lint, reason = "...")]` at the item or statement; a
 test, example, build-script or generator crate root may carry one crate-level
 `#![expect]` for unwrap, expect and panic. `#[allow]` is itself linted. Commit checks prepare missing or stale locked Python and TypeScript dependencies
