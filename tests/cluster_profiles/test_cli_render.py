@@ -255,7 +255,11 @@ def test_the_next_activity_page_keeps_every_filter_of_this_one():
         "opaque+token", limit=1, state="running", target=_SPARK, request_id="r"
     )
     assert command is not None
-    assert command[3:] == ["--limit", "1", "--cursor", "opaque+token"] + [
+    assert command[3:] == [
+        "--limit",
+        "1",
+        "--cursor",
+        "opaque+token",
         "--state",
         "running",
         "--target",

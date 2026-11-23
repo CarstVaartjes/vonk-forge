@@ -485,9 +485,8 @@ def test_hammered_agent_traffic_never_refuses_admission_or_deadlocks(
         if threading.get_ident() not in agents:
             return
         lowered = " ".join(statement.split())
-        if (
-            "UPDATE agent_nodes" in lowered
-            or "FROM agent_nodes" in lowered
+        if "UPDATE agent_nodes" in lowered or (
+            "FROM agent_nodes" in lowered
             and any(mode in lowered for mode in _NODE_LOCK)
         ):
             node_statements.append(lowered)

@@ -293,10 +293,8 @@ def _verify_ca_chain(
         raise ValueError(
             "root certificate must contain CA constraints and key usage"
         ) from error
-    if (
-        not root_constraints.ca
-        or root_constraints.path_length is not None
-        and root_constraints.path_length < 1
+    if not root_constraints.ca or (
+        root_constraints.path_length is not None and root_constraints.path_length < 1
     ):
         raise ValueError("root certificate cannot issue the configured intermediate")
     if not root_usage.key_cert_sign or not root_usage.crl_sign:

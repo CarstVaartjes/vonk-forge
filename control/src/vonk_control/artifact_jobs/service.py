@@ -318,7 +318,7 @@ class ArtifactJobService(OutputService):
             select(ArtifactJob).where(ArtifactJob.request_id == request_id)
         )
         run = session.get(RecipeRun, run_id)
-        if run is None or existing is None and run.state != RunState.RUNNING:
+        if run is None or (existing is None and run.state != RunState.RUNNING):
             raise ArtifactJobUnavailableError(
                 "recipe run observation is unavailable",
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,

@@ -341,7 +341,7 @@ class TransferMixin:
         phase: ModelCacheOperationPhase,
         completed_artifacts: int = 0,
         downloaded_bytes: int = 0,
-        expected_bytes: int | None | object = _USE_MANIFEST_BYTES,
+        expected_bytes: int | object | None = _USE_MANIFEST_BYTES,
         current_artifact_key: str | None = None,
         transfer: ModelCacheTransfer | None = None,
         previous: ModelCacheOperationProgress | None = None,

@@ -178,8 +178,7 @@ def _parse_recipe_case(
             assertion["kind"] in required_kinds
             and (
                 assertion.get("media_type") == media_type
-                or len(allowed) == 1
-                and assertion.get("media_type") is None
+                or (len(allowed) == 1 and assertion.get("media_type") is None)
             )
             for assertion in parsed_assertions
         ):

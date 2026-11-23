@@ -210,8 +210,7 @@ def main() -> None:
     rust = any(
         file.endswith(".rs")
         or file in {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml"}
-        or file.startswith("rust/")
-        and file.endswith("Cargo.toml")
+        or (file.startswith("rust/") and file.endswith("Cargo.toml"))
         for file in changed
     )
     run(["python3", "scripts/check-staged-python"])

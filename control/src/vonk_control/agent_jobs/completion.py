@@ -123,9 +123,11 @@ def _report_event(
             Effect.NONE
             if result.get("helper_error_code")
             == HelperErrorCode.GRANT_TIME_WINDOW.value
-            or operation.kind == AgentOperation.RECIPE_JOB_RUN.value
-            and job_attempt_did_not_launch(result)
-            and verdict is Disposition.WAIT
+            or (
+                operation.kind == AgentOperation.RECIPE_JOB_RUN.value
+                and job_attempt_did_not_launch(result)
+                and verdict is Disposition.WAIT
+            )
             else None
         )
         return Reported.failed(

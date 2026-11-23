@@ -434,7 +434,7 @@ def test_tailscale_disabled_ps_contract_rejects_either_owner() -> None:
     for service in sorted(acceptance.TAILSCALE_SERVICES):
         with pytest.raises(AcceptanceError):
             acceptance.assert_tailscale_services_absent(
-                json.dumps(healthy + [{"Service": service}])
+                json.dumps([*healthy, {"Service": service}])
             )
 
 

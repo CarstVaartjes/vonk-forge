@@ -74,7 +74,7 @@ def add_admin(
     sessions: sessionmaker[Session],
     *,
     disabled_at: datetime | None = None,
-    verifier: str | None | object = DEFAULT_VERIFIER,
+    verifier: str | object | None = DEFAULT_VERIFIER,
 ) -> User:
     user = User(
         subject="admin",

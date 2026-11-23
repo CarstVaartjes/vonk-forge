@@ -409,9 +409,8 @@ class OciImageStore:
         except FileNotFoundError:
             return set()
         except (ValueError, OciImageStoreError, OSError) as error:
-            damaged = (
-                isinstance(error, ValueError)
-                or isinstance(error, OciImageStoreError)
+            damaged = isinstance(error, ValueError) or (
+                isinstance(error, OciImageStoreError)
                 and error.code in DAMAGED_MANIFEST_CODES
             )
             return StoreUnknown(

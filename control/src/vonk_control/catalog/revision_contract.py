@@ -53,7 +53,7 @@ if TYPE_CHECKING:
 # A published document as JSON, before any contract has read it: the exact bytes
 # a digest names. Typed by what JSON can hold, never by ``object``.
 type PublishedValue = (
-    str | int | float | bool | None | list[PublishedValue] | dict[str, PublishedValue]
+    str | int | float | bool | list[PublishedValue] | dict[str, PublishedValue] | None
 )
 type PublishedDocument = dict[str, PublishedValue]
 

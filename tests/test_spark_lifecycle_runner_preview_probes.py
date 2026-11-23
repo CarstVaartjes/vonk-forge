@@ -125,8 +125,14 @@ def test_artifact_job_stub_writes_its_result_or_fails_with_stderr(
 
     def run(exit_code: int) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [sys.executable, script, "--exit-code", str(exit_code)]
-            + ["--output-dir", str(outputs)],
+            [
+                sys.executable,
+                script,
+                "--exit-code",
+                str(exit_code),
+                "--output-dir",
+                str(outputs),
+            ],
             capture_output=True,
             text=True,
             check=False,

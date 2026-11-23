@@ -716,13 +716,9 @@ def _numeric_rule(definition: ParameterDefinition) -> str:
 def _numeric_fits(definition: ParameterDefinition, value: float) -> bool:
     low, high, step = definition.minimum, definition.maximum, definition.step
     return not (
-        low is not None
-        and value < low
-        or high is not None
-        and value > high
-        or step is not None
-        and low is not None
-        and (value - low) % step
+        (low is not None and value < low)
+        or (high is not None and value > high)
+        or (step is not None and low is not None and (value - low) % step)
     )
 
 
@@ -741,21 +737,25 @@ def _effective_parameters(
         value = supplied.get(name, definition.default)
         kind = definition.type
         valid_type = (
-            kind == "string"
-            and isinstance(value, str)
-            and "\x00" not in value
-            and len(value.encode("utf-8")) <= 4096
-            or kind == "integer"
-            and isinstance(value, int)
-            and not isinstance(value, bool)
-            or kind == "float"
-            and _finite_parameter_number(value)
-            or kind == "boolean"
-            and isinstance(value, bool)
-            or kind == "enum"
-            and any(
-                type(value) is type(item) and value == item
-                for item in definition.allowed_values
+            (
+                kind == "string"
+                and isinstance(value, str)
+                and "\x00" not in value
+                and len(value.encode("utf-8")) <= 4096
+            )
+            or (
+                kind == "integer"
+                and isinstance(value, int)
+                and not isinstance(value, bool)
+            )
+            or (kind == "float" and _finite_parameter_number(value))
+            or (kind == "boolean" and isinstance(value, bool))
+            or (
+                kind == "enum"
+                and any(
+                    type(value) is type(item) and value == item
+                    for item in definition.allowed_values
+                )
             )
         )
         if not valid_type:

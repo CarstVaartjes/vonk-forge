@@ -365,8 +365,7 @@ def _safe_zip_entries(content: bytes) -> list[tuple[str, bytes]]:
                     total > 256 * 1024**2
                     or info.file_size > 128 * 1024**2
                     or expansion_ratio > 10_000
-                    or info.compress_size == 0
-                    and info.file_size > 0
+                    or (info.compress_size == 0 and info.file_size > 0)
                 ):
                     raise FixtureError("ZIP expansion is unsafe")
                 data = archive.read(info)

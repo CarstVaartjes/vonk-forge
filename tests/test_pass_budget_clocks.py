@@ -214,8 +214,7 @@ def uninjected_stall_calls(tree: ast.Module) -> list[int]:
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and (
-            isinstance(node.func, ast.Name)
-            and node.func.id in names
+            (isinstance(node.func, ast.Name) and node.func.id in names)
             or ast.unparse(node.func).endswith(".run_until_stalled")
         )
         and not any(keyword.arg == "clock" for keyword in node.keywords)

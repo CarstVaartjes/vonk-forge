@@ -198,9 +198,8 @@ def test_scripts_copied_into_the_controller_image_bring_their_sibling_modules() 
     for directory, names in copied.items():
         for name in sorted(names):
             path = ROOT / "scripts" / name
-            if (
-                not path.is_file()
-                or "python" not in path.read_text().partition("\n")[0]
+            if not path.is_file() or (
+                "python" not in path.read_text().partition("\n")[0]
                 and path.suffix != ".py"
             ):
                 continue

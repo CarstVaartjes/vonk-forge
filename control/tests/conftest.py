@@ -394,7 +394,7 @@ def _stop_stale_servers() -> None:
     now = datetime.now(UTC)
     stale = []
     for line in listed.stdout.splitlines():
-        container, created_at, owner = (line.split("\t") + ["", ""])[:3]
+        container, created_at, owner = ([*line.split("\t"), "", ""])[:3]
         try:
             created = datetime.strptime(created_at[:25], "%Y-%m-%d %H:%M:%S %z")
         except ValueError:

@@ -294,14 +294,15 @@ class RetirementMixin:
                         reservation.state = ReservationState.RELEASED
                         reservation.released_at = service._clock()
             completed = (
-                owner is None
-                and existing is not None
-                or owner is not None
-                and owner.state
-                == (
-                    RunState.STOPPED
-                    if kind == WireAgentOperation.RECIPE_STOP.value
-                    else InstallationState.UNINSTALLED
+                (owner is None and existing is not None)
+                or (
+                    owner is not None
+                    and owner.state
+                    == (
+                        RunState.STOPPED
+                        if kind == WireAgentOperation.RECIPE_STOP.value
+                        else InstallationState.UNINSTALLED
+                    )
                 )
             ) and session.scalar(
                 select(ResourceReservation.id)

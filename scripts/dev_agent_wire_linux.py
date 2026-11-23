@@ -282,7 +282,7 @@ def stream(command: list[str], *, timeout: float = 20 * 60) -> tuple[int, str]:
 def stream_owned_container(command: list[str], log_path: Path) -> tuple[int, str]:
     """End only this invocation's Docker container and retain partial output."""
     name = "vonk-wire-lane-" + uuid.uuid4().hex
-    owned = command[:3] + ["--name", name] + command[3:]
+    owned = [*command[:3], "--name", name, *command[3:]]
     try:
         code, output = stream(owned)
         log_path.write_text(output, encoding="utf-8")

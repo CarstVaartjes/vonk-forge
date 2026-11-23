@@ -170,9 +170,8 @@ class RecoveryMixin:
                         if parent.status_reason != UNSUPPORTED_DISPATCH:
                             continue
                         service._rollouts.reopen(parent, now, reason=None)
-                    elif (
-                        parent.state not in _ACTIVE_ROLLOUT_STATES
-                        or parent.state == LifecycleState.RUNNING
+                    elif parent.state not in _ACTIVE_ROLLOUT_STATES or (
+                        parent.state == LifecycleState.RUNNING
                         and service._dispatch_is_live(session, parent, now)
                     ):
                         continue

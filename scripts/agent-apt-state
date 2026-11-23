@@ -736,8 +736,9 @@ def publish_committed(
         name
         for name in public_files
         if name.startswith("pool/")
-        or name.startswith(f"dists/{receipt['distribution']}/")
-        and "/by-hash/" in name
+        or (
+            name.startswith(f"dists/{receipt['distribution']}/") and "/by-hash/" in name
+        )
     }
     _write_immutable_objects(
         public_store,

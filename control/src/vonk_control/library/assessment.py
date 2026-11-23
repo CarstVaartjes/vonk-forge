@@ -408,7 +408,7 @@ class LibraryAssessment:
                 fit_unknown = fit
             if ready.state == "unavailable":
                 unknown = ready
-            if best is None or fit.state == READY and best[1].state != READY:
+            if best is None or (fit.state == READY and best[1].state != READY):
                 best = (plan, fit, ready)
             # A ready group ends the search. Otherwise, with a cache that is
             # not ready, groups are ordered by missing model bytes: once a
@@ -417,8 +417,7 @@ class LibraryAssessment:
                 fit.state == READY
                 and (
                     cache.state == READY
-                    or missing_bytes is not None
-                    and missing_bytes > 0
+                    or (missing_bytes is not None and missing_bytes > 0)
                 )
             ):
                 best = (plan, fit, ready)

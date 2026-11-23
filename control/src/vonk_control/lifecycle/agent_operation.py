@@ -724,11 +724,12 @@ class AgentOperationAdapter:
             parent = self._parent_of(operation)
         if operation.recovery_deadline is None and (
             isinstance(event, LeaseLapsed)
-            or isinstance(event, Reported)
-            and (
-                event.outcome is Outcome.UNKNOWN
-                or event.outcome is Outcome.FAILED
-                and event.retryable
+            or (
+                isinstance(event, Reported)
+                and (
+                    event.outcome is Outcome.UNKNOWN
+                    or (event.outcome is Outcome.FAILED and event.retryable)
+                )
             )
         ):
             # Stored at first uncertainty; restart, exact reissue and receipts

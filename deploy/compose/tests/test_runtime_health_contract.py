@@ -156,10 +156,10 @@ def test_dependencies_only_order_startup_and_are_acyclic() -> None:
         graph[name] = set(dependencies)
 
     def visit(name: str, path: tuple[str, ...]) -> None:
-        assert name not in path, " -> ".join(path + (name,))
+        assert name not in path, " -> ".join((*path, name))
         for dependency in graph[name]:
             if dependency in graph:
-                visit(dependency, path + (name,))
+                visit(dependency, (*path, name))
 
     for service_name in graph:
         visit(service_name, ())

@@ -130,7 +130,7 @@ class LocalCertificateAuthority(NodeCertificateAuthority):
         except SQLAlchemyError as error:
             raise StepCAUnavailable("local CA journal is unavailable") from error
 
-    def check_health(self) -> None | UnknownError:
+    def check_health(self) -> UnknownError | None:
         try:
             with self._session() as session:
                 session.execute(select(LocalCertificateIssuance.request_id).limit(1))

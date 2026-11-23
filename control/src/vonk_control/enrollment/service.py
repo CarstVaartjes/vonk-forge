@@ -374,7 +374,7 @@ class EnrollmentService(RotationService):
 
     def activate(
         self, node_id: str, serial: str, generation: int
-    ) -> None | UnknownError:
+    ) -> UnknownError | None:
         for delay in (0.0, 0.05, 0.1, 0.2):
             if delay:
                 time.sleep(delay)
@@ -665,7 +665,7 @@ class EnrollmentService(RotationService):
             state=LifecycleState.FAILED if ended else LifecycleState.OBSERVING,
         )
 
-    def revoke_node(self, node_id: str, actor: str) -> None | UnknownError:
+    def revoke_node(self, node_id: str, actor: str) -> UnknownError | None:
         """Observe exact durable intent within a bounded exponential backoff."""
         for delay in (0.0, 0.05, 0.1, 0.2):
             if delay:

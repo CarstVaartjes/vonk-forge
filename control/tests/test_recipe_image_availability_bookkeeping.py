@@ -236,12 +236,17 @@ def test_stored_damage_is_not_raised_as_an_invalid_operation_outside_the_removal
                 and isinstance(node.exc, ast.Call)
                 and node.exc.args
                 and (
-                    isinstance(node.exc.args[0], ast.Constant)
-                    and node.exc.args[0].value == "recipe_image.operation_invalid"
-                    or isinstance(node.exc.args[0], ast.Attribute)
-                    and ast.unparse(node.exc.args[0])
-                    == "RecipeImageCode.OPERATION_INVALID"
-                    and ast.unparse(node.exc.func) != "RecipeImageAvailabilityUnknown"
+                    (
+                        isinstance(node.exc.args[0], ast.Constant)
+                        and node.exc.args[0].value == "recipe_image.operation_invalid"
+                    )
+                    or (
+                        isinstance(node.exc.args[0], ast.Attribute)
+                        and ast.unparse(node.exc.args[0])
+                        == "RecipeImageCode.OPERATION_INVALID"
+                        and ast.unparse(node.exc.func)
+                        != "RecipeImageAvailabilityUnknown"
+                    )
                 )
             ):
                 offenders.add(function.name)

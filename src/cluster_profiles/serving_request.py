@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from vonk_forge_contracts.api import ChatApi
 
-type Json = str | int | float | bool | None | list[Json] | dict[str, Json]
+type Json = str | int | float | bool | list[Json] | dict[str, Json] | None
 
 #: The value of the recipe's runtime argument of that name; None when it has no integer.
 ArgumentValue = Callable[[str], int | None]

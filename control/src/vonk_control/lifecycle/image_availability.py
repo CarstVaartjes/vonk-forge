@@ -295,7 +295,7 @@ class ImageAvailabilityAdapter:
         after: Lifecycle,
         now: datetime,
         *,
-        reason: str | None | _Keep = KEEP,
+        reason: str | _Keep | None = KEEP,
         visible: str | None = None,
         payload: AvailabilityJobPayload | None = None,
     ) -> AvailabilityJobPayload | None:
@@ -367,7 +367,7 @@ class ImageAvailabilityAdapter:
         now: datetime,
         *,
         row: Lifecycle | None = None,
-        reason: str | None | _Keep = KEEP,
+        reason: str | _Keep | None = KEEP,
         visible: str | None = None,
     ) -> Decision:
         """Feed ``event`` to the core and write what it decides, inline.
@@ -472,7 +472,7 @@ class ImageAvailabilityAdapter:
         after: Lifecycle,
         now: datetime,
         *,
-        reason: str | None | _Keep = KEEP,
+        reason: str | _Keep | None = KEEP,
         payload: AvailabilityJobPayload | None = None,
     ) -> AvailabilityJobPayload | None:
         """Write a decision :meth:`plan_failure` returned."""

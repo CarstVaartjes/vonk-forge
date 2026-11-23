@@ -176,7 +176,7 @@ def upgrade_credentials(
     for item in payload.secrets:
         if item.file in members:
             continue
-        if item.optional or lab and item.secure_remote_only:
+        if item.optional or (lab and item.secure_remote_only):
             members[item.file] = b""
         elif publication.newly_requested(bundle, item.file):
             members[item.file] = secret_content(prompt.secret(item))

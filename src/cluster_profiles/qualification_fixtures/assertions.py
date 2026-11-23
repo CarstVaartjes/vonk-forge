@@ -365,15 +365,17 @@ def _parse_assertion(key: str, raw: object) -> dict[str, object]:
             or any(
                 not isinstance(name, str)
                 or not name
-                or shape is not None
-                and (
-                    not isinstance(shape, list)
-                    or not shape
-                    or any(
-                        not isinstance(value, int)
-                        or isinstance(value, bool)
-                        or value < 0
-                        for value in shape
+                or (
+                    shape is not None
+                    and (
+                        not isinstance(shape, list)
+                        or not shape
+                        or any(
+                            not isinstance(value, int)
+                            or isinstance(value, bool)
+                            or value < 0
+                            for value in shape
+                        )
                     )
                 )
                 for name, shape in tensor_shapes.items()

@@ -175,9 +175,8 @@ class EndingsMixin:
         corrupt receipts, re-planning or a worker restart. Ending observation
         neither Stops a child nor withdraws a serving route.
         """
-        if (
-            progress.cancellation is not None
-            or progress.profile_application_id is not None
+        if progress.cancellation is not None or (
+            progress.profile_application_id is not None
             and (plan := _stored_job_plan(job)) is not None
             and plan.action == ProfileSwitchChildKind.STOP
         ):

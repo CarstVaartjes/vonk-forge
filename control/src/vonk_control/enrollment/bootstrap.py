@@ -60,8 +60,7 @@ def _fixed_https_origin(value: str, *, name: str) -> str:
         or parsed.fragment
         or parsed.username is not None
         or parsed.password is not None
-        or port is not None
-        and not 1 <= port <= 65535
+        or (port is not None and not 1 <= port <= 65535)
     ):
         raise ValueError(f"{name} must be a fixed HTTPS origin")
     return value.rstrip("/")
@@ -91,7 +90,7 @@ class EnrollmentBootstrapConfig:
             raise ValueError("controller CA fingerprint does not match certificate")
         address = self.controller_address
         hostnames = tuple(self.service_hostnames)
-        if address is None and hostnames or address is not None and not hostnames:
+        if (address is None and hostnames) or (address is not None and not hostnames):
             raise ValueError(
                 "controller address and service hostnames must be configured together"
             )

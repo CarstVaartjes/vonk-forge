@@ -130,7 +130,7 @@ def _canonical_payload(
                         "job payload keys must be strings",
                         reason=InvalidRequestReason.MALFORMED,
                     )
-                child_path = path + (key,)
+                child_path = (*path, key)
                 if _SENSITIVE.search(key) and child_path not in safe_quota_fields:
                     raise InvalidValue(
                         "job payload contains a sensitive field",

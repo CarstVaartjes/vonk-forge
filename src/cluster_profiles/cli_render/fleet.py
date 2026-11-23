@@ -288,7 +288,7 @@ def _gpu_clock(node: object) -> str:
     def clock_range(value: GpuClockRange | None) -> str:
         return f"{value.min_mhz}–{value.max_mhz} MHz" if value is not None else UNKNOWN
 
-    def metric(value: int | None | Unset, name: GpuClockMetric) -> str:
+    def metric(value: int | Unset | None, name: GpuClockMetric) -> str:
         reading = clock_metric(clock, value, name)
         if isinstance(reading, GpuClockUnavailable):
             return f"{reading.reason.replace('-', ' ')} ({reading.detail})"
@@ -321,7 +321,7 @@ def _gpu_clock(node: object) -> str:
 
 
 def clock_metric(
-    clock: GpuClockObservation, value: int | None | Unset, name: GpuClockMetric
+    clock: GpuClockObservation, value: int | Unset | None, name: GpuClockMetric
 ) -> int | GpuClockUnavailable | None:
     """A clock reading as reported, or the typed reason it is missing.
 

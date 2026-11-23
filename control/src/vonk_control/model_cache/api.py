@@ -571,7 +571,7 @@ def register_model_cache_operation_provider(
         return services
     from dataclasses import replace
 
-    return replace(services, operation_providers=existing + (provider,))
+    return replace(services, operation_providers=(*existing, provider))
 
 
 __all__ = [

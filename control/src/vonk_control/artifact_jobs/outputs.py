@@ -218,9 +218,14 @@ class ArtifactJobService(InputService):
                 raise ArtifactJobInvalid(
                     "artifact output changed", reason=InvalidRequestReason.CONFLICT
                 )
-            projected = tuple(
-                self._output_file(item) for item in existing if item.name != parsed.name
-            ) + (parsed,)
+            projected = (
+                *tuple(
+                    self._output_file(item)
+                    for item in existing
+                    if item.name != parsed.name
+                ),
+                parsed,
+            )
             contract = self._stored_contract(session, job)
             if isinstance(contract, Residue):
                 raise ArtifactJobUnavailableError(
@@ -262,7 +267,7 @@ class ArtifactJobService(InputService):
                         reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     )
                 return
-            projected = tuple(self._output_file(item) for item in existing) + (parsed,)
+            projected = (*tuple(self._output_file(item) for item in existing), parsed)
             contract = self._stored_contract(session, job)
             if isinstance(contract, Residue):
                 raise ArtifactJobUnavailableError(

@@ -17,7 +17,7 @@ _DEFAULT_IDENTITY = object()
 def claim_agent(
     service: AgentJobService,
     *args: Any,
-    runtime_identity: Mapping[str, object] | None | object = _DEFAULT_IDENTITY,
+    runtime_identity: Mapping[str, object] | object | None = _DEFAULT_IDENTITY,
     **kwargs: Any,
 ):
     """Claim through the exact packaged Rust runtime contract."""

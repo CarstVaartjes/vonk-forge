@@ -733,8 +733,16 @@ def _run_main(monkeypatch, tmp_path, *arguments: str) -> dict:
     monkeypatch.setattr(
         sys,
         "argv",
-        ["carry", "--channel", "dev", "--run-id", "1", "--output", str(output)]
-        + list(arguments),
+        [
+            "carry",
+            "--channel",
+            "dev",
+            "--run-id",
+            "1",
+            "--output",
+            str(output),
+            *list(arguments),
+        ],
     )
     assert carry.main() == 0
     return json.loads(output.read_text(encoding="utf-8"))
