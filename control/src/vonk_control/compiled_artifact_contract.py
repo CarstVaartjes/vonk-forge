@@ -213,11 +213,16 @@ class ArtifactOutputLimits(ArtifactContractModel):
         return self
 
 
-class _ArtifactParameterBase(ArtifactContractModel):
+class _ArtifactParameterBase[BoundT: int | float | None, StepT: int | None](
+    ArtifactContractModel
+):
+    # Generic in the bounds and step each concrete parameter publishes, so a
+    # parameter type without them states None without narrowing a mutable
+    # base field; declared here so the field order stays the same.
     name: ParameterName
-    minimum: int | float | None = None
-    maximum: int | float | None = None
-    step: int | None = Field(default=None, ge=1)
+    minimum: BoundT | None = None
+    maximum: BoundT | None = None
+    step: StepT | None = Field(default=None, ge=1)
     # Wording from the recipe's display document: it never changes execution
     # identity, so ``CompiledArtifactContract.sha256`` leaves it out.
     # Ingress validated the wording (``KnobDisplay``); it is not checked again.
@@ -260,7 +265,7 @@ class _ArtifactParameterBase(ArtifactContractModel):
         return self
 
 
-class StringParameter(_ArtifactParameterBase):
+class StringParameter(_ArtifactParameterBase[None, None]):
     type: Literal["string"]
     default: str
     step: None = None
@@ -278,7 +283,7 @@ class StringParameter(_ArtifactParameterBase):
         return value
 
 
-class IntegerParameter(_ArtifactParameterBase):
+class IntegerParameter(_ArtifactParameterBase[int, int]):
     type: Literal["integer"]
     default: int
     minimum: int | None = None
@@ -288,7 +293,7 @@ class IntegerParameter(_ArtifactParameterBase):
     )
 
 
-class FloatParameter(_ArtifactParameterBase):
+class FloatParameter(_ArtifactParameterBase[float | int, None]):
     type: Literal["float"]
     default: float | int
     step: None = None
@@ -306,7 +311,7 @@ class FloatParameter(_ArtifactParameterBase):
         return value
 
 
-class BooleanParameter(_ArtifactParameterBase):
+class BooleanParameter(_ArtifactParameterBase[None, None]):
     type: Literal["boolean"]
     default: bool
     step: None = None
@@ -317,7 +322,7 @@ class BooleanParameter(_ArtifactParameterBase):
     )
 
 
-class EnumParameter(_ArtifactParameterBase):
+class EnumParameter(_ArtifactParameterBase[None, None]):
     type: Literal["enum"]
     default: ParameterScalar
     step: None = None

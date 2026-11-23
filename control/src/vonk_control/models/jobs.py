@@ -19,7 +19,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, MappedColumn, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
 from vonk_control.lifecycle.evidence import Residue
@@ -45,9 +45,7 @@ class Job(Base):
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    __mapper_args__: ClassVar[dict[str, MappedColumn[int]]] = {
-        "version_id_col": version
-    }
+    __mapper_args__: ClassVar = {"version_id_col": version}
 
     request_id: Mapped[str] = mapped_column(String(36), unique=True, nullable=False)
     # Explicit operator decisions belong to this Job, including old replay keys.

@@ -20,7 +20,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.orm import Mapped, MappedColumn, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
 from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
 from vonk_agent_protocol.job_limits import MAX_TIMEOUT_SECONDS
@@ -196,9 +196,7 @@ STOPPABLE_RUN_STATES = ACTIVE_RUN_STATES | {RunState.LOST}
 class RecipeRun(Base):
     __tablename__ = "recipe_runs"
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    __mapper_args__: ClassVar[dict[str, MappedColumn[int]]] = {
-        "version_id_col": version
-    }
+    __mapper_args__: ClassVar = {"version_id_col": version}
     wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
         __tablename__
     )
