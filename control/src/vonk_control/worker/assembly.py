@@ -14,57 +14,60 @@ from vonk_agent_protocol.compiled_execution_plan import (
 )
 from vonk_agent_protocol.lifecycle_vocabulary import WaitOwnerKind, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
-
-from ..agent_jobs.persistence import _OrderStore
-from ..agent_jobs.retirement import operator_resume_candidates_in_session
-from ..agent_upgrades.service import AgentUpgradeService
-from ..artifact_jobs.blob_store import ArtifactBlobStore
-from ..artifact_jobs.maintenance import ArtifactMaintenanceCadence
-from ..artifact_jobs.service import ArtifactJobService
-from ..attempt_residues import AttemptResidueReconciler
-from ..capabilities import CapabilityRegistry
-from ..catalog.revision_collection import CatalogRevisionCollector
-from ..cluster_mappings import ClusterMappingService
-from ..coordinator_failures import CoordinatorFailures
-from ..distributed_recovery.coordinator import DistributedRecoveryCoordinator
-from ..distribution.service import DistributionService
-from ..distribution.wiring import build_distribution_service_from_components
-from ..distribution_executor.preparation import CompositeDistributionPhaseExecutor
-from ..due_waits import AdvanceWait, DueWaitBackstop, RowKey
-from ..fleet_profiles.factory import build_production_fleet_profile_service
-from ..gateway.route_grants import require_existing_recipe_routes
-from ..install_admission.service import InstallAdmissionService
-from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
-from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.artifact_job import ArtifactJobAdapter
-from ..recipe_builds.service import RecipeBuildService
-from ..recipe_operations.operation_worker import RecipeOperationWorker
-from ..recipe_operations.service import RecipeOperationService
-from ..recipe_routes.publisher import AtomicRecipeRoutePublisher
-from ..recipe_routes.service import RecipeRouteService
-from ..run_admission import RunAdmissionService
-from ..run_switch_operations.service import RunSwitchOperationService
-from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from ..source_bundles import DatabaseSourceBundleStore
-from ..storage_demands import StorageDemands
-from ..telemetry.maintenance import (
+from vonk_control.agent_jobs.persistence import _OrderStore
+from vonk_control.agent_jobs.retirement import operator_resume_candidates_in_session
+from vonk_control.agent_upgrades.service import AgentUpgradeService
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
+from vonk_control.artifact_jobs.maintenance import ArtifactMaintenanceCadence
+from vonk_control.artifact_jobs.service import ArtifactJobService
+from vonk_control.attempt_residues import AttemptResidueReconciler
+from vonk_control.capabilities import CapabilityRegistry
+from vonk_control.catalog.revision_collection import CatalogRevisionCollector
+from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.coordinator_failures import CoordinatorFailures
+from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.wiring import build_distribution_service_from_components
+from vonk_control.distribution_executor.preparation import (
+    CompositeDistributionPhaseExecutor,
+)
+from vonk_control.due_waits import AdvanceWait, DueWaitBackstop, RowKey
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.gateway.route_grants import require_existing_recipe_routes
+from vonk_control.install_admission.service import InstallAdmissionService
+from vonk_control.inventory.repository import INVENTORY_MAX_AGE_SECONDS
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
+from vonk_control.recipe_builds.service import RecipeBuildService
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
+from vonk_control.recipe_routes.service import RecipeRouteService
+from vonk_control.run_admission import RunAdmissionService
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
+from vonk_control.source_bundles import DatabaseSourceBundleStore
+from vonk_control.storage_demands import StorageDemands
+from vonk_control.telemetry.maintenance import (
     TelemetryMaintenance,
     TelemetryMaintenanceCadence,
 )
-from ..terminal_history_collection import TerminalHistoryCollector
-from ..unused_storage_collection.service import UnusedStorageCollector
-from ..wait_redrive import wait_sources
+from vonk_control.terminal_history_collection import TerminalHistoryCollector
+from vonk_control.unused_storage_collection.service import UnusedStorageCollector
+from vonk_control.wait_redrive import wait_sources
 
 if TYPE_CHECKING:
-    from ..catalog.sync import ManagedRecipeCatalogSyncService
-    from ..enrollment.service import EnrollmentService
-from ..availability_production.production import build_recipe_image_availability
-from ..catalog.sync import AutomaticCatalogSync
-from ..image_store_collection import ImageStoreCollector
-from ..model_cache.partials_collection import ModelPartialsCollector
-from ..prebuilt_images import PrebuiltImageImporter
-from ..settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
-from .loop import Worker
+    from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
+    from vonk_control.enrollment.service import EnrollmentService
+from vonk_control.availability_production.production import (
+    build_recipe_image_availability,
+)
+from vonk_control.catalog.sync import AutomaticCatalogSync
+from vonk_control.image_store_collection import ImageStoreCollector
+from vonk_control.model_cache.partials_collection import ModelPartialsCollector
+from vonk_control.prebuilt_images import PrebuiltImageImporter
+from vonk_control.settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
+from vonk_control.worker.loop import Worker
 
 
 @cache

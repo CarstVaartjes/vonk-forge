@@ -21,18 +21,13 @@ from vonk_agent_protocol.reason_codes.model_cache import (
     ModelCacheBlockerCode,
     ModelCacheCode,
 )
-
-from ..bounded_retry import bounded_attempts
-from ..catalog.queries import WITHOUT_DOCUMENT, active_head_revision
-from ..catalog.revision_contract import (
+from vonk_control.bounded_retry import bounded_attempts
+from vonk_control.catalog.queries import WITHOUT_DOCUMENT, active_head_revision
+from vonk_control.catalog.revision_contract import (
     CatalogRevisionContractError,
     read_shared_catalog_document,
 )
-from ..models.cache import ModelCacheSet
-from ..models.catalog import CatalogDocumentRevision
-from ..revision_images import RevisionImage, revision_images
-from ..stored.states import CatalogRevisionState
-from .artifacts import (
+from vonk_control.model_cache.artifacts import (
     ArtifactSetManifest,
     ArtifactSpec,
     _composed_artifacts,
@@ -41,14 +36,14 @@ from .artifacts import (
     _unique_artifacts,
     _validate_manifest,
 )
-from .catalog import CatalogMixin
-from .catalog_helpers import (
+from vonk_control.model_cache.catalog import CatalogMixin
+from vonk_control.model_cache.catalog_helpers import (
     _canonical_model_artifacts,
     _recipe_model_content_digests,
     _recipe_model_file_ids,
 )
-from .constants import _DIGEST_PATTERN
-from .contract import (
+from vonk_control.model_cache.constants import _DIGEST_PATTERN
+from vonk_control.model_cache.contract import (
     UUID_PATTERN,
     CachedModelResolution,
     CachedRecipeResolution,
@@ -56,7 +51,7 @@ from .contract import (
     CacheResolution,
     ModelCacheSetState,
 )
-from .errors import (
+from vonk_control.model_cache.errors import (
     ModelCacheConflictInvalid,
     ModelCacheError,
     ModelCacheNotFoundInvalid,
@@ -65,11 +60,15 @@ from .errors import (
     ModelCacheSelectorAmbiguous,
     ModelCacheStorageUnknown,
 )
-from .model_artifact_cache import model_artifact_specs
-from .source_helpers import _model_selector
+from vonk_control.model_cache.model_artifact_cache import model_artifact_specs
+from vonk_control.model_cache.source_helpers import _model_selector
+from vonk_control.models.cache import ModelCacheSet
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.revision_images import RevisionImage, revision_images
+from vonk_control.stored.states import CatalogRevisionState
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 def _has_cache_set(session: Session, digest: str) -> bool:

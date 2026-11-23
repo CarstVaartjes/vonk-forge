@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from .wire_model import (
+from vonk_agent_protocol.wire_model import (
     MAX_RUN_GENERATION,
     CanonicalUUID,
     Digest,

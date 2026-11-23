@@ -12,24 +12,22 @@ from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import OperationMemberProgress
-
-from ..categorized_faults import OperationInterrupted
-from ..fleet_profiles.read_observation import observing_profile
-from ..models.cache import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
-from . import constants
-from .artifacts import (
+from vonk_control.categorized_faults import OperationInterrupted
+from vonk_control.fleet_profiles.read_observation import observing_profile
+from vonk_control.model_cache import constants
+from vonk_control.model_cache.artifacts import (
     ArtifactPart,
     ArtifactSetManifest,
     ArtifactSpec,
     _unique_artifacts,
 )
-from .catalog_helpers import _iso_now
-from .constants import (
+from vonk_control.model_cache.catalog_helpers import _iso_now
+from vonk_control.model_cache.constants import (
     _PARALLEL_RANGE_WORKERS,
     _USE_MANIFEST_BYTES,
     SCHEMA_VERSION,
 )
-from .contract import (
+from vonk_control.model_cache.contract import (
     ModelCacheCounters,
     ModelCacheDownloadPayload,
     ModelCacheDownloadResult,
@@ -41,13 +39,22 @@ from .contract import (
     ModelCacheTransfer,
     ModelCacheTransferArtifact,
 )
-from .errors import ModelCacheError, _ArtifactWriterBusy
-from .persistence import _manifest_of, _operation_cancellation, _store_operation_payload
-from .progress import PHASES, cache_progress
-from .ranges import range_partial_bytes
+from vonk_control.model_cache.errors import ModelCacheError, _ArtifactWriterBusy
+from vonk_control.model_cache.persistence import (
+    _manifest_of,
+    _operation_cancellation,
+    _store_operation_payload,
+)
+from vonk_control.model_cache.progress import PHASES, cache_progress
+from vonk_control.model_cache.ranges import range_partial_bytes
+from vonk_control.models.cache import (
+    ModelCacheOperation,
+    ModelCacheSet,
+    ModelCacheSetArtifact,
+)
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class TransferMixin:

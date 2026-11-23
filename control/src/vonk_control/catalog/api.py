@@ -9,20 +9,19 @@ from pydantic import Field
 from starlette.responses import JSONResponse
 
 from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
-
-from ..auth import Actor
-from ..identifiers import UuidId
-from ..machine_states import CatalogSyncStateField
-from ..operation_api.constants import _ADMIN_OPERATION_IDS
-from ..strict_json import StrictModel
-from ..wait_contract import QueueWait
-from .sync import CatalogSyncView
-from .sync_contract import (
+from vonk_control.auth import Actor
+from vonk_control.catalog.sync import CatalogSyncView
+from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogStaleRecipe,
     ManagedCatalogSyncProblem,
     ManagedCatalogWithdrawnRecipe,
 )
+from vonk_control.identifiers import UuidId
+from vonk_control.machine_states import CatalogSyncStateField
+from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
+from vonk_control.strict_json import StrictModel
+from vonk_control.wait_contract import QueueWait
 
 CATALOG_OPERATION_IDS = {
     (

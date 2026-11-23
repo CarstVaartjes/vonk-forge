@@ -11,15 +11,12 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import OperationProgress
-
-from ..jobs import states as job_states
-from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..models.operations import AgentOperation
-from ..recovery_policy import FailureKind
-from ..strict_json import serialize_json_value
-from .lifecycle_contract import (
-    RecipeLifecycleResult,
-)
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.recipe_operation import RecipeOperationAdapter
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_operations.lifecycle_contract import RecipeLifecycleResult
+from vonk_control.recovery_policy import FailureKind
+from vonk_control.strict_json import serialize_json_value
 
 
 class AgentJobQueue(Protocol):

@@ -6,18 +6,17 @@ from fastapi import HTTPException
 
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
 from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
-
-from ..agent_upgrades.errors import AgentUpgradeConflict
-from ..api_availability import AVAILABILITY_ERRORS
-from ..auth import MUTATION_ROLES, Actor, CursorError
-from ..enrollment.types import EnrollmentDenied, RemoteRevocationUncertain
-from ..fleet_projection.common import FleetNode, FleetSnapshot
-from ..library_projection.common import (
+from vonk_control.agent_upgrades.errors import AgentUpgradeConflict
+from vonk_control.api_availability import AVAILABILITY_ERRORS
+from vonk_control.auth import MUTATION_ROLES, Actor, CursorError
+from vonk_control.enrollment.types import EnrollmentDenied, RemoteRevocationUncertain
+from vonk_control.fleet_projection.common import FleetNode, FleetSnapshot
+from vonk_control.library_projection.common import (
     LibrarySelectorAmbiguous,
     SelectorAmbiguityHTTPError,
 )
-from ..logging import redact_text
-from ..request_fault import RequestFault
+from vonk_control.logging import redact_text
+from vonk_control.request_fault import RequestFault
 
 
 def _node(snapshot: FleetSnapshot, selector: str) -> FleetNode:

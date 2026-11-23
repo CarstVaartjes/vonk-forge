@@ -21,8 +21,8 @@ from datetime import UTC, datetime
 from email.message import Message
 from enum import StrEnum
 
-from .control_client.client import ControlClient
-from .control_client.connection import (
+from cluster_profiles.control_client.client import ControlClient
+from cluster_profiles.control_client.connection import (
     TOKEN_FILE_ENV,
     URL_ENV,
     StoredConnection,
@@ -36,7 +36,7 @@ from .control_client.connection import (
     validated_origin,
     write_private,
 )
-from .control_client.errors import (
+from cluster_profiles.control_client.errors import (
     _MAX_TOKEN,
     ControlClientError,
     ControlForbidden,
@@ -44,8 +44,8 @@ from .control_client.errors import (
     ControlUnauthorized,
     LocalInputError,
 )
-from .control_client.transport import _read_control_response
-from .control_transport import open_https
+from cluster_profiles.control_client.transport import _read_control_response
+from cluster_profiles.control_transport import open_https
 
 _TIMEOUT_SECONDS = 15
 _SESSION_COOKIE = "vonk_session"

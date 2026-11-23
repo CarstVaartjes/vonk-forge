@@ -14,29 +14,34 @@ from sqlalchemy.orm import Session, defer
 
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-
-from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
-from ..artifact_reference_scan.model_references import model_set_reference_reasons
-from ..catalog.queries import WITHOUT_DOCUMENT, active_head_revision
-from ..failure_classification import wait_reason
-from ..logging import log_event
-from ..models.cache import ModelCacheOperation, ModelCacheSet
-from ..models.catalog import CatalogDocumentRevision
-from .artifacts import ArtifactSetManifest
-from .catalog_helpers import _revision_identity
-from .constants import _LOGGER
-from .contract import (
+from vonk_control.admission_locking import (
+    AdmissionLockBusy,
+    AdmissionRowLock,
+    lock_admission_rows,
+)
+from vonk_control.artifact_reference_scan.model_references import (
+    model_set_reference_reasons,
+)
+from vonk_control.catalog.queries import WITHOUT_DOCUMENT, active_head_revision
+from vonk_control.failure_classification import wait_reason
+from vonk_control.logging import log_event
+from vonk_control.model_cache.artifacts import ArtifactSetManifest
+from vonk_control.model_cache.catalog_helpers import _revision_identity
+from vonk_control.model_cache.constants import _LOGGER
+from vonk_control.model_cache.contract import (
     CacheOperationKind,
     ModelCacheSetState,
     ModelCacheUsage,
     RetainedModelRevision,
 )
-from .errors import ModelCacheConflictUnknown, ModelCacheError
-from .lineage import set_bindings
-from .persistence import _manifest_of
+from vonk_control.model_cache.errors import ModelCacheConflictUnknown, ModelCacheError
+from vonk_control.model_cache.lineage import set_bindings
+from vonk_control.model_cache.persistence import _manifest_of
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
+from vonk_control.models.catalog import CatalogDocumentRevision
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 _REVISION_SCAN_INTERVAL = timedelta(seconds=30)
 

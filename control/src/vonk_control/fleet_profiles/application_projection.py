@@ -20,46 +20,49 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     ProgressAlarmCode,
 )
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
-
-from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract.applications import (
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileEffectProgress,
     FleetProfileEffectState,
 )
-from ..fleet_profile_contract.definitions import FleetProfileAssignment
-from ..fleet_profile_contract.review import (
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profile_contract.review import (
     FleetProfileApplicationProjectionIssue,
     FleetProfileApplicationView,
     FleetProfilePreview,
 )
-from ..fleet_profile_contract.vocabulary import profile_switch_child_request_key
-from ..jobs import states as job_states
-from ..lifecycle.evidence import Residue
-from ..models.fleet import FleetProfileApplication
-from ..models.jobs import Job
-from ..operations.blockers import MAX_BLOCKERS
-from ..operations.progress import project_progress
-from ..persisted_waits import read_wait
-from ..progress_stall import WAITING_STATES, is_stalled, stalled_blocker
-from ..run_switch_contract.phase_results import RunSwitchStopResult
-from ..run_switch_operations.service import RunSwitchOperationService
-from .persistence import (
+from vonk_control.fleet_profile_contract.vocabulary import (
+    profile_switch_child_request_key,
+)
+from vonk_control.fleet_profiles.persistence import (
     _intended_profile,
     _persisted_profile_plan,
     _persisted_profile_progress,
     _persisted_profile_result,
     _progress_from_receipt,
 )
-from .projection_support import (
+from vonk_control.fleet_profiles.projection_support import (
     _application_cancellation_view,
     _aware,
 )
-from .switch_children import _queue_item_nodes
+from vonk_control.fleet_profiles.switch_children import _queue_item_nodes
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.operations.blockers import MAX_BLOCKERS
+from vonk_control.operations.progress import project_progress
+from vonk_control.persisted_waits import read_wait
+from vonk_control.progress_stall import WAITING_STATES, is_stalled, stalled_blocker
+from vonk_control.run_switch_contract.phase_results import RunSwitchStopResult
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 class FleetProfileService:

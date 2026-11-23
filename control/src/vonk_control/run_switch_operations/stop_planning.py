@@ -12,26 +12,20 @@ from sqlalchemy import select
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
-from ..admission_locking import (
-    admission_attempts,
+from vonk_control.admission_locking import admission_attempts
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.lifecycle.evidence import Residue, read_or_rebuild
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import (
+    STOPPABLE_RUN_STATES,
+    RecipeInstallation,
+    RecipeRun,
 )
-from ..categorized_errors import (
-    MissingRecord,
-)
-from ..lifecycle.evidence import (
-    Residue,
-    read_or_rebuild,
-)
-from ..models.cache import RecipeBuild
-from ..models.execution import STOPPABLE_RUN_STATES, RecipeInstallation, RecipeRun
-from ..models.mapping import ClusterMapping, ClusterMappingNode
-from ..recipe_operations.execution_contract import (
-    parse_stored_run_plan,
-)
-from ..run_switch_contract.evidence import RunSwitchReason, StopImpact
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.requests import (
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
+from vonk_control.run_switch_contract.evidence import RunSwitchReason, StopImpact
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.requests import (
     InvocationMetadata,
     RunSwitchCleanupPreviewRequest,
     RunSwitchProfileStopScope,
@@ -39,13 +33,17 @@ from ..run_switch_contract.requests import (
     SparkGroup,
     SparkGroupNode,
 )
-from ..strict_json import read_stored_model
-from .constants import _active_recipe_revision
-from .errors import RunSwitchRequestInvalid
-from .planning_helpers import PlanInventory, _as_reason, _now
+from vonk_control.run_switch_operations.constants import _active_recipe_revision
+from vonk_control.run_switch_operations.errors import RunSwitchRequestInvalid
+from vonk_control.run_switch_operations.planning_helpers import (
+    PlanInventory,
+    _as_reason,
+    _now,
+)
+from vonk_control.strict_json import read_stored_model
 
 if TYPE_CHECKING:
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 class StopPlanningMixin:

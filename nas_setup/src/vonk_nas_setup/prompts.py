@@ -15,8 +15,7 @@ from vonk_agent_protocol.installer_setup import (
     single_line,
     valid_required_value,
 )
-
-from .filesystem import MAX_MEMBER_BYTES, SetupError
+from vonk_nas_setup.filesystem import MAX_MEMBER_BYTES, SetupError
 
 
 class InputEnded(SetupError):

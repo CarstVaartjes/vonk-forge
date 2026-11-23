@@ -17,29 +17,38 @@ from vonk_agent_protocol.package_upgrade import (
     PackageActivationReceipt,
     PackageRollbackAuthority,
 )
-
-from .. import agent_operation_states
-from ..agent_jobs.contracts import _BOUNDARY_REFUSAL_PREFIXES
-from ..agent_jobs.retry import agent_upgrade_in_flight
-from ..inventory.items import runtime_value
-from ..jobs import states as job_states
-from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.types import CancelRequested
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..package_activation import matches_receipt
-from ..strict_json import read_stored_model
-from .contract import AgentUpgradePackage, AgentUpgradeRolloutResult
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.contracts import _BOUNDARY_REFUSAL_PREFIXES
+from vonk_control.agent_jobs.retry import agent_upgrade_in_flight
+from vonk_control.agent_upgrades.contract import (
+    AgentUpgradePackage,
+    AgentUpgradeRolloutResult,
+)
+from vonk_control.inventory.items import runtime_value
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.types import CancelRequested
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.package_activation import matches_receipt
+from vonk_control.strict_json import read_stored_model
 
 if TYPE_CHECKING:
-    from .service import AgentUpgradeService
+    from vonk_control.agent_upgrades.service import AgentUpgradeService
 
 from vonk_agent_protocol.state_machines import NodeIdentityState
-
-from .constants import _ACTIVE_ROLLOUT_STATES, _ALREADY_CURRENT
-from .helpers import _summary
-from .stored import _stored_node_order, _stored_package, _stored_result, _stored_source
+from vonk_control.agent_upgrades.constants import (
+    _ACTIVE_ROLLOUT_STATES,
+    _ALREADY_CURRENT,
+)
+from vonk_control.agent_upgrades.helpers import _summary
+from vonk_control.agent_upgrades.stored import (
+    _stored_node_order,
+    _stored_package,
+    _stored_result,
+    _stored_source,
+)
 
 
 class DispatchMixin:

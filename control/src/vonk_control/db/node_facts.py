@@ -14,15 +14,17 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..inventory.items_contract import (
+from vonk_control.db.constants import _LOGGER
+from vonk_control.inventory.items_contract import (
     AgentInventoryItems,
     InventorySnapshotKind,
     PreflightInventoryItem,
 )
-from ..models.fleet import AgentNodeContact
-from ..models.telemetry import NodeInventoryItemsSnapshot, NodeInventoryResourceSnapshot
-from .constants import _LOGGER
+from vonk_control.models.fleet import AgentNodeContact
+from vonk_control.models.telemetry import (
+    NodeInventoryItemsSnapshot,
+    NodeInventoryResourceSnapshot,
+)
 
 # The contact clock that dates each moved fact; a fact without one is kept
 # when the old owner has none (columns re-added by a rolled-back Controller are

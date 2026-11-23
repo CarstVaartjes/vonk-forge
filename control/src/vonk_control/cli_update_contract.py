@@ -11,19 +11,19 @@ from typing import Any, Literal
 from fastapi import FastAPI, Response
 from pydantic import Field
 
-from .build_identity import contract_fingerprint
-from .observation.platform import (
+from vonk_control.build_identity import contract_fingerprint
+from vonk_control.observation.platform import (
     ApiRuntimeObservation,
     CapturedPlatformObservation,
     Digest,
     Source,
 )
-from .observation.platform_errors import (
+from vonk_control.observation.platform_errors import (
     ObservationCaptureUnavailable,
     observation_capture_unavailable_response,
 )
-from .operation_api.contracts import bounded_error_responses
-from .strict_json import StrictModel
+from vonk_control.operation_api.contracts import bounded_error_responses
+from vonk_control.strict_json import StrictModel
 
 
 class CliUpdateContract(StrictModel):

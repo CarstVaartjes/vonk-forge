@@ -31,10 +31,9 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeUninstallResult,
 )
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..identifiers import UuidId
-from ..library.contract import NodeId
-from ..strict_json import StrictJSONModel
+from vonk_control.identifiers import UuidId
+from vonk_control.library.contract import NodeId
+from vonk_control.strict_json import StrictJSONModel
 
 
 class LifecycleModel(StrictJSONModel):

@@ -14,13 +14,13 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from .control_client.errors import (
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlForbidden,
     ControlUnauthorized,
 )
-from .control_client.transfers import ControlClient
-from .qualification_fixtures.contracts import FixtureError
+from cluster_profiles.control_client.transfers import ControlClient
+from cluster_profiles.qualification_fixtures.contracts import FixtureError
 
 
 def _request_root(directory: Path | None) -> Path:

@@ -21,7 +21,7 @@ from pydantic import (
     model_validator,
 )
 
-from .agent_operations import (
+from vonk_agent_protocol.agent_operations import (
     AgentFailureResult,
     AgentInstallResult,
     AgentOperation,
@@ -29,27 +29,27 @@ from .agent_operations import (
     ArtifactDistributionResult,
     RecipeStartResult,
 )
-from .build_import import (
+from vonk_agent_protocol.build_import import (
     RecipeBuildCleanupEvidence,
     RecipeBuildCleanupRequest,
     RecipeBuildEvidence,
     RecipeBuildRequest,
 )
-from .distribution import DistributionAssignment
-from .document_limits import (
+from vonk_agent_protocol.distribution import DistributionAssignment
+from vonk_agent_protocol.document_limits import (
     MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
     MAX_DOCUMENT_BYTES,
 )
-from .failure_evidence import ModelStoreLayoutFault
-from .lifecycle_vocabulary import AgentResultState, FailureCode
-from .optional_evidence import (
+from vonk_agent_protocol.failure_evidence import ModelStoreLayoutFault
+from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, FailureCode
+from vonk_agent_protocol.optional_evidence import (
     EvidenceGroup,
     OptionalEvidenceModel,
     fail_open_on_optional_evidence,
     redacted_prose,
 )
-from .outcome import (
+from vonk_agent_protocol.outcome import (
     OUTCOME_ARMS,
     OUTCOME_KINDS,
     OperationOutcome,
@@ -59,10 +59,10 @@ from .outcome import (
     outcome_body,
     outcome_state,
 )
-from .package_upgrade import PackageRollbackAuthority
-from .reason_codes.evidence import AgentEvidenceCode
-from .recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
-from .recipe_operations import (
+from vonk_agent_protocol.package_upgrade import PackageRollbackAuthority
+from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
+from vonk_agent_protocol.recipe_operations import (
     RecipeInstallPayload,
     RecipeReconcilePayload,
     RecipeReconcileResult,
@@ -72,8 +72,11 @@ from .recipe_operations import (
     RecipeUninstallPayload,
     RecipeUninstallResult,
 )
-from .runtime_preflight import RuntimePreflightRequest, RuntimePreflightResult
-from .wire_model import (
+from vonk_agent_protocol.runtime_preflight import (
+    RuntimePreflightRequest,
+    RuntimePreflightResult,
+)
+from vonk_agent_protocol.wire_model import (
     AgentProtocolError,
     CanonicalUUID,
     DigestText,

@@ -14,16 +14,21 @@ from typing import Any
 
 from sqlalchemy import event
 
-from .. import (
+from vonk_control import (
     models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
 )
-from ..catalog.revision_contract import cached_catalog_document
-from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..model_primitives import Base
-from ..models.catalog import CatalogDocumentRevision
-from ..strict_json import stored_document_detail
-from . import columns as _columns  # noqa: F401 -- binds every JSON column on import
-from .json_values import (
+from vonk_control.catalog.revision_contract import cached_catalog_document
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
+)
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.stored import (
+    columns as _columns,  # noqa: F401 -- binds every JSON column on import
+)
+from vonk_control.stored.json_values import (
     _REGISTRY,
     JsonColumn,
     _discriminator,
@@ -34,6 +39,7 @@ from .json_values import (
     read_column,
     set_write_guard_mode,
 )
+from vonk_control.strict_json import stored_document_detail
 
 
 def bindings() -> Mapping[str, JsonColumn]:

@@ -8,18 +8,15 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..journal_models import RunSwitchJournalRepairPending
-from ..models.jobs import Job
-from ..persisted_waits import schedule_wait
-from ..run_switch_contract.identity import RunSwitchCancellation
-from ..run_switch_contract.journal import (
-    RunSwitchJournalRepairPendingState,
-)
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_operations.results import _persisted_result
-from ..stall_window import stall_deadline
-from .discovery import REPAIR_WAIT, _candidate
+from vonk_control.journal_models import RunSwitchJournalRepairPending
+from vonk_control.models.jobs import Job
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.run_switch_contract.identity import RunSwitchCancellation
+from vonk_control.run_switch_contract.journal import RunSwitchJournalRepairPendingState
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_journal_repair.discovery import REPAIR_WAIT, _candidate
+from vonk_control.run_switch_operations.results import _persisted_result
+from vonk_control.stall_window import stall_deadline
 
 # A damaged observation gets a stall window that survives restarts: neither a
 # changed sample nor a new caller resets it; only a child install whose agent

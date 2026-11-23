@@ -21,7 +21,7 @@ from typing import IO, Any, Self, cast
 
 import httpx2
 
-from .control_client.errors import ControlTransportUnsupported
+from cluster_profiles.control_client.errors import ControlTransportUnsupported
 
 _DNS_LOCK = threading.Lock()
 _DNS_PENDING: dict[tuple[object, ...], Future[Any]] = {}

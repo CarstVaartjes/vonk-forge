@@ -14,32 +14,28 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
 )
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.operator_receipt_contract import JobOperatorReceipt
-
-from .. import agent_operation_states
-from ..agent_jobs.retry import schedule_agent_upgrade_retry
-from ..categorized_errors import (
-    InvalidValue,
-    MissingRecord,
-)
-from ..jobs import states as job_states
-from ..jobs.operator_receipts import (
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.retry import schedule_agent_upgrade_retry
+from vonk_control.agent_upgrades.contract import AgentUpgradeRolloutPayload
+from vonk_control.categorized_errors import InvalidValue, MissingRecord
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.operator_receipts import (
     record_job_operator_receipt,
     replay_job_operator_receipt,
 )
-from ..lifecycle.agent_upgrade import UNSUPPORTED_DISPATCH
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..models.jobs import Job, JobAttempt
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..strict_json import read_stored_model
-from .contract import AgentUpgradeRolloutPayload
+from vonk_control.lifecycle.agent_upgrade import UNSUPPORTED_DISPATCH
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.models.jobs import Job, JobAttempt
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operator_receipt_contract import JobOperatorReceipt
+from vonk_control.strict_json import read_stored_model
 
 if TYPE_CHECKING:
-    from .service import AgentUpgradeService
+    from vonk_control.agent_upgrades.service import AgentUpgradeService
 
-from .errors import AgentUpgradeConflict
-from .helpers import _aware
-from .intent import _plan_digest, _request_intent
+from vonk_control.agent_upgrades.errors import AgentUpgradeConflict
+from vonk_control.agent_upgrades.helpers import _aware
+from vonk_control.agent_upgrades.intent import _plan_digest, _request_intent
 
 
 class ResumeMixin:

@@ -27,42 +27,47 @@ from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStop
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_agent_protocol.state_machines import ReservationState, RouteState, RunState
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.owner_liveness import run_has_live_operation
-
-from ..agent_jobs.retirement import release_owned_reservations_in_session
-from ..categorized_errors import UnsettledOutcome
-from ..distributed_lifecycle import DistributedRecoveryInvalid
-from ..gateway.litellm import LiteLlmGeneration, ServedModelInfo
-from ..jobs.documents import (
+from vonk_control.agent_jobs.retirement import release_owned_reservations_in_session
+from vonk_control.categorized_errors import UnsettledOutcome
+from vonk_control.distributed_lifecycle import DistributedRecoveryInvalid
+from vonk_control.gateway.litellm import LiteLlmGeneration, ServedModelInfo
+from vonk_control.jobs.documents import (
     DistributedRecoveryMarker,
     RecipeStartParent,
     RecipeStopParent,
     RecoveryStartItem,
 )
-from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import (
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
+)
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
     STOPPABLE_NOT_RUNNING_RUN_STATES,
     STOPPABLE_RUN_STATES,
     RecipeRun,
     ResourceReservation,
     RunNode,
 )
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..operations.blockers import BlockingOperation, make_blocker
-from ..persisted_waits import read_wait, schedule_wait, write_wait
-from ..recipe_operations.execution_contract import (
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.operations.blockers import BlockingOperation, make_blocker
+from vonk_control.owner_liveness import run_has_live_operation
+from vonk_control.persisted_waits import read_wait, schedule_wait, write_wait
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     RouteWithdrawalFollowUp,
     StoredRunPlan,
     parse_stored_run_plan,
 )
-from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
-from ..recovery_policy import DISTRIBUTED_RECOVERY, schedule
-from ..stored.rows import read_row_column
-from ..stored.states import CatalogRevisionState
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
+from vonk_control.recovery_policy import DISTRIBUTED_RECOVERY, schedule
+from vonk_control.stored.rows import read_row_column
+from vonk_control.stored.states import CatalogRevisionState
 
 """Durable controller coordination for distributed recipe recovery."""
 

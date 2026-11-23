@@ -28,13 +28,12 @@ from vonk_forge_contracts import ModelDefinition
 from vonk_forge_contracts.model import ModelReference
 
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-
-from ..catalog.revision_contract import read_catalog_document
-from ..lifecycle.evidence import Residue, read_or_rebuild
-from ..models.cache import ModelCacheSet, ModelCacheSetArtifact
-from ..models.catalog import CatalogDocumentRevision
-from ..stored.rows import read_row_column
-from .contract import CacheManifest
+from vonk_control.catalog.revision_contract import read_catalog_document
+from vonk_control.lifecycle.evidence import Residue, read_or_rebuild
+from vonk_control.model_cache.contract import CacheManifest
+from vonk_control.models.cache import ModelCacheSet, ModelCacheSetArtifact
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.stored.rows import read_row_column
 
 
 def set_bindings(

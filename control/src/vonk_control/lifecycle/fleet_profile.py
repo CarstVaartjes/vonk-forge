@@ -57,31 +57,27 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitOwnerKind
-
-from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
-from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
-from ..fleet_profile_contract.switch_state import (
+from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
+from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchChildState,
 )
-from ..fleet_profile_contract.vocabulary import (
+from vonk_control.fleet_profile_contract.vocabulary import (
     FleetProfileCancellationState,
     FleetProfileOperationState,
 )
-from ..fleet_profiles import states as fleet_profile_states
-from ..jobs import states as job_states
-from ..models.fleet import FleetProfileApplication
-from ..models.jobs import Job
-from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait, wait_due
-from ..recovery_policy import RECOVERY
-from ..strict_json import read_stored_model
-from .adapter import Dispatch
-from .composite import aggregate
-from .core import STOP_BUDGET, transition
-from .reconciler import Settled
-from .reconciler import settle as settle_event
-from .run_switch import RunSwitchAdapter
-from .types import (
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.adapter import Dispatch
+from vonk_control.lifecycle.composite import aggregate
+from vonk_control.lifecycle.core import STOP_BUDGET, transition
+from vonk_control.lifecycle.reconciler import Settled
+from vonk_control.lifecycle.reconciler import settle as settle_event
+from vonk_control.lifecycle.run_switch import RunSwitchAdapter
+from vonk_control.lifecycle.types import (
     TERMINAL_STATES,
     CancelRequested,
     Decision,
@@ -95,6 +91,16 @@ from .types import (
     StopResult,
     Tick,
 )
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.persisted_waits import (
+    initialize_wait,
+    lifecycle_wait,
+    schedule_wait,
+    wait_due,
+)
+from vonk_control.recovery_policy import RECOVERY
+from vonk_control.strict_json import read_stored_model
 
 KIND = "fleet-profile"
 SUPERSEDED = LifecycleState.SUPERSEDED.value

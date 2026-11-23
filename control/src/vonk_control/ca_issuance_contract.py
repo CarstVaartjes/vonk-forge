@@ -10,8 +10,7 @@ from vonk_agent_protocol.reason_codes.admission import CertificateCode
 from vonk_agent_protocol.state_machines import (
     CertificateIssuancePurpose,
 )
-
-from .strict_json import StrictJSONModel
+from vonk_control.strict_json import StrictJSONModel
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 Serial = Annotated[str, StringConstraints(pattern=r"^[1-9][0-9]{0,47}$")]

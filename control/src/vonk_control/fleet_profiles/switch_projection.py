@@ -17,48 +17,46 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
 )
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
-
-from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract.applications import FleetProfileChildOperation
-from ..fleet_profile_contract.definitions import FleetProfileAssignment
-from ..fleet_profile_contract.effects import (
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.fleet_profile_contract.applications import FleetProfileChildOperation
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profile_contract.effects import (
     FleetProfileChildProgress,
     FleetProfileEffects,
 )
-from ..fleet_profile_contract.switch_state import (
+from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileAssignmentFailure,
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchChildResult,
     FleetProfileSwitchQueueItem,
 )
-from ..jobs import states as job_states
-from ..lifecycle.fleet_profile import doc_state
-from ..models.fleet import FleetProfileApplication
-from ..operations.blockers import PHASE_RETRY_CODE, STALL_RETRY_ATTEMPT
-from ..persisted_waits import read_wait
-from ..preparation_contract import RuntimeImageIdentity
-from ..run_switch_contract.operations import RunSwitchOperation
-from .assessment_support import (
-    _operation_state,
+from vonk_control.fleet_profiles.assessment_support import _operation_state
+from vonk_control.fleet_profiles.continuing_effects import _adopted_application_scope
+from vonk_control.fleet_profiles.contracts import FleetProfileInvalid
+from vonk_control.fleet_profiles.control_effects import _control_effects
+from vonk_control.fleet_profiles.dependencies import (
+    _PROFILE_PHASE_ADAPTER,
+    _PROFILE_PHASE_BY_RUN_PHASE,
 )
-from .continuing_effects import _adopted_application_scope
-from .contracts import (
-    FleetProfileInvalid,
-)
-from .control_effects import _control_effects
-from .dependencies import _PROFILE_PHASE_ADAPTER, _PROFILE_PHASE_BY_RUN_PHASE
-from .persistence import (
+from vonk_control.fleet_profiles.persistence import (
     _canonical_progress,
     _persisted_profile_progress,
 )
-from .projection_support import (
+from vonk_control.fleet_profiles.projection_support import (
     _state_receipt,
     _switch_queue,
     _validate_remaining_effects,
 )
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.fleet_profile import doc_state
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.operations.blockers import PHASE_RETRY_CODE, STALL_RETRY_ATTEMPT
+from vonk_control.persisted_waits import read_wait
+from vonk_control.preparation_contract import RuntimeImageIdentity
+from vonk_control.run_switch_contract.operations import RunSwitchOperation
 
 if TYPE_CHECKING:
-    from .run_switch_adapter import (
+    from vonk_control.fleet_profiles.run_switch_adapter import (
         RunSwitchFleetProfileAdapter as _RunSwitchFleetProfileAdapter,
     )
 

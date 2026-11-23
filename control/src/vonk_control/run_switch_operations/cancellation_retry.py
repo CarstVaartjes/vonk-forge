@@ -17,57 +17,68 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitReason,
 )
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-from vonk_control.run_switch_operations.results import _persisted_result
-
-from ..admission_locking import admission_attempts
-from ..artifact_jobs.lifecycle import (
+from vonk_control.admission_locking import admission_attempts
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     require_reference_open,
 )
-from ..artifact_reference_scan.intents import _run_switch_runtime_image_intent
-from ..bounded_json import require_integer
-from ..jobs import states as job_states
-from ..jobs.documents import RecipeStartParent, RecipeStopParent
-from ..lifecycle.run_switch import (
-    LIVE_STATES as _LIVE_STATES,
+from vonk_control.artifact_reference_scan.intents import (
+    _run_switch_runtime_image_intent,
 )
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..persisted_waits import schedule_wait
-from ..recipe_builds.cancellation import (
+from vonk_control.bounded_json import require_integer
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import RecipeStartParent, RecipeStopParent
+from vonk_control.lifecycle.run_switch import LIVE_STATES as _LIVE_STATES
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recipe_builds.cancellation import (
     BuildConsumerError,
     lock_run_switch_build_dependency,
 )
-from ..run_switch_contract.identity import RunSwitchCancellation
-from ..run_switch_contract.operations import (
+from vonk_control.run_switch_contract.identity import RunSwitchCancellation
+from vonk_control.run_switch_contract.operations import (
     RunSwitchOperation,
     RunSwitchOperationResult,
     RunSwitchRuntimeImageReferenceIntent,
 )
-from ..run_switch_contract.requests import RunSwitchStopApplyRequest
-from ..run_switch_journal_repair.discovery import is_zero_transfer_journal_fault
-from ..run_switch_journal_repair.observation import (
+from vonk_control.run_switch_contract.requests import RunSwitchStopApplyRequest
+from vonk_control.run_switch_journal_repair.discovery import (
+    is_zero_transfer_journal_fault,
+)
+from vonk_control.run_switch_journal_repair.observation import (
     try_repair_zero_transfer_journal,
 )
-from ..run_switch_journal_repair.pending import record_repair_cancellation
-from ..stored.rows import read_row_column
-from ..strict_json import (
-    read_stored_model,
-    serialize_json_value,
+from vonk_control.run_switch_journal_repair.pending import record_repair_cancellation
+from vonk_control.run_switch_operations.constants import _OPERATION_KINDS
+from vonk_control.run_switch_operations.errors import (
+    RunSwitchRequestInvalid,
+    RunSwitchRetryLater,
 )
-from ..workload_intent import take_workload_intent
-from .constants import _OPERATION_KINDS
-from .errors import RunSwitchRequestInvalid, RunSwitchRetryLater
-from .identity_helpers import _string_or_none
-from .ownership import _complete_cancellation
-from .plan_persistence import _reserve_run_switch_assets
-from .planning_helpers import _digest, _now, _run_switch_payload, _stored_job_plan
-from .provider import _ADAPTER
-from .result_helpers import _parse_persisted_result, _read_progress
+from vonk_control.run_switch_operations.identity_helpers import _string_or_none
+from vonk_control.run_switch_operations.ownership import _complete_cancellation
+from vonk_control.run_switch_operations.plan_persistence import (
+    _reserve_run_switch_assets,
+)
+from vonk_control.run_switch_operations.planning_helpers import (
+    _digest,
+    _now,
+    _run_switch_payload,
+    _stored_job_plan,
+)
+from vonk_control.run_switch_operations.provider import _ADAPTER
+from vonk_control.run_switch_operations.result_helpers import (
+    _parse_persisted_result,
+    _read_progress,
+)
+from vonk_control.run_switch_operations.results import _persisted_result
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import read_stored_model, serialize_json_value
+from vonk_control.workload_intent import take_workload_intent
 
 if TYPE_CHECKING:
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 class CancellationRetryMixin:

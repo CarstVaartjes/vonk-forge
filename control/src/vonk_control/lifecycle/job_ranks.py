@@ -16,13 +16,12 @@ from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.agent_operations import AgentOperation as WireOperation
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
-
-from ..artifact_jobs import states as ajs
-from ..models.execution import ArtifactJob
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..stored.rows import read_row_column
-from .agent_operation import is_artifact_owned
+from vonk_control.artifact_jobs import states as ajs
+from vonk_control.lifecycle.agent_operation import is_artifact_owned
+from vonk_control.models.execution import ArtifactJob
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.stored.rows import read_row_column
 
 
 @dataclass(frozen=True, slots=True)

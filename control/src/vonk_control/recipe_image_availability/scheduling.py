@@ -17,32 +17,26 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-from vonk_control.lifecycle.evidence import Residue
-
-from ..artifact_jobs.lifecycle import (
-    ArtifactIdentity,
-    has_pending_removal,
-)
-from ..categorized_errors import InvalidValue
-from ..jobs import states as job_states
-from ..jobs.documents import (
+from vonk_control.artifact_jobs.lifecycle import ArtifactIdentity, has_pending_removal
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import (
     AvailabilityJobPayload,
     AvailabilitySupersession,
     AvailabilityUnknownEnd,
 )
-from ..lifecycle.image_availability import PREPARATION_STALL_WINDOW
-from ..model_cache import states as model_cache_states
-from ..models.catalog import CatalogDocumentRevision
-from ..models.jobs import Job
-from ..operations.blockers import make_blocker
-from ..operations.contract import (
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.image_availability import PREPARATION_STALL_WINDOW
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.jobs import Job
+from vonk_control.operations.blockers import make_blocker
+from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
-from ..persisted_waits import schedule_wait
-from ..stall_window import Verdict, Wait, progress_verdict
-from ..strict_json import serialize_json_value
-from .contracts import (
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recipe_image_availability.contracts import (
     _CLAIM_SCAN_WINDOW,
     _MODEL_WAIT_POLL_SECONDS,
     OPERATION_KIND,
@@ -51,9 +45,13 @@ from .contracts import (
     RecipeImageAvailabilityClaim,
     RecipeImageAvailabilityUnknown,
 )
+from vonk_control.stall_window import Verdict, Wait, progress_verdict
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
 
 
 def resume_operations(self: RecipeImageAvailabilityService, *, limit: int = 16) -> int:

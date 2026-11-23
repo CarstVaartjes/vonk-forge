@@ -35,15 +35,8 @@ from vonk_agent_protocol.outcome import (
 )
 from vonk_agent_protocol.recipe_jobs import RecipeJobInputRequest, RecipeJobOutputLimits
 from vonk_agent_protocol.wire_model import AgentProtocolError
-from vonk_control.operator_receipt_contract import ReceiptPolicy
-
-from ..auth import Actor, agent_identity_from_scope
-from ..compiled_artifact_contract import ParameterScalar
-from ..download_contract import download_responses, upload_request_body
-from ..operation_api.contracts import bounded_error_responses
-from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
-from .blob_store import ArtifactBlobStore
-from .contracts import (
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
+from vonk_control.artifact_jobs.contracts import (
     ArtifactJobCapabilitiesResponse,
     ArtifactJobError,
     ArtifactJobListResponse,
@@ -51,12 +44,21 @@ from .contracts import (
     ArtifactJobUnavailableError,
     ArtifactJobView,
 )
-from .job_contract import (
+from vonk_control.artifact_jobs.job_contract import (
     JOB_CONTRACT_NOT_FOUND,
     ArtifactJobContractResponse,
     JobContractNotFound,
 )
-from .service import ArtifactJobService
+from vonk_control.artifact_jobs.service import ArtifactJobService
+from vonk_control.auth import Actor, agent_identity_from_scope
+from vonk_control.compiled_artifact_contract import ParameterScalar
+from vonk_control.download_contract import download_responses, upload_request_body
+from vonk_control.operation_api.contracts import bounded_error_responses
+from vonk_control.operator_acceptance import (
+    OperatorReceiptResolver,
+    operator_acceptance,
+)
+from vonk_control.operator_receipt_contract import ReceiptPolicy
 
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _DIGEST = r"^[0-9a-f]{64}$"

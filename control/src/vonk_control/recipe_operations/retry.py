@@ -19,37 +19,34 @@ from vonk_agent_protocol.state_machines import (
     InstallationState,
     ReservationState,
 )
-
-from ..admission_locking import admission_attempts
-from ..jobs import states as job_states
-from ..jobs.documents import RecipeBuildIntent
-from ..lifecycle.evidence import (
-    Damaged,
-    Residue,
-    read_or_rebuild,
+from vonk_control.admission_locking import admission_attempts
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import RecipeBuildIntent
+from vonk_control.lifecycle.evidence import Damaged, Residue, read_or_rebuild
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    ResourceReservation,
 )
-from ..models.cache import RecipeBuild
-from ..models.execution import InstallationNode, RecipeInstallation, ResourceReservation
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..recipe_builds.cancellation import build_cancellation
-from ..recipe_builds.common import RecipeBuildPlan
-from ..stored.rows import read_row_column
-from ..strict_json import serialize_json_value
-from .errors import RecipeRequestInvalid, RecipeRetryLater
-from .execution_contract import (
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_builds.cancellation import build_cancellation
+from vonk_control.recipe_builds.common import RecipeBuildPlan
+from vonk_control.recipe_operations.errors import RecipeRequestInvalid, RecipeRetryLater
+from vonk_control.recipe_operations.execution_contract import (
     build_plan_document,
     parse_stored_build_plan,
 )
-from .intent import _bound_workload_intent
-from .interfaces import RecipeOperationView
-from .observation_helpers import _active_recipe_revision
-from .progress import (
-    _parent_identity,
-)
+from vonk_control.recipe_operations.intent import _bound_workload_intent
+from vonk_control.recipe_operations.interfaces import RecipeOperationView
+from vonk_control.recipe_operations.observation_helpers import _active_recipe_revision
+from vonk_control.recipe_operations.progress import _parent_identity
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class RetryMixin:

@@ -12,11 +12,14 @@ from pathlib import Path
 
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
-
-from ..content_identity import ImageContent, differing_image_fields, same_image
-from ..fleet_profiles.read_observation import observe_storage
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..oci_image_store import (
+from vonk_control.content_identity import (
+    ImageContent,
+    differing_image_fields,
+    same_image,
+)
+from vonk_control.fleet_profiles.read_observation import observe_storage
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.oci_image_store import (
     DAMAGED_MANIFEST_CODES,
     IMAGE_CACHE_DIRECTORY,
     OciImageStore,
@@ -24,8 +27,8 @@ from ..oci_image_store import (
     StoredImage,
     StoreUnknown,
 )
-from ..operations.contract import AvailabilityRecoveryAction
-from .contracts import (
+from vonk_control.operations.contract import AvailabilityRecoveryAction
+from vonk_control.runtime_image_preparation.contracts import (
     _IMAGE_DIGEST,
     _LOGGER,
     _MAX_RECEIPT_REJECTION_DETAIL,

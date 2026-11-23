@@ -13,11 +13,10 @@ from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.state_machines import InstallationState
-
-from .fleet_projection.common import ProjectionReason
-from .models.execution import RecipeInstallation
-from .models.operations import AgentOperation, AgentOperationAttempt
-from .stored.rows import read_row_column
+from vonk_control.fleet_projection.common import ProjectionReason
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.stored.rows import read_row_column
 
 
 def model_layout_notices(

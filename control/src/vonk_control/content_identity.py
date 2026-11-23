@@ -35,18 +35,17 @@ from vonk_forge_contracts import RecipeDefinition
 
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.state_machines import InstallationState
-
-from .catalog.revision_contract import shared_catalog_document
-from .lifecycle.evidence import Residue, read_or_rebuild
-from .models.catalog import (
+from vonk_control.catalog.revision_contract import shared_catalog_document
+from vonk_control.lifecycle.evidence import Residue, read_or_rebuild
+from vonk_control.models.catalog import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
 )
-from .models.execution import RecipeInstallation
+from vonk_control.models.execution import RecipeInstallation
 
 if TYPE_CHECKING:
-    from .model_cache.contract import CacheResolution
+    from vonk_control.model_cache.contract import CacheResolution
 
 
 def cache_resolution_answers_revision(

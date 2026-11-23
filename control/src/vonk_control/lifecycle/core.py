@@ -47,10 +47,8 @@ from datetime import datetime
 from typing import Any
 
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, WaitReason
-
-from ..recovery_policy import RECOVERY, WAIT_STEP
-from .adapter import KindAdapter
-from .types import (
+from vonk_control.lifecycle.adapter import KindAdapter
+from vonk_control.lifecycle.types import (
     ActionName,
     CancelRequested,
     Claimed,
@@ -73,6 +71,7 @@ from .types import (
     Submitted,
     Tick,
 )
+from vonk_control.recovery_policy import RECOVERY, WAIT_STEP
 
 #: Observations of an irreversible unknown effect at the backoff rate; after
 #: them it is lost and observed at the backoff's ceiling (rule 3), never ended.

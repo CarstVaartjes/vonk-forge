@@ -34,10 +34,14 @@ from vonk_agent_protocol.state_machines import (
     machine_check,
 )
 from vonk_control.lifecycle.evidence import Residue
+from vonk_control.model_primitives import (
+    Base,
+    _lower_hex,
+    _nullable_lower_hex,
+    _state_in,
+)
+from vonk_control.models.waits import wait_due_column, wait_evidence_column
 from vonk_control.wait_contract import WaitEvidence
-
-from ..model_primitives import Base, _lower_hex, _nullable_lower_hex, _state_in
-from .waits import wait_due_column, wait_evidence_column
 
 
 class RecipeInstallation(Base):

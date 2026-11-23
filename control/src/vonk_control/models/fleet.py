@@ -29,7 +29,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Mapped, Mapper, mapped_column, relationship
 
 if TYPE_CHECKING:
-    from .telemetry import NodeInventoryItemsSnapshot
+    from vonk_control.models.telemetry import NodeInventoryItemsSnapshot
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
 from vonk_agent_protocol.state_machines import (
@@ -37,19 +37,18 @@ from vonk_agent_protocol.state_machines import (
     NodeIdentityState,
     machine_check,
 )
+from vonk_control.fleet_profile_contract.vocabulary import RecipeSelector
 from vonk_control.lifecycle.evidence import Residue
-from vonk_control.wait_contract import WaitEvidence
-
-from ..fleet_profile_contract.vocabulary import RecipeSelector
-from ..model_primitives import (
+from vonk_control.model_primitives import (
     Base,
     CertificateGenerationStorage,
     _lower_hex,
     _state_in,
 )
-from ..repeated_evidence_contract import RepeatedEvidence
-from ..stored.json_values import ContractJSON
-from .waits import wait_due_column, wait_evidence_column
+from vonk_control.models.waits import wait_due_column, wait_evidence_column
+from vonk_control.repeated_evidence_contract import RepeatedEvidence
+from vonk_control.stored.json_values import ContractJSON
+from vonk_control.wait_contract import WaitEvidence
 
 
 class User(Base):

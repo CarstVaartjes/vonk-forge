@@ -5,8 +5,8 @@ resolves the string-named relationships between them. Nothing is re-exported:
 import each name from the module that defines it.
 """
 
-from .. import journal_models  # noqa: F401
-from . import (  # noqa: F401
+from vonk_control import journal_models  # noqa: F401
+from vonk_control.models import (  # noqa: F401
     cache,
     catalog,
     coordinator,

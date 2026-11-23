@@ -9,46 +9,51 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vonk_agent_protocol.capability_reply import ControllerCapability
-
-from ..capabilities import CapabilityRegistry
-from ..jobs.queue import JobService
-from ..logging import log_event, redact_text
+from vonk_control.capabilities import CapabilityRegistry
+from vonk_control.jobs.queue import JobService
+from vonk_control.logging import log_event, redact_text
 
 if TYPE_CHECKING:
-    from ..catalog.sync import ManagedRecipeCatalogSyncService
-    from ..enrollment.service import EnrollmentService
-from ..worker_healthcheck import current_worker_instance_id
-from .assembly import assemble_production_worker
-from .liveness import (
+    from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
+    from vonk_control.enrollment.service import EnrollmentService
+from vonk_control.worker.assembly import assemble_production_worker
+from vonk_control.worker.liveness import (
     _LOGGER,
     _WORKER_WATCHDOG_TIMEOUT_SECONDS,
     WorkerHeartbeatRecorder,
     WorkerWatchdog,
     watch_worker,
 )
+from vonk_control.worker_healthcheck import current_worker_instance_id
 
 if __name__ == "__main__":
     import os
     from datetime import UTC, datetime
     from pathlib import Path
 
-    from ..agent_jobs.service import AgentJobService
-    from ..db.connections import build_engine, session_factory, wait_for_database
-    from ..execution_plan_service import ControllerExecutionPlanService
-    from ..gateway.route_runtime import (
+    from vonk_control.agent_jobs.service import AgentJobService
+    from vonk_control.db.connections import (
+        build_engine,
+        session_factory,
+        wait_for_database,
+    )
+    from vonk_control.execution_plan_service import ControllerExecutionPlanService
+    from vonk_control.gateway.route_runtime import (
         AtomicRouteBundlePublisher,
         FileSupervisorAcknowledger,
     )
-    from ..logging import configure_controller_logging
-    from ..model_cache.service import ModelCacheService
-    from ..presence import ManagementAddressPolicy
-    from ..runtime_image_preparation.preparation import (
+    from vonk_control.logging import configure_controller_logging
+    from vonk_control.model_cache.service import ModelCacheService
+    from vonk_control.presence import ManagementAddressPolicy
+    from vonk_control.runtime_image_preparation.preparation import (
         make_runtime_image_receipt_preparer,
         stored_runtime_image_resolver,
     )
-    from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-    from ..runtime_image_preparation.transport import OciLayoutImageTransport
-    from ..settings import (
+    from vonk_control.runtime_image_preparation.storage import (
+        FilesystemRuntimeImageStorage,
+    )
+    from vonk_control.runtime_image_preparation.transport import OciLayoutImageTransport
+    from vonk_control.settings import (
         ARTIFACT_JOB_RECONCILE_BATCH_LIMIT,
         ARTIFACT_JOB_RECONCILE_INTERVAL_SECONDS,
         ARTIFACT_JOB_RETENTION_SECONDS,
@@ -65,7 +70,7 @@ if __name__ == "__main__":
         WORKER_MEMORY_TRACE_WINDOW_SECONDS,
         Settings,
     )
-    from .memory import (
+    from vonk_control.worker.memory import (
         LinuxProcessProbe,
         WorkerMemoryMonitor,
         start_worker_memory_sampler,
@@ -146,8 +151,8 @@ if __name__ == "__main__":
         model_cache,
         runtime_image_resolver=stored_runtime_image_resolver(runtime_image_storage),
     )
-    from ..agent_services import build_enrollment_service
-    from ..enrollment.service import EnrollmentService
+    from vonk_control.agent_services import build_enrollment_service
+    from vonk_control.enrollment.service import EnrollmentService
 
     enrollment = capabilities.guard(
         ControllerCapability.CERTIFICATE_AUTHORITY,
@@ -160,11 +165,11 @@ if __name__ == "__main__":
             return False
         return enrollment.reconcile_revocations()
 
-    from ..auth import TokenCodec
-    from ..catalog.service import CatalogService
-    from ..catalog.sync import ManagedRecipeCatalogSyncService
-    from ..recipe_packages.client import RecipePackageClient
-    from ..source_bundles import DatabaseSourceBundleStore
+    from vonk_control.auth import TokenCodec
+    from vonk_control.catalog.service import CatalogService
+    from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
+    from vonk_control.recipe_packages.client import RecipePackageClient
+    from vonk_control.source_bundles import DatabaseSourceBundleStore
 
     catalog_sync = capabilities.guard(
         ControllerCapability.RECIPE_LIBRARY,

@@ -13,25 +13,24 @@ from pydantic import ValidationError
 from vonk_forge_contracts.model import GitHubReleaseSource
 
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-
-from .constants import (
+from vonk_control.model_cache.constants import (
     _GITHUB_API_HOST,
     _GITHUB_LFS_MEDIA_HOST,
     _REVISION_PATTERN,
     ProviderKind,
 )
-from .errors import (
+from vonk_control.model_cache.errors import (
     ModelCacheResolutionError,
     ModelCacheResolutionInvalid,
     ModelCacheStorageInvalid,
     ModelCacheStorageRefused,
 )
-from .source_helpers import _is_private_host
+from vonk_control.model_cache.source_helpers import _is_private_host
 
 if TYPE_CHECKING:
-    from .artifacts import ArtifactSpec
-    from .input_contracts import CatalogArtifact
-    from .service import ModelCacheService
+    from vonk_control.model_cache.artifacts import ArtifactSpec
+    from vonk_control.model_cache.input_contracts import CatalogArtifact
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 @dataclass(frozen=True, slots=True)

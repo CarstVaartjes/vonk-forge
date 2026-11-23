@@ -24,47 +24,30 @@ from vonk_agent_protocol.state_machines import (
     ObservedAssignmentState,
 )
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract.applications import (
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationCancellationIntent,
     FleetProfileApplicationProgress,
     FleetProfileIntendedConfiguration,
 )
-from ..fleet_profile_contract.review import FleetProfileApplicationView
-from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..lifecycle.fleet_profile import FleetProfileAdapter
-from ..lifecycle.types import Effect as _LifecycleEffect
-from ..models.fleet import (
-    AgentNode,
-    FleetProfile,
-    FleetProfileApplication,
-    FleetProfileSelection,
-)
-from ..operations.blockers import make_blocker
-from ..persisted_waits import read_wait, schedule_wait
-from ..settings import PROFILE_STALL_WINDOW_SECONDS
-from ..stall_window import stall_deadline
-from ..strict_json import read_stored_model
-from ..wait_contract import typed_wait_reason
-from ..workload_intent import take_workload_intent
-from . import states as fleet_profile_states
-from .assessment_support import (
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.fleet_profiles.assessment_support import (
     _deferral_code,
     _preview_blockers,
     _profile_preview_is_waitable,
     _storage_wait_of,
 )
-from .assignment_assessment import _assignment_state
-from .continuing_effects import _adopted_application_scope
-from .contracts import (
+from vonk_control.fleet_profiles.assignment_assessment import _assignment_state
+from vonk_control.fleet_profiles.continuing_effects import _adopted_application_scope
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileAdmissionBusy,
     FleetProfileAdmissionEffectBusy,
     FleetProfileConflict,
     FleetProfileInvalid,
     _FleetProfileSupersededIntentConflict,
 )
-from .persistence import (
+from vonk_control.fleet_profiles.persistence import (
     _application_effect_scope,
     _intended_profile,
     _newer_pending_profile_load,
@@ -73,13 +56,33 @@ from .persistence import (
     _persisted_profile_progress,
     _stored_progress,
 )
-from .projection_support import (
-    _aware,
+from vonk_control.fleet_profiles.projection_support import _aware
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
 )
+from vonk_control.lifecycle.fleet_profile import FleetProfileAdapter
+from vonk_control.lifecycle.types import Effect as _LifecycleEffect
+from vonk_control.models.fleet import (
+    AgentNode,
+    FleetProfile,
+    FleetProfileApplication,
+    FleetProfileSelection,
+)
+from vonk_control.operations.blockers import make_blocker
+from vonk_control.persisted_waits import read_wait, schedule_wait
+from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
+from vonk_control.stall_window import stall_deadline
+from vonk_control.strict_json import read_stored_model
+from vonk_control.wait_contract import typed_wait_reason
+from vonk_control.workload_intent import take_workload_intent
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 class FleetProfileService:

@@ -15,21 +15,22 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     is_state,
 )
 from vonk_agent_protocol.outcome import UnknownOutcomeError
-
-from .. import agent_operation_states
-from ..admission_locking import AdmissionLockBusy
-from ..journal_models import RunSwitchJournalRepair, RunSwitchJournalRepairPending
-from ..models.jobs import Job
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..persisted_waits import clear_wait, read_wait
-from ..run_switch_contract.journal import (
+from vonk_control import agent_operation_states
+from vonk_control.admission_locking import AdmissionLockBusy
+from vonk_control.journal_models import (
+    RunSwitchJournalRepair,
+    RunSwitchJournalRepairPending,
+)
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.persisted_waits import clear_wait, read_wait
+from vonk_control.run_switch_contract.journal import (
     JournalRepairDisposition,
     JournalRepairPurpose,
     RunSwitchJournalRepairEvidence,
 )
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_operations.results import _persisted_result
-from .discovery import (
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_journal_repair.discovery import (
     REPAIR_WAIT,
     _candidate,
     _discover,
@@ -37,8 +38,9 @@ from .discovery import (
     _plan_digest,
     journal_document,
 )
-from .pending import _pending
-from .proof import _prove
+from vonk_control.run_switch_journal_repair.pending import _pending
+from vonk_control.run_switch_journal_repair.proof import _prove
+from vonk_control.run_switch_operations.results import _persisted_result
 
 
 def _try_repair_once(

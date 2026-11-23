@@ -19,28 +19,40 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdentityState
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..agent_contacts import record_contact
-from ..agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS, fencing_intent
-from ..agent_operation_facts import aware as _aware
-from ..agent_operation_facts import lapsed_renewal_allowed as _lapsed_renewal_allowed
-from ..auth import AgentSource
-from ..cancelled_runtime import cancellation_stop_current
-from ..categorized_errors import InvalidValue
-from ..inventory.items import record_runtime
-from ..jobs import states as job_states
-from ..logging import redact_text
-from ..models.fleet import AgentCertificate, AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..offline_stops import is_deferred_stop
-from ..own_cleanup import CLEANUP_KINDS
-from .contracts import AgentContactIdentityMismatch, AgentFence, StaleAgentFence
-from .stored import column_field, column_is_document, column_value
+from vonk_control.agent_contacts import record_contact
+from vonk_control.agent_jobs.contracts import (
+    AgentContactIdentityMismatch,
+    AgentFence,
+    StaleAgentFence,
+)
+from vonk_control.agent_jobs.stored import (
+    column_field,
+    column_is_document,
+    column_value,
+)
+from vonk_control.agent_operation_facts import (
+    _WORKLOAD_INTENT_OPERATIONS,
+    fencing_intent,
+)
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.agent_operation_facts import (
+    lapsed_renewal_allowed as _lapsed_renewal_allowed,
+)
+from vonk_control.auth import AgentSource
+from vonk_control.cancelled_runtime import cancellation_stop_current
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.inventory.items import record_runtime
+from vonk_control.jobs import states as job_states
+from vonk_control.logging import redact_text
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.offline_stops import is_deferred_stop
+from vonk_control.own_cleanup import CLEANUP_KINDS
 
 if TYPE_CHECKING:
-    from .service import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
 
 
 def _active(

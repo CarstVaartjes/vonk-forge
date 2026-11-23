@@ -13,13 +13,12 @@ from pydantic import (
 )
 
 from vonk_agent_protocol.wire_model import OperationProgress
-
-from ..recipe_image_availability.clocks_contract import readable_or_none
-from ..recipe_operations.lifecycle_contract import LifecycleNodeResult
-from ..runtime_image_preparation.contracts import RuntimeImageReceipt
-from .identity import RunSwitchCancellation
-from .progress import RunSwitchMemberReceipt
-from .vocabulary import RunSwitchAction
+from vonk_control.recipe_image_availability.clocks_contract import readable_or_none
+from vonk_control.recipe_operations.lifecycle_contract import LifecycleNodeResult
+from vonk_control.run_switch_contract.identity import RunSwitchCancellation
+from vonk_control.run_switch_contract.progress import RunSwitchMemberReceipt
+from vonk_control.run_switch_contract.vocabulary import RunSwitchAction
+from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 
 
 class RunSwitchObservedEvidence(BaseModel):

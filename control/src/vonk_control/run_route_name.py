@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
     from vonk_forge_contracts import EndpointAlias
 
-    from .models.execution import RecipeRun
+    from vonk_control.models.execution import RecipeRun
 
 _LOGGER = logging.getLogger(__name__)
 

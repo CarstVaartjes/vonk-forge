@@ -12,13 +12,12 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
-
-from ..content_identity import ImageContent, same_image
-from ..models.cache import RecipeBuild
-from ..operations.contract import AvailabilityRecoveryAction
-from ..runtime.adapters import RuntimeAdapter, resolve_runtime_adapter
-from ..runtime.spec_contract import RuntimeSpec
-from .contracts import (
+from vonk_control.content_identity import ImageContent, same_image
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.operations.contract import AvailabilityRecoveryAction
+from vonk_control.runtime.adapters import RuntimeAdapter, resolve_runtime_adapter
+from vonk_control.runtime.spec_contract import RuntimeSpec
+from vonk_control.runtime_image_preparation.contracts import (
     _IMAGE_DIGEST,
     _RUNTIME_ARCHITECTURE,
     _RUNTIME_INTERFACE,
@@ -37,7 +36,10 @@ from .contracts import (
     _wire_architecture,
     _with_provenance,
 )
-from .transport import OciLayoutImageTransport, _validate_evidence
+from vonk_control.runtime_image_preparation.transport import (
+    OciLayoutImageTransport,
+    _validate_evidence,
+)
 
 
 def prepare_runtime_image(

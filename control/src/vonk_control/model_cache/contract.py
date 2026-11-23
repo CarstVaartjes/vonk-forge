@@ -22,16 +22,15 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleEffect, LifecycleS
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheBlockerCode
 from vonk_agent_protocol.state_machines import ModelCacheOperatorStatus
 from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
-
-from ..cursor_contract import MAX_CURSOR_LENGTH
-from ..fleet_model_removal_contract import FleetModelRemovalCheckpoint
-from ..machine_states import ModelFileStateField
-from ..operations.blockers import OperationBlocker
-from ..operations.contract import AvailabilityOperationFailure
-from ..recipe_image_availability.clocks_contract import readable_or_none
-from ..settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
-from ..strict_json import StrictJSONModel, StrictModel, read_stored_model
-from ..wait_contract import QueueWait
+from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
+from vonk_control.fleet_model_removal_contract import FleetModelRemovalCheckpoint
+from vonk_control.machine_states import ModelFileStateField
+from vonk_control.operations.blockers import OperationBlocker
+from vonk_control.operations.contract import AvailabilityOperationFailure
+from vonk_control.recipe_image_availability.clocks_contract import readable_or_none
+from vonk_control.settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
+from vonk_control.strict_json import StrictJSONModel, StrictModel, read_stored_model
+from vonk_control.wait_contract import QueueWait
 
 DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 ARTIFACT_KEY_PATTERN = r"^[a-z][a-z0-9_.:-]{0,255}$"

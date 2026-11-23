@@ -21,14 +21,12 @@ from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.run_switch_operations.results import _persisted_result
-
-from ..admission_locking import ConstraintReplay, admitting
-from ..agent_jobs.service import AgentJobService
-from ..bounded_json import require_integer, require_mapping
-from ..failure_classification import error_code, is_security_failure
-from ..jobs import states as job_states
-from ..jobs.documents import (
+from vonk_control.admission_locking import ConstraintReplay, admitting
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.bounded_json import require_integer, require_mapping
+from vonk_control.failure_classification import error_code, is_security_failure
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import (
     RunSwitchCleanupIntent,
     RunSwitchIntent,
     RunSwitchJobPayload,
@@ -36,36 +34,34 @@ from ..jobs.documents import (
     RunSwitchRunIntent,
     RunSwitchStopIntent,
 )
-from ..lifecycle.evidence import Residue
-from ..lifecycle.types import (
-    State as _LifecycleState,
-)
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..recipe_builds.cancellation import (
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.types import State as _LifecycleState
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_builds.cancellation import (
     BuildConsumerError,
     lock_run_switch_build_dependency,
 )
-from ..run_switch_contract.operations import RunSwitchOperation
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..stored.rows import read_row_column
-from ..strict_json import (
-    serialize_json_value,
-)
-from ..workload_intent import allocate_workload_intent
-from .constants import (
+from vonk_control.run_switch_contract.operations import RunSwitchOperation
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.constants import (
     _FINAL_VERIFICATION_MAX_SECONDS,
     _OBSERVING,
     _OPERATION_KINDS,
     _active_recipe_revision,
 )
-from .contracts import ScopeIntentStatus
-from .errors import RunSwitchRequestInvalid
-from .identity_helpers import _string_or_none
-from .image_receipts import _plan_target_node_ids, _planned_transfer_bytes
-from .observation_helpers import _same_intent
-from .plan_persistence import _reserve_run_switch_assets
-from .planning_helpers import (
+from vonk_control.run_switch_operations.contracts import ScopeIntentStatus
+from vonk_control.run_switch_operations.errors import RunSwitchRequestInvalid
+from vonk_control.run_switch_operations.identity_helpers import _string_or_none
+from vonk_control.run_switch_operations.image_receipts import (
+    _plan_target_node_ids,
+    _planned_transfer_bytes,
+)
+from vonk_control.run_switch_operations.observation_helpers import _same_intent
+from vonk_control.run_switch_operations.plan_persistence import (
+    _reserve_run_switch_assets,
+)
+from vonk_control.run_switch_operations.planning_helpers import (
     _aware,
     _digest,
     _now,
@@ -73,11 +69,18 @@ from .planning_helpers import (
     _scope_intent_status,
     _stored_job_plan,
 )
-from .provider import _ADAPTER
-from .result_helpers import _progress_damaged, _read_progress
+from vonk_control.run_switch_operations.provider import _ADAPTER
+from vonk_control.run_switch_operations.result_helpers import (
+    _progress_damaged,
+    _read_progress,
+)
+from vonk_control.run_switch_operations.results import _persisted_result
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import serialize_json_value
+from vonk_control.workload_intent import allocate_workload_intent
 
 if TYPE_CHECKING:
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 class ReservationMixin:

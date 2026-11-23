@@ -20,13 +20,7 @@ from vonk_agent_protocol.error_response import (
 )
 from vonk_agent_protocol.reason_codes.catalog import CatalogCode
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..capabilities import CapabilityUnavailableError
-from ..catalog.api import CatalogProblem
-from ..http_errors import TemporaryHTTPError
-from ..library_projection.common import SelectorAmbiguityHTTPError
-from ..logging import redact_text
-from .common import (
+from vonk_control.api.common import (
     _LOGIN_PATH,
     _bounded_error_content,
     _catalog_error_content,
@@ -35,6 +29,11 @@ from .common import (
     _log_request_failure,
     _validation_detail,
 )
+from vonk_control.capabilities import CapabilityUnavailableError
+from vonk_control.catalog.api import CatalogProblem
+from vonk_control.http_errors import TemporaryHTTPError
+from vonk_control.library_projection.common import SelectorAmbiguityHTTPError
+from vonk_control.logging import redact_text
 
 
 def install_error_handlers(app: FastAPI) -> None:

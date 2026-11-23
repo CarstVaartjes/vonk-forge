@@ -9,22 +9,26 @@ from uuid import NAMESPACE_OID, uuid5
 from sqlalchemy import delete, select, update
 
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
-
-from ..admission_locking import AdmissionRowLock, lock_admission_rows
-from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract.definitions import FleetProfileDeletion
-from ..fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
-from ..models.fleet import (
+from vonk_control.admission_locking import AdmissionRowLock, lock_admission_rows
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.fleet_profile_contract.definitions import FleetProfileDeletion
+from vonk_control.fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.fleet_profiles.contracts import (
+    FleetProfileInvalid,
+    FleetProfileRevisionConflict,
+)
+from vonk_control.models.fleet import (
     FleetProfile,
     FleetProfileApplication,
     FleetProfileRecipe,
     FleetProfileSelection,
 )
-from . import states as fleet_profile_states
-from .contracts import FleetProfileInvalid, FleetProfileRevisionConflict
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 def _stale(expected: int | None, current: int) -> None:

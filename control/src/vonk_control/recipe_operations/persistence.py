@@ -27,9 +27,8 @@ from vonk_agent_protocol.recipe_operations import (
 )
 from vonk_agent_protocol.state_machines import ReservationState
 from vonk_agent_protocol.wire_model import canonical_message
-
-from .. import agent_operation_states
-from ..admission_locking import (
+from vonk_control import agent_operation_states
+from vonk_control.admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
     ConstraintReplay,
@@ -38,53 +37,58 @@ from ..admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
-from ..agent_jobs.retirement import release_owned_reservations_in_session
-from ..agent_jobs.service import AgentJobService
-from ..bounded_json import require_mapping
-from ..compiled_execution_plan import (
+from vonk_control.agent_jobs.retirement import release_owned_reservations_in_session
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.bounded_json import require_mapping
+from vonk_control.compiled_execution_plan import (
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
     CompiledExecutionPlanError,
     validate_compiled_launch_payload,
 )
-from ..identity_insert import insert_identity
-from ..install_admission.contracts import InstallAdmissionBusy
-from ..jobs import states as job_states
-from ..jobs.documents import controller_recipe_document
-from ..lifecycle.agent_operation import retry_scheduled
-from ..lifecycle.evidence import (
-    BookkeepingReason,
-    retire_as_unknown,
+from vonk_control.identity_insert import insert_identity
+from vonk_control.install_admission.contracts import InstallAdmissionBusy
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import controller_recipe_document
+from vonk_control.lifecycle.agent_operation import retry_scheduled
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.models.execution import (
+    RecipeInstallation,
+    RecipeRun,
+    ResourceReservation,
 )
-from ..models.execution import RecipeInstallation, RecipeRun, ResourceReservation
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..own_cleanup import CLEANUP_KINDS
-from ..run_admission import (
-    RunAdmissionBusy,
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.own_cleanup import CLEANUP_KINDS
+from vonk_control.recipe_operations.constants import (
+    _MANIFEST_BOUND_KINDS,
+    _WORKLOAD_INTENT_KINDS,
 )
-from ..stored.rows import read_row_column
-from ..strict_json import read_stored_model
-from ..workload_intent import allocate_workload_intent
-from .constants import _MANIFEST_BOUND_KINDS, _WORKLOAD_INTENT_KINDS
-from .contracts import RecipeOperationContext
-from .errors import RecipeRequestInvalid
-from .interfaces import RecipeOperationView, new_recipe_job
-from .lifecycle_contract import (
+from vonk_control.recipe_operations.contracts import RecipeOperationContext
+from vonk_control.recipe_operations.errors import RecipeRequestInvalid
+from vonk_control.recipe_operations.interfaces import (
+    RecipeOperationView,
+    new_recipe_job,
+)
+from vonk_control.recipe_operations.lifecycle_contract import (
     START_CHILD_KINDS,
     validate_recipe_lifecycle_terminal,
 )
-from .observation_helpers import _RECIPE_PARENT_READERS
-from .progress import (
+from vonk_control.recipe_operations.observation_helpers import _RECIPE_PARENT_READERS
+from vonk_control.recipe_operations.progress import (
     _RECIPE_WIRE_PAYLOAD_MODELS,
     _parent_identity,
     _project_recipe_operation_progress,
     _recorded_parent,
 )
-from .results import _recorded_result
+from vonk_control.recipe_operations.results import _recorded_result
+from vonk_control.run_admission import RunAdmissionBusy
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import read_stored_model
+from vonk_control.workload_intent import allocate_workload_intent
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class PersistenceMixin:

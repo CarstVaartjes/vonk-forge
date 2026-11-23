@@ -15,17 +15,20 @@ from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
 from vonk_agent_protocol.state_machines import AssetAvailability
-
-from ..artifact_jobs.lifecycle import (
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     RemovalOwnerKind,
     retryable_artifact_database_error,
 )
-from ..artifact_reference_scan.image_references import runtime_image_reference_findings
-from ..artifact_reference_scan.model_references import model_set_reference_findings
-from ..artifact_reference_scan.types import ArtifactReferenceFinding
-from ..cache_removal_review import (
+from vonk_control.artifact_reference_scan.image_references import (
+    runtime_image_reference_findings,
+)
+from vonk_control.artifact_reference_scan.model_references import (
+    model_set_reference_findings,
+)
+from vonk_control.artifact_reference_scan.types import ArtifactReferenceFinding
+from vonk_control.cache_removal_review import (
     ArtifactKind,
     AssetDisposition,
     CacheAssetDisposition,
@@ -36,12 +39,11 @@ from ..cache_removal_review import (
     CacheRemovalReviewContent,
     seal_cache_removal_review,
 )
-from ..content_identity import ImageContent, same_image
-from ..model_cache.views import ModelCacheRemovalScope
-from ..models.cache import ArtifactLifecycleGate
-from ..operations.contract import AvailabilityRecoveryAction
-from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
-from .contracts import (
+from vonk_control.content_identity import ImageContent, same_image
+from vonk_control.model_cache.views import ModelCacheRemovalScope
+from vonk_control.models.cache import ArtifactLifecycleGate
+from vonk_control.operations.contract import AvailabilityRecoveryAction
+from vonk_control.recipe_image_availability.contracts import (
     SCHEMA_VERSION,
     ModelCacheRemovalCoordinator,
     RecipeImageAvailabilityError,
@@ -49,9 +51,14 @@ from .contracts import (
     _iso,
     _RecipeRemovalSelection,
 )
+from vonk_control.runtime_image_preparation.contracts import (
+    RuntimeImagePreparationError,
+)
 
 if TYPE_CHECKING:
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
 
 
 def _cache_removal_finding(

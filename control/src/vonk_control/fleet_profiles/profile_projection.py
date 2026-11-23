@@ -16,9 +16,8 @@ from vonk_agent_protocol.agent_words import (
 )
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheBlockerCode
 from vonk_agent_protocol.state_machines import AssetAvailability
-
-from ..catalog.revision_contract import RecipeRevisionProjection
-from ..fleet_profile_contract.definitions import (
+from vonk_control.catalog.revision_contract import RecipeRevisionProjection
+from vonk_control.fleet_profile_contract.definitions import (
     FleetAssignmentModelView,
     FleetAssignmentRecipeView,
     FleetCacheSummary,
@@ -29,30 +28,43 @@ from ..fleet_profile_contract.definitions import (
     FleetProfileDefinition,
     FleetProfileView,
 )
-from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..model_cache.contract import CachedResourceEstimate
-from ..models.catalog import CatalogDocument, CatalogDocumentRevision
-from ..models.fleet import AgentNode, AgentNodeProfile, FleetProfile
-from ..recipe_update_batches.notice import RecipeUpdateNotice, recipe_update_notice
-from ..stored.states import CatalogRevisionState
-from .assignment_assessment import _assignment_rows, _assignment_state, _AssignmentRows
-from .contracts import _SelectedProfileSnapshot
-from .dependencies import (
+from vonk_control.fleet_profiles.assignment_assessment import (
+    _assignment_rows,
+    _assignment_state,
+    _AssignmentRows,
+)
+from vonk_control.fleet_profiles.contracts import _SelectedProfileSnapshot
+from vonk_control.fleet_profiles.dependencies import (
     _INSTALLATION_POLICY_ADAPTER,
     _LOGGER,
     _OBSERVED_ASSIGNMENT_LABELS,
 )
-from .projection_support import (
+from vonk_control.fleet_profiles.projection_support import (
     _aware,
     _digest,
     _effective_option_choices,
     _profile_document,
 )
-from .saved_profiles import _definition
+from vonk_control.fleet_profiles.saved_profiles import _definition
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
+)
+from vonk_control.model_cache.contract import CachedResourceEstimate
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.models.fleet import AgentNode, AgentNodeProfile, FleetProfile
+from vonk_control.recipe_update_batches.notice import (
+    RecipeUpdateNotice,
+    recipe_update_notice,
+)
+from vonk_control.stored.states import CatalogRevisionState
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 @dataclass(frozen=True)

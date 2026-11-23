@@ -34,42 +34,10 @@ from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
 from vonk_agent_protocol.state_machines import InstallationState, RunState
-
-from .. import agent_operation_states as aos
-from ..admission_locking import ConstraintReplay, admitting
-from ..bounded_retry import bounded_attempts
-from ..categorized_errors import InvalidValue, MissingRecord
-from ..cluster_mappings import mapping_option_choices
-from ..compiled_artifact_contract import ParameterScalar
-from ..execution_plan_service import compile_job_invocation
-from ..identity_insert import insert_identity
-from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state
-from ..lifecycle.artifact_job import ArtifactJobAdapter
-from ..lifecycle.evidence import Damaged, Residue
-from ..lifecycle.types import CancelRequested, Outcome
-from ..logging import log_event
-from ..models.cache import RecipeBuild
-from ..models.execution import (
-    ArtifactJob,
-    ArtifactJobBlob,
-    ArtifactJobFile,
-    RecipeInstallation,
-    RecipeRun,
-)
-from ..models.jobs import Job
-from ..models.mapping import ClusterMapping
-from ..models.operations import AgentOperation
-from ..recipe_operations.errors import RecipeOperationConflict, RecipeRetryLater
-from ..recipe_operations.execution_contract import RecipeExecutionContractError
-from ..recipe_operations.observation_helpers import run_takes_jobs
-from ..recipe_operations.runtime_specs import recipe_engine
-from ..recipe_operations.start_payloads import (
-    RecipeStartPlacement,
-    bind_compiled_execution_plan,
-    start_peer_addresses,
-)
-from . import states as ajs
-from .contracts import (
+from vonk_control import agent_operation_states as aos
+from vonk_control.admission_locking import ConstraintReplay, admitting
+from vonk_control.artifact_jobs import states as ajs
+from vonk_control.artifact_jobs.contracts import (
     ArtifactJobCapabilitiesResponse,
     ArtifactJobError,
     ArtifactJobInvalid,
@@ -90,9 +58,54 @@ from .contracts import (
     _recipe_interface,
     _validate_inputs_against_contract,
 )
-from .evidence import ArtifactJobResultEvidence, read_result_evidence
-from .job_contract import ArtifactJobContractResponse, read_job_contract
-from .outputs import ArtifactJobService as OutputService
+from vonk_control.artifact_jobs.evidence import (
+    ArtifactJobResultEvidence,
+    read_result_evidence,
+)
+from vonk_control.artifact_jobs.job_contract import (
+    ArtifactJobContractResponse,
+    read_job_contract,
+)
+from vonk_control.artifact_jobs.outputs import ArtifactJobService as OutputService
+from vonk_control.bounded_retry import bounded_attempts
+from vonk_control.categorized_errors import InvalidValue, MissingRecord
+from vonk_control.cluster_mappings import mapping_option_choices
+from vonk_control.compiled_artifact_contract import ParameterScalar
+from vonk_control.execution_plan_service import compile_job_invocation
+from vonk_control.identity_insert import insert_identity
+from vonk_control.lifecycle.agent_operation import (
+    AgentOperationAdapter,
+    set_parent_state,
+)
+from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
+from vonk_control.lifecycle.evidence import Damaged, Residue
+from vonk_control.lifecycle.types import CancelRequested, Outcome
+from vonk_control.logging import log_event
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import (
+    ArtifactJob,
+    ArtifactJobBlob,
+    ArtifactJobFile,
+    RecipeInstallation,
+    RecipeRun,
+)
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_operations.errors import (
+    RecipeOperationConflict,
+    RecipeRetryLater,
+)
+from vonk_control.recipe_operations.execution_contract import (
+    RecipeExecutionContractError,
+)
+from vonk_control.recipe_operations.observation_helpers import run_takes_jobs
+from vonk_control.recipe_operations.runtime_specs import recipe_engine
+from vonk_control.recipe_operations.start_payloads import (
+    RecipeStartPlacement,
+    bind_compiled_execution_plan,
+    start_peer_addresses,
+)
 
 _LOGGER = logging.getLogger(__name__)
 

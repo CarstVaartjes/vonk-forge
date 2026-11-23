@@ -16,40 +16,37 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import InstallationState
-
-from ..categorized_errors import BookkeepingUnknown
-from ..cluster_mappings import (
+from vonk_control.categorized_errors import BookkeepingUnknown
+from vonk_control.cluster_mappings import (
     ClusterMappingError,
     effective_option_choices,
     mapping_option_choices,
 )
-from ..content_identity import same_image
-from ..machine_states import rank_installed
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import InstallationNode, RecipeInstallation
-from ..models.mapping import ClusterMapping, ClusterMappingNode
-from ..preparation_contract import (
-    RuntimeImageIdentity,
-)
-from ..recipe_operations.execution_contract import (
+from vonk_control.content_identity import same_image
+from vonk_control.machine_states import rank_installed
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import InstallationNode, RecipeInstallation
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.preparation_contract import RuntimeImageIdentity
+from vonk_control.recipe_operations.execution_contract import (
     StoredInstallationPlan,
     installation_serves_authorised_ports,
 )
-from ..recipe_operations.runtime_specs import (
+from vonk_control.recipe_operations.runtime_specs import (
     OPTION_CHOICES_KEY,
     RUNTIME_INTERFACE,
     RecipeRuntimeSpecError,
     resolve_recipe_entities,
 )
-from ..revision_images import revision_source_bundle
-from ..run_switch_contract.evidence import MappingSelection, RunSwitchReason
-from ..run_switch_contract.requests import SparkGroup, SparkGroupNode
-from ..stored.states import ClusterMappingState, RecipeBuildState
-from .planning_helpers import _as_reason
+from vonk_control.revision_images import revision_source_bundle
+from vonk_control.run_switch_contract.evidence import MappingSelection, RunSwitchReason
+from vonk_control.run_switch_contract.requests import SparkGroup, SparkGroupNode
+from vonk_control.run_switch_operations.planning_helpers import _as_reason
+from vonk_control.stored.states import ClusterMappingState, RecipeBuildState
 
 if TYPE_CHECKING:
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 class ResolutionMixin:

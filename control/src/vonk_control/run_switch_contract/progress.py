@@ -12,15 +12,14 @@ from pydantic import (
 )
 
 from vonk_agent_protocol.wire_model import OperationProgress
-
-from ..strict_json import StrictModel
-from .identity import NodeId
-from .vocabulary import (
+from vonk_control.run_switch_contract.identity import NodeId
+from vonk_control.run_switch_contract.vocabulary import (
     RunSwitchMemberState,
     RunSwitchPhaseKind,
     RunSwitchProgressState,
     RunSwitchSubphase,
 )
+from vonk_control.strict_json import StrictModel
 
 
 class RunSwitchMemberProgress(StrictModel):

@@ -13,30 +13,21 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_agent_protocol.state_machines import ReservationState
-
-from ..admission_locking import (
+from vonk_control.admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
     acquire_admission_keys,
     lock_admission_rows,
     node_admission_key,
 )
-from ..disk_reservations import outstanding_disk_reservation_bytes
-from ..gpu.health import gpu_health_reason
-from ..inventory.items import runtime_value
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import ResourceReservation
-from ..models.fleet import AgentNode
-from ..recipe_operations.execution_contract import (
-    RecipeExecutionContractError,
-    build_plan_document,
-    parse_stored_build_plan,
-    parse_stored_build_policy,
-)
-from ..spark_disk import spark_free_bytes
-from ..stored.states import CatalogRevisionState, RecipeBuildState
-from .common import (
+from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
+from vonk_control.gpu.health import gpu_health_reason
+from vonk_control.inventory.items import runtime_value
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import AgentNode
+from vonk_control.recipe_builds.common import (
     _BUILD_OBSERVATION_DELAYS,
     _OCI_DIGEST,
     _SHA256,
@@ -53,10 +44,18 @@ from .common import (
     _valid_succeeded_receipt,
     _validate_builder,
 )
-from .receipts import CompletedRecipeBuild
+from vonk_control.recipe_builds.receipts import CompletedRecipeBuild
+from vonk_control.recipe_operations.execution_contract import (
+    RecipeExecutionContractError,
+    build_plan_document,
+    parse_stored_build_plan,
+    parse_stored_build_policy,
+)
+from vonk_control.spark_disk import spark_free_bytes
+from vonk_control.stored.states import CatalogRevisionState, RecipeBuildState
 
 if TYPE_CHECKING:
-    from .service import RecipeBuildService
+    from vonk_control.recipe_builds.service import RecipeBuildService
 
 
 def persist_plan_in_session(

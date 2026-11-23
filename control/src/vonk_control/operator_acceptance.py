@@ -29,55 +29,62 @@ from vonk_agent_protocol.outcome import (
     UnknownOutcomeError,
 )
 from vonk_agent_protocol.state_machines import EnrollmentGrantState
-
-from .agent_acceptance import AGENT_POLICIES, resolve_agent_receipt
-from .api_availability import AVAILABILITY_ERRORS
-from .artifact_jobs.contracts import ArtifactJobResponse
-from .auth import Actor
-from .enrollment.contract import EnrollmentGrantStatus
-from .fleet_profile_contract.definitions import FleetProfileView
-from .fleet_profile_contract.review import FleetProfileApplicationView
-from .fleet_projection.common import FleetNodeIdentity
-from .gateway.keys_contract import GatewayKeyCreated, GatewayKeyRevoked
-from .jobs.operator_receipts import read_job_operator_receipt
-from .model_cache.contract import ModelCacheOperatorResponse
-from .observation.platform_errors import (
+from vonk_control.agent_acceptance import AGENT_POLICIES, resolve_agent_receipt
+from vonk_control.api_availability import AVAILABILITY_ERRORS
+from vonk_control.artifact_jobs.contracts import ArtifactJobResponse
+from vonk_control.auth import Actor
+from vonk_control.enrollment.contract import EnrollmentGrantStatus
+from vonk_control.fleet_profile_contract.definitions import FleetProfileView
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_projection.common import FleetNodeIdentity
+from vonk_control.gateway.keys_contract import GatewayKeyCreated, GatewayKeyRevoked
+from vonk_control.jobs.operator_receipts import read_job_operator_receipt
+from vonk_control.model_cache.contract import ModelCacheOperatorResponse
+from vonk_control.observation.platform_errors import (
     ObservationCaptureUnavailable,
     observation_capture_unavailable_response,
 )
-from .operation_api.contracts import JobResumeRequest, JobResumeResponse
-from .operator_projection_api.contracts import FleetActionResponse
-from .operator_receipt_contract import (
+from vonk_control.operation_api.contracts import JobResumeRequest, JobResumeResponse
+from vonk_control.operator_projection_api.contracts import FleetActionResponse
+from vonk_control.operator_receipt_contract import (
     AcceptanceReceipt,
     ReceiptCode,
     ReceiptOwner,
     ReceiptPolicy,
     SecurityEdge,
 )
-from .receipt_checks import _available, _identity, _refused, _require
-from .recipe_image_availability.removal_contract import (
+from vonk_control.receipt_checks import _available, _identity, _refused, _require
+from vonk_control.recipe_image_availability.removal_contract import (
     RecipeRemovalUnavailableView,
 )
-from .recipe_image_availability.response_contract import (
+from vonk_control.recipe_image_availability.response_contract import (
     RecipeImageAvailabilityResponse,
     RecipeOperatorResponse,
 )
-from .recipe_image_availability.view_contract import RecipeCacheRemovalStatus
-from .recipe_update_batches.contract import RecipeUpdateResponse
-from .run_switch_contract.operations import RunSwitchOperation
-from .strict_json import _retry_later_response, route_endpoint, serialize_json_value
+from vonk_control.recipe_image_availability.view_contract import (
+    RecipeCacheRemovalStatus,
+)
+from vonk_control.recipe_update_batches.contract import RecipeUpdateResponse
+from vonk_control.run_switch_contract.operations import RunSwitchOperation
+from vonk_control.strict_json import (
+    _retry_later_response,
+    route_endpoint,
+    serialize_json_value,
+)
 
 if TYPE_CHECKING:
-    from .agent_api.common import AgentApiServices
-    from .api.common import JobQueue
-    from .artifact_jobs.service import ArtifactJobService
-    from .fleet_profiles.service import FleetProfileService
-    from .fleet_projection.service import FleetProjection
-    from .gateway.keys import GatewayKeyService
-    from .model_cache.service import ModelCacheService
-    from .operator_projection_api.services import FleetOperatorServices
-    from .recipe_image_availability.service import RecipeImageAvailabilityService
-    from .run_switch_operations.service import RunSwitchOperationService
+    from vonk_control.agent_api.common import AgentApiServices
+    from vonk_control.api.common import JobQueue
+    from vonk_control.artifact_jobs.service import ArtifactJobService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_projection.service import FleetProjection
+    from vonk_control.gateway.keys import GatewayKeyService
+    from vonk_control.model_cache.service import ModelCacheService
+    from vonk_control.operator_projection_api.services import FleetOperatorServices
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 RECEIPT_HEADER = "X-Vonk-Receipt"

@@ -23,63 +23,64 @@ from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..admission_locking import ConstraintReplay, admitting, is_admission_contention
-from ..bounded_json import require_mapping
-from ..distributed_lifecycle import (
+from vonk_control.admission_locking import (
+    ConstraintReplay,
+    admitting,
+    is_admission_contention,
+)
+from vonk_control.bounded_json import require_mapping
+from vonk_control.distributed_lifecycle import (
     DistributedLifecycleError,
     DistributedRecoveryInvalid,
 )
-from ..distributed_recovery.common import (
+from vonk_control.distributed_recovery.common import (
     recovery_start_plan,
     run_node_reports_absent,
     settle_absent_run_in_session,
 )
-from ..gateway.litellm import ServedModelInfo
-from ..jobs.documents import (
+from vonk_control.gateway.litellm import ServedModelInfo
+from vonk_control.jobs.documents import (
     DistributedRecoveryMarker,
     ProfilePartialStop,
     RecipeStopParent,
     controller_recipe_document,
 )
-from ..lifecycle.evidence import (
+from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
     Residue,
     retire_as_unknown,
 )
-from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..models.execution import RecipeRun, RunNode
-from ..models.jobs import Job
-from ..recipe_routes.shared import route_publication_transaction
-from ..run_admission import RunAdmissionBusy
-from ..stored.rows import read_row_column
-from ..strict_json import read_stored_model, serialize_json_value
-from .contracts import RecipeOperationContext
-from .errors import (
+from vonk_control.lifecycle.recipe_operation import RecipeOperationAdapter
+from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_operations.contracts import RecipeOperationContext
+from vonk_control.recipe_operations.errors import (
     RecipeOperationConflict,
     RecipeRequestInvalid,
     RecipeRetryLater,
     _RouteNotWithdrawn,
 )
-from .impact_plans import (
-    StopPlan,
+from vonk_control.recipe_operations.impact_plans import StopPlan
+from vonk_control.recipe_operations.intent import _shared_workload_intent
+from vonk_control.recipe_operations.interfaces import (
+    RecipeOperationView,
+    new_recipe_job,
 )
-from .intent import _shared_workload_intent
-from .interfaces import RecipeOperationView, new_recipe_job
-from .observation_helpers import _active_recipe_revision
-from .progress import (
-    _role_phases,
-    _topology_order,
-)
-from .results import _validated_result
-from .run_transitions import end_unfinished_run
-from .stop_payloads import (
+from vonk_control.recipe_operations.observation_helpers import _active_recipe_revision
+from vonk_control.recipe_operations.progress import _role_phases, _topology_order
+from vonk_control.recipe_operations.results import _validated_result
+from vonk_control.recipe_operations.run_transitions import end_unfinished_run
+from vonk_control.recipe_operations.stop_payloads import (
     RecipeStopAuthorityError,
     durable_run_stop_payloads,
 )
+from vonk_control.recipe_routes.shared import route_publication_transaction
+from vonk_control.run_admission import RunAdmissionBusy
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import read_stored_model, serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class StopDispatchMixin:

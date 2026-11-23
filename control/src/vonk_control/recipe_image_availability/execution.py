@@ -14,35 +14,31 @@ from vonk_forge_contracts import RecipeDefinition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-from vonk_control.lifecycle.evidence import Residue
-
-from ..failure_classification import is_security_failure
-from ..jobs import states as job_states
-from ..jobs.documents import (
+from vonk_control.failure_classification import is_security_failure
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityJobResult,
     AvailabilityModelChild,
 )
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..lifecycle.image_availability import preparation_deadline
-from ..model_cache import states as model_cache_states
-from ..model_cache.errors import ModelCacheNotFound
-from ..models.cache import ModelCacheOperation
-from ..models.catalog import CatalogDocumentRevision
-from ..models.jobs import Job
-from ..operations.blockers import make_blocker
-from ..operations.contract import (
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
+)
+from vonk_control.lifecycle.image_availability import preparation_deadline
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.errors import ModelCacheNotFound
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.jobs import Job
+from vonk_control.operations.blockers import make_blocker
+from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
-from ..persisted_waits import schedule_wait, wait_due
-from ..recipe_operations.availability_intent import (
-    RecipeRetryIntent,
-)
-from ..stored.rows import read_row_column
-from ..strict_json import serialize_json_value
-from ..worker.memory_contract import WorkerMemoryComponent
-from .contracts import (
+from vonk_control.persisted_waits import schedule_wait, wait_due
+from vonk_control.recipe_image_availability.contracts import (
     OPERATION_KIND,
     SCHEMA_VERSION,
     BuildUnsettled,
@@ -52,14 +48,20 @@ from .contracts import (
     _known_total,
     _read,
 )
-from .reader_contract import (
+from vonk_control.recipe_image_availability.reader_contract import (
     AvailabilityDownloadPreview,
     StoredAvailabilityIdentity,
     StoredModelChildCancellation,
 )
+from vonk_control.recipe_operations.availability_intent import RecipeRetryIntent
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import serialize_json_value
+from vonk_control.worker.memory_contract import WorkerMemoryComponent
 
 if TYPE_CHECKING:
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
 
 
 def run_claim(

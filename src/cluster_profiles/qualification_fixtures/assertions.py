@@ -7,8 +7,18 @@ import re
 from collections.abc import Mapping
 from pathlib import PurePosixPath
 
-from .contracts import _FORMATS, _MEDIA_TYPE, _NAME, FixtureError
-from .values import _integer, _number_range, _object, _positive_number
+from cluster_profiles.qualification_fixtures.contracts import (
+    _FORMATS,
+    _MEDIA_TYPE,
+    _NAME,
+    FixtureError,
+)
+from cluster_profiles.qualification_fixtures.values import (
+    _integer,
+    _number_range,
+    _object,
+    _positive_number,
+)
 
 
 def _parse_assertion(key: str, raw: object) -> dict[str, object]:

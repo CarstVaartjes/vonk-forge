@@ -10,24 +10,20 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.capability_reply import ControllerCapability
 from vonk_control import local_ca
-
-from .agent_api.common import AgentApiServices
-from .agent_jobs.service import AgentJobService
-from .capabilities import CapabilityRegistry
-from .distribution.service import DistributionService
-from .distribution.wiring import build_distribution_service_from_components
-from .enrollment.bootstrap import EnrollmentBootstrapConfig
-from .enrollment.service import EnrollmentService
-from .host_helper_authority import (
+from vonk_control.agent_api.common import AgentApiServices
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.capabilities import CapabilityRegistry
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.wiring import build_distribution_service_from_components
+from vonk_control.enrollment.bootstrap import EnrollmentBootstrapConfig
+from vonk_control.enrollment.service import EnrollmentService
+from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )
-from .presence import AgentPresenceService, ManagementAddressPolicy
-from .settings import (
-    AGENT_CA_PROVISIONER_NAME,
-    Settings,
-)
-from .source_bundles import DatabaseSourceBundleStore
+from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
+from vonk_control.settings import AGENT_CA_PROVISIONER_NAME, Settings
+from vonk_control.source_bundles import DatabaseSourceBundleStore
 
 
 def build_enrollment_service(

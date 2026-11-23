@@ -34,24 +34,27 @@ from vonk_agent_protocol.state_machines import (
     RunState,
     machine_adopter,
 )
-
-from ..catalog.revision_contract import (
+from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
 )
-from ..cursor_contract import MAX_CURSOR_LENGTH
-from ..identifiers import UuidId
-from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
-from ..machine_states import InstallationStateField, RouteStateField, RunStateField
-from ..model_cache.contract import (
+from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
+from vonk_control.identifiers import UuidId
+from vonk_control.inventory.repository import INVENTORY_MAX_AGE_SECONDS
+from vonk_control.machine_states import (
+    InstallationStateField,
+    RouteStateField,
+    RunStateField,
+)
+from vonk_control.model_cache.contract import (
     ModelCacheOperationState,
     ModelCacheUsage,
     ModelStorageObservation,
 )
-from ..operations.blockers import MAX_BLOCKERS, OperationBlocker
-from ..run_switch_contract.evidence import RunSwitchReason, SparkFit
-from ..run_switch_contract.requests import SparkGroup
-from ..strict_json import StrictModel
+from vonk_control.operations.blockers import MAX_BLOCKERS, OperationBlocker
+from vonk_control.run_switch_contract.evidence import RunSwitchReason, SparkFit
+from vonk_control.run_switch_contract.requests import SparkGroup
+from vonk_control.strict_json import StrictModel
 
 _NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 _DIGEST_PATTERN = r"^[0-9a-f]{64}$"

@@ -22,9 +22,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from vonk_agent_protocol.reason_codes.fleet import ClusterMappingCode
 from vonk_agent_protocol.state_machines import machine_check
-
-from ..model_primitives import Base, _lower_hex
-from ..stored.states import ClusterMappingState
+from vonk_control.model_primitives import Base, _lower_hex
+from vonk_control.stored.states import ClusterMappingState
 
 
 class ClusterMapping(Base):

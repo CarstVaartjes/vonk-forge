@@ -29,14 +29,12 @@ from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.state_machines import RunState
-from vonk_control.owner_liveness import OWNER_SETTLE_GRACE
-
-from ..logging import log_event
-from ..models.execution import IN_FLIGHT_RUN_STATES, RecipeRun, RunNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..owner_liveness import runs_named_by_live_work
-from .common import settle_absent_run_in_session
+from vonk_control.distributed_recovery.common import settle_absent_run_in_session
+from vonk_control.logging import log_event
+from vonk_control.models.execution import IN_FLIGHT_RUN_STATES, RecipeRun, RunNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.owner_liveness import OWNER_SETTLE_GRACE, runs_named_by_live_work
 
 _LOGGER = logging.getLogger(__name__)
 _OWNER_ENDED = "owner-ended"

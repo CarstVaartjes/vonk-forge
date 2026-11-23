@@ -19,16 +19,9 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TypedDict
 
-from ..error_reporting import (
-    local_io_context,
-    protocol_context,
-    safe_request_id,
-    transport_context,
-)
-from ..generated_control.limits import MAX_CONTROL_DOCUMENT_BYTES
-from .client import ControlClient as HTTPControlClient
-from .common import _MAX_ARTIFACT_INPUT
-from .errors import (
+from cluster_profiles.control_client.client import ControlClient as HTTPControlClient
+from cluster_profiles.control_client.common import _MAX_ARTIFACT_INPUT
+from cluster_profiles.control_client.errors import (
     _MAX_ARTIFACT_OUTPUT,
     _STATUS_ERRORS,
     ControlClientError,
@@ -40,13 +33,20 @@ from .errors import (
     _retry_after_seconds,
     _structured_http_error_fields,
 )
-from .schema import (
+from cluster_profiles.control_client.schema import (
     _operation,
     _request_media_contract,
     _response_contract,
     _response_definition,
     _response_media_contract,
 )
+from cluster_profiles.error_reporting import (
+    local_io_context,
+    protocol_context,
+    safe_request_id,
+    transport_context,
+)
+from cluster_profiles.generated_control.limits import MAX_CONTROL_DOCUMENT_BYTES
 
 
 class TransferReceipt(TypedDict):

@@ -8,14 +8,14 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
-from ..artifact_jobs.lifecycle import ArtifactIdentity, lock_reference_gates
-from ..lifecycle.model_cache import ModelCacheAdapter
-from ..models.cache import ModelCacheOperation
-from .contract import CacheOperationKind
-from .views import CacheOperationView
+from vonk_control.artifact_jobs.lifecycle import ArtifactIdentity, lock_reference_gates
+from vonk_control.lifecycle.model_cache import ModelCacheAdapter
+from vonk_control.model_cache.contract import CacheOperationKind
+from vonk_control.model_cache.views import CacheOperationView
+from vonk_control.models.cache import ModelCacheOperation
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 def admit_transfer(

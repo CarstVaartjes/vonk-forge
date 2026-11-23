@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from .common import _bytes, _optional, _text
+from cluster_profiles.cli_render.common import _bytes, _optional, _text
 
 
 def progress_line(observed: Mapping[str, object]) -> str:

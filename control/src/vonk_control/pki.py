@@ -15,8 +15,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
 
 from vonk_agent_protocol.outcome import UnknownError
-
-from .ca_issuance_contract import CertificateIssuanceBinding
+from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 
 _PROVIDER_REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{43}\Z")
 

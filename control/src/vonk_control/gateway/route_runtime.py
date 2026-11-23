@@ -29,10 +29,9 @@ from vonk_agent_protocol.route_activation import (
     SupervisorAcknowledgement,
     SupervisorPhase,
 )
-
-from ..strict_json import read_stored_model
-from .litellm import LiteLlmConfig
-from .route_bundle_contract import RouteBundleDocument
+from vonk_control.gateway.litellm import LiteLlmConfig
+from vonk_control.gateway.route_bundle_contract import RouteBundleDocument
+from vonk_control.strict_json import read_stored_model
 
 # A publication claim is a short critical section, so a bounded nonblocking
 # claim is enough: the reconciler retries the whole publication, which is safer

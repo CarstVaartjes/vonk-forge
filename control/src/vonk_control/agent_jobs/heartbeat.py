@@ -17,33 +17,47 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.wire_model import OperationProgress
-
-from ..agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS, fencing_intent
-from ..agent_operation_facts import aware as _aware
-from ..auth import AgentSource
-from ..categorized_errors import InvalidValue
-from ..logging import log_event
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..operations.contract import validate_progress_update
-from ..operations.progress import (
+from vonk_control.agent_jobs.contracts import (
+    _LOGGER,
+    PROGRESSING_LEASE,
+    AgentFence,
+    cancelled_job_run,
+)
+from vonk_control.agent_jobs.endings import end_unobserved_order
+from vonk_control.agent_jobs.retry import (
+    _renew_distribution_grant,
+    superseded_cancellation_deadline,
+)
+from vonk_control.agent_jobs.stored import (
+    column_field,
+    column_is_document,
+    column_value,
+)
+from vonk_control.agent_jobs.waits import refresh_queue_waits
+from vonk_control.agent_operation_facts import (
+    _WORKLOAD_INTENT_OPERATIONS,
+    fencing_intent,
+)
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.auth import AgentSource
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.logging import log_event
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.operations.contract import validate_progress_update
+from vonk_control.operations.progress import (
     progress_document,
     progress_write_due,
     sample_progress,
     stored_progress,
 )
-from ..own_cleanup import CLEANUP_KINDS
-from ..stall_window import progress_advanced
-from .contracts import _LOGGER, PROGRESSING_LEASE, AgentFence, cancelled_job_run
-from .endings import end_unobserved_order
-from .retry import _renew_distribution_grant, superseded_cancellation_deadline
-from .stored import column_field, column_is_document, column_value
-from .waits import refresh_queue_waits
+from vonk_control.own_cleanup import CLEANUP_KINDS
+from vonk_control.stall_window import progress_advanced
 
 if TYPE_CHECKING:
-    from .service import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
 
 
 def heartbeat(

@@ -21,31 +21,41 @@ from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, Lifecycle
 from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
 from vonk_agent_protocol.state_machines import DistributionAssignmentState
 from vonk_agent_protocol.wire_model import WireModel
-
-from .. import agent_operation_states
-from ..agent_operation_facts import (
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.contracts import (
+    _ABANDONABLE_OPERATIONS,
+    _ENDED_PARENT_STATES,
+    _GRANT_LIFETIME,
+)
+from vonk_control.agent_jobs.stored import (
+    column_field,
+    column_is_document,
+    column_value,
+)
+from vonk_control.agent_operation_facts import (
     AGENT_UPGRADE_RECOVERY_FENCE,
     SUPERSEDED_CANCELLATION_SECONDS,
     job_attempt_did_not_launch,
 )
-from ..agent_operation_facts import (
+from vonk_control.agent_operation_facts import (
     RESTART_REISSUE_OPERATIONS as _RESTART_REISSUE_OPERATIONS,
 )
-from ..agent_operation_facts import aware as _aware
-from ..agent_upgrades.status import AGENT_UPGRADE_AWAITING_IDENTITY_REASONS
-from ..failure_classification import disposition, is_security_failure
-from ..lifecycle.agent_operation import (
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.agent_upgrades.status import AGENT_UPGRADE_AWAITING_IDENTITY_REASONS
+from vonk_control.failure_classification import disposition, is_security_failure
+from vonk_control.lifecycle.agent_operation import (
     AgentOperationAdapter,
     retry_scheduled,
     set_parent_state,
 )
-from ..lifecycle.types import CancelRequested, Reported
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt, ArtifactDistributionAssignment
-from ..recovery_policy import kind_for_failure_fields
-from .contracts import _ABANDONABLE_OPERATIONS, _ENDED_PARENT_STATES, _GRANT_LIFETIME
-from .stored import column_field, column_is_document, column_value
+from vonk_control.lifecycle.types import CancelRequested, Reported
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import (
+    AgentOperationAttempt,
+    ArtifactDistributionAssignment,
+)
+from vonk_control.recovery_policy import kind_for_failure_fields
 
 
 def superseded_cancellation_deadline(result: object) -> datetime | None:

@@ -19,14 +19,16 @@ from vonk_agent_protocol.inventory import (
 )
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.wire_model import canonical_message, strict_json_datetime
-
-from ..categorized_errors import InvalidValue
-from ..dialect_insert import dialect_insert
-from ..installed_bytes import reconcile_missing_installations, refresh_installed_bytes
-from ..logging import log_event
-from ..models.fleet import AgentNode
-from ..models.telemetry import NodeInventorySnapshot, NodeSnapshot
-from .items_contract import InventorySnapshotKind
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.dialect_insert import dialect_insert
+from vonk_control.installed_bytes import (
+    reconcile_missing_installations,
+    refresh_installed_bytes,
+)
+from vonk_control.inventory.items_contract import InventorySnapshotKind
+from vonk_control.logging import log_event
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.telemetry import NodeInventorySnapshot, NodeSnapshot
 
 _LOG = logging.getLogger(__name__)
 

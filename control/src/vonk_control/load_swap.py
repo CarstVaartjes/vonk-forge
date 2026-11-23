@@ -18,15 +18,14 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.state_machines import RunState
 from vonk_agent_protocol.swap import GIB
-
-from .models.execution import RecipeRun, RunNode
-from .recipe_operations.execution_contract import (
+from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     StoredRunPlan,
     parse_stored_run_plan,
 )
-from .resource_planning.types import SwapCapacity, SwapHolder
-from .swap import selected_swap
+from vonk_control.resource_planning.types import SwapCapacity, SwapHolder
+from vonk_control.swap import selected_swap
 
 _LOADING = (RunState.PLANNED, RunState.STARTING)
 _HOLDING = (*_LOADING, RunState.RUNNING)

@@ -8,8 +8,7 @@ from pydantic import ValidationError
 
 from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..strict_json import read_stored_model
+from vonk_control.strict_json import read_stored_model
 
 
 def _stored_activation_marker(value: object) -> ActivationMarker:

@@ -9,11 +9,14 @@ from pydantic import AwareDatetime, ConfigDict, Field, StringConstraints
 from vonk_agent_protocol.lifecycle_vocabulary import ProgressAlarmCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
 from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
-
-from .inventory.items_contract import PreflightInventoryItem
-from .operations.blockers import MAX_BLOCKERS, OperationBlocker, make_blocker
-from .strict_json import StrictJSONModel
-from .wait_contract import typed_wait_reason
+from vonk_control.inventory.items_contract import PreflightInventoryItem
+from vonk_control.operations.blockers import (
+    MAX_BLOCKERS,
+    OperationBlocker,
+    make_blocker,
+)
+from vonk_control.strict_json import StrictJSONModel
+from vonk_control.wait_contract import typed_wait_reason
 
 NodeId = Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
 

@@ -13,10 +13,12 @@ from vonk_agent_protocol.enrollment import (
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..pki import IssuedCertificate
-from .contract import EnrollmentObservationOutcome
-from .types import EnrollmentIssuanceUncertain, RenewalIssuanceUncertain
+from vonk_control.enrollment.contract import EnrollmentObservationOutcome
+from vonk_control.enrollment.types import (
+    EnrollmentIssuanceUncertain,
+    RenewalIssuanceUncertain,
+)
+from vonk_control.pki import IssuedCertificate
 
 
 def unknown_response(

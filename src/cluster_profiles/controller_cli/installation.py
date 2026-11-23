@@ -8,9 +8,9 @@ import time
 from collections.abc import Callable, Mapping
 from typing import cast
 
-from ..cli_outcome import Submission, SubmissionAcceptance
-from ..cli_states_generated import JOB_KIND_CLEANUP
-from ..control_client.errors import (
+from cluster_profiles.cli_outcome import Submission, SubmissionAcceptance
+from cluster_profiles.cli_states_generated import JOB_KIND_CLEANUP
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlForbidden,
     ControlMalformedResponse,
@@ -18,11 +18,22 @@ from ..control_client.errors import (
     ControlUnauthorized,
     ControlUnavailable,
 )
-from ..control_client.schema import validate_control_document
-from .common import ControllerClient, _known_http_refusal_status, _quoted, _request_key
-from .observation import _poll_path
-from .selection import _observe_selection, _selection_remaining
-from .submission import _accepted_submission, _submit_idempotent_request
+from cluster_profiles.control_client.schema import validate_control_document
+from cluster_profiles.controller_cli.common import (
+    ControllerClient,
+    _known_http_refusal_status,
+    _quoted,
+    _request_key,
+)
+from cluster_profiles.controller_cli.observation import _poll_path
+from cluster_profiles.controller_cli.selection import (
+    _observe_selection,
+    _selection_remaining,
+)
+from cluster_profiles.controller_cli.submission import (
+    _accepted_submission,
+    _submit_idempotent_request,
+)
 
 
 def _run_switch_request_operation(

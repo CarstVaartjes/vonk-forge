@@ -9,19 +9,18 @@ import urllib.parse
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 
-from ..cli_outcome import (
-    Observation,
-    ObservationStatus,
-    operation_state,
+from cluster_profiles.cli_outcome import Observation, ObservationStatus, operation_state
+from cluster_profiles.control_client.common import (
+    observation_delay,
+    observation_unknown,
 )
-from ..control_client.common import observation_delay, observation_unknown
-from ..control_client.errors import (
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlMalformedResponse,
     ControlTransportError,
     ControlUnavailable,
 )
-from .common import (
+from cluster_profiles.controller_cli.common import (
     ControllerClient,
     _cache_operation_id,
     _interval_seconds,

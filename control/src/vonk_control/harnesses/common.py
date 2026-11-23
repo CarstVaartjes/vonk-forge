@@ -7,9 +7,12 @@ from collections.abc import Sequence
 from pathlib import PurePosixPath
 
 from vonk_agent_protocol.document_limits import MAX_ARGV_BYTES
-
-from .contracts import HarnessBinding, HarnessMount, HarnessProjection
-from .errors import HarnessCompileError
+from vonk_control.harnesses.contracts import (
+    HarnessBinding,
+    HarnessMount,
+    HarnessProjection,
+)
+from vonk_control.harnesses.errors import HarnessCompileError
 
 _NON_ROOT_UID = re.compile(r"^[1-9][0-9]*(?::[1-9][0-9]*)?$")
 _SHELL_EXECUTABLES = frozenset(

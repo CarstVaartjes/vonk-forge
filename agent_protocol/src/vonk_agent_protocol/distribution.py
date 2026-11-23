@@ -11,7 +11,11 @@ from pydantic import (
     model_validator,
 )
 
-from .wire_model import AgentProtocolError, WireModel, canonical_message
+from vonk_agent_protocol.wire_model import (
+    AgentProtocolError,
+    WireModel,
+    canonical_message,
+)
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 ImageDigest = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]

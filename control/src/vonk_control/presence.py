@@ -15,9 +15,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.lifecycle_vocabulary import ErrorCategory, WaitReason
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdentityState
-
-from .auth import AgentIdentity, AgentSource, AuthError
-from .models.fleet import AgentCertificate, AgentNode, AgentNodeContact
+from vonk_control.auth import AgentIdentity, AgentSource, AuthError
+from vonk_control.models.fleet import AgentCertificate, AgentNode, AgentNodeContact
 
 type _Network = ipaddress.IPv4Network | ipaddress.IPv6Network
 type _Address = ipaddress.IPv4Address | ipaddress.IPv6Address

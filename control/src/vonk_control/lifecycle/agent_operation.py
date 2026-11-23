@@ -74,10 +74,9 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
-
-from .. import agent_operation_states
-from .. import agent_operation_states as aos
-from ..agent_operation_facts import (
+from vonk_control import agent_operation_states
+from vonk_control import agent_operation_states as aos
+from vonk_control.agent_operation_facts import (
     AGENT_ORDER_RECOVERY_BUDGET,
     AGENT_UPGRADE_RECOVERY_FENCE,
     STALLED_INTERRUPTION_LIMIT,
@@ -91,23 +90,14 @@ from ..agent_operation_facts import (
     stalled_interruptions,
     start_deadline,
 )
-from ..categorized_errors import InvalidValue
-from ..evidence_repeats import note_success
-from ..jobs import states as job_states
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..offline_stops import is_deferred_stop
-from ..operations.progress import progress_document
-from ..owner_liveness import order_recovery_deadline
-from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait
-from ..stall_window import stall_deadline
-from ..stored.rows import read_row_column
-from .adapter import Dispatch
-from .core import transition
-from .evidence import keep_recorded_outcome
-from .reconciler import settle
-from .types import (
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.evidence_repeats import note_success
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.adapter import Dispatch
+from vonk_control.lifecycle.core import transition
+from vonk_control.lifecycle.evidence import keep_recorded_outcome
+from vonk_control.lifecycle.reconciler import settle
+from vonk_control.lifecycle.types import (
     TERMINAL_STATES,
     ActionName,
     Claimed,
@@ -123,6 +113,15 @@ from .types import (
     StopResult,
     Tick,
 )
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.offline_stops import is_deferred_stop
+from vonk_control.operations.progress import progress_document
+from vonk_control.owner_liveness import order_recovery_deadline
+from vonk_control.persisted_waits import initialize_wait, lifecycle_wait, schedule_wait
+from vonk_control.stall_window import stall_deadline
+from vonk_control.stored.rows import read_row_column
 
 #: The kinds whose repeat could repeat a visible effect (see the module docstring).
 IRREVERSIBLE_OPERATIONS = frozenset(

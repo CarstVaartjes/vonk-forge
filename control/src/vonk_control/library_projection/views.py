@@ -10,10 +10,10 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from sqlalchemy import select
 
-from ..auth import cursor_key
-from ..catalog.queries import active_head_revision
-from ..identifiers import _UUID_PATTERN
-from ..library.contract import (
+from vonk_control.auth import cursor_key
+from vonk_control.catalog.queries import active_head_revision
+from vonk_control.identifiers import _UUID_PATTERN
+from vonk_control.library.contract import (
     _MAX_PAGE_RECIPES,
     LibraryFilterValues,
     LibraryModelProjection,
@@ -28,13 +28,7 @@ from ..library.contract import (
     RecipeLibraryResponse,
     _utc,
 )
-from ..model_cache.resolution import ResolutionMixin
-from ..model_cache.source_helpers import _model_selector
-from ..models.catalog import CatalogDocumentRevision
-from ..operator_receipt_contract import ReceiptOwner
-from ..request_fault import RequestFault
-from ..stored.states import CatalogRevisionState
-from .common import (
+from vonk_control.library_projection.common import (
     _LIBRARY_ORDER,
     LibrarySelectorAmbiguous,
     _canonical_model,
@@ -44,11 +38,17 @@ from .common import (
     _note_unreadable,
     _observed_library_page,
 )
+from vonk_control.model_cache.resolution import ResolutionMixin
+from vonk_control.model_cache.source_helpers import _model_selector
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.request_fault import RequestFault
+from vonk_control.stored.states import CatalogRevisionState
 
 _REVISION_ID = re.compile(_UUID_PATTERN)
 
 if TYPE_CHECKING:
-    from .service import LibraryProjection
+    from vonk_control.library_projection.service import LibraryProjection
 
 
 def models(

@@ -15,8 +15,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from ..logging import log_event
-from .contracts import StorageReconciliation
+from vonk_control.artifact_jobs.contracts import StorageReconciliation
+from vonk_control.logging import log_event
 
 _LOGGER = logging.getLogger(__name__)
 

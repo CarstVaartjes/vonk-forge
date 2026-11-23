@@ -8,13 +8,13 @@ import sys
 import time
 from collections.abc import Callable, Mapping
 
-from ..cli_outcome import (
+from cluster_profiles.cli_outcome import (
     ObservationStatus,
     Submission,
     SubmissionAcceptance,
 )
-from ..cli_states_generated import PROFILE_REFUSAL_CODES
-from ..control_client.errors import (
+from cluster_profiles.cli_states_generated import PROFILE_REFUSAL_CODES
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlConflict,
     ControlHTTPError,
@@ -24,9 +24,16 @@ from ..control_client.errors import (
     ControlResponseTooLarge,
     ControlTransportError,
 )
-from ..error_reporting import ErrorContext, protocol_context, transport_context
-from .common import ControllerClient, _known_http_refusal_status
-from .observation import _poll_path
+from cluster_profiles.controller_cli.common import (
+    ControllerClient,
+    _known_http_refusal_status,
+)
+from cluster_profiles.controller_cli.observation import _poll_path
+from cluster_profiles.error_reporting import (
+    ErrorContext,
+    protocol_context,
+    transport_context,
+)
 
 
 def _accepted_submission(args: argparse.Namespace, operation_id: str) -> None:

@@ -18,8 +18,7 @@ from vonk_agent_protocol.enrollment import (
     EnrollmentEvidence,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
-
-from .types import _NODE_ID, _TOKEN, EnrollmentDenied
+from vonk_control.enrollment.types import _NODE_ID, _TOKEN, EnrollmentDenied
 
 
 def _load_csr(node_id: str | None, csr: bytes) -> tuple[bytes, bytes, str, str]:

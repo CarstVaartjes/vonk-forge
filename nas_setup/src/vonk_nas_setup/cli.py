@@ -13,10 +13,9 @@ from typing import NoReturn, TextIO, override
 from pydantic import ValidationError
 
 from vonk_agent_protocol.installer_setup import NasInstallTemplate
-
-from .filesystem import MAX_MEMBER_BYTES, MAX_TEMPLATE_BYTES, SetupError
-from .prompts import PromptIo
-from .setup import prepare
+from vonk_nas_setup.filesystem import MAX_MEMBER_BYTES, MAX_TEMPLATE_BYTES, SetupError
+from vonk_nas_setup.prompts import PromptIo
+from vonk_nas_setup.setup import prepare
 
 
 class PrivateArgumentParser(argparse.ArgumentParser):

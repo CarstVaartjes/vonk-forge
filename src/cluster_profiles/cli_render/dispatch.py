@@ -6,25 +6,60 @@ import json
 import shlex
 from collections.abc import Mapping
 
-from ..cli_json_contract import Word
-from ..cli_platform_render import render_platform
-from ..cli_states_generated import ENDPOINT_UNAVAILABLE, SUCCEEDED
-from ..control_client.errors import ControlMalformedResponse
-from ..generated_control.models.artifact_job_response import ArtifactJobResponse
-from ..generated_control.models.metric_spec import MetricSpec
-from ..generated_control.models.metrics_series_response import MetricsSeriesResponse
-from ..generated_control.models.platform_observation import PlatformObservation
-from .activity import _activity, _locks
-from .administration import _catalog_sync, _enrollment, _error
-from .artifact_jobs import _artifact_job, artifact_job_details, prints_record
-from .common import _field, _object, _records, _table, _text, _time, _words
-from .fleet import _fleet_overview, _node
-from .library import _library
-from .metrics import _metric_list, _metric_series
-from .operations import _application, _job, _operation, _run_result
-from .profile import _endpoints_view, _gateway_keys, _profile, _profile_endpoints
-from .removal_review import _cache_removal_review, _unused_removal
-from .review import _preview
+from cluster_profiles.cli_json_contract import Word
+from cluster_profiles.cli_platform_render import render_platform
+from cluster_profiles.cli_render.activity import _activity, _locks
+from cluster_profiles.cli_render.administration import (
+    _catalog_sync,
+    _enrollment,
+    _error,
+)
+from cluster_profiles.cli_render.artifact_jobs import (
+    _artifact_job,
+    artifact_job_details,
+    prints_record,
+)
+from cluster_profiles.cli_render.common import (
+    _field,
+    _object,
+    _records,
+    _table,
+    _text,
+    _time,
+    _words,
+)
+from cluster_profiles.cli_render.fleet import _fleet_overview, _node
+from cluster_profiles.cli_render.library import _library
+from cluster_profiles.cli_render.metrics import _metric_list, _metric_series
+from cluster_profiles.cli_render.operations import (
+    _application,
+    _job,
+    _operation,
+    _run_result,
+)
+from cluster_profiles.cli_render.profile import (
+    _endpoints_view,
+    _gateway_keys,
+    _profile,
+    _profile_endpoints,
+)
+from cluster_profiles.cli_render.removal_review import (
+    _cache_removal_review,
+    _unused_removal,
+)
+from cluster_profiles.cli_render.review import _preview
+from cluster_profiles.cli_states_generated import ENDPOINT_UNAVAILABLE, SUCCEEDED
+from cluster_profiles.control_client.errors import ControlMalformedResponse
+from cluster_profiles.generated_control.models.artifact_job_response import (
+    ArtifactJobResponse,
+)
+from cluster_profiles.generated_control.models.metric_spec import MetricSpec
+from cluster_profiles.generated_control.models.metrics_series_response import (
+    MetricsSeriesResponse,
+)
+from cluster_profiles.generated_control.models.platform_observation import (
+    PlatformObservation,
+)
 
 
 def render_payload(

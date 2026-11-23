@@ -19,13 +19,12 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitResumeCondition,
 )
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
-from ..agent_jobs.service import AgentJobService
-from ..categorized_errors import MissingRecord
-from ..failure_classification import is_definite
-from ..fleet_profile_contract.applications import FleetProfileChildOperation
-from ..fleet_profile_contract.definitions import FleetProfileAssignment
-from ..fleet_profile_contract.switch_state import (
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.failure_classification import is_definite
+from vonk_control.fleet_profile_contract.applications import FleetProfileChildOperation
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileAssignmentFailure,
     FleetProfileSwitchAdapterResult,
     FleetProfileSwitchAdapterState,
@@ -33,28 +32,33 @@ from ..fleet_profile_contract.switch_state import (
     FleetProfileSwitchPendingChild,
     FleetProfileSwitchQueueItem,
 )
-from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..lifecycle.fleet_profile import FleetProfileAdapter, cancellation_state, doc_state
-from ..models.execution import STOPPABLE_RUN_STATES, RecipeRun
-from ..models.fleet import FleetProfileApplication
-from ..operations.blockers import BlockingOperation, make_blocker
-from ..persisted_waits import schedule_wait, write_wait
-from ..run_switch_contract.operations import RunSwitchOperation
-from .assessment_support import (
-    _stored_state,
+from vonk_control.fleet_profiles.assessment_support import _stored_state
+from vonk_control.fleet_profiles.continuing_effects import _adopted_application_scope
+from vonk_control.fleet_profiles.dependencies import _CHILD_PENDING_STATES
+from vonk_control.fleet_profiles.persistence import _persisted_profile_progress
+from vonk_control.fleet_profiles.projection_support import _aware
+from vonk_control.fleet_profiles.switch_children import (
+    _ending_disposition,
+    _queue_item_nodes,
 )
-from .continuing_effects import _adopted_application_scope
-from .dependencies import _CHILD_PENDING_STATES
-from .persistence import (
-    _persisted_profile_progress,
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
 )
-from .projection_support import (
-    _aware,
+from vonk_control.lifecycle.fleet_profile import (
+    FleetProfileAdapter,
+    cancellation_state,
+    doc_state,
 )
-from .switch_children import _ending_disposition, _queue_item_nodes
+from vonk_control.models.execution import STOPPABLE_RUN_STATES, RecipeRun
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.operations.blockers import BlockingOperation, make_blocker
+from vonk_control.persisted_waits import schedule_wait, write_wait
+from vonk_control.run_switch_contract.operations import RunSwitchOperation
 
 if TYPE_CHECKING:
-    from .run_switch_adapter import (
+    from vonk_control.fleet_profiles.run_switch_adapter import (
         RunSwitchFleetProfileAdapter as _RunSwitchFleetProfileAdapter,
     )
 

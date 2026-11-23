@@ -14,37 +14,42 @@ from vonk_agent_protocol.agent_words import (
     ProfileProjectionKind,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-
-from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
-from ..fleet_profile_contract.definitions import FleetProfileAssignment
-from ..fleet_profile_contract.effects import (
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profile_contract.effects import (
     FleetProfileAdoptedApplicationEffect,
     FleetProfileAdoptedStopEffect,
     FleetProfilePendingEffect,
 )
-from ..fleet_profile_contract.switch_state import FleetProfileSwitchChildState
-from ..fleet_profile_contract.vocabulary import profile_switch_child_request_key
-from ..jobs import states as job_states
-from ..jobs.documents import RunSwitchJobPayload
-from ..lifecycle.evidence import Residue
-from ..models.fleet import AgentNode, FleetProfileApplication, FleetProfileSelection
-from ..models.jobs import Job
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..settings import DATABASE_WAIT_BUDGETS
-from ..stored.rows import read_row_column
-from . import states as fleet_profile_states
-from .contracts import (
-    FleetProfileConflict,
+from vonk_control.fleet_profile_contract.switch_state import (
+    FleetProfileSwitchChildState,
 )
-from .persistence import (
+from vonk_control.fleet_profile_contract.vocabulary import (
+    profile_switch_child_request_key,
+)
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.fleet_profiles.contracts import FleetProfileConflict
+from vonk_control.fleet_profiles.persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
     _persisted_profile_scope,
     _workload_intent_ordinal,
 )
-from .projection_support import (
-    _digest,
+from vonk_control.fleet_profiles.projection_support import _digest
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import RunSwitchJobPayload
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.fleet import (
+    AgentNode,
+    FleetProfileApplication,
+    FleetProfileSelection,
 )
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.settings import DATABASE_WAIT_BUDGETS
+from vonk_control.stored.rows import read_row_column
 
 
 def _stop_binding_is_exact(

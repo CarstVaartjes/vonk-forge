@@ -7,10 +7,10 @@ from typing import Annotated, Any, Literal
 
 from pydantic import Field, ValidationError, model_validator
 
-from .agent_operations import AgentOperation
-from .compiled_execution_plan import CompiledExecutionPlan
-from .gpu_clock import GpuClockIntent
-from .wire_model import (
+from vonk_agent_protocol.agent_operations import AgentOperation
+from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
+from vonk_agent_protocol.gpu_clock import GpuClockIntent
+from vonk_agent_protocol.wire_model import (
     MAX_RUN_GENERATION,
     AgentProtocolError,
     Uuid4Text,

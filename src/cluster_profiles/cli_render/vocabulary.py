@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..generated_control.models.catalog_vocabulary import CatalogVocabulary
+from cluster_profiles.generated_control.models.catalog_vocabulary import (
+    CatalogVocabulary,
+)
 
 #: The word shown where a value is missing, the same in the dashboard.
 NOT_REPORTED = "Not reported"

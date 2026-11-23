@@ -10,33 +10,19 @@ from sqlalchemy.orm import Session, load_only
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..artifact_jobs.lifecycle import (
-    ArtifactReferenceUnverified,
-)
-from ..machine_states import DISTRIBUTION_HELD
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import RecipeInstallation, RecipeRun
-from ..models.fleet import FleetProfile, FleetProfileApplication
-from ..models.jobs import Job
-from ..models.operations import ArtifactDistributionAssignment
-from ..recipe_image_availability.contracts import OPERATION_KIND
-from ..reference_facts import profiles_naming
-from ..revision_images import (
-    revision_archives,
-    revision_images,
-)
-from ..runtime_image_preparation.contracts import read_runtime_image_reference_intent
-from .intents import (
+from vonk_control.artifact_jobs.lifecycle import ArtifactReferenceUnverified
+from vonk_control.artifact_reference_scan.intents import (
     _installation_plan,
     _profile_plan,
     _run_switch_kinds,
     _run_switch_plan,
     _run_switch_runtime_image_intent,
 )
-from .model_sets import _protect_saved, _selectors_revisions
-from .types import (
+from vonk_control.artifact_reference_scan.model_sets import (
+    _protect_saved,
+    _selectors_revisions,
+)
+from vonk_control.artifact_reference_scan.types import (
     _ACTIVE_ARTIFACT_JOBS,
     _ACTIVE_INSTALLATIONS,
     _ACTIVE_PROFILE_APPLICATIONS,
@@ -45,6 +31,19 @@ from .types import (
     ArtifactReferenceFinding,
     _finding,
     _reason_projection,
+)
+from vonk_control.machine_states import DISTRIBUTION_HELD
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation, RecipeRun
+from vonk_control.models.fleet import FleetProfile, FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import ArtifactDistributionAssignment
+from vonk_control.recipe_image_availability.contracts import OPERATION_KIND
+from vonk_control.reference_facts import profiles_naming
+from vonk_control.revision_images import revision_archives, revision_images
+from vonk_control.runtime_image_preparation.contracts import (
+    read_runtime_image_reference_intent,
 )
 
 _UNREADABLE_INSTALLATION = (

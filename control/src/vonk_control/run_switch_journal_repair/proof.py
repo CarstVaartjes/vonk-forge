@@ -11,46 +11,47 @@ from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..content_identity import same_image
-from ..fleet_profiles.continuing_effects import (
+from vonk_control.content_identity import same_image
+from vonk_control.fleet_profiles.continuing_effects import (
     _adopted_application_scope,
     _application_is_current_selection,
 )
-from ..fleet_profiles.persistence import _stored_progress
-from ..jobs.documents import RecipeInstallParent
-from ..lifecycle.evidence import Residue
-from ..models.fleet import AgentCertificate, FleetProfileApplication
-from ..models.jobs import Job
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..operations.progress import stored_progress
-from ..recipe_operations.progress import current_recipe_progress_attribution
-from ..run_switch_contract.journal import (
+from vonk_control.fleet_profiles.persistence import _stored_progress
+from vonk_control.jobs.documents import RecipeInstallParent
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.fleet import AgentCertificate, FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operations.progress import stored_progress
+from vonk_control.recipe_operations.progress import current_recipe_progress_attribution
+from vonk_control.run_switch_contract.journal import (
     JournalRepairPurpose,
     NativeProgressWitness,
 )
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.phase_results import (
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import (
     RunSwitchRuntimeImageResult,
     RunSwitchRuntimeInstallResult,
     RunSwitchRuntimePlanResult,
     RunSwitchTargetTransferEvidenceResult,
     RunSwitchVerifyResult,
 )
-from ..run_switch_operations.artifact_validation import _validate_artifact_execution
-from ..run_switch_operations.contracts import ScopeIntentStatus
-from ..run_switch_operations.executor import RecipeLifecyclePhaseExecutor
-from ..run_switch_operations.image_receipts import (
+from vonk_control.run_switch_operations.artifact_validation import (
+    _validate_artifact_execution,
+)
+from vonk_control.run_switch_operations.contracts import ScopeIntentStatus
+from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
+from vonk_control.run_switch_operations.image_receipts import (
     _plan_target_node_ids,
     _planned_transfer_parts,
 )
-from ..run_switch_operations.observation_helpers import _phase_request_key
-from ..run_switch_operations.planning_helpers import (
+from vonk_control.run_switch_operations.observation_helpers import _phase_request_key
+from vonk_control.run_switch_operations.planning_helpers import (
     _digest,
     _run_switch_payload,
     _scope_intent_status,
 )
-from ..stored.rows import read_row_column
+from vonk_control.stored.rows import read_row_column
 
 
 def _prove(

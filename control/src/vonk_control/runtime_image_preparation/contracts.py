@@ -28,8 +28,7 @@ from vonk_agent_protocol.outcome import (
 )
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
 from vonk_agent_protocol.wire_model import Digest, WireModel, canonical_message
-
-from ..categorized_faults import security_reason
+from vonk_control.categorized_faults import security_reason
 
 _IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 

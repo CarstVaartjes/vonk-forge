@@ -9,12 +9,11 @@ from vonk_agent_protocol.gpu_clock import (
     GpuClockRange,
     default_gpu_clock,
 )
-
-from ..fleet_profile_contract.definitions import StoredFleetProfileAssignment
-from ..fleet_profile_contract.effects import FleetProfileGpuClockEffect
-from ..fleet_profiles.persistence import _intended_profile
-from ..lifecycle.evidence import Residue
-from ..models.fleet import FleetProfileApplication, FleetProfileSelection
+from vonk_control.fleet_profile_contract.definitions import StoredFleetProfileAssignment
+from vonk_control.fleet_profile_contract.effects import FleetProfileGpuClockEffect
+from vonk_control.fleet_profiles.persistence import _intended_profile
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.fleet import FleetProfileApplication, FleetProfileSelection
 
 
 def selected_gpu_clock(session: Session, node_id: str) -> GpuClockIntent:

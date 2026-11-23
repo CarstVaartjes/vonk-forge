@@ -13,30 +13,28 @@ from sqlalchemy.orm import Session
 from vonk_forge_contracts import ModelDefinition
 
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
-from ..fleet_profiles.capacity import kept_runs
-from ..model_cache.errors import ModelCacheError
-from ..model_cache.resolution import resolve_recipe_set
-from ..models.catalog import CatalogDocumentRevision
-from ..resource_planning.settings import resolve_effective_settings
-from ..run_switch_contract.evidence import RunSwitchReason, StopImpact
-from ..run_switch_contract.plans import RunSwitchAssessment
-from ..run_switch_contract.requests import RunSwitchPreviewRequest
-from ..strict_json import (
-    read_stored_model,
+from vonk_control.fleet_profiles.capacity import kept_runs
+from vonk_control.model_cache.errors import ModelCacheError
+from vonk_control.model_cache.resolution import resolve_recipe_set
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.resource_planning.settings import resolve_effective_settings
+from vonk_control.run_switch_contract.evidence import RunSwitchReason, StopImpact
+from vonk_control.run_switch_contract.plans import RunSwitchAssessment
+from vonk_control.run_switch_contract.requests import RunSwitchPreviewRequest
+from vonk_control.run_switch_operations.artifact_inspection import (
+    missing_spark_bytes_by_node,
 )
-from .artifact_inspection import missing_spark_bytes_by_node
-from .build_helpers import _refreshed_freshness
-from .constants import (
+from vonk_control.run_switch_operations.build_helpers import _refreshed_freshness
+from vonk_control.run_switch_operations.constants import (
     _MEMORY_CAPACITY_REFUSALS,
     _MEMORY_STOP_CONDITIONAL_REFUSALS,
     _SWAP_BEYOND_STOP_COMPONENT,
     _SWAP_COMPONENT,
     _active_recipe_revision,
 )
-from .errors import RunSwitchRequestInvalid
-from .interfaces import _ResourceFits
-from .planning_helpers import (
+from vonk_control.run_switch_operations.errors import RunSwitchRequestInvalid
+from vonk_control.run_switch_operations.interfaces import _ResourceFits
+from vonk_control.run_switch_operations.planning_helpers import (
     PlanInventory,
     _conditional_post_stop_memory_check,
     _now,
@@ -44,9 +42,10 @@ from .planning_helpers import (
     _settings_view,
     _stop_covered_nodes,
 )
+from vonk_control.strict_json import read_stored_model
 
 if TYPE_CHECKING:
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 def _reviewed_model(

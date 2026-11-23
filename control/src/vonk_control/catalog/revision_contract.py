@@ -42,13 +42,16 @@ from vonk_forge_contracts.recipe import (
 from vonk_agent_protocol.build_import import RecipeBuildOptions
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..bounded_json import require_mapping
-from ..operator_receipt_contract import ReceiptOwner
-from ..strict_json import StrictJSONModel, serialize_json_value, stored_document_detail
+from vonk_control.bounded_json import require_mapping
+from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.strict_json import (
+    StrictJSONModel,
+    serialize_json_value,
+    stored_document_detail,
+)
 
 if TYPE_CHECKING:
-    from ..models.catalog import CatalogDocumentRevision
+    from vonk_control.models.catalog import CatalogDocumentRevision
 
 
 # A published document as JSON, before any contract has read it: the exact bytes

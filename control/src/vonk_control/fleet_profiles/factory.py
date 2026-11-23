@@ -7,10 +7,10 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..model_cache.contract import CacheResolution
-from ..run_switch_operations.service import RunSwitchOperationService
-from .run_switch_adapter import RunSwitchFleetProfileAdapter
-from .service import FleetProfileService
+from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.model_cache.contract import CacheResolution
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 def build_production_fleet_profile_service(

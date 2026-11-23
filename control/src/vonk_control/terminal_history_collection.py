@@ -58,22 +58,24 @@ from vonk_agent_protocol.state_machines import (
     RoutePublicationState,
     RunState,
 )
-
-from .catalog.revision_collection import GRACE, INTERVAL, tokens
-from .evidence_repeats import command_evidence_needed
-from .journal_models import RunSwitchJournalRepair, RunSwitchJournalRepairPending
-from .lifecycle.evidence import Residue
-from .logging import log_event
-from .model_cache.contract import ModelCacheSetState
-from .model_cache.inventory import holds_unique_objects
-from .models.cache import (
+from vonk_control.catalog.revision_collection import GRACE, INTERVAL, tokens
+from vonk_control.evidence_repeats import command_evidence_needed
+from vonk_control.journal_models import (
+    RunSwitchJournalRepair,
+    RunSwitchJournalRepairPending,
+)
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.logging import log_event
+from vonk_control.model_cache.contract import ModelCacheSetState
+from vonk_control.model_cache.inventory import holds_unique_objects
+from vonk_control.models.cache import (
     ArtifactLifecycleGate,
     ModelCacheOperation,
     ModelCacheSet,
     RecipeBuild,
     RecipeLibrarySyncRun,
 )
-from .models.execution import (
+from vonk_control.models.execution import (
     ArtifactJob,
     InstallationNode,
     RecipeInstallation,
@@ -81,7 +83,7 @@ from .models.execution import (
     ResourceReservation,
     RunNode,
 )
-from .models.fleet import (
+from vonk_control.models.fleet import (
     AgentCertificate,
     AgentCertificateRotation,
     AgentEnrollment,
@@ -93,21 +95,32 @@ from .models.fleet import (
     FleetProfileApplication,
     FleetProfileSelection,
 )
-from .models.jobs import ControlProcessHeartbeat, Job, JobAttempt
-from .models.mapping import ClusterMapping, ClusterMappingNode
-from .models.operations import (
+from vonk_control.models.jobs import ControlProcessHeartbeat, Job, JobAttempt
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.models.operations import (
     AgentOperation,
     AgentOperationAttempt,
     ArtifactDistributionAssignment,
 )
-from .models.routes import RecipeRouteAuthority, RoutePublication, RoutePublicationOwner
-from .models.telemetry import NodeSnapshot, NodeTelemetryLatest, NodeTelemetrySample
-from .owner_liveness import builds_in_flight, installations_named_by_live_jobs
-from .run_states import ENDED_RUN_STATES
-from .step_ca import CERTIFICATE_LIFETIME
-from .stored.json_values import binding_for
-from .stored.rows import read_row_column
-from .stored.states import LibrarySyncRunState
+from vonk_control.models.routes import (
+    RecipeRouteAuthority,
+    RoutePublication,
+    RoutePublicationOwner,
+)
+from vonk_control.models.telemetry import (
+    NodeSnapshot,
+    NodeTelemetryLatest,
+    NodeTelemetrySample,
+)
+from vonk_control.owner_liveness import (
+    builds_in_flight,
+    installations_named_by_live_jobs,
+)
+from vonk_control.run_states import ENDED_RUN_STATES
+from vonk_control.step_ca import CERTIFICATE_LIFETIME
+from vonk_control.stored.json_values import binding_for
+from vonk_control.stored.rows import read_row_column
+from vonk_control.stored.states import LibrarySyncRunState
 
 PASS_BUDGET_SECONDS = 2.0
 

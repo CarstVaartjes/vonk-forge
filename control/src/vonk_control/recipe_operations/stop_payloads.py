@@ -13,18 +13,17 @@ from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..categorized_errors import BookkeepingUnknown
-from ..lifecycle.evidence import Residue
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import RecipeInstallation, RecipeRun, RunNode
-from ..stored.rows import read_row_column
-from ..strict_json import read_stored_model
-from .execution_contract import (
+from vonk_control.categorized_errors import BookkeepingUnknown
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )
-from .impact_plans import StopNodeImpact
+from vonk_control.recipe_operations.impact_plans import StopNodeImpact
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import read_stored_model
 
 
 class RecipeStopAuthorityError(ValueError):

@@ -10,10 +10,9 @@ from pathlib import Path
 
 from vonk_agent_protocol.installer_setup import NasInstallTemplate
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, WaitReason
-
-from . import publication
-from .compose import resolve_compose
-from .environment import (
+from vonk_nas_setup import publication
+from vonk_nas_setup.compose import resolve_compose
+from vonk_nas_setup.environment import (
     SELECTION_ENV,
     profiles,
     recover_environment,
@@ -21,7 +20,7 @@ from .environment import (
     required_default,
     retain_known,
 )
-from .filesystem import (
+from vonk_nas_setup.filesystem import (
     ObservationUnavailable,
     acquire_owner,
     atomic_replace,
@@ -35,15 +34,15 @@ from .filesystem import (
     sync_directory,
     write_member,
 )
-from .pki import (
+from vonk_nas_setup.pki import (
     generate_pki,
     normalize_controller_key,
     normalize_intermediate_key,
     renew_controller_leaf,
     validate_pki_material,
 )
-from .prompts import PromptIo
-from .secrets import (
+from vonk_nas_setup.prompts import PromptIo
+from vonk_nas_setup.secrets import (
     apply_secret_group,
     generate_missing,
     generated,

@@ -13,9 +13,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitR
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
 from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
-
-from ..catalog.sync_contract import ManagedCatalogSyncProblem
-from ..recipe_library_types import RecipeLibraryError
+from vonk_control.catalog.sync_contract import ManagedCatalogSyncProblem
+from vonk_control.recipe_library_types import RecipeLibraryError
 
 _RELEASE_TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 

@@ -8,22 +8,23 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
-from ..content_identity import differing_image_fields
-from ..models.cache import RecipeBuild
-from ..preparation_contract import (
-    RuntimeImageIdentity,
-)
-from ..run_switch_contract.observation import (
+from vonk_control.content_identity import differing_image_fields
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.preparation_contract import RuntimeImageIdentity
+from vonk_control.run_switch_contract.observation import (
     RunSwitchEffectiveBuildReceipt,
     RunSwitchObservedImageIdentity,
 )
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.phase_results import RunSwitchContainerBuildResult
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..stored.states import RecipeBuildState
-from .errors import RunSwitchRetryLater
-from .identity_helpers import _is_hex_digest, _is_oci_digest, _node_missing_bytes
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import RunSwitchContainerBuildResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
+from vonk_control.run_switch_operations.identity_helpers import (
+    _is_hex_digest,
+    _is_oci_digest,
+    _node_missing_bytes,
+)
+from vonk_control.stored.states import RecipeBuildState
 
 
 def _planned_model_download_bytes(plan: RunSwitchPlan) -> int | None:

@@ -12,8 +12,8 @@ from typing import Any
 
 import yaml
 
-from .environment import SELECTION_ENV, profiles
-from .filesystem import SetupError
+from vonk_nas_setup.environment import SELECTION_ENV, profiles
+from vonk_nas_setup.filesystem import SetupError
 
 _SECTIONS = ("networks", "secrets", "volumes", "configs")
 

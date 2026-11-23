@@ -17,13 +17,7 @@ from vonk_agent_protocol.gpu_clock import GpuClockRange, default_gpu_clock
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
-
-from ..model_cache.contract import CachedResourceEstimate
-from ..recipe_update_batches.notice import RecipeUpdateNotice
-from ..run_switch_contract.requests import SparkGroupNode
-from ..strict_json import StrictModel
-from ..wait_contract import QueueWait
-from .vocabulary import (
+from vonk_control.fleet_profile_contract.vocabulary import (
     MAX_PROFILE_WARNINGS,
     Description,
     DesiredAssignmentStateField,
@@ -37,6 +31,11 @@ from .vocabulary import (
     RecipeSelector,
     UuidId,
 )
+from vonk_control.model_cache.contract import CachedResourceEstimate
+from vonk_control.recipe_update_batches.notice import RecipeUpdateNotice
+from vonk_control.run_switch_contract.requests import SparkGroupNode
+from vonk_control.strict_json import StrictModel
+from vonk_control.wait_contract import QueueWait
 
 
 class FleetProfileNode(SparkGroupNode):

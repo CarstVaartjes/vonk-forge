@@ -65,35 +65,18 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
 from vonk_agent_protocol.wire_model import canonical_message
-
-from .. import agent_operation_states
-from ..agent_jobs.contracts import _ABANDONABLE_OPERATIONS
-from ..agent_jobs.retry import abandon_idempotent_job_in_session
-from ..agent_operation_facts import aware
-from ..jobs import states as job_states
-from ..lifecycle_preflight import end_unclaimed_probes
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..operations.blockers import OperationBlocker, make_blocker
-from ..persisted_waits import lifecycle_wait, schedule_wait, wait_due
-from ..run_switch_contract.observation import (
-    RunSwitchStoredChildIdentity,
-    RunSwitchStoredIdentity,
-    RunSwitchStoredLifecycle,
-)
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.progress import RunSwitchMemberReceipt
-from ..run_switch_contract.vocabulary import RunSwitchMemberState
-from ..run_switch_operations.awaited_children import child_job_ids
-from ..run_switch_operations.observation_window import checkpoint_deadline
-from ..wait_contract import typed_wait_reason
-from .adapter import Dispatch
-from .agent_operation import AgentOperationAdapter
-from .composite import aggregate
-from .core import transition
-from .reconciler import Settled
-from .reconciler import settle as settle_event
-from .types import (
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.contracts import _ABANDONABLE_OPERATIONS
+from vonk_control.agent_jobs.retry import abandon_idempotent_job_in_session
+from vonk_control.agent_operation_facts import aware
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.adapter import Dispatch
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.composite import aggregate
+from vonk_control.lifecycle.core import transition
+from vonk_control.lifecycle.reconciler import Settled
+from vonk_control.lifecycle.reconciler import settle as settle_event
+from vonk_control.lifecycle.types import (
     TERMINAL_STATES,
     CancelRequested,
     Decision,
@@ -107,6 +90,22 @@ from .types import (
     StopResult,
     Tick,
 )
+from vonk_control.lifecycle_preflight import end_unclaimed_probes
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.operations.blockers import OperationBlocker, make_blocker
+from vonk_control.persisted_waits import lifecycle_wait, schedule_wait, wait_due
+from vonk_control.run_switch_contract.observation import (
+    RunSwitchStoredChildIdentity,
+    RunSwitchStoredIdentity,
+    RunSwitchStoredLifecycle,
+)
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.progress import RunSwitchMemberReceipt
+from vonk_control.run_switch_contract.vocabulary import RunSwitchMemberState
+from vonk_control.run_switch_operations.awaited_children import child_job_ids
+from vonk_control.run_switch_operations.observation_window import checkpoint_deadline
+from vonk_control.wait_contract import typed_wait_reason
 
 KIND = "run-switch"
 WAITING = LifecycleState.NEEDS_OPERATOR.value

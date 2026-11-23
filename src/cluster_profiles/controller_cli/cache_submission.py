@@ -7,21 +7,29 @@ import shlex
 import uuid
 from collections.abc import Callable, Mapping
 
-from ..cli_states import (
-    CANCEL_ACCEPTED_STATES,
+from cluster_profiles.cli_states import CANCEL_ACCEPTED_STATES
+from cluster_profiles.control_client.errors import (
+    ControlClientError,
+    ControlMalformedResponse,
 )
-from ..control_client.errors import ControlClientError, ControlMalformedResponse
-from ..control_client.schema import validate_control_document
-from ..generated_control.models.model_cache_operator_response import (
+from cluster_profiles.control_client.schema import validate_control_document
+from cluster_profiles.controller_cli.common import (
+    ControllerClient,
+    _cache_operation_id,
+    _quoted,
+    _request_key,
+)
+from cluster_profiles.controller_cli.confirmation import _confirm_action
+from cluster_profiles.controller_cli.submission import _submit_idempotent_request
+from cluster_profiles.generated_control.models.model_cache_operator_response import (
     ModelCacheOperatorResponse,
 )
-from ..generated_control.models.recipe_image_availability_response import (
+from cluster_profiles.generated_control.models.recipe_image_availability_response import (
     RecipeImageAvailabilityResponse,
 )
-from ..generated_control.models.recipe_retry_intent import RecipeRetryIntent
-from .common import ControllerClient, _cache_operation_id, _quoted, _request_key
-from .confirmation import _confirm_action
-from .submission import _submit_idempotent_request
+from cluster_profiles.generated_control.models.recipe_retry_intent import (
+    RecipeRetryIntent,
+)
 
 
 def _submit_cache_request(

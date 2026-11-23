@@ -17,46 +17,51 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import RunState
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..inventory.repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
-from ..lifecycle_preflight import LifecyclePreflight
-from ..lifecycle_preflight_contract import LifecyclePreflightCheckpoint
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import RecipeRun, RunNode
-from ..offline_stops import pending_run_stop_nodes
-from ..owner_liveness import live_build_job
-from ..recipe_builds.common import RecipeBuildAdmissionBusy, RecipeBuildPlan
-from ..recipe_operations.errors import RecipeOperationConflict
-from ..recipe_operations.execution_contract import (
+from vonk_control.inventory.repository import (
+    MAX_INVENTORY_FUTURE_SKEW,
+    InventoryRepository,
+)
+from vonk_control.lifecycle_preflight import LifecyclePreflight
+from vonk_control.lifecycle_preflight_contract import LifecyclePreflightCheckpoint
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.offline_stops import pending_run_stop_nodes
+from vonk_control.owner_liveness import live_build_job
+from vonk_control.recipe_builds.common import RecipeBuildAdmissionBusy, RecipeBuildPlan
+from vonk_control.recipe_operations.errors import RecipeOperationConflict
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     build_plan_document,
     parse_stored_build_plan,
 )
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..stored.states import CatalogRevisionState, RecipeBuildState
-from ..strict_json import (
-    read_stored_model,
-)
-from .build_helpers import _container_build_result
-from .errors import (
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.build_helpers import _container_build_result
+from vonk_control.run_switch_operations.errors import (
     RunSwitchIssuedWorkloadPending,
     RunSwitchPostStopEvidencePending,
     RunSwitchRetryLater,
     _RunSwitchBuildParentChanged,
     retry_later_unless_deterministic,
 )
-from .evidence_waits import RunSwitchPostStopInventoryPending
-from .executor_phases import _replans_when_superseded
-from .identity_helpers import _started_operation_id, _string_or_none
-from .interfaces import PhaseExecution
-from .ownership import _lock_current_build_parent
-from .planning_helpers import _aware, _now
-from .result_helpers import _bound_workload_intent
+from vonk_control.run_switch_operations.evidence_waits import (
+    RunSwitchPostStopInventoryPending,
+)
+from vonk_control.run_switch_operations.executor_phases import _replans_when_superseded
+from vonk_control.run_switch_operations.identity_helpers import (
+    _started_operation_id,
+    _string_or_none,
+)
+from vonk_control.run_switch_operations.interfaces import PhaseExecution
+from vonk_control.run_switch_operations.ownership import _lock_current_build_parent
+from vonk_control.run_switch_operations.planning_helpers import _aware, _now
+from vonk_control.run_switch_operations.result_helpers import _bound_workload_intent
+from vonk_control.stored.states import CatalogRevisionState, RecipeBuildState
+from vonk_control.strict_json import read_stored_model
 
 if TYPE_CHECKING:
-    from .executor import RecipeLifecyclePhaseExecutor
+    from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
 
 
 class ExecutorPreflightMixin:

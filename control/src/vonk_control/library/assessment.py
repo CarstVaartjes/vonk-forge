@@ -15,20 +15,23 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.reason_codes.catalog import LibraryAssessmentCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
-
-from ..model_cache.resolution import artifact_sets_resolved_once
-from ..model_cache.service import ModelCacheService
-from ..models.fleet import AgentNode
-from ..run_switch_contract.evidence import RunSwitchReason
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_operations.artifact_inspection import (
+from vonk_control.library.contract import (
+    LibraryRecipeProjection,
+    RecipeReadiness,
+    RecipeReadinessCheck,
+)
+from vonk_control.model_cache.resolution import artifact_sets_resolved_once
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.fleet import AgentNode
+from vonk_control.run_switch_contract.evidence import RunSwitchReason
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.artifact_inspection import (
     failed_copies_read_once,
     missing_spark_bytes,
     spark_stores,
 )
-from ..run_switch_operations.phase_planning import targets_hold_model
-from ..run_switch_operations.service import RunSwitchOperationService
-from .contract import LibraryRecipeProjection, RecipeReadiness, RecipeReadinessCheck
+from vonk_control.run_switch_operations.phase_planning import targets_hold_model
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 def _reason(code: str, detail: str) -> RunSwitchReason:

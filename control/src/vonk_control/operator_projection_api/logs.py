@@ -11,10 +11,9 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, ObservationCause
-
-from .. import agent_operation_states
-from ..catalog.revision_collection import GRACE
-from ..failure_evidence import (
+from vonk_control import agent_operation_states
+from vonk_control.catalog.revision_collection import GRACE
+from vonk_control.failure_evidence import (
     AttemptPhase,
     FailedAttempt,
     FailureEvidenceBundle,
@@ -22,12 +21,17 @@ from ..failure_evidence import (
     failed_attempt_condition,
     sanitize_diagnostics,
 )
-from ..logging import redact_text
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import RecipeInstallation, RecipeRun, RunNode
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..operations.item_contract import OperationResultFacts
-from .contracts import FleetLogEntry, FleetLogResponse, LogLevel, LogSource
+from vonk_control.logging import redact_text
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operations.item_contract import OperationResultFacts
+from vonk_control.operator_projection_api.contracts import (
+    FleetLogEntry,
+    FleetLogResponse,
+    LogLevel,
+    LogSource,
+)
 
 #: How far back the log projection narrates failed agent attempts by default:
 #: the history retention window, since older history is collected anyway.

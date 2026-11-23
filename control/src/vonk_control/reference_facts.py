@@ -19,8 +19,8 @@ from collections.abc import Collection
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .content_identity import catalog_selector_membership
-from .models.fleet import FleetProfile, FleetProfileRecipe
+from vonk_control.content_identity import catalog_selector_membership
+from vonk_control.models.fleet import FleetProfile, FleetProfileRecipe
 
 
 def profiles_naming(

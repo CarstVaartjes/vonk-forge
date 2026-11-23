@@ -24,10 +24,24 @@ from vonk_forge_contracts.resolver import (
 
 from vonk_agent_protocol.document_limits import MAX_ARGV_BYTES
 from vonk_agent_protocol.telemetry import EngineFormat
-
-from ..platform_ports import rebind_port_argument, serving_port
-from ..runtime.spec_contract import SpecArtifact, SpecModelIdentity, SpecModelMount
-from ..runtime.writable_paths import (
+from vonk_control.harnesses.canonical_metadata import (
+    CANONICAL_HARNESSES,
+    canonical_harness,
+)
+from vonk_control.harnesses.common import validate_projection
+from vonk_control.harnesses.contracts import (
+    HarnessBinding,
+    HarnessMount,
+    HarnessProjection,
+)
+from vonk_control.harnesses.errors import HarnessCompileError
+from vonk_control.platform_ports import rebind_port_argument, serving_port
+from vonk_control.runtime.spec_contract import (
+    SpecArtifact,
+    SpecModelIdentity,
+    SpecModelMount,
+)
+from vonk_control.runtime.writable_paths import (
     RUNTIME_REQUIREMENT_DECLARATION,
     RuntimeWritablePath,
     effective_environment,
@@ -38,13 +52,6 @@ from ..runtime.writable_paths import (
     validate_paths,
     writable_paths,
 )
-from .canonical_metadata import (
-    CANONICAL_HARNESSES,
-    canonical_harness,
-)
-from .common import validate_projection
-from .contracts import HarnessBinding, HarnessMount, HarnessProjection
-from .errors import HarnessCompileError
 
 _BUILTINS = frozenset(metadata.slug for metadata in CANONICAL_HARNESSES)
 _JOB_INTERFACES = frozenset(

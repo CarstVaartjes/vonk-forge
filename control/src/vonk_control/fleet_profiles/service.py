@@ -8,38 +8,62 @@ from datetime import datetime
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
-from ..fleet_profile_contract.adapter import FleetProfileSwitchAdapter
-from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
-from ..lifecycle.fleet_profile import FleetProfileAdapter
-from ..model_cache.contract import CacheResolution
-from .application_projection import FleetProfileService as _ApplicationProjection
-from .apply import FleetProfileService as _Apply
-from .assessment import FleetProfileService as _Assessment
-from .assignment_persistence import FleetProfileService as _AssignmentPersistence
-from .cancellation import FleetProfileService as _Cancellation
-from .cancellation_observation import FleetProfileService as _CancellationObservation
-from .contracts import (
+from vonk_control.fleet_profile_contract.adapter import FleetProfileSwitchAdapter
+from vonk_control.fleet_profiles.application_projection import (
+    FleetProfileService as _ApplicationProjection,
+)
+from vonk_control.fleet_profiles.apply import FleetProfileService as _Apply
+from vonk_control.fleet_profiles.assessment import FleetProfileService as _Assessment
+from vonk_control.fleet_profiles.assignment_persistence import (
+    FleetProfileService as _AssignmentPersistence,
+)
+from vonk_control.fleet_profiles.cancellation import (
+    FleetProfileService as _Cancellation,
+)
+from vonk_control.fleet_profiles.cancellation_observation import (
+    FleetProfileService as _CancellationObservation,
+)
+from vonk_control.fleet_profiles.contracts import (
     PreparationCanceller,
     PreparationProgress,
     PreparationStarter,
     StorageReliefProvider,
     _AssessmentProvider,
 )
-from .deletion import FleetProfileService as _Deletion
-from .endpoint_projection import FleetProfileService as _EndpointProjection
-from .operation_projection import FleetProfileService as _OperationProjection
-from .pending_admission import FleetProfileService as _PendingAdmission
-from .pending_application import FleetProfileService as _PendingApplication
-from .preparation import FleetProfileService as _Preparation
-from .profile_projection import FleetProfileService as _ProfileProjection
-from .queue_application import FleetProfileService as _QueueApplication
-from .recipe_choices import FleetProfileService as _RecipeChoices
-from .reconcile import FleetProfileService as _Reconcile
-from .recovery import FleetProfileService as _Recovery
-from .replan import FleetProfileService as _Replan
-from .retry import FleetProfileService as _Retry
-from .saved_profiles import FleetProfileService as _SavedProfiles
-from .selection import FleetProfileService as _Selection
+from vonk_control.fleet_profiles.deletion import FleetProfileService as _Deletion
+from vonk_control.fleet_profiles.endpoint_projection import (
+    FleetProfileService as _EndpointProjection,
+)
+from vonk_control.fleet_profiles.operation_projection import (
+    FleetProfileService as _OperationProjection,
+)
+from vonk_control.fleet_profiles.pending_admission import (
+    FleetProfileService as _PendingAdmission,
+)
+from vonk_control.fleet_profiles.pending_application import (
+    FleetProfileService as _PendingApplication,
+)
+from vonk_control.fleet_profiles.preparation import FleetProfileService as _Preparation
+from vonk_control.fleet_profiles.profile_projection import (
+    FleetProfileService as _ProfileProjection,
+)
+from vonk_control.fleet_profiles.queue_application import (
+    FleetProfileService as _QueueApplication,
+)
+from vonk_control.fleet_profiles.recipe_choices import (
+    FleetProfileService as _RecipeChoices,
+)
+from vonk_control.fleet_profiles.reconcile import FleetProfileService as _Reconcile
+from vonk_control.fleet_profiles.recovery import FleetProfileService as _Recovery
+from vonk_control.fleet_profiles.replan import FleetProfileService as _Replan
+from vonk_control.fleet_profiles.retry import FleetProfileService as _Retry
+from vonk_control.fleet_profiles.saved_profiles import (
+    FleetProfileService as _SavedProfiles,
+)
+from vonk_control.fleet_profiles.selection import FleetProfileService as _Selection
+from vonk_control.inventory.repository import INVENTORY_MAX_AGE_SECONDS
+from vonk_control.lifecycle.fleet_profile import FleetProfileAdapter
+from vonk_control.model_cache.contract import CacheResolution
 
 
 class FleetProfileService(

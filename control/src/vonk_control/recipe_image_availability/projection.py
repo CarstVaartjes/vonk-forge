@@ -17,36 +17,43 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.lifecycle.evidence import Residue
-
-from ..categorized_errors import InvalidValue, MissingRecord
-from ..jobs.documents import AvailabilityJobPayload, AvailabilityRetry
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..models.jobs import Job
-from ..recipe_operations.availability_intent import (
-    RecipeAvailabilityIntent,
-    RecipeRetryIntent,
+from vonk_control.categorized_errors import InvalidValue, MissingRecord
+from vonk_control.jobs.documents import AvailabilityJobPayload, AvailabilityRetry
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
 )
-from ..recipe_update_batches.contract import UPDATE_KIND, RecipeUpdateResponse
-from ..strict_json import serialize_json_value
-from .contracts import (
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability.contracts import (
     OPERATION_KIND,
     REMOVE_OPERATION_KIND,
     RecipeImageAvailabilityInvalid,
     RecipeImageAvailabilityUnknown,
     _iso,
 )
-from .removal_contract import (
+from vonk_control.recipe_image_availability.removal_contract import (
     RecipeRemovalProjectionIssue,
     RecipeRemovalUnavailableView,
 )
-from .view_contract import (
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeCacheRemovalStatus,
     RecipeImageAvailabilityView,
 )
+from vonk_control.recipe_operations.availability_intent import (
+    RecipeAvailabilityIntent,
+    RecipeRetryIntent,
+)
+from vonk_control.recipe_update_batches.contract import (
+    UPDATE_KIND,
+    RecipeUpdateResponse,
+)
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
 
 
 def _matching_request(

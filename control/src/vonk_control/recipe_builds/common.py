@@ -39,38 +39,40 @@ from vonk_agent_protocol.state_machines import (
     RunState,
 )
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..catalog.revision_contract import (
+from vonk_control.catalog.revision_contract import (
     BuildModelArtifactProjection,
     BuildResourcesProjection,
     BuildSecurityProjection,
     RecipeRevisionProjection,
 )
-from ..categorized_errors import InvalidType
-from ..categorized_faults import security_reason
-from ..fleet_profiles.capacity import profile_build_memory_claims
-from ..inventory.items import inventory_items
-from ..inventory.repository import InventorySnapshotView
-from ..memory_reservations import memory_reservations, memory_reserve_floor
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import RecipeRun, ResourceReservation, RunNode
-from ..models.fleet import AgentNode
-from ..recipe_operations.runtime_specs import RecipeRuntimeSpecError, recipe_topology
-from ..resource_planning.memory import memory_capacity_snapshot
-from ..runtime.adapters import (
+from vonk_control.categorized_errors import InvalidType
+from vonk_control.categorized_faults import security_reason
+from vonk_control.fleet_profiles.capacity import profile_build_memory_claims
+from vonk_control.inventory.items import inventory_items
+from vonk_control.inventory.repository import InventorySnapshotView
+from vonk_control.memory_reservations import memory_reservations, memory_reserve_floor
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
+from vonk_control.models.fleet import AgentNode
+from vonk_control.recipe_operations.runtime_specs import (
+    RecipeRuntimeSpecError,
+    recipe_topology,
+)
+from vonk_control.resource_planning.memory import memory_capacity_snapshot
+from vonk_control.runtime.adapters import (
     RuntimeAdapter,
     RuntimeAdapterError,
     resolve_runtime_adapter,
 )
-from ..source_bundles import (
+from vonk_control.source_bundles import (
     GeneratedSourceBundle,
     SourceBundleError,
     generate_source_bundle,
 )
-from ..source_policy import SourcePolicyReport, inspect_build_source_policy
-from ..stored.rows import read_row_column
-from ..stored.states import RecipeBuildState
+from vonk_control.source_policy import SourcePolicyReport, inspect_build_source_policy
+from vonk_control.stored.rows import read_row_column
+from vonk_control.stored.states import RecipeBuildState
 
 """Durable source-build planning and exact OCI result recording."""
 

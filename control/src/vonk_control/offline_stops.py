@@ -5,11 +5,11 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .fleet_profiles.stop_contract import ProfileJobRunStopJob
-from .jobs.documents import RecipeStopParent
-from .models.jobs import Job
-from .models.operations import AgentOperation
-from .strict_json import read_stored_model
+from vonk_control.fleet_profiles.stop_contract import ProfileJobRunStopJob
+from vonk_control.jobs.documents import RecipeStopParent
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.strict_json import read_stored_model
 
 
 def deferred_stop_nodes(job: Job) -> frozenset[str]:

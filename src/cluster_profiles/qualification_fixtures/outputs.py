@@ -8,7 +8,7 @@ import time
 from collections.abc import Mapping
 from pathlib import Path
 
-from .contracts import (
+from cluster_profiles.qualification_fixtures.contracts import (
     _DIGEST,
     _MEDIA_TYPE,
     _NAME,
@@ -17,7 +17,7 @@ from .contracts import (
     FixtureObservationUnknown,
     RecipeFixture,
 )
-from .media import (
+from cluster_profiles.qualification_fixtures.media import (
     _ffprobe_metadata,
     _glb_metadata,
     _png_metadata,
@@ -27,18 +27,18 @@ from .media import (
     _wav_metadata,
     media_budget,
 )
-from .output_values import (
+from cluster_profiles.qualification_fixtures.output_values import (
     _assert_number_range,
     _assert_required_keys,
     _parse_fraction,
     _parse_json_object,
 )
-from .semantic import (
+from cluster_profiles.qualification_fixtures.semantic import (
     _validate_document_archive,
     _validate_realtime_transcript,
     _validate_synchronized_media_receipt,
 )
-from .values import (
+from cluster_profiles.qualification_fixtures.values import (
     _integer_value,
     _number_value,
     _numeric_token,

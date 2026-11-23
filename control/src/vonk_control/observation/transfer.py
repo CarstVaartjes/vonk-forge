@@ -19,8 +19,7 @@ from starlette.responses import StreamingResponse
 
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-
-from ..strict_json import StrictModel, serialize_json_value
+from vonk_control.strict_json import StrictModel, serialize_json_value
 
 OBSERVATION_MEDIA_TYPE = "application/x-vonk-observation+ndjson"
 TransferId = Annotated[

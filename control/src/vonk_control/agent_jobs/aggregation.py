@@ -14,34 +14,40 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
 )
-
-from .. import agent_operation_states
-from ..agent_upgrades.status import operator_agent_upgrade_reason
-from ..categorized_errors import MissingRecord
-from ..distribution_executor.receipts import project_child
-from ..inventory.items import runtime_value
-from ..jobs import states as job_states
-from ..lifecycle.agent_operation import (
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.contracts import _ABANDONABLE_OPERATIONS
+from vonk_control.agent_jobs.evidence import _is_refusal_reason
+from vonk_control.agent_jobs.retry import (
+    _abandon_operation,
+    _retry_authorized_for_current_attempt,
+)
+from vonk_control.agent_jobs.stored import (
+    column_field,
+    column_is_document,
+    column_value,
+)
+from vonk_control.agent_upgrades.status import operator_agent_upgrade_reason
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.distribution_executor.receipts import project_child
+from vonk_control.inventory.items import runtime_value
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.agent_operation import (
     aggregate_parent_state,
     is_artifact_owned,
     set_parent_state,
 )
-from ..lifecycle.artifact_job import ArtifactJobAdapter
-from ..lifecycle.job_ranks import job_run_verdict
-from ..logging import redact_text
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..offline_stops import is_deferred_stop
-from ..strict_json import serialize_json_value
-from .contracts import _ABANDONABLE_OPERATIONS
-from .evidence import _is_refusal_reason
-from .retry import _abandon_operation, _retry_authorized_for_current_attempt
-from .stored import column_field, column_is_document, column_value
+from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
+from vonk_control.lifecycle.job_ranks import job_run_verdict
+from vonk_control.logging import redact_text
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.offline_stops import is_deferred_stop
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
 
 
 def _aggregate_parent(

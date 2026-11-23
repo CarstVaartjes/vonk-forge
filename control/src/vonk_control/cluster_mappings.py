@@ -18,23 +18,22 @@ from vonk_forge_contracts.recipe import RecipeTopology, Scalar
 
 from vonk_agent_protocol.reason_codes.fleet import ClusterMappingCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
-
-from .inventory.items import runtime_value
-from .inventory.repository import newest_snapshot_ids
-from .mapping_parameters import MappingParameters
-from .models.catalog import CatalogDocumentRevision
-from .models.fleet import AgentNode
-from .models.mapping import ClusterMapping, ClusterMappingNode
-from .models.telemetry import NodeInventorySnapshot
-from .recipe_operations.runtime_specs import (
+from vonk_control.inventory.items import runtime_value
+from vonk_control.inventory.repository import newest_snapshot_ids
+from vonk_control.mapping_parameters import MappingParameters
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.recipe_operations.runtime_specs import (
     OPTION_CHOICES_KEY,
     RecipeRuntimeSpecError,
     recipe_topology,
     split_option_choices,
 )
-from .stored.states import CatalogRevisionState, ClusterMappingState
-from .strict_json import StrictModel
-from .topology import Placement, TopologyError, validate_topology
+from vonk_control.stored.states import CatalogRevisionState, ClusterMappingState
+from vonk_control.strict_json import StrictModel
+from vonk_control.topology import Placement, TopologyError, validate_topology
 
 
 class ClusterMappingError(ValueError):

@@ -14,36 +14,17 @@ from sqlalchemy import case, func, select
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
-
-from ..catalog.revision_contract import RecipeRevisionProjection
-from ..categorized_errors import BookkeepingUnknown
-from ..content_identity import reusable_build
-from ..fleet_profiles.read_observation import observing_profile
-from ..inventory.items import runtime_value
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.fleet import AgentNode
-from ..operator_receipt_contract import ReceiptOwner
-from ..recipe_operations.execution_contract import (
-    RecipeExecutionContractError,
-    parse_stored_build_plan,
-    parse_stored_build_policy,
-)
-from ..source_bundles import (
-    GeneratedSourceBundle,
-    SourceBundleError,
-    SourceBundleIntegrityRefused,
-    SourceBundleRefused,
-    SourceBundleUnknown,
-)
-from ..source_policy import (
-    SourcePolicyReport,
-    dockerfile_base_images,
-    inspect_build_source_policy,
-)
-from ..stored.states import CatalogRevisionState, RecipeBuildState
-from .common import (
+from vonk_control.catalog.revision_contract import RecipeRevisionProjection
+from vonk_control.categorized_errors import BookkeepingUnknown
+from vonk_control.content_identity import reusable_build
+from vonk_control.fleet_profiles.read_observation import observing_profile
+from vonk_control.inventory.items import runtime_value
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import AgentNode
+from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.recipe_builds.common import (
     _BUILD_OBSERVATION_DELAYS,
     _BUILD_RUNTIME_INTERFACE,
     _BUILD_RUNTIME_PLATFORM,
@@ -65,10 +46,28 @@ from .common import (
     _source_policy_document,
     derive_build_input_identity,
 )
-from .receipts import BuildCandidate, PreparedBuildReceipt
+from vonk_control.recipe_builds.receipts import BuildCandidate, PreparedBuildReceipt
+from vonk_control.recipe_operations.execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_build_plan,
+    parse_stored_build_policy,
+)
+from vonk_control.source_bundles import (
+    GeneratedSourceBundle,
+    SourceBundleError,
+    SourceBundleIntegrityRefused,
+    SourceBundleRefused,
+    SourceBundleUnknown,
+)
+from vonk_control.source_policy import (
+    SourcePolicyReport,
+    dockerfile_base_images,
+    inspect_build_source_policy,
+)
+from vonk_control.stored.states import CatalogRevisionState, RecipeBuildState
 
 if TYPE_CHECKING:
-    from .service import RecipeBuildService
+    from vonk_control.recipe_builds.service import RecipeBuildService
 
 
 def _verified_bundle(

@@ -15,30 +15,24 @@ from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
-from ..fleet_profile_contract.review import (
+from vonk_control.fleet_profile_contract.review import (
     FleetProfileApplicationView,
     FleetProfilePreview,
 )
-from ..lifecycle.evidence import Residue
-from ..models.fleet import FleetProfileApplication
-from ..operations.blockers import OperationBlocker, make_blocker
-from ..stall_window import latest_progress
-from ..storage_demands import StorageRelief
-from . import states as fleet_profile_states
-from .assessment_support import (
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.fleet_profiles.assessment_support import (
     _assignments_needing_preparation,
     _disk_shortfalls,
     _progress_with_blockers,
     _relief_blocker,
 )
-from .claim_restore import restore_released_profile_claims
-from .continuing_effects import (
+from vonk_control.fleet_profiles.claim_restore import restore_released_profile_claims
+from vonk_control.fleet_profiles.continuing_effects import (
     _adopted_application_scope,
     _application_is_current_selection,
     _superseding_intent,
 )
-from .contracts import (
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileChildPlanBlocked,
     FleetProfileConflict,
     PreparationCanceller,
@@ -46,8 +40,12 @@ from .contracts import (
     PreparationStarter,
     StorageReliefProvider,
 )
-from .dependencies import _CHILD_PENDING_STATES, _LOGGER, ENDING_BLOCKER_CODES
-from .persistence import (
+from vonk_control.fleet_profiles.dependencies import (
+    _CHILD_PENDING_STATES,
+    _LOGGER,
+    ENDING_BLOCKER_CODES,
+)
+from vonk_control.fleet_profiles.persistence import (
     _application_order_key,
     _intended_profile,
     _newer_profile_intent_overlaps,
@@ -55,13 +53,18 @@ from .persistence import (
     _persisted_profile_progress,
     _stored_progress,
 )
-from .projection_support import (
-    _aware,
-)
+from vonk_control.fleet_profiles.projection_support import _aware
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.operations.blockers import OperationBlocker, make_blocker
+from vonk_control.stall_window import latest_progress
+from vonk_control.storage_demands import StorageRelief
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 class FleetProfileService:

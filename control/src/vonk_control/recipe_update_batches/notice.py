@@ -15,13 +15,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
-
-from ..catalog.queries import active_head_revision
-from ..catalog.revision_contract import shared_catalog_document
-from ..content_identity import RecipeExecution, runs_identically
-from ..models.catalog import CatalogDocumentRevision
-from ..stored.states import CatalogRevisionState
-from ..strict_json import StrictJSONModel
+from vonk_control.catalog.queries import active_head_revision
+from vonk_control.catalog.revision_contract import shared_catalog_document
+from vonk_control.content_identity import RecipeExecution, runs_identically
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.stored.states import CatalogRevisionState
+from vonk_control.strict_json import StrictJSONModel
 
 RECIPE_UPDATE_AVAILABLE = ProjectionCode.RECIPE_UPDATE_AVAILABLE
 _Text = Annotated[str, StringConstraints(min_length=1, max_length=64)]

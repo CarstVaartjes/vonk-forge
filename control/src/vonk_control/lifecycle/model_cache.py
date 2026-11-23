@@ -68,24 +68,13 @@ from vonk_agent_protocol.reason_codes.model_cache import (
     ModelAccessReason,
     ModelCacheCode,
 )
-
-from ..agent_operation_facts import aware
-from ..model_cache import states as model_cache_states
-from ..model_cache.contract import (
-    ModelCacheCancellationObservation,
-    ModelCacheOperationPayload,
-    StoredCacheClocks,
-)
-from ..models.cache import ModelCacheOperation
-from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait
-from ..stall_window import stall_deadline
-from ..strict_json import serialize_json_value
-from .adapter import Dispatch
-from .agent_operation import same_order
-from .core import transition
-from .evidence import Damaged
-from .reconciler import settle
-from .types import (
+from vonk_control.agent_operation_facts import aware
+from vonk_control.lifecycle.adapter import Dispatch
+from vonk_control.lifecycle.agent_operation import same_order
+from vonk_control.lifecycle.core import transition
+from vonk_control.lifecycle.evidence import Damaged
+from vonk_control.lifecycle.reconciler import settle
+from vonk_control.lifecycle.types import (
     TERMINAL_STATES,
     Claimed,
     Decision,
@@ -99,6 +88,16 @@ from .types import (
     State,
     StopResult,
 )
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.contract import (
+    ModelCacheCancellationObservation,
+    ModelCacheOperationPayload,
+    StoredCacheClocks,
+)
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.persisted_waits import initialize_wait, lifecycle_wait, schedule_wait
+from vonk_control.stall_window import stall_deadline
+from vonk_control.strict_json import serialize_json_value
 
 _LOGGER = logging.getLogger(__name__)
 #: States an operation is active in (everything that is not an end).

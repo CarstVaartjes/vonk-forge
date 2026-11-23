@@ -15,23 +15,19 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import SecurityRefusalError
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
-
-from ..admission_locking import ConstraintDefect
-from ..jobs.documents import AvailabilityModelChild
-from ..model_cache.contract import (
-    CacheManifest,
-    ModelCacheOperationProgress,
-)
-from ..model_cache.progress import project_cache_progress
-from ..operations.blockers import OperationBlocker
-from ..operations.contract import (
+from vonk_control.admission_locking import ConstraintDefect
+from vonk_control.jobs.documents import AvailabilityModelChild
+from vonk_control.model_cache.contract import CacheManifest, ModelCacheOperationProgress
+from vonk_control.model_cache.progress import project_cache_progress
+from vonk_control.operations.blockers import OperationBlocker
+from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
-from .availability_contract import (
+from vonk_control.recipe_image_availability.availability_contract import (
     RecipeImageAvailabilityArtifact,
 )
-from .contracts import (
+from vonk_control.recipe_image_availability.contracts import (
     ModelCacheOperationHandle,
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityInvalid,
@@ -41,12 +37,14 @@ from .contracts import (
     _progress,
     _read,
 )
-from .reader_contract import (
+from vonk_control.recipe_image_availability.reader_contract import (
     AvailabilityDownloadPreview,
 )
 
 if TYPE_CHECKING:
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
 
 
 def _model_wait_blockers(

@@ -27,30 +27,29 @@ from vonk_agent_protocol.package_upgrade import PackageActivationPhase
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.wire_model import canonical_message
-
-from .. import agent_operation_states as aos
-from ..agent_operation_facts import (
+from vonk_control import agent_operation_states as aos
+from vonk_control.agent_jobs.contracts import _ENDED_PARENT_STATES
+from vonk_control.agent_jobs.stored import column_field, column_value
+from vonk_control.agent_operation_facts import (
     _WORKLOAD_INTENT_OPERATIONS,
     aware,
     job_output_retention_expiry,
 )
-from ..agent_outcome import agent_outcome
-from ..agent_upgrades.dispatch import DispatchMixin
-from ..agent_upgrades.stored import _stored_package
-from ..cancelled_runtime import cancellation_stop_current
-from ..inventory.items import runtime_value
-from ..jobs.documents import DistributionJobPayload
-from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..package_activation import matches_receipt
-from .contracts import _ENDED_PARENT_STATES
-from .stored import column_field, column_value
+from vonk_control.agent_outcome import agent_outcome
+from vonk_control.agent_upgrades.dispatch import DispatchMixin
+from vonk_control.agent_upgrades.stored import _stored_package
+from vonk_control.cancelled_runtime import cancellation_stop_current
+from vonk_control.inventory.items import runtime_value
+from vonk_control.jobs.documents import DistributionJobPayload
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.package_activation import matches_receipt
 
 if TYPE_CHECKING:
-    from .service import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
 
 
 RUNTIME_KINDS = frozenset(

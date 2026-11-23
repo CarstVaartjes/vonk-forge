@@ -15,28 +15,27 @@ from vonk_agent_protocol.agent_words import (
 )
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
-
-from ..agent_jobs.endings import end_unobserved_order
-from ..agent_jobs.retirement import release_owned_reservations_in_session
-from ..agent_jobs.retry import abandon_idempotent_job_in_session
-from ..models.jobs import Job
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..run_switch_contract.evidence import RunSwitchPhase
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.phase_results import (
-    RunSwitchCachedTransferResult,
-    RunSwitchDistributionEndedResult,
-    RunSwitchTargetTransferResult,
-)
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_operations.constants import _is_artifact_phase
-from ..run_switch_operations.interfaces import PhaseExecution
-from .children import DistributionChildren
-from .receipts import (
+from vonk_control.agent_jobs.endings import end_unobserved_order
+from vonk_control.agent_jobs.retirement import release_owned_reservations_in_session
+from vonk_control.agent_jobs.retry import abandon_idempotent_job_in_session
+from vonk_control.distribution_executor.children import DistributionChildren
+from vonk_control.distribution_executor.receipts import (
     _ChildView,
     _phase_receipt,
     project_child,
 )
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import (
+    RunSwitchCachedTransferResult,
+    RunSwitchDistributionEndedResult,
+    RunSwitchTargetTransferResult,
+)
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.constants import _is_artifact_phase
+from vonk_control.run_switch_operations.interfaces import PhaseExecution
 
 
 class DurableDistributionPhaseExecutor(DistributionChildren):

@@ -28,28 +28,27 @@ from vonk_agent_protocol.outcome import (
     SecurityRefusalError,
     UnknownOutcomeError,
 )
-
-from .compiled_execution_plan import (
+from vonk_control.compiled_execution_plan import (
     CompiledExecutionPlanError,
     DistributionObjectReceipt,
     VerifiedModelObject,
     VerifiedRuntimeImage,
     compile_verified_execution_plan,
 )
-from .distribution.sources import verified_model_receipts
-from .models.cache import RecipeBuild
-from .models.catalog import CatalogDocumentRevision
-from .models.mapping import ClusterMappingNode
-from .recipe_operations.runtime_specs import (
+from vonk_control.distribution.sources import verified_model_receipts
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.mapping import ClusterMappingNode
+from vonk_control.recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     ResolvedRecipe,
     compile_runtime_spec,
     resolve_recipe_entities,
     split_option_choices,
 )
-from .runtime.spec_contract import RuntimeSpec, SpecArtifact, SpecModelMount
-from .runtime_image_preparation.contracts import RuntimeImageReceipt
-from .stored.states import CatalogRevisionState, RecipeBuildState
+from vonk_control.runtime.spec_contract import RuntimeSpec, SpecArtifact, SpecModelMount
+from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
+from vonk_control.stored.states import CatalogRevisionState, RecipeBuildState
 
 
 def compile_job_invocation(

@@ -42,8 +42,7 @@ from vonk_agent_protocol.job_limits import (
 )
 from vonk_agent_protocol.recipe_jobs import MediaType, canonical_media_types
 from vonk_agent_protocol.wire_model import canonical_message
-
-from .strict_json import StrictJSONModel
+from vonk_control.strict_json import StrictJSONModel
 
 MAX_PARAMETERS = 64
 

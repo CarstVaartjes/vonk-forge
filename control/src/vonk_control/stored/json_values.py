@@ -53,8 +53,12 @@ from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.types import TypeDecorator
 
-from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..strict_json import read_stored_document, stored_document_detail
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
+)
+from vonk_control.strict_json import read_stored_document, stored_document_detail
 
 _LOG = logging.getLogger(__name__)
 

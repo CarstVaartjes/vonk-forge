@@ -14,8 +14,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 from vonk_agent_protocol.telemetry import EngineFormat
-
-from ..harnesses.errors import HarnessCompileError
+from vonk_control.harnesses.errors import HarnessCompileError
 
 
 @dataclass(frozen=True, slots=True)

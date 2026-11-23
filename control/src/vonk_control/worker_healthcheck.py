@@ -10,10 +10,9 @@ from sqlalchemy import select
 
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
-
-from .db.connections import build_engine, session_factory
-from .models.jobs import ControlProcessHeartbeat
-from .settings import Settings
+from vonk_control.db.connections import build_engine, session_factory
+from vonk_control.models.jobs import ControlProcessHeartbeat
+from vonk_control.settings import Settings
 
 #: How recent the worker's readiness heartbeat must be to count as live.
 WORKER_READINESS_WINDOW_SECONDS = 30

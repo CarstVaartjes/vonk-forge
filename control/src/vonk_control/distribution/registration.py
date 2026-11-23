@@ -10,23 +10,22 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 from vonk_agent_protocol.state_machines import DistributionAssignmentState
-
-from ..admission_locking import admitting
-from ..artifact_jobs.lifecycle import (
+from vonk_control.admission_locking import admitting
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     require_reference_open,
 )
-from ..artifact_reference_scan.model_sets import require_model_sets_open
-from ..distribution_assignment import NodeDistributionAssignment
-from ..identity_insert import insert_identity
-from ..models.operations import ArtifactDistributionAssignment
+from vonk_control.artifact_reference_scan.model_sets import require_model_sets_open
+from vonk_control.distribution_assignment import NodeDistributionAssignment
+from vonk_control.identity_insert import insert_identity
+from vonk_control.models.operations import ArtifactDistributionAssignment
 
 if TYPE_CHECKING:
-    from .service import DistributionService
+    from vonk_control.distribution.service import DistributionService
 
-from .assignments import _may_replace
-from .types import (
+from vonk_control.distribution.assignments import _may_replace
+from vonk_control.distribution.types import (
     DistributionError,
     DistributionIntegrityError,
     DistributionUnknown,

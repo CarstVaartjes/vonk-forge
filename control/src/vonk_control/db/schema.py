@@ -12,16 +12,13 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import SQLAlchemyError
 
 from vonk_control import exact_integer_adoption
-from vonk_control.db import node_facts
-
-from .. import (
+from vonk_control import (
     models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
 )
-from ..model_primitives import Base
-from ..models.evidence import REPEATED_EVIDENCE_SEQUENCE
-from .connections import _reraise_contention
-from .constants import _LOGGER
-from .schema_helpers import (
+from vonk_control.db import node_facts
+from vonk_control.db.connections import _reraise_contention
+from vonk_control.db.constants import _LOGGER
+from vonk_control.db.schema_helpers import (
     _FOREIGN_TABLES,
     _REPLACED_CONSTRAINT_NAMES,
     _TOLERATED_SCHEMA_DIFFERENCES,
@@ -41,6 +38,8 @@ from .schema_helpers import (
     _schema_difference_key,
     _unhandled_differences,
 )
+from vonk_control.model_primitives import Base
+from vonk_control.models.evidence import REPEATED_EVIDENCE_SEQUENCE
 
 
 def _schema_differences(connection: Connection) -> list[tuple[Any, ...]]:

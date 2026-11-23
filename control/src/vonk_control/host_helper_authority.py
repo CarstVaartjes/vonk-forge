@@ -50,30 +50,29 @@ from vonk_agent_protocol.recipe_operations import (
 )
 from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdentityState
 from vonk_agent_protocol.wire_model import AgentProtocolError, canonical_message
-
-from . import agent_operation_states
-from .agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
-from .gpu.clock import selected_gpu_clock
-from .host_runtime_plan_authority import (
+from vonk_control import agent_operation_states
+from vonk_control.agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
+from vonk_control.gpu.clock import selected_gpu_clock
+from vonk_control.host_runtime_plan_authority import (
     RuntimePlanAuthorityError,
     RuntimePlanBinding,
     RuntimePlanEvidenceUnavailable,
     RuntimePlanUnsatisfiable,
     derive_runtime_plan_binding,
 )
-from .jobs import states as job_states
-from .logging import log_event
-from .models.fleet import AgentCertificate, AgentNode
-from .models.jobs import Job
-from .models.operations import AgentOperation as StoredAgentOperation
-from .models.operations import AgentOperationAttempt
-from .offline_stops import is_deferred_stop
-from .own_cleanup import CLEANUP_ACTIONS
-from .owner_liveness import run_has_live_operation
-from .package_activation import matches_receipt
-from .strict_json import read_stored_model
-from .swap import selected_swap
-from .untracked_installations import run_wanted_here
+from vonk_control.jobs import states as job_states
+from vonk_control.logging import log_event
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredAgentOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.offline_stops import is_deferred_stop
+from vonk_control.own_cleanup import CLEANUP_ACTIONS
+from vonk_control.owner_liveness import run_has_live_operation
+from vonk_control.package_activation import matches_receipt
+from vonk_control.strict_json import read_stored_model
+from vonk_control.swap import selected_swap
+from vonk_control.untracked_installations import run_wanted_here
 
 _LOGGER = logging.getLogger("vonk_control.host_helper_authority")
 

@@ -6,7 +6,7 @@ import json
 
 from fastapi import HTTPException, Request
 
-from ..agent_api.common import (
+from vonk_control.agent_api.common import (
     _ENROLLMENT_TOKEN,
     _JSON_WHITESPACE,
     _MAX_ENROLLMENT_BODY_BYTES,

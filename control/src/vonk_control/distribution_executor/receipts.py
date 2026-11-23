@@ -17,28 +17,30 @@ from vonk_agent_protocol.agent_words import (
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 from vonk_agent_protocol.wire_model import OperationMemberProgress, OperationProgress
-
-from ..agent_operation_facts import aware
-from ..failure_classification import is_security_failure
-from ..jobs.documents import DistributionJobPayload
-from ..models.jobs import Job
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..operations.progress import aggregate_progress, project_progress
-from ..run_switch_contract.evidence import RunSwitchPhase
-from ..run_switch_contract.observation import RunSwitchObservedEvidence
-from ..run_switch_contract.phase_results import (
+from vonk_control.agent_operation_facts import aware
+from vonk_control.failure_classification import is_security_failure
+from vonk_control.jobs.documents import DistributionJobPayload
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operations.progress import aggregate_progress, project_progress
+from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+from vonk_control.run_switch_contract.observation import RunSwitchObservedEvidence
+from vonk_control.run_switch_contract.phase_results import (
     RunSwitchDistributionChildResult,
     RunSwitchDistributionEndedResult,
     RunSwitchPhaseResult,
 )
-from ..run_switch_contract.progress import (
+from vonk_control.run_switch_contract.progress import (
     ArtifactVerificationEvidence,
     RunSwitchChildProgress,
     RunSwitchMemberReceipt,
 )
-from ..run_switch_contract.vocabulary import RunSwitchMemberState
-from ..run_switch_operations.constants import _MEMBER_STATE_ADAPTER, _is_artifact_phase
-from ..strict_json import read_stored_model
+from vonk_control.run_switch_contract.vocabulary import RunSwitchMemberState
+from vonk_control.run_switch_operations.constants import (
+    _MEMBER_STATE_ADAPTER,
+    _is_artifact_phase,
+)
+from vonk_control.strict_json import read_stored_model
 
 
 @dataclass(frozen=True, slots=True)

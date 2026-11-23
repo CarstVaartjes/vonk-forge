@@ -31,9 +31,8 @@ from vonk_agent_protocol.reason_codes.vocabulary import (
     adopt_reason_code,
 )
 from vonk_agent_protocol.wire_model import DigestText
-
-from ..child_phases import FleetProfileChildPhase
-from ..strict_json import StrictJSONModel
+from vonk_control.child_phases import FleetProfileChildPhase
+from vonk_control.strict_json import StrictJSONModel
 
 MAX_BLOCKERS = 16
 _BLOCKER_REASON = TypeAdapter(OperationReason | ProgressAlarmCode)

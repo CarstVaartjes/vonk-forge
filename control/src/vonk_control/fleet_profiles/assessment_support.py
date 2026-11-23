@@ -15,39 +15,40 @@ from vonk_agent_protocol.agent_words import (
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..bounded_json import sequence
-from ..failure_classification import is_security_failure
-from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
-from ..fleet_profile_contract.assessment import (
+from vonk_control.bounded_json import sequence
+from vonk_control.failure_classification import is_security_failure
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
+from vonk_control.fleet_profile_contract.assessment import (
     FleetProfileAssignmentAssessment,
     FleetProfileAssignmentPreview,
     FleetProfileReason,
 )
-from ..fleet_profile_contract.review import FleetProfilePreview
-from ..fleet_profile_contract.vocabulary import FleetProfileOperationState
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..lifecycle.types import State as _LifecycleState
-from ..operations.blockers import (
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profile_contract.vocabulary import FleetProfileOperationState
+from vonk_control.fleet_profiles.contracts import (
+    FleetProfileAdmissionEffectBusy,
+    FleetProfileResourceRecheckUnavailable,
+    _FleetProfileRecoveryBindingConflict,
+)
+from vonk_control.fleet_profiles.dependencies import (
+    _DISK_REFUSALS,
+    _OPERATION_STATE_ADAPTER,
+    _PREPARATION_RESOLVABLE_CODES,
+)
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.lifecycle.types import State as _LifecycleState
+from vonk_control.operations.blockers import (
     OperationBlocker,
     StorageReliefEvidence,
     bound_blockers,
     make_blocker,
 )
-from ..preparation_contract import RolloutPreparation
-from ..run_switch_contract.evidence import RunSwitchReason
-from ..storage_demands import STORAGE_INSUFFICIENT, StorageRelief
-from ..strict_json import read_stored_model
-from .contracts import (
-    FleetProfileAdmissionEffectBusy,
-    FleetProfileResourceRecheckUnavailable,
-    _FleetProfileRecoveryBindingConflict,
-)
-from .dependencies import (
-    _DISK_REFUSALS,
-    _OPERATION_STATE_ADAPTER,
-    _PREPARATION_RESOLVABLE_CODES,
-)
+from vonk_control.preparation_contract import RolloutPreparation
+from vonk_control.run_switch_contract.evidence import RunSwitchReason
+from vonk_control.storage_demands import STORAGE_INSUFFICIENT, StorageRelief
+from vonk_control.strict_json import read_stored_model
 
 
 def _recovery_preparation_identity(preparation: RolloutPreparation) -> object:

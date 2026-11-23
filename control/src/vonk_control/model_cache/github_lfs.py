@@ -40,11 +40,9 @@ from pydantic import ValidationError
 
 from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-
-from ..bounded_retry import bounded_attempts
-from ..operations.contract import AvailabilityRecoveryAction
-from .catalog_helpers import _datetime
-from .constants import (
+from vonk_control.bounded_retry import bounded_attempts
+from vonk_control.model_cache.catalog_helpers import _datetime
+from vonk_control.model_cache.constants import (
     _GITHUB_HOST,
     _GITHUB_LFS_OBJECT_HOSTS,
     _LFS_HREF_MARGIN_SECONDS,
@@ -52,7 +50,7 @@ from .constants import (
     _MAX_GITHUB_LFS_BATCH_BYTES,
     _MAX_GITHUB_LFS_LINK_HEADERS,
 )
-from .errors import (
+from vonk_control.model_cache.errors import (
     ModelCacheError,
     ModelCacheStorageInvalid,
     ModelCacheStorageRefused,
@@ -60,18 +58,19 @@ from .errors import (
     ProviderNotAsked,
     _retry_after_seconds,
 )
-from .provider_contracts import (
+from vonk_control.model_cache.provider_contracts import (
     _GitHubLfsBatch,
     _GitHubLfsBatchRequest,
     _GitHubLfsObject,
     _GitHubLfsObjectRef,
     _GitHubLfsOperation,
 )
-from .providers import _github_lfs_binding
+from vonk_control.model_cache.providers import _github_lfs_binding
+from vonk_control.operations.contract import AvailabilityRecoveryAction
 
 if TYPE_CHECKING:
-    from .artifacts import ArtifactSpec
-    from .service import ModelCacheService
+    from vonk_control.model_cache.artifacts import ArtifactSpec
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 _LFS_MEDIA_TYPE = "application/vnd.git-lfs+json"

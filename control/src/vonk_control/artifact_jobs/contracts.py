@@ -51,35 +51,37 @@ from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
 from vonk_agent_protocol.wire_model import AgentProtocolError, canonical_message
-
-from ..compiled_artifact_contract import (
+from vonk_control.artifact_jobs.blob_store import (
+    ArtifactBlobStoreError,
+    BlobReconciliation,
+)
+from vonk_control.artifact_jobs.evidence import (
+    ArtifactJobResultEvidence,
+    OutputContractBreach,
+    OutputContractRule,
+)
+from vonk_control.compiled_artifact_contract import (
     ArtifactSlotContract,
     CompiledArtifactContract,
     ParameterDefinition,
     ParameterScalar,
     compile_artifact_contract,
 )
-from ..identifiers import UuidId
-from ..jobs.documents import RecipeJobRunParent
-from ..lifecycle.evidence import (
+from vonk_control.identifiers import UuidId
+from vonk_control.jobs.documents import RecipeJobRunParent
+from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
     Damaged,
     Residue,
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..models.catalog import CatalogDocument, CatalogDocumentRevision
-from ..models.execution import ArtifactJob, RunNode
-from ..models.jobs import Job
-from ..stored.rows import read_row_column
-from ..stored.states import CatalogRevisionState
-from ..strict_json import StrictJSONModel, read_stored_model
-from .blob_store import ArtifactBlobStoreError, BlobReconciliation
-from .evidence import (
-    ArtifactJobResultEvidence,
-    OutputContractBreach,
-    OutputContractRule,
-)
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.models.execution import ArtifactJob, RunNode
+from vonk_control.models.jobs import Job
+from vonk_control.stored.rows import read_row_column
+from vonk_control.stored.states import CatalogRevisionState
+from vonk_control.strict_json import StrictJSONModel, read_stored_model
 
 _UUID_ID_ADAPTER = TypeAdapter(UuidId)
 

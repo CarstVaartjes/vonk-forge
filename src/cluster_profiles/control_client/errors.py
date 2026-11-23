@@ -10,7 +10,7 @@ from typing import Any, Protocol, Self, TypedDict
 
 from jsonschema import Draft202012Validator, validators
 
-from ..error_reporting import (
+from cluster_profiles.error_reporting import (
     ClientCode,
     ErrorContext,
     decision_for,
@@ -18,9 +18,15 @@ from ..error_reporting import (
     safe_endpoint,
     safe_request_id,
 )
-from ..generated_control.models.bounded_error_response import BoundedErrorResponse
-from ..generated_control.models.error_context_response import ErrorContextResponse
-from ..generated_control.models.job_detail_response import JobDetailResponse
+from cluster_profiles.generated_control.models.bounded_error_response import (
+    BoundedErrorResponse,
+)
+from cluster_profiles.generated_control.models.error_context_response import (
+    ErrorContextResponse,
+)
+from cluster_profiles.generated_control.models.job_detail_response import (
+    JobDetailResponse,
+)
 
 _MAX_ARTIFACT_OUTPUT = 1024**3
 

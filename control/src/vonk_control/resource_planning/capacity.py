@@ -17,10 +17,9 @@ from vonk_agent_protocol.swap import (
     swap_reaches,
     usable_swap_bytes,
 )
-
-from ..operations.blockers import SwapShortfallEvidence
-from .reasons import _reason, _same_memory_kind
-from .types import (
+from vonk_control.operations.blockers import SwapShortfallEvidence
+from vonk_control.resource_planning.reasons import _reason, _same_memory_kind
+from vonk_control.resource_planning.types import (
     CapacityPlan,
     CapacitySnapshot,
     NodeCapacityPlan,

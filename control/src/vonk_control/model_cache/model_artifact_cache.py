@@ -16,8 +16,8 @@ from collections import OrderedDict
 from collections.abc import Callable
 from threading import Lock
 
-from ..models.catalog import CatalogDocumentRevision
-from .artifacts import ArtifactSpec
+from vonk_control.model_cache.artifacts import ArtifactSpec
+from vonk_control.models.catalog import CatalogDocumentRevision
 
 _MAX_RETAINED_SPECS = 100_000
 _cache: OrderedDict[tuple[str, bool], tuple[ArtifactSpec, ...]] = OrderedDict()

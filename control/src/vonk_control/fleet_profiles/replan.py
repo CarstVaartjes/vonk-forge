@@ -13,30 +13,20 @@ from vonk_forge_contracts import RecipeDefinition
 
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
-
-from ..fleet_profile_contract.applications import (
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileIntendedConfiguration,
 )
-from ..fleet_profile_contract.definitions import FleetProfileAssignment
-from ..fleet_profile_contract.review import FleetProfilePreview
-from ..lifecycle.evidence import Residue
-from ..lifecycle.fleet_profile import FleetProfileAdapter
-from ..lifecycle.types import State as _LifecycleState
-from ..models.catalog import CatalogDocumentRevision
-from ..models.fleet import FleetProfile, FleetProfileApplication
-from ..operations.blockers import OperationBlocker, bound_blockers, make_blocker
-from ..persisted_waits import schedule_wait
-from ..settings import PROFILE_STALL_WINDOW_SECONDS
-from ..stall_window import Verdict, progress_verdict
-from .assessment_support import (
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profiles.assessment_support import (
     _preview_blockers,
     _profile_preview_is_waitable,
     _progress_with_blockers,
 )
-from .contracts import FleetProfileConflict
-from .dependencies import _LOGGER
-from .persistence import (
+from vonk_control.fleet_profiles.contracts import FleetProfileConflict
+from vonk_control.fleet_profiles.dependencies import _LOGGER
+from vonk_control.fleet_profiles.persistence import (
     _intended_profile,
     _owns_pending_admission,
     _persisted_profile_plan,
@@ -44,15 +34,30 @@ from .persistence import (
     _stored_recipe,
     _unreadable_revisions,
 )
-from .projection_support import (
+from vonk_control.fleet_profiles.projection_support import (
     _aware,
     _digest,
     _profile_document,
 )
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.fleet_profile import FleetProfileAdapter
+from vonk_control.lifecycle.types import State as _LifecycleState
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import FleetProfile, FleetProfileApplication
+from vonk_control.operations.blockers import (
+    OperationBlocker,
+    bound_blockers,
+    make_blocker,
+)
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
+from vonk_control.stall_window import Verdict, progress_verdict
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 def _revision_label(session: Session, item: FleetProfileAssignment) -> str:

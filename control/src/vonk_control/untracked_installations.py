@@ -13,8 +13,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     stored_words,
 )
 from vonk_agent_protocol.state_machines import InstallationState
-
-from .models.execution import (
+from vonk_control.models.execution import (
     STOPPABLE_RUN_STATES,
     ArtifactJob,
     InstallationNode,
@@ -22,7 +21,7 @@ from .models.execution import (
     RecipeRun,
     RunNode,
 )
-from .run_states import ENDED_RUN_STATES
+from vonk_control.run_states import ENDED_RUN_STATES
 
 
 def node_run_ids(node_id: str) -> Select[str]:

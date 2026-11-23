@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from .capacity import plan_capacity
-from .demand import resource_demand
-from .settings import resolve_effective_settings
-from .types import (
+from vonk_control.resource_planning.capacity import plan_capacity
+from vonk_control.resource_planning.demand import resource_demand
+from vonk_control.resource_planning.settings import resolve_effective_settings
+from vonk_control.resource_planning.types import (
     CapacitySnapshot,
     PlannedStopRelease,
     ResourceEvidence,

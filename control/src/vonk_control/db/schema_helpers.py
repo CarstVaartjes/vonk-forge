@@ -26,12 +26,12 @@ from sqlalchemy.exc import (
 )
 from sqlalchemy.schema import CreateTable, DropTable
 
-from .. import (
+from vonk_control import (
     models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
 )
-from ..model_primitives import Base
-from .connections import _database_sqlstate, _reraise_contention
-from .constants import _LOGGER
+from vonk_control.db.connections import _database_sqlstate, _reraise_contention
+from vonk_control.db.constants import _LOGGER
+from vonk_control.model_primitives import Base
 
 # ``alembic_version`` cannot prove that a live database is the current schema.
 # The fresh baseline creates its tables from ``Base.metadata``, so a database

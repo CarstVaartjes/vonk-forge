@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 
-from .agent_words import (
+from vonk_agent_protocol.agent_words import (
     AgentClientDecision,
     AgentDiagnosticOperation,
     AgentTransportKind,
@@ -41,7 +41,7 @@ from .agent_words import (
     ProgressPhase,
     RecipeRunDispositionValue,
 )
-from .state_machines import (
+from vonk_agent_protocol.state_machines import (
     AssetAvailability,
     CatalogSyncState,
     CertificateIssuancePurpose,
@@ -71,7 +71,7 @@ from .state_machines import (
     RouteState,
     RunState,
 )
-from .wire_model import WireEnum, WireModel
+from vonk_agent_protocol.wire_model import WireEnum, WireModel
 
 
 class LifecycleState(WireEnum):

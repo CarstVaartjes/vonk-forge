@@ -26,14 +26,13 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.route_activation import ActivationMarker
-
-from ..admission_locking import ConstraintReplay, admitting
-from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
-from ..failure_classification import disposition
-from ..gateway.litellm import LiteLlmGeneration, LiteLlmPolicy, RouteState
-from ..gateway.route_bundle_contract import RouteEndpointDocument
-from ..models.jobs import Job
-from ..models.routes import RoutePublication, RoutePublicationOwner
+from vonk_control.admission_locking import ConstraintReplay, admitting
+from vonk_control.bounded_retry import REQUEST_PAUSES, bounded_attempts
+from vonk_control.failure_classification import disposition
+from vonk_control.gateway.litellm import LiteLlmGeneration, LiteLlmPolicy, RouteState
+from vonk_control.gateway.route_bundle_contract import RouteEndpointDocument
+from vonk_control.models.jobs import Job
+from vonk_control.models.routes import RoutePublication, RoutePublicationOwner
 
 _NODE_ID = TypeAdapter(NodeId)
 _UPSTREAM_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,119}\Z")

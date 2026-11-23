@@ -26,8 +26,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
-from ..logging import redact_text
-from .types import Effect, Observed
+from vonk_control.lifecycle.types import Effect, Observed
+from vonk_control.logging import redact_text
 
 _LOG = logging.getLogger(__name__)
 _REPORTED: set[tuple[str, str, str]] = set()

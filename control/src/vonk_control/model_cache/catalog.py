@@ -10,31 +10,30 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..catalog.queries import WITHOUT_DOCUMENT
-from ..catalog.revision_contract import (
+from vonk_control.catalog.queries import WITHOUT_DOCUMENT
+from vonk_control.catalog.revision_contract import (
     catalog_document_readable,
     read_shared_catalog_document,
 )
-from ..categorized_errors import InvalidType
-from ..models.catalog import CatalogDocumentRevision
-from .artifacts import (
+from vonk_control.categorized_errors import InvalidType
+from vonk_control.model_cache.artifacts import (
     ArtifactPart,
     ArtifactSpec,
     _is_hex,
     _validate_artifact,
 )
-from .catalog_helpers import _source_for_catalog_artifact
-from .errors import (
+from vonk_control.model_cache.catalog_helpers import _source_for_catalog_artifact
+from vonk_control.model_cache.errors import (
     ModelCacheResolutionInvalid,
     ModelCacheResolutionRefused,
     ModelCacheStorageUnknown,
 )
-from .input_contracts import CatalogArtifact, FixtureArtifact
-from .providers import PROVIDERS, source_is_repository
+from vonk_control.model_cache.input_contracts import CatalogArtifact, FixtureArtifact
+from vonk_control.model_cache.providers import PROVIDERS, source_is_repository
+from vonk_control.models.catalog import CatalogDocumentRevision
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class CatalogMixin:

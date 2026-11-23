@@ -7,9 +7,8 @@ from typing import Annotated
 from pydantic import AwareDatetime, Field
 
 from vonk_agent_protocol.inventory import ModelStoreObject
-
-from .lifecycle.evidence import BookkeepingReason
-from .strict_json import StrictJSONModel
+from vonk_control.lifecycle.evidence import BookkeepingReason
+from vonk_control.strict_json import StrictJSONModel
 
 STORE_RETENTION_MAX_AGE = timedelta(minutes=10)
 FLEET_REMOVAL_DEADLINE = timedelta(hours=24)

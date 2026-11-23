@@ -9,9 +9,12 @@ from vonk_agent_protocol.installer_setup import (
     single_line,
     valid_required_value,
 )
-
-from .environment import SELECTION_ENV, parse_environment, render_environment
-from .filesystem import (
+from vonk_nas_setup.environment import (
+    SELECTION_ENV,
+    parse_environment,
+    render_environment,
+)
+from vonk_nas_setup.filesystem import (
     MAX_TEMPLATE_BYTES,
     ObservationUnavailable,
     SetupError,
@@ -25,8 +28,8 @@ from .filesystem import (
     sync_directory,
     write_member,
 )
-from .pki import validate_pki_material
-from .secrets import (
+from vonk_nas_setup.pki import validate_pki_material
+from vonk_nas_setup.secrets import (
     generated,
     load_members,
     postgres_url,

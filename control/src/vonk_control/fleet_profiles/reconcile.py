@@ -23,64 +23,67 @@ from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..failure_classification import error_code, is_definite, is_security_failure
-from ..fleet_profile_contract.applications import (
+from vonk_control.failure_classification import (
+    error_code,
+    is_definite,
+    is_security_failure,
+)
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
     FleetProfileChildOperation,
 )
-from ..fleet_profile_contract.switch_state import FleetProfileStepResult
-from ..jobs import states as job_states
-from ..lifecycle.evidence import Residue
-from ..lifecycle.fleet_profile import FleetProfileAdapter
-from ..lifecycle.types import Effect as _LifecycleEffect
-from ..lifecycle.types import State as _LifecycleState
-from ..models.fleet import FleetProfileApplication
-from ..operations.blockers import (
-    PHASE_RETRY_CODE,
-    BlockingOperation,
-    OperationBlocker,
-    bound_blockers,
-    make_blocker,
-)
-from ..persisted_waits import schedule_wait
-from ..recipe_operations.errors import RecipeOperationConflict
-from ..reservation_owners import release_dead_owner_reservations
-from ..run_switch_contract.phase_results import RunSwitchStopResult
-from ..strict_json import read_stored_model
-from . import states as fleet_profile_states
-from .assignment_assessment import _assignment_state
-from .continuing_effects import (
+from vonk_control.fleet_profile_contract.switch_state import FleetProfileStepResult
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.fleet_profiles.assignment_assessment import _assignment_state
+from vonk_control.fleet_profiles.continuing_effects import (
     _adopted_application_scope,
     _application_is_current_selection,
     _superseding_intent,
 )
-from .contracts import (
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileChildPlanBlocked,
     FleetProfileConflict,
     FleetProfilePermissionDenied,
     FleetProfileReviewStale,
     _FleetProfileRecoveryBindingConflict,
 )
-from .dependencies import (
+from vonk_control.fleet_profiles.dependencies import (
     _CHILD_FAILED_STATES,
     _CHILD_PENDING_STATES,
 )
-from .error_summary import _normalized_failure_text
-from .persistence import (
+from vonk_control.fleet_profiles.error_summary import _normalized_failure_text
+from vonk_control.fleet_profiles.persistence import (
     _intended_profile,
     _persisted_profile_plan,
     _persisted_profile_progress,
     _stored_progress,
 )
-from .projection_support import (
-    _aware,
+from vonk_control.fleet_profiles.projection_support import _aware
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.fleet_profile import FleetProfileAdapter
+from vonk_control.lifecycle.types import Effect as _LifecycleEffect
+from vonk_control.lifecycle.types import State as _LifecycleState
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.operations.blockers import (
+    PHASE_RETRY_CODE,
+    BlockingOperation,
+    OperationBlocker,
+    bound_blockers,
+    make_blocker,
 )
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recipe_operations.errors import RecipeOperationConflict
+from vonk_control.reservation_owners import release_dead_owner_reservations
+from vonk_control.run_switch_contract.phase_results import RunSwitchStopResult
+from vonk_control.strict_json import read_stored_model
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 class FleetProfileService:

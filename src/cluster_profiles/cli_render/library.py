@@ -8,21 +8,7 @@ from enum import StrEnum
 from typing import Any
 from urllib.parse import quote
 
-from ..cli_states_generated import QualificationOutcome, QualificationStatus
-from ..cli_telemetry_render import size as _size
-from ..generated_control.models.library_resource_projection import (
-    LibraryResourceProjection,
-)
-from ..generated_control.models.model_cache_usage import ModelCacheUsage
-from ..generated_control.models.model_display import ModelDisplay
-from ..generated_control.models.published_qualification_status_view import (
-    PublishedQualificationStatusView,
-)
-from ..generated_control.models.qualification_evidence_record import (
-    QualificationEvidenceRecord,
-)
-from ..generated_control.types import Unset
-from .common import (
+from cluster_profiles.cli_render.common import (
     _bytes,
     _field,
     _freshness,
@@ -38,8 +24,29 @@ from .common import (
     _waiting,
     _words,
 )
-from .progress import progress_line
-from .vocabulary import NOT_REPORTED, capability_label, status_meaning
+from cluster_profiles.cli_render.progress import progress_line
+from cluster_profiles.cli_render.vocabulary import (
+    NOT_REPORTED,
+    capability_label,
+    status_meaning,
+)
+from cluster_profiles.cli_states_generated import (
+    QualificationOutcome,
+    QualificationStatus,
+)
+from cluster_profiles.cli_telemetry_render import size as _size
+from cluster_profiles.generated_control.models.library_resource_projection import (
+    LibraryResourceProjection,
+)
+from cluster_profiles.generated_control.models.model_cache_usage import ModelCacheUsage
+from cluster_profiles.generated_control.models.model_display import ModelDisplay
+from cluster_profiles.generated_control.models.published_qualification_status_view import (
+    PublishedQualificationStatusView,
+)
+from cluster_profiles.generated_control.models.qualification_evidence_record import (
+    QualificationEvidenceRecord,
+)
+from cluster_profiles.generated_control.types import Unset
 
 
 class LibraryNoun(StrEnum):

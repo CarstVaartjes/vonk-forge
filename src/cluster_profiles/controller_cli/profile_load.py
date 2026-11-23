@@ -11,28 +11,37 @@ from contextlib import redirect_stdout
 from dataclasses import dataclass, replace
 from typing import cast
 
-from ..cli_outcome import SubmissionAcceptance
-from ..cli_render.dispatch import render_payload
-from ..cli_states_generated import (
+from cluster_profiles.cli_outcome import SubmissionAcceptance
+from cluster_profiles.cli_render.dispatch import render_payload
+from cluster_profiles.cli_states_generated import (
     PROFILE_REFUSAL_CODES,
     PROFILE_REVIEW_STALE,
     PROFILE_REVISION_CONFLICT,
 )
-from ..control_client.errors import (
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlConflict,
     ControlMalformedResponse,
 )
-from ..control_client.schema import validate_control_document
-from ..error_reporting import ClientCode, protocol_context
-from ..generated_control.models.fleet_profile_load_request import (
+from cluster_profiles.control_client.schema import validate_control_document
+from cluster_profiles.controller_cli.common import (
+    ControllerClient,
+    _quoted,
+    _request_key,
+)
+from cluster_profiles.controller_cli.confirmation import _confirm_action
+from cluster_profiles.controller_cli.observation import _poll_path
+from cluster_profiles.controller_cli.submission import (
+    _accepted_submission,
+    _submit_idempotent_request,
+)
+from cluster_profiles.error_reporting import ClientCode, protocol_context
+from cluster_profiles.generated_control.models.fleet_profile_load_request import (
     FleetProfileLoadRequest,
 )
-from ..generated_control.models.fleet_profile_load_review import FleetProfileLoadReview
-from .common import ControllerClient, _quoted, _request_key
-from .confirmation import _confirm_action
-from .observation import _poll_path
-from .submission import _accepted_submission, _submit_idempotent_request
+from cluster_profiles.generated_control.models.fleet_profile_load_review import (
+    FleetProfileLoadReview,
+)
 
 _REVIEW_STALE_CODE = PROFILE_REVIEW_STALE
 

@@ -21,53 +21,12 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode, RecipeImageCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
-
-from ..admission_locking import (
+from vonk_control.admission_locking import (
     AdmissionLockBusy,
     acquire_admission_keys,
     node_admission_key,
 )
-from ..bounded_json import require_mapping
-from ..catalog.revision_contract import read_catalog_document
-from ..categorized_errors import InvalidValue
-from ..inventory.items import runtime_value
-from ..jobs import states as job_states
-from ..jobs.documents import AvailabilityJobPayload, AvailabilityRuntime
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..operations.blockers import make_blocker
-from ..recipe_builds.cancellation import BuildConsumerError, lock_build_dependency
-from ..recipe_builds.common import (
-    PrebuiltDecision,
-    RecipeBuildAdmissionBusy,
-    RecipeBuildResolution,
-    RecipeSourcePolicyError,
-)
-from ..recipe_image_availability.build_observation import (
-    accepted_build_request as _accepted_build_request,
-)
-from ..recipe_image_availability.build_observation import reconcile_abandoned_builds
-from ..recipe_image_availability.contracts import (
-    SOURCE_POLICY_REFUSED_CODE,
-    BuildUnsettled,
-    RecipeImageAvailabilityClaim,
-    RecipeImageAvailabilityError,
-    RecipeImageAvailabilityRefused,
-)
-from ..recipe_image_availability.service import RecipeImageAvailabilityService
-from ..recipe_operations.availability_intent import RecipeBuildDependency
-from ..recipe_operations.errors import RecipeOperationConflict
-from ..recipe_operations.runtime_specs import (
-    resolve_recipe_entities,
-)
-from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from ..runtime_image_preparation.transport import OciLayoutImageTransport
-from ..stored.states import CatalogRevisionState
-from ..strict_json import read_stored_model
-from .build_observation import (
+from vonk_control.availability_production.build_observation import (
     AvailabilityUnsettled,
     _cached_build_receipt,
     _capacity_wait,
@@ -76,7 +35,54 @@ from .build_observation import (
     _prebuilt_blocker,
     _recorded_decision,
 )
-from .scheduler import RecipeImageAvailabilityScheduler
+from vonk_control.availability_production.scheduler import (
+    RecipeImageAvailabilityScheduler,
+)
+from vonk_control.bounded_json import require_mapping
+from vonk_control.catalog.revision_contract import read_catalog_document
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.inventory.items import runtime_value
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import AvailabilityJobPayload, AvailabilityRuntime
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.operations.blockers import make_blocker
+from vonk_control.recipe_builds.cancellation import (
+    BuildConsumerError,
+    lock_build_dependency,
+)
+from vonk_control.recipe_builds.common import (
+    PrebuiltDecision,
+    RecipeBuildAdmissionBusy,
+    RecipeBuildResolution,
+    RecipeSourcePolicyError,
+)
+from vonk_control.recipe_image_availability.build_observation import (
+    accepted_build_request as _accepted_build_request,
+)
+from vonk_control.recipe_image_availability.build_observation import (
+    reconcile_abandoned_builds,
+)
+from vonk_control.recipe_image_availability.contracts import (
+    SOURCE_POLICY_REFUSED_CODE,
+    BuildUnsettled,
+    RecipeImageAvailabilityClaim,
+    RecipeImageAvailabilityError,
+    RecipeImageAvailabilityRefused,
+)
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
+)
+from vonk_control.recipe_operations.availability_intent import RecipeBuildDependency
+from vonk_control.recipe_operations.errors import RecipeOperationConflict
+from vonk_control.recipe_operations.runtime_specs import resolve_recipe_entities
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
+from vonk_control.runtime_image_preparation.transport import OciLayoutImageTransport
+from vonk_control.stored.states import CatalogRevisionState
+from vonk_control.strict_json import read_stored_model
 
 PREBUILT_PULL_KEY = "prebuilt_pull"
 

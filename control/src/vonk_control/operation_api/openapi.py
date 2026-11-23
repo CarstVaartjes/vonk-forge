@@ -13,11 +13,10 @@ from pydantic.json_schema import JsonSchemaMode, JsonSchemaValue, models_json_sc
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleVocabulary
 from vonk_agent_protocol.outcome import ErrorCatalog
 from vonk_agent_protocol.reason_codes.vocabulary import ReasonCodeVocabulary
-
-from ..auth_api import CliTokenDownload
-from ..stored.json_values import ExternalPassthrough, contract_models
-from ..stored.rows import bindings
-from .constants import _ADMIN_OPERATION_IDS, _HTTP_METHODS
+from vonk_control.auth_api import CliTokenDownload
+from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS, _HTTP_METHODS
+from vonk_control.stored.json_values import ExternalPassthrough, contract_models
+from vonk_control.stored.rows import bindings
 
 type ExternalSchemaDocument = Annotated[
     JsonSchemaValue,

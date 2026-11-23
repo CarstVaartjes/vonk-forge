@@ -24,59 +24,62 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.evidence import OperationFailureCode
 from vonk_agent_protocol.wire_model import OperationProgress
-
-from ..auth import MUTATION_ROLES
-from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
-from ..fleet_profile_contract.review import (
+from vonk_control.auth import MUTATION_ROLES
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
+from vonk_control.fleet_profile_contract.review import (
     FleetProfileApplicationView,
     FleetProfilePreview,
 )
-from ..jobs import states as job_states
-from ..lifecycle.evidence import Residue
-from ..logging import redact_text
-from ..models.fleet import FleetProfile, FleetProfileApplication, User
-from ..operation_api.contracts import (
-    OperationListPage,
-    OperationProvider,
-    OperationQuery,
-)
-from ..operation_api.providers import _activity_keyset_filter
-from ..operations.contract import OperationFailureEvidence
-from ..operations.item_contract import (
-    OperationItem,
-    OperationOwnerReference,
-    OperationResultFacts,
-)
-from ..persisted_waits import read_wait
-from ..strict_json import warn_unreadable_once
-from . import states as fleet_profile_states
-from .activity import (
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.fleet_profiles.activity import (
     _profile_activity_state,
     _profile_activity_state_expression,
 )
-from .contracts import (
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileConflict,
     FleetProfilePermissionDenied,
 )
-from .persistence import (
+from vonk_control.fleet_profiles.persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
     _persisted_profile_result,
     _persisted_profile_scope,
 )
-from .projection_support import (
+from vonk_control.fleet_profiles.projection_support import (
     _application_cancellation_view,
     _aware,
 )
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.logging import redact_text
+from vonk_control.models.fleet import FleetProfile, FleetProfileApplication, User
+from vonk_control.operation_api.contracts import (
+    OperationListPage,
+    OperationProvider,
+    OperationQuery,
+)
+from vonk_control.operation_api.providers import _activity_keyset_filter
+from vonk_control.operations.contract import OperationFailureEvidence
+from vonk_control.operations.item_contract import (
+    OperationItem,
+    OperationOwnerReference,
+    OperationResultFacts,
+)
+from vonk_control.persisted_waits import read_wait
+from vonk_control.strict_json import warn_unreadable_once
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..operation_api.contracts import OperationProviderProtocol
+    from vonk_control.operation_api.contracts import OperationProviderProtocol
 
 
 class FleetProfileService:

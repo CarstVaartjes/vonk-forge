@@ -8,18 +8,20 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.state_machines import InstallationState, ReservationState
-
-from .inventory.repository import MAX_INVENTORY_FUTURE_SKEW, newest_snapshot_ids
-from .machine_states import rank_installed
-from .models.execution import (
+from vonk_control.inventory.repository import (
+    MAX_INVENTORY_FUTURE_SKEW,
+    newest_snapshot_ids,
+)
+from vonk_control.machine_states import rank_installed
+from vonk_control.models.execution import (
     STOPPABLE_RUN_STATES,
     InstallationNode,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
 )
-from .models.telemetry import NodeInventorySnapshot
-from .reservation_owners import ReservationOwner
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.reservation_owners import ReservationOwner
 
 
 def release_covered_installation_claims(

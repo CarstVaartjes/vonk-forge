@@ -12,28 +12,25 @@ from collections.abc import Callable, Mapping
 from contextlib import redirect_stdout
 from typing import cast
 
-from ..cli_outcome import (
-    Submission,
-    SubmissionAcceptance,
-)
-from ..cli_render.dispatch import render_payload
-from ..control_client.errors import (
+from cluster_profiles.cli_outcome import Submission, SubmissionAcceptance
+from cluster_profiles.cli_render.dispatch import render_payload
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlConflict,
     ControlMalformedResponse,
     ControlNotFound,
 )
-from ..control_client.schema import validate_control_document
-from .common import (
+from cluster_profiles.control_client.schema import validate_control_document
+from cluster_profiles.controller_cli.common import (
     ControllerClient,
     _cache_operation_id,
     _known_http_refusal_status,
     _quoted,
     _request_key,
 )
-from .confirmation import _can_prompt, _confirm_action
-from .observation import _poll_path
-from .submission import _submit_idempotent_request
+from cluster_profiles.controller_cli.confirmation import _can_prompt, _confirm_action
+from cluster_profiles.controller_cli.observation import _poll_path
+from cluster_profiles.controller_cli.submission import _submit_idempotent_request
 
 
 def _validate_cache_removal_receipt(

@@ -13,53 +13,61 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import InstallationState, RouteState, RunState
-
-from ..distributed_lifecycle import (
-    DistributedLifecycleError,
-)
-from ..distributed_recovery.common import (
+from vonk_control.distributed_lifecycle import DistributedLifecycleError
+from vonk_control.distributed_recovery.common import (
     ended_run_state,
     enforce_recovery_deadline,
     recovery_start_plan,
 )
-from ..fleet_profiles.stop_contract import ProfileJobRunStopJob
-from ..jobs.documents import (
+from vonk_control.fleet_profiles.stop_contract import ProfileJobRunStopJob
+from vonk_control.jobs.documents import (
     ProfilePartialStop,
     RecipeStopParent,
     controller_recipe_document,
 )
-from ..lifecycle.evidence import (
+from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
     Residue,
     retire_as_unknown,
 )
-from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import RecipeInstallation, RecipeRun, RunNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..persisted_waits import schedule_wait
-from ..stored.rows import read_row_column
-from ..strict_json import serialize_json_value
-from .intent import _intent_is_current, _job_workload_intent, _shared_workload_intent
-from .lifecycle_contract import (
+from vonk_control.lifecycle.recipe_operation import RecipeOperationAdapter
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recipe_operations.intent import (
+    _intent_is_current,
+    _job_workload_intent,
+    _shared_workload_intent,
+)
+from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationCancellationResult,
     RecipeOperationProgressResult,
     RecipeOperationResult,
 )
-from .observation_helpers import _active_recipe_revision
-from .progress import (
+from vonk_control.recipe_operations.observation_helpers import _active_recipe_revision
+from vonk_control.recipe_operations.progress import (
     _parent_execution_mode,
     _recorded_parent,
     _start_deadline_failure,
 )
-from .rank_authority import _profile_jobrun_parent
-from .results import _recorded_result, _recorded_result_document, _validated_result
-from .run_transitions import end_unfinished_run, withdraw_for_cleanup
-from .start_cleanup import StartCleanup, stage
+from vonk_control.recipe_operations.rank_authority import _profile_jobrun_parent
+from vonk_control.recipe_operations.results import (
+    _recorded_result,
+    _recorded_result_document,
+    _validated_result,
+)
+from vonk_control.recipe_operations.run_transitions import (
+    end_unfinished_run,
+    withdraw_for_cleanup,
+)
+from vonk_control.recipe_operations.start_cleanup import StartCleanup, stage
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class TerminalProjectionMixin:

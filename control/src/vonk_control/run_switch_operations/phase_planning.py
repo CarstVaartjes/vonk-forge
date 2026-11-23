@@ -16,15 +16,14 @@ from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import InstallationState, ReservationState
-
-from ..cluster_mappings import (
+from vonk_control.cluster_mappings import (
     mapping_option_choices,
     validate_mapping_parameters,
 )
-from ..models.execution import ResourceReservation
-from ..models.mapping import ClusterMapping, ClusterMappingNode
-from ..recipe_operations.errors import RecipeOperationConflict
-from ..run_switch_contract.evidence import (
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.recipe_operations.errors import RecipeOperationConflict
+from vonk_control.run_switch_contract.evidence import (
     ArtifactStorageImpact,
     MappingSelection,
     RunSwitchPhase,
@@ -32,16 +31,16 @@ from ..run_switch_contract.evidence import (
     RuntimeImageStorageImpact,
     StopImpact,
 )
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.requests import SparkGroup, SparkGroupNode
-from ..run_switch_contract.vocabulary import (
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.requests import SparkGroup, SparkGroupNode
+from vonk_control.run_switch_contract.vocabulary import (
     RunSwitchAction,
     RunSwitchPhaseKind,
     RunSwitchSubphase,
 )
-from .identity_helpers import _is_hex_digest
-from .interfaces import ArtifactInspection
-from .planning_helpers import (
+from vonk_control.run_switch_operations.identity_helpers import _is_hex_digest
+from vonk_control.run_switch_operations.interfaces import ArtifactInspection
+from vonk_control.run_switch_operations.planning_helpers import (
     _as_reason,
     _digest,
     _inspection_unavailable,
@@ -49,7 +48,7 @@ from .planning_helpers import (
 )
 
 if TYPE_CHECKING:
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 def targets_hold_model(inspection: ArtifactInspection | ArtifactStorageImpact) -> bool:

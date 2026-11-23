@@ -12,22 +12,25 @@ from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOper
 from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
-
-from ..jobs import states as job_states
-from ..lifecycle.evidence import Residue
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..recipe_operations.execution_contract import (
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_image_availability.contracts import (
+    RecipeImageAvailabilityClaim,
+)
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_plan,
 )
-from .contracts import RecipeImageAvailabilityClaim
 
 if TYPE_CHECKING:
-    from ..recipe_operations.service import RecipeOperationService
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 def accepted_build_request(

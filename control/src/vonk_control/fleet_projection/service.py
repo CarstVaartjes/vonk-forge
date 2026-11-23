@@ -16,41 +16,11 @@ from vonk_agent_protocol.state_machines import (
     InstallationState,
     ReservationState,
 )
-from vonk_control.owner_liveness import SPARK_PRESENCE_WINDOW
-
-from ..auth import CursorError
-from ..evidence_repeats import repeating_evidence
-from ..fleet_event_contract import NodeProfilePayload
-from ..fleet_events import FleetEventDraft, FleetEventRepository
-from ..gpu.clock import selected_gpu_clocks
-from ..inventory.items import inventory_items
-from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS, newest_snapshot_ids
-from ..model_layout_notice import model_layout_notices
-from ..models.catalog import CatalogDocument, CatalogDocumentRevision
-from ..models.execution import (
-    InstallationNode,
-    RecipeInstallation,
-    RecipeRun,
-    ResourceReservation,
-    RunNode,
-)
-from ..models.fleet import (
-    AgentCertificate,
-    AgentNode,
-    AgentNodeProfile,
-    FleetProfileApplication,
-)
-from ..models.mapping import ClusterMapping, ClusterMappingNode
-from ..models.telemetry import NodeInventorySnapshot
-from ..nas_transfer_rate import slow_nas_transfers
-from ..observation.capture import begin_observation_capture
-from ..operations.blockers import PHASE_RETRY_CODE, read_blockers
-from ..recipe_update_batches.notice import newest_active_revisions
-from ..run_states import ENDED_RUN_STATES
-from ..stored.states import CatalogRevisionState
-from ..swap import selected_swaps
-from ..telemetry.samples import CPU_LOW_CLOCK_MIN_SECONDS, TelemetryRepository
-from .common import (
+from vonk_control.auth import CursorError
+from vonk_control.evidence_repeats import repeating_evidence
+from vonk_control.fleet_event_contract import NodeProfilePayload
+from vonk_control.fleet_events import FleetEventDraft, FleetEventRepository
+from vonk_control.fleet_projection.common import (
     _AUTHORITY_REVISION,
     _LOW_CLOCK_LOOKBACK_SLACK,
     _MEMBER_COORDINATES,
@@ -60,8 +30,48 @@ from .common import (
     RunPresenceRow,
     _utc,
 )
-from .nodes import _connection, _inventory, _node, _telemetry_state
-from .presence import _installed_presence, _loaded_presence
+from vonk_control.fleet_projection.nodes import (
+    _connection,
+    _inventory,
+    _node,
+    _telemetry_state,
+)
+from vonk_control.fleet_projection.presence import _installed_presence, _loaded_presence
+from vonk_control.gpu.clock import selected_gpu_clocks
+from vonk_control.inventory.items import inventory_items
+from vonk_control.inventory.repository import (
+    INVENTORY_MAX_AGE_SECONDS,
+    newest_snapshot_ids,
+)
+from vonk_control.model_layout_notice import model_layout_notices
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    RecipeRun,
+    ResourceReservation,
+    RunNode,
+)
+from vonk_control.models.fleet import (
+    AgentCertificate,
+    AgentNode,
+    AgentNodeProfile,
+    FleetProfileApplication,
+)
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.nas_transfer_rate import slow_nas_transfers
+from vonk_control.observation.capture import begin_observation_capture
+from vonk_control.operations.blockers import PHASE_RETRY_CODE, read_blockers
+from vonk_control.owner_liveness import SPARK_PRESENCE_WINDOW
+from vonk_control.recipe_update_batches.notice import newest_active_revisions
+from vonk_control.run_states import ENDED_RUN_STATES
+from vonk_control.stored.states import CatalogRevisionState
+from vonk_control.swap import selected_swaps
+from vonk_control.telemetry.samples import (
+    CPU_LOW_CLOCK_MIN_SECONDS,
+    TelemetryRepository,
+)
 
 
 class FleetProjection:

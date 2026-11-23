@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from .common import (
+from cluster_profiles.cli_render.common import (
     _actions,
     _bytes,
     _field,

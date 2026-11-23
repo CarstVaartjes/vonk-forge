@@ -16,39 +16,42 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
 )
 from vonk_agent_protocol.wire_model import canonical_message
-
-from .. import agent_operation_states
-from ..agent_jobs.predicates import _JsonFlagIsTrue
-from ..categorized_errors import (
-    InvalidValue,
-    MissingRecord,
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.predicates import _JsonFlagIsTrue
+from vonk_control.categorized_errors import InvalidValue, MissingRecord
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.recipe_operation import RecipeOperationAdapter
+from vonk_control.lifecycle.types import Outcome
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_builds.cancellation import (
+    BuildConsumerError,
+    build_cancellation,
 )
-from ..jobs import states as job_states
-from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..lifecycle.types import Outcome
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..recipe_builds.cancellation import BuildConsumerError, build_cancellation
-from ..stored.rows import read_row_column
-from ..strict_json import serialize_json_value
-from .constants import _WORKLOAD_INTENT_KINDS
-from .errors import RecipeOperationConflict, RecipeRequestInvalid
-from .intent import _cancel_reason
-from .interfaces import RecipeOperationView
-from .lifecycle_contract import (
+from vonk_control.recipe_operations.constants import _WORKLOAD_INTENT_KINDS
+from vonk_control.recipe_operations.errors import (
+    RecipeOperationConflict,
+    RecipeRequestInvalid,
+)
+from vonk_control.recipe_operations.intent import _cancel_reason
+from vonk_control.recipe_operations.interfaces import RecipeOperationView
+from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationCancellationResult,
 )
-from .observation_helpers import _aware
-from .progress import (
-    _cancel_requested,
-    _parent_intent,
+from vonk_control.recipe_operations.observation_helpers import _aware
+from vonk_control.recipe_operations.progress import _cancel_requested, _parent_intent
+from vonk_control.recipe_operations.results import (
+    _recorded_result,
+    _recorded_result_document,
+    _validated_result,
 )
-from .results import _recorded_result, _recorded_result_document, _validated_result
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class CancellationMixin:

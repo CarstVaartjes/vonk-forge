@@ -21,53 +21,46 @@ from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
 from vonk_agent_protocol.reason_codes.vocabulary import run_switch_code
 from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_control.run_switch_operations.results import _persisted_result
-
-from ..admission_locking import (
+from vonk_control.admission_locking import (
     AdmissionLockBusy,
     busy_detail,
     patient_admission,
 )
-from ..agent_operation_facts import job_start_deadline
-from ..bounded_json import require_integer
-from ..content_identity import same_image
-from ..failure_classification import (
+from vonk_control.agent_operation_facts import job_start_deadline
+from vonk_control.bounded_json import require_integer
+from vonk_control.content_identity import same_image
+from vonk_control.failure_classification import (
     error_code,
     error_detail,
     is_definite,
     is_security_failure,
 )
-from ..install_admission.contracts import InstallAdmissionBusy
-from ..lifecycle.types import (
-    State as _LifecycleState,
-)
-from ..lifecycle_preflight import end_unclaimed_probes
-from ..logging import log_event
-from ..models.jobs import Job
-from ..operations.blockers import make_blocker
-from ..persisted_waits import schedule_wait
-from ..preparation_contract import (
-    RuntimeImageIdentity,
-)
-from ..recipe_builds.common import RecipeBuildAdmissionBusy
-from ..run_admission import (
+from vonk_control.install_admission.contracts import InstallAdmissionBusy
+from vonk_control.lifecycle.types import State as _LifecycleState
+from vonk_control.lifecycle_preflight import end_unclaimed_probes
+from vonk_control.logging import log_event
+from vonk_control.models.jobs import Job
+from vonk_control.operations.blockers import make_blocker
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.preparation_contract import RuntimeImageIdentity
+from vonk_control.recipe_builds.common import RecipeBuildAdmissionBusy
+from vonk_control.run_admission import (
     RETRYABLE_PLAN_BLOCKERS,
     RUN_ADMISSION_WAIT_CODES,
     RunAdmissionBusy,
 )
-from ..run_switch_contract.operations import RunSwitchAwaitedInventory
-from ..run_switch_contract.phase_results import RunSwitchFinalVerifyResult
-from ..run_switch_contract.progress_view import (
+from vonk_control.run_switch_contract.operations import RunSwitchAwaitedInventory
+from vonk_control.run_switch_contract.phase_results import RunSwitchFinalVerifyResult
+from vonk_control.run_switch_contract.progress_view import (
     RECOVERY_STALL_WINDOW,
     _complete_phase_progress,
     _merge_progress_evidence,
     _observe_progress,
 )
-from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
-from ..stall_window import Verdict, stall_deadline
-from ..stored.rows import read_row_column
-from .artifact_validation import _validate_artifact_execution
-from .constants import (
+from vonk_control.run_switch_operations.artifact_validation import (
+    _validate_artifact_execution,
+)
+from vonk_control.run_switch_operations.constants import (
     _ARTIFACT_WAIT_CODES,
     _LOGGER,
     _OBSERVING,
@@ -75,27 +68,52 @@ from .constants import (
     _TERMINAL_STATES,
     _is_artifact_phase,
 )
-from .contracts import FinalVerificationExpiry
-from .endings_helpers import _reject_invalid_operation
-from .errors import (
+from vonk_control.run_switch_operations.contracts import FinalVerificationExpiry
+from vonk_control.run_switch_operations.endings_helpers import _reject_invalid_operation
+from vonk_control.run_switch_operations.errors import (
     RunSwitchInstallPreflightExpired,
     RunSwitchIssuedWorkloadPending,
     RunSwitchOperationConflict,
     RunSwitchPostStopEvidencePending,
     _RunSwitchBuildParentChanged,
 )
-from .evidence_waits import RunSwitchPostStopInventoryPending
-from .image_receipts import _build_receipt_in_session
-from .interfaces import PhaseExecution, _PhasePreflightGate
-from .observation_helpers import _failure_code_of, _phase_request_key
-from .observation_window import checkpoint_verdict
-from .ownership import _checkpoint_matches, _complete_cancellation
-from .planning_helpers import _aware, _refused_retries, _start_parent, _stored_job_plan
-from .provider import _ADAPTER
-from .result_helpers import _phase_result, _read_progress
+from vonk_control.run_switch_operations.evidence_waits import (
+    RunSwitchPostStopInventoryPending,
+)
+from vonk_control.run_switch_operations.image_receipts import _build_receipt_in_session
+from vonk_control.run_switch_operations.interfaces import (
+    PhaseExecution,
+    _PhasePreflightGate,
+)
+from vonk_control.run_switch_operations.observation_helpers import (
+    _failure_code_of,
+    _phase_request_key,
+)
+from vonk_control.run_switch_operations.observation_window import checkpoint_verdict
+from vonk_control.run_switch_operations.ownership import (
+    _checkpoint_matches,
+    _complete_cancellation,
+)
+from vonk_control.run_switch_operations.planning_helpers import (
+    _aware,
+    _refused_retries,
+    _start_parent,
+    _stored_job_plan,
+)
+from vonk_control.run_switch_operations.provider import _ADAPTER
+from vonk_control.run_switch_operations.result_helpers import (
+    _phase_result,
+    _read_progress,
+)
+from vonk_control.run_switch_operations.results import _persisted_result
+from vonk_control.runtime_image_preparation.contracts import (
+    RuntimeImagePreparationError,
+)
+from vonk_control.stall_window import Verdict, stall_deadline
+from vonk_control.stored.rows import read_row_column
 
 if TYPE_CHECKING:
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 class PhaseDispatchMixin:

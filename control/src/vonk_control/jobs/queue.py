@@ -21,14 +21,13 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitReason,
 )
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
-
-from ..admission_locking import ConstraintReplay, admitting
-from ..categorized_errors import InvalidType, InvalidValue, MissingRecord
-from ..compiled_execution_plan import MAX_COMPILED_EXECUTION_PLAN_BYTES
-from ..lifecycle.job import JobAdapter
-from ..models.jobs import Job, JobAttempt
-from ..models.operations import AgentOperation
-from ..optimistic import Stale, transition
+from vonk_control.admission_locking import ConstraintReplay, admitting
+from vonk_control.categorized_errors import InvalidType, InvalidValue, MissingRecord
+from vonk_control.compiled_execution_plan import MAX_COMPILED_EXECUTION_PLAN_BYTES
+from vonk_control.lifecycle.job import JobAdapter
+from vonk_control.models.jobs import Job, JobAttempt
+from vonk_control.models.operations import AgentOperation
+from vonk_control.optimistic import Stale, transition
 
 _SENSITIVE = re.compile(r"(?i)(password|secret|token|private.?key|authorization)")
 _MAX_PAYLOAD = 65_536

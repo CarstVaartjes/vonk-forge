@@ -14,25 +14,24 @@ from pydantic import (
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
-
-from ..distribution_assignment import NodeDistributionAssignment
-from ..model_cache.contract import ModelCacheDownloadResult
-from ..operations.blockers import MAX_BLOCKERS, OperationBlocker
-from ..runtime_image_preparation.contracts import RuntimeImageReceipt
-from ..strict_json import StrictModel
-from .identity import NodeId, UuidId
-from .progress import (
+from vonk_control.distribution_assignment import NodeDistributionAssignment
+from vonk_control.model_cache.contract import ModelCacheDownloadResult
+from vonk_control.operations.blockers import MAX_BLOCKERS, OperationBlocker
+from vonk_control.run_switch_contract.identity import NodeId, UuidId
+from vonk_control.run_switch_contract.progress import (
     ArtifactVerificationEvidence,
     RunSwitchChildProgress,
     RunSwitchMemberReceipt,
     RunSwitchRankReceipt,
     _FailureText,
 )
-from .vocabulary import (
+from vonk_control.run_switch_contract.vocabulary import (
     Digest,
     RunSwitchContainerBuildState,
     RunSwitchSubphase,
 )
+from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
+from vonk_control.strict_json import StrictModel
 
 
 class ArtifactVerificationResult(StrictModel):

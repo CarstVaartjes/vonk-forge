@@ -17,25 +17,20 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitReason,
 )
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
+from vonk_control.categorized_errors import InvalidValue, MissingRecord
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import AvailabilityJobPayload, RecipeBuildParent
 from vonk_control.lifecycle.evidence import Residue
-
-from ..categorized_errors import InvalidValue, MissingRecord
-from ..jobs import states as job_states
-from ..jobs.documents import AvailabilityJobPayload, RecipeBuildParent
-from ..model_cache import states as model_cache_states
-from ..models.cache import ModelCacheOperation, RecipeBuild
-from ..models.jobs import Job
-from ..recipe_builds.cancellation import (
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.models.cache import ModelCacheOperation, RecipeBuild
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_builds.cancellation import (
     BuildConsumerError,
     current_build_consumers,
     lock_build_dependency,
     request_build_cancellation,
 )
-from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
-from ..recipe_update_batches.contract import UPDATE_KIND, RecipeUpdateResponse
-from ..stored.rows import read_row_column
-from ..strict_json import serialize_json_value
-from .contracts import (
+from vonk_control.recipe_image_availability.contracts import (
     OPERATION_KIND,
     ModelCacheCancellationOwner,
     RecipeImageAvailabilityInvalid,
@@ -43,15 +38,26 @@ from .contracts import (
     _canonical_cancellation_id,
     _read,
 )
-from .reader_contract import (
+from vonk_control.recipe_image_availability.reader_contract import (
     StoredAvailabilityIdentity,
 )
-from .view_contract import (
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeImageAvailabilityView,
 )
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
+from vonk_control.recipe_update_batches.contract import (
+    UPDATE_KIND,
+    RecipeUpdateResponse,
+)
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
 
 
 def update(

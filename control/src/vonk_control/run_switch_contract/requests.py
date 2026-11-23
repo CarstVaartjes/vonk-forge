@@ -14,10 +14,9 @@ from vonk_forge_contracts import EndpointAlias
 
 from vonk_agent_protocol.gpu_clock import GpuClockRange
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
-
-from ..strict_json import StrictModel
-from .identity import NodeId, UuidId
-from .vocabulary import Digest, RunSwitchPlacementAction
+from vonk_control.run_switch_contract.identity import NodeId, UuidId
+from vonk_control.run_switch_contract.vocabulary import Digest, RunSwitchPlacementAction
+from vonk_control.strict_json import StrictModel
 
 
 class InvocationMetadata(StrictModel):

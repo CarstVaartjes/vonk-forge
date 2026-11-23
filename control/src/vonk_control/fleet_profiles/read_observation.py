@@ -21,8 +21,7 @@ from sqlalchemy import event
 from sqlalchemy.orm import ORMExecuteState, Session, SessionTransaction
 
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-
-from ..categorized_errors import BookkeepingUnknown
+from vonk_control.categorized_errors import BookkeepingUnknown
 
 PROFILE_READ_STORAGE_SECONDS = 2.0
 _WORKERS = 8

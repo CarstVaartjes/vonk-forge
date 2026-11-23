@@ -13,7 +13,7 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from .stall_window import Verdict, progress_verdict
+from vonk_control.stall_window import Verdict, progress_verdict
 
 
 def tree_bytes(*roots: Path) -> int:

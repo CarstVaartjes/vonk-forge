@@ -45,9 +45,8 @@ from datetime import timedelta
 from pathlib import Path
 
 from vonk_agent_protocol.reason_codes.images import ImageStoreCode
-
-from .logging import log_event
-from .stalled_process import run_until_stalled, tree_bytes
+from vonk_control.logging import log_event
+from vonk_control.stalled_process import run_until_stalled, tree_bytes
 
 IMAGE_CACHE_DIRECTORY = "image-cache"
 LAYOUT_DIRECTORY = "oci"

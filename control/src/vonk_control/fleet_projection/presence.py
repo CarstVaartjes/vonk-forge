@@ -11,18 +11,8 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.reason_codes.admission import InstallDegradedReason
 from vonk_agent_protocol.reason_codes.evidence import RunDegradedReason
 from vonk_agent_protocol.state_machines import InstallationState, RouteState, RunState
-
-from ..cluster_mappings import mapping_option_choices
-from ..load_swap import held_rise, readable_run_plan
-from ..machine_states import rank_installed, read_state
-from ..models.catalog import CatalogDocumentRevision
-from ..models.mapping import ClusterMappingNode
-from ..recipe_operations.observation_helpers import _run_is_one_shot
-from ..recipe_update_batches.notice import recipe_update_notice
-from ..run_readiness import run_not_ready_for_profile
-from ..run_states import ENDED_RUN_STATES
-from ..strict_json import warn_unreadable_once
-from .common import (
+from vonk_control.cluster_mappings import mapping_option_choices
+from vonk_control.fleet_projection.common import (
     InstallationPresence,
     InstallationPresenceRow,
     LoadedPresence,
@@ -37,9 +27,18 @@ from .common import (
     _unavailable_presence,
     _utc,
 )
+from vonk_control.load_swap import held_rise, readable_run_plan
+from vonk_control.machine_states import rank_installed, read_state
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.mapping import ClusterMappingNode
+from vonk_control.recipe_operations.observation_helpers import _run_is_one_shot
+from vonk_control.recipe_update_batches.notice import recipe_update_notice
+from vonk_control.run_readiness import run_not_ready_for_profile
+from vonk_control.run_states import ENDED_RUN_STATES
+from vonk_control.strict_json import warn_unreadable_once
 
 if TYPE_CHECKING:
-    from .service import FleetProjection
+    from vonk_control.fleet_projection.service import FleetProjection
 
 
 def _installed_presence(

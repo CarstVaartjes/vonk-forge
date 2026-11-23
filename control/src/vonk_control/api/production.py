@@ -17,67 +17,79 @@ from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 import vonk_control
 from vonk_agent_protocol.capability_reply import ControllerCapability
 from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
-
-from ..agent_jobs.contracts import controller_result_consumer
-from ..agent_services import build_agent_services
-from ..agent_upgrades.service import AgentUpgradeService
-from ..artifact_jobs.blob_store import ArtifactBlobStore
-from ..artifact_jobs.service import ArtifactJobService
-from ..auth import CursorCodec, TokenCodec
-from ..availability_production.production import build_recipe_image_availability
-from ..bounded_retry import REQUEST_PAUSES
-from ..browser_auth import BrowserAuthService
-from ..capabilities import CapabilityRegistry, CapabilityUnavailableError
-from ..catalog.service import CatalogService
-from ..catalog.sync import ManagedRecipeCatalogSyncService, catalog_sync_failure_reason
-from ..cluster_mappings import ClusterMappingService
-from ..compose_bundle import compose_bundle
-from ..db.connections import build_engine, session_factory
-from ..distribution_executor.preparation import CompositeDistributionPhaseExecutor
-from ..execution_plan_service import ControllerExecutionPlanService
-from ..failure_evidence import FailureEvidenceService
-from ..fleet_events import FleetEventRepository
-from ..fleet_profiles.factory import build_production_fleet_profile_service
-from ..fleet_projection.service import FleetProjection
-from ..fleet_stream import FleetStream
-from ..gateway.keys import GatewayKeyError, GatewayKeyService, keep_default_key
-from ..gateway.route_grants import recipe_key_routes
-from ..gateway.route_runtime import (
+from vonk_control.agent_jobs.contracts import controller_result_consumer
+from vonk_control.agent_services import build_agent_services
+from vonk_control.agent_upgrades.service import AgentUpgradeService
+from vonk_control.api.application import create_app
+from vonk_control.api.common import _LOGGER, SpaFiles
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
+from vonk_control.artifact_jobs.service import ArtifactJobService
+from vonk_control.auth import CursorCodec, TokenCodec
+from vonk_control.availability_production.production import (
+    build_recipe_image_availability,
+)
+from vonk_control.bounded_retry import REQUEST_PAUSES
+from vonk_control.browser_auth import BrowserAuthService
+from vonk_control.capabilities import CapabilityRegistry, CapabilityUnavailableError
+from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync import (
+    ManagedRecipeCatalogSyncService,
+    catalog_sync_failure_reason,
+)
+from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.compose_bundle import compose_bundle
+from vonk_control.db.connections import build_engine, session_factory
+from vonk_control.distribution_executor.preparation import (
+    CompositeDistributionPhaseExecutor,
+)
+from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.failure_evidence import FailureEvidenceService
+from vonk_control.fleet_events import FleetEventRepository
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.fleet_projection.service import FleetProjection
+from vonk_control.fleet_stream import FleetStream
+from vonk_control.gateway.keys import (
+    GatewayKeyError,
+    GatewayKeyService,
+    keep_default_key,
+)
+from vonk_control.gateway.route_grants import recipe_key_routes
+from vonk_control.gateway.route_runtime import (
     AtomicRouteBundlePublisher,
     FileSupervisorAcknowledger,
 )
-from ..install_admission.service import InstallAdmissionService
-from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
-from ..jobs.queue import JobService
-from ..library.assessment import LibraryAssessment
-from ..library_projection.service import LibraryProjection
-from ..logging import configure_controller_logging, log_event, redact_text
-from ..metrics.registry import (
+from vonk_control.install_admission.service import InstallAdmissionService
+from vonk_control.inventory.repository import INVENTORY_MAX_AGE_SECONDS
+from vonk_control.jobs.queue import JobService
+from vonk_control.library.assessment import LibraryAssessment
+from vonk_control.library_projection.service import LibraryProjection
+from vonk_control.logging import configure_controller_logging, log_event, redact_text
+from vonk_control.metrics.registry import (
     MetricsRegistry,
     OperationalMetricsCollector,
     read_runnable_job_ages,
 )
-from ..model_cache.api import register_model_cache_operation_provider
-from ..model_cache.service import ModelCacheService
-from ..models.jobs import Job
-from ..observation.platform import PlatformObserver
-from ..operation_api.durable import durable_operation_services
-from ..operator_projection_api.wiring import build_fleet_operator_services
-from ..presence import ManagementAddressPolicy
-from ..recipe_builds.service import RecipeBuildService
-from ..recipe_operations.operation_worker import RecipeOperationWorker
-from ..recipe_operations.service import RecipeOperationService
-from ..recipe_routes.publisher import AtomicRecipeRoutePublisher
-from ..recipe_routes.service import RecipeRouteService
-from ..run_admission import RunAdmissionService
-from ..run_switch_operations.service import RunSwitchOperationService
-from ..runtime_image_preparation.preparation import (
+from vonk_control.model_cache.api import register_model_cache_operation_provider
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.jobs import Job
+from vonk_control.observation.platform import PlatformObserver
+from vonk_control.operation_api.durable import durable_operation_services
+from vonk_control.operator_projection_api.wiring import build_fleet_operator_services
+from vonk_control.presence import ManagementAddressPolicy
+from vonk_control.recipe_builds.service import RecipeBuildService
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
+from vonk_control.recipe_routes.service import RecipeRouteService
+from vonk_control.run_admission import RunAdmissionService
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runtime_image_preparation.preparation import (
     make_runtime_image_receipt_preparer,
     stored_runtime_image_resolver,
 )
-from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from ..runtime_image_preparation.transport import OciLayoutImageTransport
-from ..settings import (
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
+from vonk_control.runtime_image_preparation.transport import OciLayoutImageTransport
+from vonk_control.settings import (
     AGENT_RELEASE_API_URL,
     ARTIFACT_JOB_RETENTION_SECONDS,
     ARTIFACT_JOB_STORAGE_MAX_BYTES,
@@ -90,11 +102,12 @@ from ..settings import (
     WORKER_MEMORY_REPORT_MAX_AGE_SECONDS,
     Settings,
 )
-from ..source_bundles import DatabaseSourceBundleStore
-from ..telemetry.samples import TelemetryRepository
-from ..worker.memory import read_worker_memory_report, worker_memory_report_path
-from .application import create_app
-from .common import _LOGGER, SpaFiles
+from vonk_control.source_bundles import DatabaseSourceBundleStore
+from vonk_control.telemetry.samples import TelemetryRepository
+from vonk_control.worker.memory import (
+    read_worker_memory_report,
+    worker_memory_report_path,
+)
 
 
 class LibraryObservations:

@@ -23,28 +23,29 @@ from vonk_agent_protocol.outcome import (
 )
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
-
-from ..fleet_profile_contract.applications import FleetProfileIntendedConfiguration
-from ..fleet_profile_contract.assessment import FleetProfileReason
-from ..fleet_profile_contract.definitions import (
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileIntendedConfiguration,
+)
+from vonk_control.fleet_profile_contract.assessment import FleetProfileReason
+from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignment,
     FleetProfileDefinition,
 )
-from ..fleet_profile_contract.effects import FleetProfileEffects
-from ..fleet_profile_contract.review import FleetProfilePreview
-from ..fleet_profile_contract.vocabulary import (
+from vonk_control.fleet_profile_contract.effects import FleetProfileEffects
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profile_contract.vocabulary import (
     FleetProfileAssignmentState,
     FleetProfileSupersedeCode,
 )
-from ..lifecycle.evidence import Residue
-from ..models.execution import RecipeInstallation, RecipeRun
-from ..models.mapping import ClusterMapping
-from ..operations.blockers import OperationBlocker, make_blocker
-from ..preparation_contract import RuntimeImageIdentity
-from ..run_switch_contract.plans import RunSwitchAssessment
-from ..run_switch_operations.errors import RunSwitchOperationConflict
-from ..storage_demands import StorageRelief
-from ..wait_contract import QueueWait
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.execution import RecipeInstallation, RecipeRun
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.operations.blockers import OperationBlocker, make_blocker
+from vonk_control.preparation_contract import RuntimeImageIdentity
+from vonk_control.run_switch_contract.plans import RunSwitchAssessment
+from vonk_control.run_switch_operations.errors import RunSwitchOperationConflict
+from vonk_control.storage_demands import StorageRelief
+from vonk_control.wait_contract import QueueWait
 
 
 class PreparationStarter(Protocol):

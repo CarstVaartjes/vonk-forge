@@ -17,26 +17,32 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 from dataclasses import asdict, dataclass, field
 
-from ..cli_outcome import SubmissionAcceptance
-from ..cli_render.dispatch import render_payload
-from ..cli_states import PARTIAL_FIELD
-from ..control_client.errors import (
+from cluster_profiles.cli_outcome import SubmissionAcceptance
+from cluster_profiles.cli_render.dispatch import render_payload
+from cluster_profiles.cli_states import PARTIAL_FIELD
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlConflict,
     ControlMalformedResponse,
 )
-from ..generated_control.models.cache_removal_review import CacheRemovalReview
-from ..generated_control.models.fleet_model_removal_effects import (
-    FleetModelRemovalEffects,
-)
-from .cache_removal import (
+from cluster_profiles.controller_cli.cache_removal import (
     _cache_removal_review,
     _model_removal_reconnect,
     _submit_model_removal,
 )
-from .common import ControllerClient, _cache_operation_id, _query
-from .confirmation import _can_prompt, _confirm_action
-from .selection import _library_pages
+from cluster_profiles.controller_cli.common import (
+    ControllerClient,
+    _cache_operation_id,
+    _query,
+)
+from cluster_profiles.controller_cli.confirmation import _can_prompt, _confirm_action
+from cluster_profiles.controller_cli.selection import _library_pages
+from cluster_profiles.generated_control.models.cache_removal_review import (
+    CacheRemovalReview,
+)
+from cluster_profiles.generated_control.models.fleet_model_removal_effects import (
+    FleetModelRemovalEffects,
+)
 
 _LIST_BUDGET_SECONDS = 60.0
 _REVIEW_WORKERS = 4

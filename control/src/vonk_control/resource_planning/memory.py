@@ -16,12 +16,14 @@ from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool
 from vonk_agent_protocol.reason_codes.resources import ResourcePlanningCode
-
-from .demand import _resource_evidence, resource_demand
-from .memory_kinds import memory_reservation_kind, memory_reservation_kinds
-from .reasons import _reason
-from .settings import resolve_effective_settings
-from .types import (
+from vonk_control.resource_planning.demand import _resource_evidence, resource_demand
+from vonk_control.resource_planning.memory_kinds import (
+    memory_reservation_kind,
+    memory_reservation_kinds,
+)
+from vonk_control.resource_planning.reasons import _reason
+from vonk_control.resource_planning.settings import resolve_effective_settings
+from vonk_control.resource_planning.types import (
     NO_SWAP,
     CapacitySnapshot,
     EffectiveResourceSettings,

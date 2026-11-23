@@ -10,19 +10,14 @@ from vonk_forge_contracts import ModelDefinition
 from vonk_forge_contracts.model import ModelReference
 
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-
-from ..catalog.queries import active_head_revision
-from ..catalog.revision_contract import (
+from vonk_control.catalog.queries import active_head_revision
+from vonk_control.catalog.revision_contract import (
     CatalogRevisionContractError,
     read_catalog_document,
 )
-from ..categorized_errors import InvalidValue
-from ..models.cache import ModelCacheSet
-from ..models.catalog import CatalogDocumentRevision
-from ..stored.states import CatalogRevisionState
-from ..strict_json import serialize_json_value
-from .artifacts import ArtifactSetManifest, _optional_digest
-from .catalog_helpers import (
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, _optional_digest
+from vonk_control.model_cache.catalog_helpers import (
     _datetime,
     _iso,
     _model_lineage_signature,
@@ -30,14 +25,15 @@ from .catalog_helpers import (
     _revision_identity,
     _same_model_artifact_identity,
 )
-from .constants import (
-    SCHEMA_VERSION,
-    SOURCE_POLICY,
-)
-from .errors import ModelCacheConflictInvalid
+from vonk_control.model_cache.constants import SCHEMA_VERSION, SOURCE_POLICY
+from vonk_control.model_cache.errors import ModelCacheConflictInvalid
+from vonk_control.models.cache import ModelCacheSet
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.stored.states import CatalogRevisionState
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class UpdatesMixin:

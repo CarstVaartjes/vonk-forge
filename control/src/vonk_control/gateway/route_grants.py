@@ -8,10 +8,9 @@ from vonk_forge_contracts import read_recipe
 from vonk_forge_contracts.recipe import RecipeDecisionSettings
 
 from vonk_agent_protocol.state_machines import RouteState, RunState
-
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import RecipeInstallation, RecipeRun
-from ..recipe_routes.shared import RecipeRouteNotReady
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation, RecipeRun
+from vonk_control.recipe_routes.shared import RecipeRouteNotReady
 
 
 class GatewayInferenceRoute(StrEnum):

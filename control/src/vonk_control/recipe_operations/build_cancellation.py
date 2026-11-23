@@ -15,45 +15,41 @@ from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOper
 from vonk_agent_protocol.build_import import RecipeBuildCleanupRequest
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
-from vonk_control.recovery_policy import RECOVERY
-
-from ..admission_locking import (
-    admission_attempts,
-    admission_wait_exhausted,
-)
-from ..jobs import states as job_states
-from ..jobs.documents import controller_recipe_document
-from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.evidence import (
-    BookkeepingReason,
-    retire_as_unknown,
-)
-from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..lifecycle.types import Outcome
-from ..models.cache import RecipeBuild
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..owner_liveness import OwnerKind, issued_for
-from ..prebuilt_images import prebuilt_reference
-from ..recipe_builds.cancellation import (
+from vonk_control.admission_locking import admission_attempts, admission_wait_exhausted
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import controller_recipe_document
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.lifecycle.recipe_operation import RecipeOperationAdapter
+from vonk_control.lifecycle.types import Outcome
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.owner_liveness import OwnerKind, issued_for
+from vonk_control.prebuilt_images import prebuilt_reference
+from vonk_control.recipe_builds.cancellation import (
     BuildConsumerError,
     build_cancellation,
     current_build_consumers,
     read_build_intent,
     request_build_cancellation,
 )
-from ..stored.states import RecipeBuildState
-from ..strict_json import serialize_json_value
-from .errors import RecipeBuildOwnershipBusy, RecipeRequestInvalid
-from .observation_helpers import _aware
-from .progress import (
+from vonk_control.recipe_operations.errors import (
+    RecipeBuildOwnershipBusy,
+    RecipeRequestInvalid,
+)
+from vonk_control.recipe_operations.observation_helpers import _aware
+from vonk_control.recipe_operations.progress import (
     _parent_force_rebuild,
     _parent_identity,
 )
+from vonk_control.recovery_policy import RECOVERY
+from vonk_control.stored.states import RecipeBuildState
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class BuildCancellationMixin:

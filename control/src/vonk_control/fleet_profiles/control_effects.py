@@ -18,48 +18,52 @@ from vonk_agent_protocol.state_machines import (
     DesiredAssignmentState,
     ObservedAssignmentState,
 )
-
-from ..fleet_profile_contract.assessment import FleetProfileReason
-from ..fleet_profile_contract.definitions import FleetProfileAssignment
-from ..fleet_profile_contract.effects import (
+from vonk_control.fleet_profile_contract.assessment import FleetProfileReason
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profile_contract.effects import (
     FleetProfileEffects,
     FleetProfileInstallationEffect,
     FleetProfileRunEffect,
 )
-from ..gpu.clock import profile_gpu_clock_effects
-from ..jobs import states as job_states
-from ..lifecycle.evidence import Residue
-from ..models.execution import STOPPABLE_RUN_STATES, RecipeInstallation, RecipeRun
-from ..models.fleet import AgentNode, FleetProfileApplication
-from ..models.jobs import Job
-from ..models.mapping import ClusterMappingNode
-from ..preparation_contract import RuntimeImageIdentity
-from ..run_route_name import carries_alias
-from ..run_switch_contract.requests import (
-    RunSwitchProfileStopScope,
-    SparkGroup,
-    SparkGroupNode,
-)
-from ..strict_json import warn_unreadable_once
-from . import states as fleet_profile_states
-from .assignment_assessment import (
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.fleet_profiles.assignment_assessment import (
     _assignment_rows,
     _assignment_state,
     _installation_node_ids,
     _installation_nodes,
     _run_nodes,
 )
-from .continuing_effects import _continuing_effects, _pending_effects
-from .contracts import (
-    _ProfileControlEffects,
+from vonk_control.fleet_profiles.continuing_effects import (
+    _continuing_effects,
+    _pending_effects,
 )
-from .dependencies import _ACTIVE_INSTALL_STATES
-from .persistence import (
+from vonk_control.fleet_profiles.contracts import _ProfileControlEffects
+from vonk_control.fleet_profiles.dependencies import _ACTIVE_INSTALL_STATES
+from vonk_control.fleet_profiles.persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
     _persisted_profile_scope,
     _workload_intent_ordinal,
 )
+from vonk_control.gpu.clock import profile_gpu_clock_effects
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.execution import (
+    STOPPABLE_RUN_STATES,
+    RecipeInstallation,
+    RecipeRun,
+)
+from vonk_control.models.fleet import AgentNode, FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMappingNode
+from vonk_control.preparation_contract import RuntimeImageIdentity
+from vonk_control.run_route_name import carries_alias
+from vonk_control.run_switch_contract.requests import (
+    RunSwitchProfileStopScope,
+    SparkGroup,
+    SparkGroupNode,
+)
+from vonk_control.strict_json import warn_unreadable_once
 
 
 def switch_step_scope(

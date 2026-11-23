@@ -11,24 +11,23 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..admission_locking import AdmissionLockBusy
-from ..agent_operation_facts import attempt_is_live, aware
-from ..journal_models import RunSwitchJournalRepairPending
-from ..models.jobs import Job
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..persisted_waits import schedule_wait
-from ..run_switch_contract.journal import (
+from vonk_control.admission_locking import AdmissionLockBusy
+from vonk_control.agent_operation_facts import attempt_is_live, aware
+from vonk_control.journal_models import RunSwitchJournalRepairPending
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.run_switch_contract.journal import (
     JournalRepairDisposition,
     JournalRepairPurpose,
 )
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_operations.results import _persisted_result
-from ..stall_window import Verdict, Wait, progress_verdict, stall_deadline
-from .discovery import REPAIR_WAIT, _candidate
-from .ending import _end_unproven_journal
-from .pending import REPAIR_BUDGET, _pending
-from .repair import _try_repair_once
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_journal_repair.discovery import REPAIR_WAIT, _candidate
+from vonk_control.run_switch_journal_repair.ending import _end_unproven_journal
+from vonk_control.run_switch_journal_repair.pending import REPAIR_BUDGET, _pending
+from vonk_control.run_switch_journal_repair.repair import _try_repair_once
+from vonk_control.run_switch_operations.results import _persisted_result
+from vonk_control.stall_window import Verdict, Wait, progress_verdict, stall_deadline
 
 
 def try_repair_zero_transfer_journal(

@@ -8,19 +8,19 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from .display_memory import DisplayMemoryObservation
-from .gpu_clock import GpuClockSupport
-from .host_helper import SignedHostHelperGrant
-from .host_tuning import HostTuning
-from .optional_evidence import (
+from vonk_agent_protocol.display_memory import DisplayMemoryObservation
+from vonk_agent_protocol.gpu_clock import GpuClockSupport
+from vonk_agent_protocol.host_helper import SignedHostHelperGrant
+from vonk_agent_protocol.host_tuning import HostTuning
+from vonk_agent_protocol.optional_evidence import (
     EvidenceGroup,
     OptionalEvidenceModel,
     fail_open_on_optional_evidence,
 )
-from .reason_codes.evidence import AgentEvidenceCode
-from .store_cleanup import StoreRetentionFailure
-from .swap import SwapObservation
-from .wire_model import (
+from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
+from vonk_agent_protocol.store_cleanup import StoreRetentionFailure
+from vonk_agent_protocol.swap import SwapObservation
+from vonk_agent_protocol.wire_model import (
     MAX_TELEMETRY_CAPACITY_BYTES,
     WireEnum,
     WireModel,

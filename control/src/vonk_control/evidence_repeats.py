@@ -15,20 +15,19 @@ from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.contracts import AgentUpgradePayload
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import OutcomeUnknown
-
-from . import agent_operation_states
-from .agent_contacts import lock_contact, store_contact_evidence
-from .models.evidence import REPEATED_EVIDENCE_SEQUENCE
-from .models.fleet import AgentNodeContact, FleetProfileApplication
-from .models.operations import AgentOperation, AgentOperationAttempt
-from .recovery_policy import RECOVERY
-from .repeated_evidence_contract import (
+from vonk_control import agent_operation_states
+from vonk_control.agent_contacts import lock_contact, store_contact_evidence
+from vonk_control.models.evidence import REPEATED_EVIDENCE_SEQUENCE
+from vonk_control.models.fleet import AgentNodeContact, FleetProfileApplication
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.recovery_policy import RECOVERY
+from vonk_control.repeated_evidence_contract import (
     RepeatedEvidence,
     RepeatedEvidenceSubject,
     is_contact_subject,
 )
-from .settings import PROFILE_STALL_WINDOW_SECONDS
-from .stored.rows import read_row_column
+from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
+from vonk_control.stored.rows import read_row_column
 
 _LOGGER = logging.getLogger(__name__)
 _SHOWN_FOR = timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS)

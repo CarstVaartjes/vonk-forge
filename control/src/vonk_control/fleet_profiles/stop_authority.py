@@ -21,47 +21,23 @@ from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.state_machines import RunState
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..categorized_errors import BookkeepingUnknown
-from ..fleet_profile_contract.switch_state import FleetProfileSwitchChildKind
-from ..fleet_profile_contract.vocabulary import profile_switch_child_request_key
-from ..jobs import states as job_states
-from ..jobs.documents import RecipeStopParent, RunSwitchJobPayload
-from ..lifecycle.evidence import Residue
-from ..lifecycle.job_ranks import fan_in_cancellation_key
-from ..models.execution import ArtifactJob, RecipeInstallation, RecipeRun, RunNode
-from ..models.fleet import (
-    AgentNode,
-    FleetProfile,
-    FleetProfileApplication,
-    FleetProfileSelection,
+from vonk_control.categorized_errors import BookkeepingUnknown
+from vonk_control.fleet_profile_contract.switch_state import FleetProfileSwitchChildKind
+from vonk_control.fleet_profile_contract.vocabulary import (
+    profile_switch_child_request_key,
 )
-from ..models.jobs import Job
-from ..models.mapping import ClusterMappingNode
-from ..models.operations import AgentOperation
-from ..owner_liveness import OwnerKind
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.vocabulary import RunSwitchPlacementAction
-from ..run_switch_operations.image_receipts import _plan_target_node_ids
-from ..run_switch_operations.observation_helpers import (
-    _phase_request_key,
-    _stop_child_request_key,
-)
-from ..stored.rows import read_row_column
-from ..strict_json import read_stored_model
-from .continuing_effects import (
+from vonk_control.fleet_profiles.continuing_effects import (
     _adopted_application_scope,
     _application_is_current_selection,
     _superseding_intent,
 )
-from .persistence import (
+from vonk_control.fleet_profiles.persistence import (
     _intended_profile,
     _persisted_profile_plan,
     _persisted_profile_progress,
     _reviewed_profile_plan,
 )
-from .stop_contract import (
+from vonk_control.fleet_profiles.stop_contract import (
     ProfileJobRunStopAuthorization,
     ProfileJobRunStopJob,
     ProfileJobRunStopTarget,
@@ -69,6 +45,36 @@ from .stop_contract import (
     ProfileStopOwnerBinding,
     jobrun_stop_key,
 )
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import RecipeStopParent, RunSwitchJobPayload
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.job_ranks import fan_in_cancellation_key
+from vonk_control.models.execution import (
+    ArtifactJob,
+    RecipeInstallation,
+    RecipeRun,
+    RunNode,
+)
+from vonk_control.models.fleet import (
+    AgentNode,
+    FleetProfile,
+    FleetProfileApplication,
+    FleetProfileSelection,
+)
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMappingNode
+from vonk_control.models.operations import AgentOperation
+from vonk_control.owner_liveness import OwnerKind
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.vocabulary import RunSwitchPlacementAction
+from vonk_control.run_switch_operations.image_receipts import _plan_target_node_ids
+from vonk_control.run_switch_operations.observation_helpers import (
+    _phase_request_key,
+    _stop_child_request_key,
+)
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import read_stored_model
 
 _PLACEMENT_ACTIONS = frozenset(get_args(RunSwitchPlacementAction))
 

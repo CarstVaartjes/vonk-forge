@@ -13,9 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from vonk_agent_protocol.agent_operations import AgentFailureResult
 from vonk_agent_protocol.failure_evidence import add_known_dropped_bytes
 from vonk_agent_protocol.wire_model import ERROR_CODE_PATTERN, OperationProgress
-
-from .. import agent_operation_states
-from ..logging import redact_text
+from vonk_control import agent_operation_states
+from vonk_control.logging import redact_text
 
 _SENSITIVE = re.compile(
     r"(?i)(password|secret|token|private.?key|authorization|cookie)"

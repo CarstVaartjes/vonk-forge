@@ -10,22 +10,22 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import cast
 
-from ..cli_select import SelectorError
-from ..control_client.errors import (
+from cluster_profiles.cli_select import SelectorError
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlForbidden,
     ControlMalformedResponse,
     ControlUnauthorized,
 )
-from ..control_client.schema import validate_control_document
-from ..generated_control.models.library_recipe_projection import (
-    LibraryRecipeProjection,
-)
-from .common import (
+from cluster_profiles.control_client.schema import validate_control_document
+from cluster_profiles.controller_cli.common import (
     MAX_PAGE_LIMIT,
     ControllerClient,
     _known_http_refusal_status,
     _quoted,
+)
+from cluster_profiles.generated_control.models.library_recipe_projection import (
+    LibraryRecipeProjection,
 )
 
 

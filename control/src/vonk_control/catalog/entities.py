@@ -37,19 +37,9 @@ from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.outcome import InvalidRequestError
 from vonk_agent_protocol.reason_codes.catalog import CatalogCode, CatalogSyncCode
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..admission_locking import ConstraintReplay, admitting
-from ..auth import CursorCodec
-from ..identity_insert import insert_identity
-from ..models.catalog import (
-    CatalogDocument,
-    CatalogDocumentHead,
-    CatalogDocumentRevision,
-    CatalogRecipeModelReference,
-)
-from ..stored.states import CatalogRevisionState
-from ..strict_json import serialize_json_value
-from .revision_contract import (
+from vonk_control.admission_locking import ConstraintReplay, admitting
+from vonk_control.auth import CursorCodec
+from vonk_control.catalog.revision_contract import (
     CatalogRevisionContractError,
     ModelRevisionProjection,
     PublishedDocument,
@@ -63,7 +53,16 @@ from .revision_contract import (
     rederive_projection,
     write_catalog_projection,
 )
-from .sync_contract import ManagedCatalogSyncProblem
+from vonk_control.catalog.sync_contract import ManagedCatalogSyncProblem
+from vonk_control.identity_insert import insert_identity
+from vonk_control.models.catalog import (
+    CatalogDocument,
+    CatalogDocumentHead,
+    CatalogDocumentRevision,
+    CatalogRecipeModelReference,
+)
+from vonk_control.stored.states import CatalogRevisionState
+from vonk_control.strict_json import serialize_json_value
 
 _LOGGER = logging.getLogger(__name__)
 

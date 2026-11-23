@@ -25,24 +25,10 @@ from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.wire_model import canonical_message
-
-from .. import agent_operation_states
-from ..admission_locking import admission_attempts
-from ..agent_contacts import record_contact
-from ..agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS, fencing_intent
-from ..agent_operation_facts import aware as _aware
-from ..agent_outcome import stored_report
-from ..auth import AgentSource
-from ..jobs import states as job_states
-from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.types import CancelRequested, LeaseLapsed, Outcome, Reported
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..offline_stops import is_deferred_stop
-from ..optimistic import Stale, transition
-from ..own_cleanup import CLEANUP_KINDS
-from .contracts import (
+from vonk_control import agent_operation_states
+from vonk_control.admission_locking import admission_attempts
+from vonk_control.agent_contacts import record_contact
+from vonk_control.agent_jobs.contracts import (
     _ABANDONABLE_OPERATIONS,
     _ENDED_PARENT_STATES,
     AgentFence,
@@ -50,19 +36,40 @@ from .contracts import (
     StaleAgentRequest,
     cancelled_job_run,
 )
-from .evidence import (
+from vonk_control.agent_jobs.evidence import (
     _failure_result,
     _lease_expiry_reason,
     sanitized_failure_report,
 )
-from .observation_receipts import adopt_observation_receipt
-from .predicates import _document
-from .retirement import operator_resume_candidates_in_session
-from .retry import superseded_cancellation_deadline
-from .stored import column_field, column_is_document, column_message, column_value
+from vonk_control.agent_jobs.observation_receipts import adopt_observation_receipt
+from vonk_control.agent_jobs.predicates import _document
+from vonk_control.agent_jobs.retirement import operator_resume_candidates_in_session
+from vonk_control.agent_jobs.retry import superseded_cancellation_deadline
+from vonk_control.agent_jobs.stored import (
+    column_field,
+    column_is_document,
+    column_message,
+    column_value,
+)
+from vonk_control.agent_operation_facts import (
+    _WORKLOAD_INTENT_OPERATIONS,
+    fencing_intent,
+)
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.agent_outcome import stored_report
+from vonk_control.auth import AgentSource
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.types import CancelRequested, LeaseLapsed, Outcome, Reported
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.offline_stops import is_deferred_stop
+from vonk_control.optimistic import Stale, transition
+from vonk_control.own_cleanup import CLEANUP_KINDS
 
 if TYPE_CHECKING:
-    from .service import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
 
 
 def succeed(

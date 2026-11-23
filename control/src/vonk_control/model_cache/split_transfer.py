@@ -15,20 +15,19 @@ from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OperatorActionName
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.state_machines import ModelFileState
-
-from ..bounded_retry import bounded_attempts
-from ..categorized_faults import OperationInterrupted
-from ..models.cache import ModelCacheOperation
-from ..worker.memory_contract import WorkerMemoryComponent
-from . import constants
-from .artifacts import ArtifactSpec
-from .constants import _CHUNK_BYTES, _TRANSFER_CLAIM_SECONDS
-from .contract import ModelCacheRepairPayload
-from .errors import ModelCacheStorageUnknown
-from .persistence import _operation_cancellation
+from vonk_control.bounded_retry import bounded_attempts
+from vonk_control.categorized_faults import OperationInterrupted
+from vonk_control.model_cache import constants
+from vonk_control.model_cache.artifacts import ArtifactSpec
+from vonk_control.model_cache.constants import _CHUNK_BYTES, _TRANSFER_CLAIM_SECONDS
+from vonk_control.model_cache.contract import ModelCacheRepairPayload
+from vonk_control.model_cache.errors import ModelCacheStorageUnknown
+from vonk_control.model_cache.persistence import _operation_cancellation
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.worker.memory_contract import WorkerMemoryComponent
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 #: The partials directory of a repair is this prefix plus its transfer id; a

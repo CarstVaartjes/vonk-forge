@@ -13,44 +13,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..distributed_lifecycle import canonical_distributed_readiness
-from ..jobs.documents import (
-    DistributedRecoveryMarker,
-    RecipeStartParent,
-    RecipeStopParent,
-    RecoveryStartItem,
-    StartPhaseOperation,
-    StopPhaseOperation,
-    controller_recipe_document,
-)
-from ..lifecycle.evidence import Residue
-from ..lifecycle.job import JobAdapter
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import RecipeInstallation, RecipeRun, RunNode
-from ..models.fleet import AgentNode, AgentNodeContact
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..recipe_operations.execution_contract import (
-    RecipeExecutionContractError,
-    parse_stored_installation_plan,
-    parse_stored_run_plan,
-)
-from ..recipe_operations.start_payloads import (
-    RecipeStartPayloadError,
-    RecipeStartPlacement,
-    build_recipe_start_payload,
-    start_peer_addresses,
-    validate_distributed_start_timeout_seconds,
-)
-from ..recipe_operations.stop_payloads import (
-    RecipeStopAuthorityError,
-    durable_run_stop_payloads,
-)
-from ..stall_window import stall_deadline
-from ..stored.rows import read_row_column
-from ..strict_json import read_stored_model, serialize_json_value
-from .common import (
+from vonk_control.distributed_lifecycle import canonical_distributed_readiness
+from vonk_control.distributed_recovery.common import (
     _DAMAGED,
     _MISMATCH,
     _MISSING,
@@ -63,6 +27,41 @@ from .common import (
     _RecoveryJobQueue,
     _unproven,
 )
+from vonk_control.jobs.documents import (
+    DistributedRecoveryMarker,
+    RecipeStartParent,
+    RecipeStopParent,
+    RecoveryStartItem,
+    StartPhaseOperation,
+    StopPhaseOperation,
+    controller_recipe_document,
+)
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.job import JobAdapter
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.models.fleet import AgentNode, AgentNodeContact
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_operations.execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_installation_plan,
+    parse_stored_run_plan,
+)
+from vonk_control.recipe_operations.start_payloads import (
+    RecipeStartPayloadError,
+    RecipeStartPlacement,
+    build_recipe_start_payload,
+    start_peer_addresses,
+    validate_distributed_start_timeout_seconds,
+)
+from vonk_control.recipe_operations.stop_payloads import (
+    RecipeStopAuthorityError,
+    durable_run_stop_payloads,
+)
+from vonk_control.stall_window import stall_deadline
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import read_stored_model, serialize_json_value
 
 
 def _start_binds_current_run_plan(session: Session, start: Job, run: RecipeRun) -> bool:

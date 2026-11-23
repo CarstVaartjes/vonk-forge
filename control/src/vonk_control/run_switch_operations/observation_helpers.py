@@ -15,17 +15,19 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import RouteState, RunState
-
-from ..failure_classification import error_code, is_security_failure
-from ..jobs import states as job_states
-from ..jobs.documents import RunSwitchIntent
-from ..models.execution import ACTIVE_RUN_STATES
-from ..models.jobs import Job
-from ..recipe_operations.interfaces import RecipeOperationView, RecipeRunStatusReader
-from ..run_switch_contract.evidence import RunSwitchPhase
-from ..run_switch_contract.plans import RunSwitchPlan
-from .errors import RunSwitchRequestInvalid
-from .planning_helpers import _run_switch_payload
+from vonk_control.failure_classification import error_code, is_security_failure
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import RunSwitchIntent
+from vonk_control.models.execution import ACTIVE_RUN_STATES
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_operations.interfaces import (
+    RecipeOperationView,
+    RecipeRunStatusReader,
+)
+from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.errors import RunSwitchRequestInvalid
+from vonk_control.run_switch_operations.planning_helpers import _run_switch_payload
 
 
 def _established_effect(child: RecipeOperationView, run_id: str) -> RecipeOperationView:

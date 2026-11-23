@@ -7,8 +7,8 @@ from typing import Any
 
 from pydantic import Field, field_validator, model_validator
 
-from .failure_evidence import FailureDiagnostics
-from .wire_model import (
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.wire_model import (
     MAX_RUN_GENERATION,
     AgentProtocolError,
     Uuid4Text,

@@ -16,23 +16,18 @@ from vonk_agent_protocol.agent_words import (
 )
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
-
-from ..admission_locking import patient_admission
-from ..fleet_profile_contract.review import FleetProfilePreview
-from ..fleet_profile_contract.vocabulary import (
+from vonk_control.admission_locking import patient_admission
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profile_contract.vocabulary import (
     FleetProfileOperationState,
     FleetProfileSupersedeCode,
 )
-from ..jobs import states as job_states
-from ..lifecycle.evidence import Residue
-from ..models.fleet import FleetProfile, FleetProfileApplication
-from ..operations.blockers import OperationBlocker, make_blocker
-from .assessment_support import (
+from vonk_control.fleet_profiles.assessment_support import (
     _deferral_code,
     _progress_with_blockers,
     _storage_wait_of,
 )
-from .contracts import (
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileAdmissionBusy,
     FleetProfileAdmissionDefect,
     FleetProfileAdmissionEffectBusy,
@@ -43,22 +38,26 @@ from .contracts import (
     FleetProfileStalePlanConflict,
     _FleetProfileSupersededIntentConflict,
 )
-from .dependencies import (
+from vonk_control.fleet_profiles.dependencies import (
     _CANCELLED_OPERATION,
     _MAX_PARKED_APPLICATION_OBSERVATIONS,
 )
-from .persistence import (
+from vonk_control.fleet_profiles.persistence import (
     _intended_profile,
     _owns_pending_admission,
     _persisted_profile_plan,
     _persisted_profile_progress,
     _stored_progress,
 )
-from .projection_support import (
+from vonk_control.fleet_profiles.projection_support import (
     _aware,
     _digest,
     _profile_document,
 )
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.fleet import FleetProfile, FleetProfileApplication
+from vonk_control.operations.blockers import OperationBlocker, make_blocker
 
 #: Every stored ISO time sorts below this; anything above it is not a time.
 
@@ -70,8 +69,10 @@ def _raw_pending(row: FleetProfileApplication) -> bool:
 
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 class FleetProfileService:

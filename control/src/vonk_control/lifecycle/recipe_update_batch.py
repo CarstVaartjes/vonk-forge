@@ -36,18 +36,14 @@ from typing import Any
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import WaitOwnerKind
 from vonk_agent_protocol.reason_codes.recipes import RecipeUpdateCode
-
-from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
-from ..jobs import states as job_states
-from ..models.jobs import Job
-from ..persisted_waits import initialize_wait, lifecycle_wait, wait_due
-from ..recipe_update_batches.contract import RecipeUpdateChild, RecipeUpdateDocument
-from .adapter import Dispatch
-from .composite import aggregate
-from .core import STOP_BUDGET, transition
-from .reconciler import Settled
-from .reconciler import settle as settle_event
-from .types import (
+from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.adapter import Dispatch
+from vonk_control.lifecycle.composite import aggregate
+from vonk_control.lifecycle.core import STOP_BUDGET, transition
+from vonk_control.lifecycle.reconciler import Settled
+from vonk_control.lifecycle.reconciler import settle as settle_event
+from vonk_control.lifecycle.types import (
     TERMINAL_STATES,
     Claimed,
     Decision,
@@ -60,6 +56,12 @@ from .types import (
     State,
     StopResult,
     Tick,
+)
+from vonk_control.models.jobs import Job
+from vonk_control.persisted_waits import initialize_wait, lifecycle_wait, wait_due
+from vonk_control.recipe_update_batches.contract import (
+    RecipeUpdateChild,
+    RecipeUpdateDocument,
 )
 
 KIND = "recipe.cache.update.v2"

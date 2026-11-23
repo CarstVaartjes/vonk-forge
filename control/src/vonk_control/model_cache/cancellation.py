@@ -11,34 +11,33 @@ from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-
-from ..agent_operation_facts import aware as _aware
-from ..lifecycle.evidence import Residue
-from ..lifecycle.model_cache import ModelCacheStore
-from ..lifecycle.reconciler import Reconciler
-from ..lifecycle.types import CancelRequested, State, Tick
-from ..models.cache import ModelCacheOperation
-from . import states as model_cache_states
-from .artifacts import ArtifactSetManifest, _unique_artifacts
-from .catalog_helpers import _iso
-from .contract import (
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.model_cache import ModelCacheStore
+from vonk_control.lifecycle.reconciler import Reconciler
+from vonk_control.lifecycle.types import CancelRequested, State, Tick
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, _unique_artifacts
+from vonk_control.model_cache.catalog_helpers import _iso
+from vonk_control.model_cache.contract import (
     CacheOperationKind,
     ModelCacheCancellation,
     ModelCacheCancellationRequest,
     ModelCacheOperationPayload,
 )
-from .errors import ModelCacheConflictInvalid
-from .persistence import (
+from vonk_control.model_cache.errors import ModelCacheConflictInvalid
+from vonk_control.model_cache.persistence import (
     _operation_cancellation,
     _operation_payload,
     _operation_progress,
     _store_operation_payload,
 )
-from .progress import cache_phase, progress_document
-from .views import CacheOperationView
+from vonk_control.model_cache.progress import cache_phase, progress_document
+from vonk_control.model_cache.views import CacheOperationView
+from vonk_control.models.cache import ModelCacheOperation
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class CancellationMixin:

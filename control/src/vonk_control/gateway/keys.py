@@ -41,17 +41,23 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitReason,
 )
 from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
+from vonk_control.auth import MUTATION_ROLES, Actor
+from vonk_control.capabilities import CapabilityUnavailableError
+from vonk_control.gateway.keys_contract import (
+    GatewayKeyCreated,
+    GatewayKeyRevoked,
+    GatewayKeyView,
+)
+from vonk_control.gateway.route_grants import BASE_KEY_ROUTES, GatewayInferenceRoute
+from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
+from vonk_control.operation_api.contracts import bounded_error_responses
+from vonk_control.operator_acceptance import (
+    OperatorReceiptResolver,
+    operator_acceptance,
+)
 from vonk_control.operator_receipt_contract import ReceiptPolicy
-
-from ..auth import MUTATION_ROLES, Actor
-from ..capabilities import CapabilityUnavailableError
-from ..operation_api.constants import _ADMIN_OPERATION_IDS
-from ..operation_api.contracts import bounded_error_responses
-from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
-from ..runtime_init import GATEWAY_MASTER_KEY_PATH
-from ..strict_json import StrictJSONModel
-from .keys_contract import GatewayKeyCreated, GatewayKeyRevoked, GatewayKeyView
-from .route_grants import BASE_KEY_ROUTES, GatewayInferenceRoute
+from vonk_control.runtime_init import GATEWAY_MASTER_KEY_PATH
+from vonk_control.strict_json import StrictJSONModel
 
 _LOGGER = logging.getLogger(__name__)
 

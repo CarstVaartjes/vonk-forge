@@ -11,27 +11,25 @@ from collections.abc import Callable, Mapping
 from enum import StrEnum
 from typing import Final, cast
 
-from ..cli_outcome import (
-    operation_state,
+from cluster_profiles.cli_outcome import operation_state
+from cluster_profiles.cli_render.common import _text, _words, terminal_text
+from cluster_profiles.cli_select import SelectorError
+from cluster_profiles.control_client.errors import ControlMalformedResponse
+from cluster_profiles.control_client.schema import validate_control_document
+from cluster_profiles.controller_cli.common import (
+    ControllerClient,
+    _profile_number,
+    _request_key,
 )
-from ..cli_render.common import _text, _words, terminal_text
-from ..cli_select import SelectorError
-from ..control_client.errors import ControlMalformedResponse
-from ..control_client.schema import validate_control_document
-from ..generated_control.models.fleet_profile_effects import FleetProfileEffects
-from ..generated_control.models.fleet_profile_run_effect_action import (
-    FleetProfileRunEffectAction,
-    check_fleet_profile_run_effect_action,
+from cluster_profiles.controller_cli.confirmation import _require_confirmation
+from cluster_profiles.controller_cli.profile import _profile
+from cluster_profiles.controller_cli.profile_authoring import (
+    _profile_save,
+    _read_saved_definition,
+    _with_assignment,
 )
-from ..generated_control.models.library_recipe_projection import LibraryRecipeProjection
-from ..generated_control.models.model_display import ModelDisplay
-from ..generated_control.types import Unset
-from .common import ControllerClient, _profile_number, _request_key
-from .confirmation import _require_confirmation
-from .profile import _profile
-from .profile_authoring import _profile_save, _read_saved_definition, _with_assignment
-from .profile_load import ReviewedDraft, _load_profile
-from .selection import (
+from cluster_profiles.controller_cli.profile_load import ReviewedDraft, _load_profile
+from cluster_profiles.controller_cli.selection import (
     _library_pages,
     _observe_selection,
     _read_concurrently,
@@ -41,6 +39,18 @@ from .selection import (
     _selection_remaining,
     _skipped_read,
 )
+from cluster_profiles.generated_control.models.fleet_profile_effects import (
+    FleetProfileEffects,
+)
+from cluster_profiles.generated_control.models.fleet_profile_run_effect_action import (
+    FleetProfileRunEffectAction,
+    check_fleet_profile_run_effect_action,
+)
+from cluster_profiles.generated_control.models.library_recipe_projection import (
+    LibraryRecipeProjection,
+)
+from cluster_profiles.generated_control.models.model_display import ModelDisplay
+from cluster_profiles.generated_control.types import Unset
 
 
 def _run(

@@ -13,9 +13,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
 from vonk_agent_protocol.wire_model import canonical_message
-
-from .operations.blockers import BlockingOperation, OperationBlocker
-from .strict_json import StrictModel
+from vonk_control.operations.blockers import BlockingOperation, OperationBlocker
+from vonk_control.strict_json import StrictModel
 
 
 class WaitEvidence(StrictModel):

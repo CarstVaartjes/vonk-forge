@@ -25,16 +25,16 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .catalog.queries import WITHOUT_DOCUMENT
-from .catalog.revision_contract import (
+from vonk_control.catalog.queries import WITHOUT_DOCUMENT
+from vonk_control.catalog.revision_contract import (
     CatalogRevisionContractError,
     read_catalog_projection,
 )
-from .content_identity import build_source_bundles
-from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from .models.cache import RecipeBuild
-from .models.catalog import CatalogDocumentRevision
-from .stored.states import RecipeBuildState
+from vonk_control.content_identity import build_source_bundles
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.stored.states import RecipeBuildState
 
 
 @dataclass(frozen=True, slots=True)

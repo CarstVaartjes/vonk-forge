@@ -9,59 +9,50 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
-
-from ..categorized_errors import (
-    InvalidValue,
-    MissingRecord,
-)
-from ..cluster_mappings import (
-    ClusterMappingService,
-    candidate_placements,
-)
-from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
-from ..model_cache.service import ModelCacheService
-from ..preparation_contract import (
-    RuntimeImageIdentity,
-)
-from ..recipe_operations.runtime_specs import (
-    recipe_topology,
-)
-from ..recipe_operations.service import RecipeOperationService
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.requests import (
+from vonk_control.categorized_errors import InvalidValue, MissingRecord
+from vonk_control.cluster_mappings import ClusterMappingService, candidate_placements
+from vonk_control.inventory.repository import INVENTORY_MAX_AGE_SECONDS
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.preparation_contract import RuntimeImageIdentity
+from vonk_control.recipe_operations.runtime_specs import recipe_topology
+from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.requests import (
     RunSwitchPreviewRequest,
     SparkGroup,
     SparkGroupNode,
 )
-from .acceptance import AcceptanceMixin
-from .advance import AdvanceMixin
-from .artifact_inspection import DatabaseRunSwitchArtifactInspector
-from .build_evidence import BuildEvidenceMixin
-from .build_selection import BuildSelectionMixin
-from .cancellation_retry import CancellationRetryMixin
-from .cleanup_planning import CleanupPlanningMixin
-from .constants import _active_recipe_revision
-from .endings import EndingsMixin
-from .errors import RunSwitchRuntimeSpecInvalid
-from .executor import RecipeLifecyclePhaseExecutor
-from .identity_helpers import _primary_model_digest
-from .interfaces import (
+from vonk_control.run_switch_operations.acceptance import AcceptanceMixin
+from vonk_control.run_switch_operations.advance import AdvanceMixin
+from vonk_control.run_switch_operations.artifact_inspection import (
+    DatabaseRunSwitchArtifactInspector,
+)
+from vonk_control.run_switch_operations.build_evidence import BuildEvidenceMixin
+from vonk_control.run_switch_operations.build_selection import BuildSelectionMixin
+from vonk_control.run_switch_operations.cancellation_retry import CancellationRetryMixin
+from vonk_control.run_switch_operations.cleanup_planning import CleanupPlanningMixin
+from vonk_control.run_switch_operations.constants import _active_recipe_revision
+from vonk_control.run_switch_operations.endings import EndingsMixin
+from vonk_control.run_switch_operations.errors import RunSwitchRuntimeSpecInvalid
+from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
+from vonk_control.run_switch_operations.identity_helpers import _primary_model_digest
+from vonk_control.run_switch_operations.interfaces import (
     RunSwitchArtifactInspector,
     RunSwitchArtifactPhaseExecutor,
     RunSwitchPhaseExecutor,
 )
-from .observation import ObservationMixin
-from .phase_dispatch import PhaseDispatchMixin
-from .phase_planning import PhasePlanningMixin
-from .preparation import PreparationMixin
-from .projection import ProjectionMixin
-from .reservation import ReservationMixin
-from .resolution import ResolutionMixin
-from .resource_admission import ResourceAdmissionMixin
-from .resource_fit import ResourceFitMixin
-from .retry_holds import RetryHoldsMixin
-from .run_planning import RunPlanningMixin
-from .stop_planning import StopPlanningMixin
+from vonk_control.run_switch_operations.observation import ObservationMixin
+from vonk_control.run_switch_operations.phase_dispatch import PhaseDispatchMixin
+from vonk_control.run_switch_operations.phase_planning import PhasePlanningMixin
+from vonk_control.run_switch_operations.preparation import PreparationMixin
+from vonk_control.run_switch_operations.projection import ProjectionMixin
+from vonk_control.run_switch_operations.reservation import ReservationMixin
+from vonk_control.run_switch_operations.resolution import ResolutionMixin
+from vonk_control.run_switch_operations.resource_admission import ResourceAdmissionMixin
+from vonk_control.run_switch_operations.resource_fit import ResourceFitMixin
+from vonk_control.run_switch_operations.retry_holds import RetryHoldsMixin
+from vonk_control.run_switch_operations.run_planning import RunPlanningMixin
+from vonk_control.run_switch_operations.stop_planning import StopPlanningMixin
 
 
 class RunSwitchOperationService(

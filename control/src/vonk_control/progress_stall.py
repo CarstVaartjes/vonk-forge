@@ -71,20 +71,21 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitReason,
 )
 from vonk_agent_protocol.wire_model import canonical_message
-
-from .fleet_profile_contract.applications import FleetProfileApplicationProgress
-from .models.fleet import FleetProfileApplication
-from .operations.blockers import (
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.operations.blockers import (
     OperationBlocker,
     ProgressStall,
     StallMark,
     StallWait,
     make_blocker,
 )
-from .persisted_waits import schedule_wait
-from .settings import PROFILE_STALL_WINDOW_SECONDS
-from .stall_window import Verdict, progress_verdict
-from .wait_contract import WaitEvidence, typed_wait_reason
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
+from vonk_control.stall_window import Verdict, progress_verdict
+from vonk_control.wait_contract import WaitEvidence, typed_wait_reason
 
 #: How long a wait shows no movement before it is shown as stalled: the load's
 #: own stall window.  It is longer than a preparation's own stall window, so a

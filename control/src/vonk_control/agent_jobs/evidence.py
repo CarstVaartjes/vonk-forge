@@ -23,31 +23,30 @@ from vonk_agent_protocol.recipe_operations import (
 )
 from vonk_agent_protocol.state_machines import RunState
 from vonk_agent_protocol.wire_model import canonical_message
-
-from .. import agent_operation_states
-from ..agent_contacts import last_seen
-from ..agent_operation_facts import aware as _aware
-from ..failure_evidence import safe_text, sanitize_diagnostics
-from ..fleet_profiles.stop_contract import (
+from vonk_control import agent_operation_states
+from vonk_control.agent_contacts import last_seen
+from vonk_control.agent_jobs.contracts import _REFUSAL_PREFIXES, AgentResultRefused
+from vonk_control.agent_jobs.predicates import _document
+from vonk_control.agent_jobs.stored import column_field, column_message, column_value
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.failure_evidence import safe_text, sanitize_diagnostics
+from vonk_control.fleet_profiles.stop_contract import (
     ProfileJobRunStopJob,
     ProfileStopAuthorityError,
     jobrun_stop_key,
 )
-from ..jobs.documents import RecipeStartParent, RecipeStopParent
-from ..models.execution import RecipeRun, RunNode
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..operations.contract import sanitize_failure_evidence
-from ..recipe_operations.stop_payloads import (
+from vonk_control.jobs.documents import RecipeStartParent, RecipeStopParent
+from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.operations.contract import sanitize_failure_evidence
+from vonk_control.recipe_operations.stop_payloads import (
     durable_run_stop_payloads,
     stop_payload_from_start,
 )
-from ..recovery_policy import FailureKind
-from .contracts import _REFUSAL_PREFIXES, AgentResultRefused
-from .predicates import _document
-from .stored import column_field, column_message, column_value
+from vonk_control.recovery_policy import FailureKind
 
 
 def _failure_result(

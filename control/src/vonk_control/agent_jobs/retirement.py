@@ -22,35 +22,42 @@ from vonk_agent_protocol.state_machines import (
     RunState,
 )
 from vonk_agent_protocol.wire_model import canonical_message
-
-from .. import agent_operation_states
-from ..agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
-from ..agent_operation_facts import (
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.contracts import OperatorRetirementRefused
+from vonk_control.agent_jobs.retry import _retry_authorized_for_current_attempt
+from vonk_control.agent_jobs.scope import _lock_target_scopes, _target_scope
+from vonk_control.agent_jobs.stored import (
+    column_field,
+    column_is_document,
+    column_value,
+)
+from vonk_control.agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
+from vonk_control.agent_operation_facts import (
     attempt_holds_open_launch_budget as _attempt_holds_open_launch_budget,
 )
-from ..agent_operation_facts import aware as _aware
-from ..categorized_errors import InvalidValue, MissingRecord
-from ..installation_transitions import end_unfinished_installation
-from ..jobs import states as job_states
-from ..lifecycle.agent_operation import (
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.categorized_errors import InvalidValue, MissingRecord
+from vonk_control.installation_transitions import end_unfinished_installation
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.agent_operation import (
     AgentOperationAdapter,
     set_parent_state,
 )
-from ..lifecycle.evidence import Residue
-from ..lifecycle.types import CancelRequested, OperatorAction, Reported
-from ..models.execution import RecipeInstallation, RecipeRun, ResourceReservation
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..persisted_waits import schedule_wait
-from ..recipe_operations.lifecycle_contract import (
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.types import CancelRequested, OperatorAction, Reported
+from vonk_control.models.execution import (
+    RecipeInstallation,
+    RecipeRun,
+    ResourceReservation,
+)
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationCancellationResult,
 )
-from .contracts import OperatorRetirementRefused
-from .retry import _retry_authorized_for_current_attempt
-from .scope import _lock_target_scopes, _target_scope
-from .stored import column_field, column_is_document, column_value
 
 
 def release_owned_reservations_in_session(

@@ -28,40 +28,46 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..catalog.revision_contract import RecipeRevisionProjection
-from ..fleet_profile_contract.applications import (
+from vonk_control.catalog.revision_contract import RecipeRevisionProjection
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationCancellationView,
     FleetProfileApplicationEffect,
     FleetProfileApplicationProgress,
 )
-from ..fleet_profile_contract.definitions import (
+from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignment,
     FleetProfileAssignmentInput,
     FleetProfileDefinition,
     FleetProfileView,
 )
-from ..fleet_profile_contract.effects import FleetProfileEffects, FleetProfileRunEffect
-from ..fleet_profile_contract.review import (
+from vonk_control.fleet_profile_contract.effects import (
+    FleetProfileEffects,
+    FleetProfileRunEffect,
+)
+from vonk_control.fleet_profile_contract.review import (
     FleetProfilePreview,
     FleetProfileReviewedDecision,
 )
-from ..fleet_profile_contract.switch_state import (
+from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileChildResult,
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchQueueItem,
 )
-from ..fleet_profile_contract.vocabulary import MAX_PROFILE_WARNINGS
-from ..lifecycle.evidence import Residue
-from ..models.execution import InstallationNode
-from ..models.fleet import FleetProfile, FleetProfileApplication, FleetProfileSelection
-from ..stored.rows import read_row_column
-from .contracts import (
+from vonk_control.fleet_profile_contract.vocabulary import MAX_PROFILE_WARNINGS
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileReviewStale,
     FleetProfileStalePlanConflict,
     FleetProfileUnsupportedStore,
     SavedProfileDocument,
 )
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.execution import InstallationNode
+from vonk_control.models.fleet import (
+    FleetProfile,
+    FleetProfileApplication,
+    FleetProfileSelection,
+)
+from vonk_control.stored.rows import read_row_column
 
 
 def _state_receipt(

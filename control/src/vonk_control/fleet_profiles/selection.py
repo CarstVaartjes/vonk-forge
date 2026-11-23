@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from ..admission_locking import (
+from vonk_control.admission_locking import (
     AdmissionLockBusy,
     ConstraintDefect,
     ConstraintReplan,
@@ -22,12 +22,9 @@ from ..admission_locking import (
     is_admission_contention,
     node_admission_key,
 )
-from ..auth import MUTATION_ROLES, Actor
-from ..lifecycle.evidence import Damaged, Residue, read_or_rebuild
-from ..models.fleet import FleetProfileApplication, FleetProfileSelection, User
-from ..persisted_waits import read_wait
-from .capacity import release_unassigned_profile_claims
-from .contracts import (
+from vonk_control.auth import MUTATION_ROLES, Actor
+from vonk_control.fleet_profiles.capacity import release_unassigned_profile_claims
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileAdmissionBusy,
     FleetProfileAdmissionDefect,
     FleetProfileAdmissionEffectBusy,
@@ -36,18 +33,24 @@ from .contracts import (
     FleetProfilePortPromiseConflict,
     _SelectedProfileSnapshot,
 )
-from .persistence import (
+from vonk_control.fleet_profiles.persistence import (
     _intended_profile,
     _persisted_profile_plan,
 )
-from .projection_support import (
-    _aware,
-    _roster_digest,
+from vonk_control.fleet_profiles.projection_support import _aware, _roster_digest
+from vonk_control.lifecycle.evidence import Damaged, Residue, read_or_rebuild
+from vonk_control.models.fleet import (
+    FleetProfileApplication,
+    FleetProfileSelection,
+    User,
 )
+from vonk_control.persisted_waits import read_wait
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 def _admission_wait(error: BaseException) -> str:

@@ -16,8 +16,7 @@ from pydantic import (
 
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-
-from .fleet_event_contract import (
+from vonk_control.fleet_event_contract import (
     AgentOperationPayload,
     InstallationNodePayload,
     JobPayload,
@@ -26,8 +25,8 @@ from .fleet_event_contract import (
     RecipeRunPayload,
     RunNodePayload,
 )
-from .fleet_projection.common import TelemetryPoint
-from .strict_json import StrictJSONModel
+from vonk_control.fleet_projection.common import TelemetryPoint
+from vonk_control.strict_json import StrictJSONModel
 
 
 class _FleetStreamModel(StrictJSONModel):

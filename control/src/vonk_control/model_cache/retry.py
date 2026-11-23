@@ -16,41 +16,37 @@ from vonk_agent_protocol.reason_codes.model_cache import (
     ModelAccessReason,
     ModelCacheCode,
 )
-
-from ..admission_locking import admitting
-from ..lifecycle.types import Effect, Outcome, Reported
-from ..models.cache import ModelCacheOperation
-from ..strict_json import serialize_json_value
-from . import states as model_cache_states
-from .artifacts import (
-    ArtifactSetManifest,
-    _optional_digest,
-)
-from .constants import _TRANSFER_CLAIM_SECONDS
-from .contract import (
+from vonk_control.admission_locking import admitting
+from vonk_control.lifecycle.types import Effect, Outcome, Reported
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, _optional_digest
+from vonk_control.model_cache.constants import _TRANSFER_CLAIM_SECONDS
+from vonk_control.model_cache.contract import (
     ModelCacheAccessRecheck,
     ModelCacheDownloadResult,
     ModelCacheOperationPhase,
     ModelCacheTransfer,
 )
-from .errors import (
+from vonk_control.model_cache.errors import (
     ModelCacheConflictInvalid,
     ModelCacheNotFoundInvalid,
 )
-from .persistence import (
+from vonk_control.model_cache.persistence import (
     _manifest_of,
     _operation_progress,
     _store_operation_payload,
     _updated,
     _write_operation_payload,
 )
-from .progress import cache_phase, progress_document
-from .source_helpers import _request_key
-from .transfer_admission import admit_transfer, refreshes
-from .views import CacheOperationView
+from vonk_control.model_cache.progress import cache_phase, progress_document
+from vonk_control.model_cache.source_helpers import _request_key
+from vonk_control.model_cache.transfer_admission import admit_transfer, refreshes
+from vonk_control.model_cache.views import CacheOperationView
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class RetryMixin:

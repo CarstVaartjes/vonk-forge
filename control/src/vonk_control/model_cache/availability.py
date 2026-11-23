@@ -9,22 +9,26 @@ from typing import TYPE_CHECKING, cast
 
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-
-from ..bounded_retry import bounded_attempts
-from ..categorized_errors import InvalidValue
-from ..models.cache import ModelCacheSet
-from .artifacts import ArtifactSetManifest, _optional_digest
-from .constants import _LOGGER, _RETRY_BASE_SECONDS, _REVERIFY_ACTOR, SCHEMA_VERSION
-from .contract import ModelCacheSetState
-from .errors import (
+from vonk_control.bounded_retry import bounded_attempts
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, _optional_digest
+from vonk_control.model_cache.constants import (
+    _LOGGER,
+    _RETRY_BASE_SECONDS,
+    _REVERIFY_ACTOR,
+    SCHEMA_VERSION,
+)
+from vonk_control.model_cache.contract import ModelCacheSetState
+from vonk_control.model_cache.errors import (
     ModelCacheConflictUnknown,
     ModelCacheNotFound,
     ModelCacheNotFoundInvalid,
 )
-from .source_helpers import _valid_relative_path
+from vonk_control.model_cache.source_helpers import _valid_relative_path
+from vonk_control.models.cache import ModelCacheSet
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class AvailabilityMixin:

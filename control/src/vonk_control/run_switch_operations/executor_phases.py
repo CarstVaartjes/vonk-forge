@@ -17,42 +17,44 @@ from vonk_agent_protocol.outcome import InvalidRequestError
 from vonk_agent_protocol.reason_codes.admission import InstallDegradedReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import InstallationState, RouteState, RunState
-
-from ..cluster_mappings import (
-    ClusterMappingPlan,
+from vonk_control.cluster_mappings import ClusterMappingPlan
+from vonk_control.fleet_profiles.capacity import prepared_profile_installation
+from vonk_control.install_admission.contracts import (
+    InstallAdmissionBusy,
+    InstallPreflightExpired,
 )
-from ..fleet_profiles.capacity import (
-    prepared_profile_installation,
+from vonk_control.logging import redact_text
+from vonk_control.models.execution import (
+    STOPPABLE_RUN_STATES,
+    RecipeInstallation,
+    RecipeRun,
 )
-from ..install_admission.contracts import InstallAdmissionBusy, InstallPreflightExpired
-from ..logging import redact_text
-from ..models.execution import STOPPABLE_RUN_STATES, RecipeInstallation, RecipeRun
-from ..offline_stops import pending_run_stop_nodes
-from ..recipe_operations.errors import (
+from vonk_control.offline_stops import pending_run_stop_nodes
+from vonk_control.recipe_operations.errors import (
     RecipeArtifactJobCancellationPending,
     RecipeInstallPreflightExpired,
     RecipeOperationConflict,
 )
-from ..recipe_operations.execution_contract import (
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )
-from ..recipe_operations.lifecycle_contract import JOB_ACTIVATION
-from ..run_admission import (
-    RunAdmissionBusy,
-)
-from ..run_switch_contract.evidence import RunSwitchPhase
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.phase_results import (
+from vonk_control.recipe_operations.lifecycle_contract import JOB_ACTIVATION
+from vonk_control.run_admission import RunAdmissionBusy
+from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import (
     RunSwitchRuntimeInstallResult,
     RunSwitchRuntimePlanResult,
     RunSwitchStartResult,
     RunSwitchStopResult,
 )
-from ..run_switch_contract.plans import RunSwitchPlan
-from .artifact_validation import _validate_artifact_execution
-from .constants import _is_artifact_phase
-from .errors import (
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.artifact_validation import (
+    _validate_artifact_execution,
+)
+from vonk_control.run_switch_operations.constants import _is_artifact_phase
+from vonk_control.run_switch_operations.errors import (
     RunSwitchInstallPreflightExpired,
     RunSwitchIssuedWorkloadPending,
     RunSwitchRetryLater,
@@ -60,19 +62,25 @@ from .errors import (
     _RunSwitchIncompleteProfileGroupConflict,
     retry_later_unless_deterministic,
 )
-from .identity_helpers import (
+from vonk_control.run_switch_operations.identity_helpers import (
     _mapping_node,
     _required_string,
     _started_operation_id,
     _string_or_none,
 )
-from .interfaces import PhaseExecution
-from .observation_helpers import _start_child_request_key, _stop_child_request_key
-from .planning_helpers import _now, _required_int
-from .result_helpers import _bound_workload_intent, _phase_result
+from vonk_control.run_switch_operations.interfaces import PhaseExecution
+from vonk_control.run_switch_operations.observation_helpers import (
+    _start_child_request_key,
+    _stop_child_request_key,
+)
+from vonk_control.run_switch_operations.planning_helpers import _now, _required_int
+from vonk_control.run_switch_operations.result_helpers import (
+    _bound_workload_intent,
+    _phase_result,
+)
 
 if TYPE_CHECKING:
-    from .executor import RecipeLifecyclePhaseExecutor
+    from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
 
 
 @contextmanager

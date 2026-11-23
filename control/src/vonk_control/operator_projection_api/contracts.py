@@ -12,15 +12,14 @@ from vonk_agent_protocol.state_machines import (
     EnrollmentGrantState,
     ModelCacheOperatorStatus,
 )
-
-from ..agent_api.common import EnrollmentGrantResponse
-from ..enrollment.contract import (
+from vonk_control.agent_api.common import EnrollmentGrantResponse
+from vonk_control.enrollment.contract import (
     EnrollmentGrantStatus,
     EnrollmentId,
     EnrollmentObservationOutcome,
     EnrollmentRevocationStatus,
 )
-from ..strict_json import StrictJSONModel
+from vonk_control.strict_json import StrictJSONModel
 
 _NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 

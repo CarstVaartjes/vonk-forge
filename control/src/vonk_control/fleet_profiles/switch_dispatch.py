@@ -15,55 +15,59 @@ from vonk_agent_protocol.agent_words import (
 )
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
-
-from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract.definitions import FleetProfileAssignment
-from ..fleet_profile_contract.review import FleetProfilePreview
-from ..fleet_profile_contract.switch_state import FleetProfileSwitchQueueItem
-from ..fleet_profile_contract.vocabulary import profile_switch_child_request_key
-from ..jobs.documents import RunSwitchJobPayload
-from ..lifecycle.evidence import (
-    BookkeepingReason,
-    Residue,
-    retire_as_unknown,
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profile_contract.switch_state import FleetProfileSwitchQueueItem
+from vonk_control.fleet_profile_contract.vocabulary import (
+    profile_switch_child_request_key,
 )
-from ..models.fleet import FleetProfileApplication
-from ..models.jobs import Job
-from ..operations.blockers import OperationBlocker, make_blocker
-from ..run_switch_contract.operations import (
-    RunSwitchOperation,
-    RunSwitchOperationResult,
-)
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.requests import (
-    RunSwitchCleanupApplyRequest,
-    RunSwitchCleanupPreviewRequest,
-    RunSwitchStopApplyRequest,
-    RunSwitchStopPreviewRequest,
-)
-from ..stored.rows import read_row_column
-from .assessment_support import (
+from vonk_control.fleet_profiles.assessment_support import (
     _disk_shortfalls,
     _require_recovery_preparation,
     operation_blocker_of,
 )
-from .colocation import colocated_memory_overcommit
-from .contracts import (
+from vonk_control.fleet_profiles.colocation import colocated_memory_overcommit
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileChildPlanBlocked,
     FleetProfileInvalid,
     FleetProfileReviewStale,
 )
-from .dependencies import _DISK_REFUSALS, ENDING_BLOCKER_CODES
-from .persistence import (
+from vonk_control.fleet_profiles.dependencies import (
+    _DISK_REFUSALS,
+    ENDING_BLOCKER_CODES,
+)
+from vonk_control.fleet_profiles.persistence import (
     _intended_profile,
     _persisted_profile_plan,
     _persisted_profile_progress,
     _reviewed_profile_plan,
 )
-from .switch_children import _assignment_intent
+from vonk_control.fleet_profiles.switch_children import _assignment_intent
+from vonk_control.jobs.documents import RunSwitchJobPayload
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
+)
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.operations.blockers import OperationBlocker, make_blocker
+from vonk_control.run_switch_contract.operations import (
+    RunSwitchOperation,
+    RunSwitchOperationResult,
+)
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.requests import (
+    RunSwitchCleanupApplyRequest,
+    RunSwitchCleanupPreviewRequest,
+    RunSwitchStopApplyRequest,
+    RunSwitchStopPreviewRequest,
+)
+from vonk_control.stored.rows import read_row_column
 
 if TYPE_CHECKING:
-    from .run_switch_adapter import (
+    from vonk_control.fleet_profiles.run_switch_adapter import (
         RunSwitchFleetProfileAdapter as _RunSwitchFleetProfileAdapter,
     )
 

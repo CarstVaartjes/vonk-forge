@@ -22,24 +22,21 @@ from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..agent_operation_facts import aware as _aware
-from ..agent_operation_facts import (
+from vonk_control.agent_jobs.retry import result_disposition
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.agent_operation_facts import (
     job_attempt_did_not_launch,
     job_output_retention_expiry,
 )
-from ..agent_operation_facts import (
-    start_deadline as _start_deadline,
-)
-from ..evidence_repeats import note_repeat
-from ..inventory.items import record_preflight
-from ..lifecycle.agent_operation import cancel_requested_at
-from ..lifecycle.types import Effect, Outcome, Reported
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from .retry import result_disposition
+from vonk_control.agent_operation_facts import start_deadline as _start_deadline
+from vonk_control.evidence_repeats import note_repeat
+from vonk_control.inventory.items import record_preflight
+from vonk_control.lifecycle.agent_operation import cancel_requested_at
+from vonk_control.lifecycle.types import Effect, Outcome, Reported
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
 
 
 def _report_event(

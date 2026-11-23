@@ -18,8 +18,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..admission_locking import (
+from vonk_control.admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
     acquire_admission_keys,
@@ -28,24 +27,24 @@ from ..admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
-from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
-from ..fleet_profile_contract.review import (
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
+from vonk_control.fleet_profile_contract.review import (
     FleetProfileApplicationView,
     FleetProfilePreview,
 )
-from ..lifecycle.evidence import Residue
-from ..models.fleet import AgentNode, FleetProfile, FleetProfileApplication
-from ..strict_json import read_stored_model
-from ..workload_intent import allocate_workload_intent
-from . import states as fleet_profile_states
-from .assessment_support import (
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.fleet_profiles.assessment_support import (
     _deferral_code,
     _profile_preview_is_waitable,
     _storage_wait_of,
 )
-from .continuing_effects import _application_is_current_selection
-from .contracts import (
+from vonk_control.fleet_profiles.continuing_effects import (
+    _application_is_current_selection,
+)
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileAdmissionBusy,
     FleetProfileAdmissionEffectBusy,
     FleetProfileConflict,
@@ -56,7 +55,7 @@ from .contracts import (
     FleetProfileStalePlanConflict,
     _FleetProfileSupersededIntentConflict,
 )
-from .persistence import (
+from vonk_control.fleet_profiles.persistence import (
     _application_order_key,
     _intent_scope,
     _kept_fence_ordinal,
@@ -66,13 +65,17 @@ from .persistence import (
     _persisted_profile_progress,
     _workload_fence_nodes,
 )
-from .projection_support import (
-    _aware,
-)
+from vonk_control.fleet_profiles.projection_support import _aware
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.fleet import AgentNode, FleetProfile, FleetProfileApplication
+from vonk_control.strict_json import read_stored_model
+from vonk_control.workload_intent import allocate_workload_intent
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 def _fence_wait(error: BaseException) -> str:

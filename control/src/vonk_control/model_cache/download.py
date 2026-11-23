@@ -20,20 +20,17 @@ from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.state_machines import ModelFileState
-
-from ..artifact_jobs.lifecycle import (
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     reference_gate_is_open_nowait,
 )
-from ..artifact_reference_scan.model_sets import require_model_sets_open
-from ..categorized_faults import OperationInterrupted
-from ..lifecycle.types import State
-from ..models.cache import ModelCacheOperation, ModelCacheSet
-from ..operations.contract import AvailabilityRecoveryAction
-from .artifacts import ArtifactSpec
-from .constants import _CHUNK_BYTES, _PARALLEL_RANGE_WORKERS
-from .errors import (
+from vonk_control.artifact_reference_scan.model_sets import require_model_sets_open
+from vonk_control.categorized_faults import OperationInterrupted
+from vonk_control.lifecycle.types import State
+from vonk_control.model_cache.artifacts import ArtifactSpec
+from vonk_control.model_cache.constants import _CHUNK_BYTES, _PARALLEL_RANGE_WORKERS
+from vonk_control.model_cache.errors import (
     ModelCacheConflictUnknown,
     ModelCacheError,
     ModelCacheStorageError,
@@ -44,12 +41,18 @@ from .errors import (
     _ArtifactWriterBusy,
     _reference_error_type,
 )
-from .provider_waits import hinted_until
-from .providers import provider_for
-from .ranges import cleanup_ranges, download_ranges, range_partial_bytes
+from vonk_control.model_cache.provider_waits import hinted_until
+from vonk_control.model_cache.providers import provider_for
+from vonk_control.model_cache.ranges import (
+    cleanup_ranges,
+    download_ranges,
+    range_partial_bytes,
+)
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
+from vonk_control.operations.contract import AvailabilityRecoveryAction
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class DownloadMixin:

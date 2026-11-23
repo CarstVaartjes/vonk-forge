@@ -22,11 +22,17 @@ from vonk_agent_protocol.state_machines import (
     EnrollmentRecordState,
     NodeIdentityState,
 )
+from vonk_control.agent_contacts import ensure_contact
+from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment.contract import EnrollmentRotationClaim
-
-from ..agent_contacts import ensure_contact
-from ..ca_issuance_contract import CertificateIssuanceBinding
-from ..models.fleet import (
+from vonk_control.enrollment.ending import retain_ended_effect
+from vonk_control.enrollment.types import EnrollmentDenied, EnrollmentIssuanceUncertain
+from vonk_control.enrollment.validation import (
+    _load_csr,
+    _stored_utc,
+    _validate_evidence,
+)
+from vonk_control.models.fleet import (
     AgentCertificate,
     AgentCertificateRotation,
     AgentEnrollment,
@@ -34,19 +40,12 @@ from ..models.fleet import (
     AgentNode,
     AgentNodeProfile,
 )
-from ..pki import IssuedCertificate
-from ..security.enrollment import (
+from vonk_control.pki import IssuedCertificate
+from vonk_control.security.enrollment import (
     certificate_text,
     require_fresh_identity,
     require_grant,
     require_node,
-)
-from .ending import retain_ended_effect
-from .types import EnrollmentDenied, EnrollmentIssuanceUncertain
-from .validation import (
-    _load_csr,
-    _stored_utc,
-    _validate_evidence,
 )
 
 

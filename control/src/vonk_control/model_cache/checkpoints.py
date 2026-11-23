@@ -12,29 +12,34 @@ from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.state_machines import ModelFileState
-
-from ..agent_operation_facts import aware as _aware
-from ..fleet_profiles.read_observation import observe_storage
-from ..lifecycle.types import Outcome, Reported, State
-from ..models.cache import ModelCacheOperation, ModelCacheSet
-from ..operations.progress import STALE_AFTER_SECONDS, STALL_AFTER_SECONDS
-from . import states as model_cache_states
-from .artifacts import ArtifactSetManifest, ArtifactSpec
-from .catalog_helpers import _iso, _iso_now
-from .constants import _RETRY_BASE_SECONDS, _TRANSFER_CLAIM_SECONDS
-from .contract import ModelCacheSetState, ModelCacheTransferArtifact
-from .errors import _ArtifactWriterBusy
-from .persistence import (
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.fleet_profiles.read_observation import observe_storage
+from vonk_control.lifecycle.types import Outcome, Reported, State
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
+from vonk_control.model_cache.catalog_helpers import _iso, _iso_now
+from vonk_control.model_cache.constants import (
+    _RETRY_BASE_SECONDS,
+    _TRANSFER_CLAIM_SECONDS,
+)
+from vonk_control.model_cache.contract import (
+    ModelCacheSetState,
+    ModelCacheTransferArtifact,
+)
+from vonk_control.model_cache.errors import _ArtifactWriterBusy
+from vonk_control.model_cache.persistence import (
     _cache_failure,
     _manifest_of,
     _operation_cancellation,
     _operation_progress,
     _store_operation_payload,
 )
-from .progress import cache_phase, progress_document
+from vonk_control.model_cache.progress import cache_phase, progress_document
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
+from vonk_control.operations.progress import STALE_AFTER_SECONDS, STALL_AFTER_SECONDS
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 #: How often a running download writes its durable progress. One write per

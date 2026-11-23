@@ -26,43 +26,43 @@ from vonk_agent_protocol.outcome import (
 )
 from vonk_agent_protocol.reason_codes.admission import InstallAdmissionCode
 from vonk_agent_protocol.state_machines import InstallationNodeState, InstallationState
-
-from ..admission_locking import admission_attempts, admission_wait_exhausted
-from ..failure_classification import error_detail
-from ..install_admission.contracts import InstallPlan
-from ..install_admission.validation import (
+from vonk_control.admission_locking import admission_attempts, admission_wait_exhausted
+from vonk_control.failure_classification import error_detail
+from vonk_control.install_admission.contracts import InstallPlan
+from vonk_control.install_admission.validation import (
     require_admissible as require_install_admissible,
 )
-from ..install_admission.validation import (
+from vonk_control.install_admission.validation import (
     require_same_execution as require_same_install_execution,
 )
-from ..lifecycle.evidence import (
+from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
     Damaged,
     Residue,
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..models.execution import InstallationNode, RecipeInstallation
-from ..models.jobs import Job
-from ..stored.rows import read_row_column
-from ..strict_json import serialize_json_value
-from .errors import RecipeRetryLater, retry_later_unless_deterministic
-from .execution_contract import (
+from vonk_control.models.execution import InstallationNode, RecipeInstallation
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_operations.errors import (
+    RecipeRetryLater,
+    retry_later_unless_deterministic,
+)
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )
-from .interfaces import RecipeOperationView
-from .observation_helpers import (
+from vonk_control.recipe_operations.interfaces import RecipeOperationView
+from vonk_control.recipe_operations.observation_helpers import (
     _active_recipe_revision,
     wait_for_installation_upkeep,
 )
-from .progress import (
-    _parent_intent,
-)
+from vonk_control.recipe_operations.progress import _parent_intent
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class InstallationPreparationMixin:

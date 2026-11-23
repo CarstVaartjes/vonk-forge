@@ -17,29 +17,28 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 from vonk_agent_protocol.wire_model import canonical_message
-
-from .agent_jobs.retry import abandon_idempotent_job_in_session
-from .failure_classification import is_security_failure
-from .inventory.items import inventory_items
-from .lifecycle.job import JobAdapter
-from .lifecycle_preflight_contract import LifecyclePreflightCheckpoint
-from .models.fleet import AgentNode
-from .models.jobs import Job
-from .models.operations import AgentOperation, AgentOperationAttempt
-from .operations.blockers import (
+from vonk_control.agent_jobs.retry import abandon_idempotent_job_in_session
+from vonk_control.failure_classification import is_security_failure
+from vonk_control.inventory.items import inventory_items
+from vonk_control.lifecycle.job import JobAdapter
+from vonk_control.lifecycle_preflight_contract import LifecyclePreflightCheckpoint
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operations.blockers import (
     MAX_BLOCKERS,
     BlockingOperation,
     make_blocker,
 )
-from .persisted_waits import read_wait
-from .recovery_policy import RECOVERY
-from .runtime.preflight import (
+from vonk_control.persisted_waits import read_wait
+from vonk_control.recovery_policy import RECOVERY
+from vonk_control.runtime.preflight import (
     admission_blockers,
     latest_result,
     recipe_requirements,
     request_digest,
 )
-from .wait_contract import typed_wait_reason
+from vonk_control.wait_contract import typed_wait_reason
 
 # The agent bounds probe execution. After its normal delivery/reporting window,
 # observe less frequently while that same fenced operation owns recovery.

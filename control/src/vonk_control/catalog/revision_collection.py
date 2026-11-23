@@ -96,34 +96,36 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.state_machines import InstallationState
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..agent_jobs.retirement import release_owned_reservations_in_session
-from ..logging import log_event
-from ..model_cache.contract import CacheManifest, CacheOperationKind
-from ..models.cache import ModelCacheOperation, ModelCacheSet, RecipeBuild
-from ..models.catalog import (
+from vonk_control.agent_jobs.retirement import release_owned_reservations_in_session
+from vonk_control.catalog.revision_contract import (
+    UnprojectedRevision,
+    shared_catalog_document,
+)
+from vonk_control.logging import log_event
+from vonk_control.model_cache.contract import CacheManifest, CacheOperationKind
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet, RecipeBuild
+from vonk_control.models.catalog import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
     RecipeSourceBundle,
     SourceBundleArchive,
 )
-from ..models.execution import (
+from vonk_control.models.execution import (
     ArtifactJob,
     InstallationNode,
     RecipeInstallation,
     RecipeRun,
     RunNode,
 )
-from ..models.fleet import FleetProfileApplication, FleetProfileSelection
-from ..models.jobs import Job
-from ..models.mapping import ClusterMapping, ClusterMappingNode
-from ..models.operations import AgentOperation
-from ..owner_liveness import builds_in_flight
-from ..revision_images import revision_images
-from ..run_states import ENDED_RUN_STATES
-from ..stored.json_values import binding_for
-from .revision_contract import UnprojectedRevision, shared_catalog_document
+from vonk_control.models.fleet import FleetProfileApplication, FleetProfileSelection
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.models.operations import AgentOperation
+from vonk_control.owner_liveness import builds_in_flight
+from vonk_control.revision_images import revision_images
+from vonk_control.run_states import ENDED_RUN_STATES
+from vonk_control.stored.json_values import binding_for
 
 _LOGGER = logging.getLogger(__name__)
 GRACE = timedelta(hours=24)

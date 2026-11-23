@@ -14,24 +14,23 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     SecurityRefusalReason,
 )
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-
-from ..bounded_retry import bounded_attempts
-from .artifacts import ArtifactSpec
-from .constants import (
+from vonk_control.bounded_retry import bounded_attempts
+from vonk_control.model_cache.artifacts import ArtifactSpec
+from vonk_control.model_cache.constants import (
     _GITHUB_USER_AGENT,
     _MAX_GITHUB_ERROR_METADATA_BYTES,
 )
-from .errors import (
+from vonk_control.model_cache.errors import (
     ModelCacheStorageRefused,
     ModelCacheStorageUnknown,
     _retry_after_seconds,
 )
-from .provider_contracts import _GitHubErrorMetadata
-from .providers import _github_release_asset_binding
-from .source_helpers import _is_allowed_github_release_redirect
+from vonk_control.model_cache.provider_contracts import _GitHubErrorMetadata
+from vonk_control.model_cache.providers import _github_release_asset_binding
+from vonk_control.model_cache.source_helpers import _is_allowed_github_release_redirect
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class GithubMixin:

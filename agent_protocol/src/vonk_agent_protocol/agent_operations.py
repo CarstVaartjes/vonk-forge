@@ -7,11 +7,11 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
-from .failure_evidence import FailureDiagnostics
-from .lifecycle_vocabulary import WaitReason
-from .optional_evidence import EvidenceDrop
-from .package_upgrade import PackageActivationReceipt
-from .wire_model import DigestText, ErrorCode, WireEnum, WireModel
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.optional_evidence import EvidenceDrop
+from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
+from vonk_agent_protocol.wire_model import DigestText, ErrorCode, WireEnum, WireModel
 
 
 class AgentOperation(StrEnum):

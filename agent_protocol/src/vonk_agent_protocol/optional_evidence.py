@@ -33,8 +33,8 @@ from typing import Any, ClassVar, NamedTuple
 from pydantic import BaseModel, Field, PrivateAttr, ValidationError, model_validator
 from pydantic_core.core_schema import ValidatorFunctionWrapHandler
 
-from .reason_codes.evidence import AgentEvidenceCode
-from .wire_model import WireModel
+from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
+from vonk_agent_protocol.wire_model import WireModel
 
 
 class EvidenceGroup(NamedTuple):

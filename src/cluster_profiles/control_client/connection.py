@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from .errors import (
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlCredentialScope,
     ControlNotConfigured,

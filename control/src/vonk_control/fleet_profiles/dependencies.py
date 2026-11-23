@@ -23,23 +23,20 @@ from vonk_agent_protocol.state_machines import (
     ObservedAssignmentState,
     RunState,
 )
-
-from ..child_phases import FleetProfileChildPhase
-from ..fleet_profile_contract.vocabulary import (
+from vonk_control.child_phases import FleetProfileChildPhase
+from vonk_control.fleet_profile_contract.vocabulary import (
     FleetProfileAssignmentState,
     FleetProfileInstallationPolicy,
     FleetProfileOperationState,
 )
-from ..jobs import states as job_states
-from ..lifecycle.types import (
-    State as _LifecycleState,
-)
-from ..storage_demands import (
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.types import State as _LifecycleState
+from vonk_control.storage_demands import (
     STORAGE_EVICTING,
     STORAGE_EVICTION_TIMED_OUT,
     STORAGE_INSUFFICIENT,
 )
-from . import states as fleet_profile_states
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 

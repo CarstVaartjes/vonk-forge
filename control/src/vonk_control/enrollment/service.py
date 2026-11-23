@@ -24,23 +24,42 @@ from vonk_agent_protocol.state_machines import (
     EnrollmentRecordState,
     NodeIdentityState,
 )
-
-from ..agent_contacts import retire_contact
-from ..coordinator_failures import _RETRY_CAP_SECONDS
-from ..logging import log_event, redact_text
-from ..models.fleet import (
+from vonk_control.agent_contacts import retire_contact
+from vonk_control.coordinator_failures import _RETRY_CAP_SECONDS
+from vonk_control.enrollment.contract import (
+    EnrollmentObservationOutcome,
+    EnrollmentRevocationStatus,
+)
+from vonk_control.enrollment.ending import retain_ended_effect
+from vonk_control.enrollment.persistence import _issuance_binding
+from vonk_control.enrollment.rotation import RotationService
+from vonk_control.enrollment.types import (
+    EnrollmentIssuanceUncertain,
+    RemoteRevocationUncertain,
+    RenewalConflictRevocationUncertain,
+    RenewalInProgress,
+    RenewalIssuanceUncertain,
+)
+from vonk_control.enrollment.validation import (
+    _stored_utc,
+    _utc,
+    _validate_actor,
+    _validate_node_id,
+)
+from vonk_control.logging import log_event, redact_text
+from vonk_control.models.fleet import (
     AgentCertificate,
     AgentCertificateRotation,
     AgentEnrollment,
     AgentIssuedCertificateRevocation,
     AgentNode,
 )
-from ..models.jobs import Job
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..owner_liveness import OwnerKind, OwnerRef, owner
-from ..persisted_waits import read_wait, schedule_wait
-from ..pki import IssuedCertificate
-from ..security.enrollment import (
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
+from vonk_control.persisted_waits import read_wait, schedule_wait
+from vonk_control.pki import IssuedCertificate
+from vonk_control.security.enrollment import (
     require_activation_identity,
     require_certificate,
     require_expired_proof,
@@ -48,27 +67,10 @@ from ..security.enrollment import (
     require_staged_certificate,
     validate_issued_binding,
 )
-from ..security.enrollment import (
+from vonk_control.security.enrollment import (
     require_expired_source as _require_expired_source,
 )
-from ..step_ca import StepCAError, StepCAIssuancePending, StepCAUnavailable
-from .contract import EnrollmentObservationOutcome, EnrollmentRevocationStatus
-from .ending import retain_ended_effect
-from .persistence import _issuance_binding
-from .rotation import RotationService
-from .types import (
-    EnrollmentIssuanceUncertain,
-    RemoteRevocationUncertain,
-    RenewalConflictRevocationUncertain,
-    RenewalInProgress,
-    RenewalIssuanceUncertain,
-)
-from .validation import (
-    _stored_utc,
-    _utc,
-    _validate_actor,
-    _validate_node_id,
-)
+from vonk_control.step_ca import StepCAError, StepCAIssuancePending, StepCAUnavailable
 
 _LOGGER = logging.getLogger("vonk_control.enrollment")
 _REVOCATION_BATCH = 64

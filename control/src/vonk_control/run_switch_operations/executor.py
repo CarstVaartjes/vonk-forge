@@ -10,24 +10,22 @@ from typing import (
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..categorized_errors import (
-    MissingRecord,
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.inventory.repository import INVENTORY_MAX_AGE_SECONDS
+from vonk_control.lifecycle_preflight import LifecyclePreflight
+from vonk_control.recipe_operations.interfaces import RecipeOperationView
+from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.run_switch_contract.operations import RunSwitchOperation
+from vonk_control.run_switch_operations.executor_phases import ExecutorPhasesMixin
+from vonk_control.run_switch_operations.executor_preflight import ExecutorPreflightMixin
+from vonk_control.run_switch_operations.executor_verification import (
+    ExecutorVerificationMixin,
 )
-from ..cluster_mappings import (
-    ClusterMappingService,
-)
-from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
-from ..lifecycle_preflight import LifecyclePreflight
-from ..recipe_operations.interfaces import RecipeOperationView
-from ..recipe_operations.service import RecipeOperationService
-from ..run_switch_contract.operations import RunSwitchOperation
-from .executor_phases import ExecutorPhasesMixin
-from .executor_preflight import ExecutorPreflightMixin
-from .executor_verification import ExecutorVerificationMixin
-from .interfaces import RunSwitchArtifactPhaseExecutor
+from vonk_control.run_switch_operations.interfaces import RunSwitchArtifactPhaseExecutor
 
 if TYPE_CHECKING:
-    from ..distribution_executor.receipts import _ChildView
+    from vonk_control.distribution_executor.receipts import _ChildView
 
 
 class RecipeLifecyclePhaseExecutor(

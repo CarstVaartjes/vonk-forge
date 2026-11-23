@@ -6,19 +6,24 @@ from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Path, status
 
-from vonk_control.operator_receipt_contract import ReceiptPolicy
-
-from ..api_availability import AVAILABILITY_ERRORS
-from ..auth import MUTATION_ROLES, Actor
-from ..fleet_profile_contract.review import (
+from vonk_control.api_availability import AVAILABILITY_ERRORS
+from vonk_control.auth import MUTATION_ROLES, Actor
+from vonk_control.fleet_profile_contract.review import (
     FleetProfileApplicationCancelRequest,
     FleetProfileApplicationView,
 )
-from ..operation_api.constants import _ADMIN_OPERATION_IDS
-from ..operation_api.contracts import bounded_error_responses
-from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
-from .api import raise_profile_conflict
-from .contracts import FleetProfileConflict, FleetProfilePermissionDenied
+from vonk_control.fleet_profiles.api import raise_profile_conflict
+from vonk_control.fleet_profiles.contracts import (
+    FleetProfileConflict,
+    FleetProfilePermissionDenied,
+)
+from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
+from vonk_control.operation_api.contracts import bounded_error_responses
+from vonk_control.operator_acceptance import (
+    OperatorReceiptResolver,
+    operator_acceptance,
+)
+from vonk_control.operator_receipt_contract import ReceiptPolicy
 
 _CANCEL_PATH = "/api/profile/applications/{application_id}/cancel"
 _CANCEL_RECEIPT_PATH = (

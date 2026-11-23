@@ -31,21 +31,23 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from jsonschema import Draft202012Validator, ValidationError
 
-from .build_identity import current_build
-from .control_client.errors import (
+from cluster_profiles.build_identity import current_build
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlForbidden,
     ControlUnauthorized,
 )
-from .control_client.transfers import ControlClient
-from .control_transport import open_https
-from .generated_control.models.cli_update_contract import CliUpdateContract
-from .runtime_identity import (
+from cluster_profiles.control_client.transfers import ControlClient
+from cluster_profiles.control_transport import open_https
+from cluster_profiles.generated_control.models.cli_update_contract import (
+    CliUpdateContract,
+)
+from cluster_profiles.runtime_identity import (
     installed_content_identity,
     verified_wheel_identity,
     wheel_content_identity,
 )
-from .stall_window import stall_deadline
+from cluster_profiles.stall_window import stall_deadline
 
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _SOURCE = re.compile(r"[0-9a-f]{40}\Z")

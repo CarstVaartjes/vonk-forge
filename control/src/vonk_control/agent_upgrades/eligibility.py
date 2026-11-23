@@ -6,14 +6,13 @@ from datetime import UTC, datetime
 
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.state_machines import NodeIdentityState
-
-from ..agent_contacts import last_seen as contact_last_seen
-from ..inventory.items import runtime_value
-from ..models.fleet import AgentNode
-from ..strict_json import read_stored_model
-from .constants import _ONLINE_WINDOW
-from .contract import AgentUpgradePackage
-from .errors import AgentUpgradeInvalid
+from vonk_control.agent_contacts import last_seen as contact_last_seen
+from vonk_control.agent_upgrades.constants import _ONLINE_WINDOW
+from vonk_control.agent_upgrades.contract import AgentUpgradePackage
+from vonk_control.agent_upgrades.errors import AgentUpgradeInvalid
+from vonk_control.inventory.items import runtime_value
+from vonk_control.models.fleet import AgentNode
+from vonk_control.strict_json import read_stored_model
 
 
 class EligibilityMixin:

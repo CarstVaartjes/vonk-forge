@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pydantic import ValidationError
 
-from .logging import redact_text
+from vonk_control.logging import redact_text
 
 # Two issues are enough to locate a broken document; a location plus an error
 # type identifies the rule, so the redactor-approved message is the only part

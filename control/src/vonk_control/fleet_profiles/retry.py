@@ -21,46 +21,55 @@ from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
-
-from ..admission_locking import ConstraintReplan, patient_admission
-from ..categorized_errors import MissingRecord
-from ..evidence_repeats import load_subject, note_repeat, note_success
-from ..failure_classification import disposition, error_detail
-from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
-from ..fleet_profile_contract.review import FleetProfileApplicationView
-from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..lifecycle.fleet_profile import FleetProfileAdapter
-from ..models.fleet import FleetProfileApplication
-from ..operations.blockers import OperationBlocker, bound_blockers, make_blocker
-from ..persisted_waits import schedule_wait
-from . import states as fleet_profile_states
-from .assessment_support import (
+from vonk_control.admission_locking import ConstraintReplan, patient_admission
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.evidence_repeats import load_subject, note_repeat, note_success
+from vonk_control.failure_classification import disposition, error_detail
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.fleet_profiles.assessment_support import (
     _preview_blockers,
     _progress_with_blockers,
     _require_recovery_preparations,
 )
-from .contracts import (
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileAdmissionDefect,
     FleetProfileConflict,
     FleetProfileInvalid,
     FleetProfileReviewStale,
     _FleetProfileSupersededIntentConflict,
 )
-from .dependencies import _CHILD_PENDING_STATES, _LOGGER
-from .persistence import (
+from vonk_control.fleet_profiles.dependencies import _CHILD_PENDING_STATES, _LOGGER
+from vonk_control.fleet_profiles.persistence import (
     _application_order_key,
     _newer_profile_intent_overlaps,
     _persisted_profile_progress,
     _reviewed_profile_plan,
 )
-from .projection_support import (
-    _aware,
+from vonk_control.fleet_profiles.projection_support import _aware
+from vonk_control.fleet_profiles.recovery import _stale_plan_signature
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
 )
-from .recovery import _stale_plan_signature
+from vonk_control.lifecycle.fleet_profile import FleetProfileAdapter
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.operations.blockers import (
+    OperationBlocker,
+    bound_blockers,
+    make_blocker,
+)
+from vonk_control.persisted_waits import schedule_wait
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 class FleetProfileService:

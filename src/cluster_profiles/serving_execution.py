@@ -24,12 +24,15 @@ from vonk_forge_contracts.systemone import (
     validate_decision_result,
 )
 
+from cluster_profiles.cli_states import ENDED_STATES
 from cluster_profiles.cli_states_generated import SUCCEEDED
-
-from .cli_states import ENDED_STATES
-from .control_transport import open_https
-from .serving_audio import AudioCheckError, assert_speech, multipart_body
-from .serving_request import ArgumentValue, Json, bounded_chat_check
+from cluster_profiles.control_transport import open_https
+from cluster_profiles.serving_audio import (
+    AudioCheckError,
+    assert_speech,
+    multipart_body,
+)
+from cluster_profiles.serving_request import ArgumentValue, Json, bounded_chat_check
 
 if TYPE_CHECKING:
     from vonk_forge_contracts.api import ChatApi

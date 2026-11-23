@@ -27,22 +27,21 @@ from sqlalchemy.orm.attributes import set_committed_value
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.state_machines import ReservationState
 from vonk_agent_protocol.telemetry import HostResourceSample
-
-from .content_identity import RecipeExecution, runs_identically
-from .dialect_insert import dialect_insert
-from .fleet_events import FleetEventRecorder, FleetEventRepository
-from .memory_reservations import MEMORY_RESERVATION_KINDS
-from .models.catalog import CatalogDocumentRevision
-from .models.execution import (
+from vonk_control.content_identity import RecipeExecution, runs_identically
+from vonk_control.dialect_insert import dialect_insert
+from vonk_control.fleet_events import FleetEventRecorder, FleetEventRepository
+from vonk_control.memory_reservations import MEMORY_RESERVATION_KINDS
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
     MeasuredRolePeak,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
     RunNode,
 )
-from .models.telemetry import NodeInventoryResourceSnapshot
-from .recipe_operations.execution_contract import parse_stored_run_plan
-from .settings import PROFILE_STALL_WINDOW_SECONDS
+from vonk_control.models.telemetry import NodeInventoryResourceSnapshot
+from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
+from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
 
 def record_observed_run_memory(

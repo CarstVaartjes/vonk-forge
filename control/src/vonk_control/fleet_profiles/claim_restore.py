@@ -24,8 +24,7 @@ from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.state_machines import ReservationState
-
-from ..admission_locking import (
+from vonk_control.admission_locking import (
     AdmissionRowLock,
     ConstraintReplan,
     acquire_admission_keys,
@@ -33,18 +32,21 @@ from ..admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
-from ..disk_reservations import outstanding_disk_charges
-from ..memory_reservations import MEMORY_RESERVATION_KINDS, memory_reservations
-from ..models.execution import ResourceReservation
-from ..models.fleet import FleetProfileApplication
-from ..resource_planning.capacity import plan_capacity
-from ..resource_planning.memory import memory_capacity_snapshot
-from ..resource_planning.memory_kinds import memory_reservation_kind
-from ..resource_planning.types import ResourceDemand
-from ..run_switch_contract.evidence import FreshnessEvidence
-from ..run_switch_operations.planning_helpers import PlanInventory
-from ..spark_disk import spark_free_bytes
-from . import states as fleet_profile_states
+from vonk_control.disk_reservations import outstanding_disk_charges
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.memory_reservations import (
+    MEMORY_RESERVATION_KINDS,
+    memory_reservations,
+)
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.resource_planning.capacity import plan_capacity
+from vonk_control.resource_planning.memory import memory_capacity_snapshot
+from vonk_control.resource_planning.memory_kinds import memory_reservation_kind
+from vonk_control.resource_planning.types import ResourceDemand
+from vonk_control.run_switch_contract.evidence import FreshnessEvidence
+from vonk_control.run_switch_operations.planning_helpers import PlanInventory
+from vonk_control.spark_disk import spark_free_bytes
 
 #: The restored claims no longer fit the Spark: plan the load again.
 CAPACITY_SHORT_CONSTRAINT = "profile_claim_capacity"

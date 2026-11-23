@@ -29,54 +29,55 @@ from vonk_agent_protocol.state_machines import (
     RunState,
 )
 from vonk_agent_protocol.wire_model import canonical_message
-
-from .. import agent_operation_states
-from ..admission_locking import (
-    admission_attempts,
-    admission_wait_exhausted,
-)
-from ..cancelled_runtime import cancellation_stop_current
-from ..installed_bytes import demote_ranks_on_lost_image
-from ..jobs.documents import RecipeBuildCleanupParent
-from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.artifact_job import ArtifactJobAdapter
-from ..lifecycle.evidence import (
-    BookkeepingReason,
-    retire_as_unknown,
-)
-from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..lifecycle.types import Outcome
-from ..models.cache import RecipeBuild
-from ..models.execution import (
+from vonk_control import agent_operation_states
+from vonk_control.admission_locking import admission_attempts, admission_wait_exhausted
+from vonk_control.cancelled_runtime import cancellation_stop_current
+from vonk_control.installed_bytes import demote_ranks_on_lost_image
+from vonk_control.jobs.documents import RecipeBuildCleanupParent
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.lifecycle.recipe_operation import RecipeOperationAdapter
+from vonk_control.lifecycle.types import Outcome
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import (
     ArtifactJob,
     InstallationNode,
     RecipeInstallation,
     RecipeRun,
     RunNode,
 )
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..recipe_builds.cancellation import build_cancellation
-from ..stored.rows import read_row_column
-from ..strict_json import read_stored_model, serialize_json_value
-from .constants import _WORKLOAD_INTENT_KINDS
-from .errors import RecipeRequestInvalid, RecipeRetryLater
-from .execution_contract import parse_stored_run_plan
-from .intent import _intent_is_current, _job_workload_intent
-from .interfaces import _TERMINAL_JOB_STATES, RecipeOperationView
-from .lifecycle_contract import (
-    LifecycleNodeResult,
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_builds.cancellation import build_cancellation
+from vonk_control.recipe_operations.constants import _WORKLOAD_INTENT_KINDS
+from vonk_control.recipe_operations.errors import RecipeRequestInvalid, RecipeRetryLater
+from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
+from vonk_control.recipe_operations.intent import (
+    _intent_is_current,
+    _job_workload_intent,
 )
-from .orphan_cleanup import consume_orphan_cleanup
-from .progress import (
+from vonk_control.recipe_operations.interfaces import (
+    _TERMINAL_JOB_STATES,
+    RecipeOperationView,
+)
+from vonk_control.recipe_operations.lifecycle_contract import LifecycleNodeResult
+from vonk_control.recipe_operations.orphan_cleanup import consume_orphan_cleanup
+from vonk_control.recipe_operations.progress import (
     _parent_identity,
     _parent_reconciliation,
     _parse_recipe_parent,
 )
-from .results import _RANK_FAILED, _node_result, _unproven_evidence
+from vonk_control.recipe_operations.results import (
+    _RANK_FAILED,
+    _node_result,
+    _unproven_evidence,
+)
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import read_stored_model, serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class ResultConsumptionMixin:

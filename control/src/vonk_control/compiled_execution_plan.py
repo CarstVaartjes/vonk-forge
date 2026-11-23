@@ -57,10 +57,9 @@ from vonk_agent_protocol.document_limits import (
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
 )
 from vonk_agent_protocol.wire_model import canonical_message
-
-from .content_identity import same_model_object
-from .runtime.spec_contract import RuntimeSpec
-from .strict_json import StrictModel
+from vonk_control.content_identity import same_model_object
+from vonk_control.runtime.spec_contract import RuntimeSpec
+from vonk_control.strict_json import StrictModel
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]

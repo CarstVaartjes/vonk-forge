@@ -35,24 +35,32 @@ from vonk_agent_protocol.wire_model import (
     canonical_message,
     strict_json_datetime,
 )
-
-from ..catalog.revision_contract import read_catalog_document
-from ..installation_transitions import IN_FLIGHT
-from ..machine_states import (
+from vonk_control.catalog.revision_contract import read_catalog_document
+from vonk_control.fleet_projection.host_checks import (
+    HostCheck,
+    HostCheckAdvice,
+    Text1024,
+)
+from vonk_control.installation_transitions import IN_FLIGHT
+from vonk_control.machine_states import (
     CertificateStateField,
     InstallationStateField,
     RouteStateField,
     RunStateField,
 )
-from ..metrics.contract import PrometheusAttention
-from ..models.catalog import CatalogDocument, CatalogDocumentRevision
-from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun, RunNode
-from ..models.mapping import ClusterMapping
-from ..recipe_update_batches.notice import RecipeUpdateNotice
-from ..stored.states import CatalogRevisionState
-from ..strict_json import StrictModel
-from ..telemetry.samples import TelemetrySampleView
-from .host_checks import HostCheck, HostCheckAdvice, Text1024
+from vonk_control.metrics.contract import PrometheusAttention
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    RecipeRun,
+    RunNode,
+)
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.recipe_update_batches.notice import RecipeUpdateNotice
+from vonk_control.stored.states import CatalogRevisionState
+from vonk_control.strict_json import StrictModel
+from vonk_control.telemetry.samples import TelemetrySampleView
 
 """Bounded typed projection of PostgreSQL-authoritative Fleet state."""
 

@@ -14,28 +14,27 @@ from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..agent_jobs.service import AgentJobService
-from ..content_identity import ImageContent, same_image
-from ..distribution.service import DistributionService
-from ..distribution.types import content_objects, plan_objects
-from ..distribution_assignment import NodeDistributionAssignment
-from ..models.execution import RecipeInstallation
-from ..oci_image_store import StoreUnknown
-from ..recipe_operations.execution_contract import (
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.content_identity import ImageContent, same_image
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.types import content_objects, plan_objects
+from vonk_control.distribution_assignment import NodeDistributionAssignment
+from vonk_control.distribution_executor.receipts import RuntimeImagePull
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.oci_image_store import StoreUnknown
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.phase_results import (
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import (
     RunSwitchRuntimeImageResult,
     RunSwitchRuntimePlanResult,
 )
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_operations.errors import RunSwitchRetryLater
-from ..run_switch_operations.image_receipts import effective_build_receipt
-from ..runtime_image_preparation.contracts import RuntimeImageStorage
-from .receipts import RuntimeImagePull
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
+from vonk_control.run_switch_operations.image_receipts import effective_build_receipt
+from vonk_control.runtime_image_preparation.contracts import RuntimeImageStorage
 
 
 class DistributionIdentity:

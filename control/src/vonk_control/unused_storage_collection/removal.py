@@ -14,8 +14,7 @@ from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.state_machines import RunState
-
-from ..artifact_jobs.lifecycle import (
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactReferenceUnverified,
     clear_removal,
@@ -23,21 +22,44 @@ from ..artifact_jobs.lifecycle import (
     release_dead_removal_nowait,
     reserve_removal,
 )
-from ..artifact_reference_scan.image_references import runtime_image_reference_findings
-from ..artifact_reference_scan.model_references import model_set_reference_findings
-from ..capabilities import CapabilityUnavailableError
-from ..models.cache import ModelCacheSet
-from ..models.execution import RecipeRun
-from ..models.fleet import AgentNode
-from ..oci_image_store import DAMAGED_MANIFEST_CODES, OciImageStoreError
-from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
-from .common import _RECEIPT_SUFFIX, ACTOR, _Kept, _Stopping
-from .evidence import _CollectorEvidence, _Evidence, _Item
-from .references import _image_kept, _installation_kept, _model_kept, _mtime, _utc
+from vonk_control.artifact_reference_scan.image_references import (
+    runtime_image_reference_findings,
+)
+from vonk_control.artifact_reference_scan.model_references import (
+    model_set_reference_findings,
+)
+from vonk_control.capabilities import CapabilityUnavailableError
+from vonk_control.models.cache import ModelCacheSet
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.fleet import AgentNode
+from vonk_control.oci_image_store import DAMAGED_MANIFEST_CODES, OciImageStoreError
+from vonk_control.runtime_image_preparation.contracts import (
+    RuntimeImagePreparationError,
+)
+from vonk_control.unused_storage_collection.common import (
+    _RECEIPT_SUFFIX,
+    ACTOR,
+    _Kept,
+    _Stopping,
+)
+from vonk_control.unused_storage_collection.evidence import (
+    _CollectorEvidence,
+    _Evidence,
+    _Item,
+)
+from vonk_control.unused_storage_collection.references import (
+    _image_kept,
+    _installation_kept,
+    _model_kept,
+    _mtime,
+    _utc,
+)
 
 if TYPE_CHECKING:
-    from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-    from .service import UnusedStorageCollector
+    from vonk_control.runtime_image_preparation.storage import (
+        FilesystemRuntimeImageStorage,
+    )
+    from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
 
 def _uninstall(

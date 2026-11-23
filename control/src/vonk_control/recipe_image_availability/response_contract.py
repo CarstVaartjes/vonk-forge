@@ -10,21 +10,22 @@ from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import OperationProgress
-
-from ..lifecycle.evidence import Residue
-from ..model_cache.contract import Digest
-from ..operations.blockers import OperationBlocker
-from ..operations.contract import (
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.model_cache.contract import Digest
+from vonk_control.operations.blockers import OperationBlocker
+from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
-from ..recipe_operations.availability_intent import RecipeAvailabilityIntent
-from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
-from ..strict_json import StrictJSONModel
-from .availability_contract import (
+from vonk_control.recipe_image_availability.availability_contract import (
     RecipeImageAvailabilityArtifact,
     RecipeImageAvailabilityState,
 )
+from vonk_control.recipe_operations.availability_intent import RecipeAvailabilityIntent
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
+from vonk_control.strict_json import StrictJSONModel
 
 RecipeImageAvailabilityKind = Literal["recipe.image.availability.v2"]
 RecipeImageAvailabilityChildKind = Literal["model-cache", "runtime-image"]

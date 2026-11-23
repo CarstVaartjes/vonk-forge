@@ -14,37 +14,38 @@ from starlette.responses import Response
 from vonk_agent_protocol.lifecycle_vocabulary import ErrorCategory, WaitReason
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.state_machines import ModelCacheOperatorStatus
-from vonk_control.operator_receipt_contract import ReceiptPolicy
-
-from ..admission_locking import report_admission_locks
-from ..agent_upgrades.contract import AgentUpgradeRequestIntent
-from ..api_availability import AVAILABILITY_ERRORS
-from ..auth import Actor
-from ..enrollment.contract import (
+from vonk_control.admission_locking import report_admission_locks
+from vonk_control.agent_upgrades.contract import AgentUpgradeRequestIntent
+from vonk_control.api_availability import AVAILABILITY_ERRORS
+from vonk_control.auth import Actor
+from vonk_control.enrollment.contract import (
     ENROLLMENT_ID_PATTERN,
     EnrollmentGrantStatus,
     EnrollmentObservationOutcome,
     EnrollmentRevocationStatus,
 )
-from ..fleet_projection.common import FleetNode, FleetNodeIdentity, FleetSnapshot
-from ..library.api import install_library_routes
-from ..metrics.prometheus_api import PrometheusReader, install_metrics_routes
-from ..models.execution import RecipeRun, RunNode
-from ..observation.platform_errors import (
+from vonk_control.fleet_projection.common import (
+    FleetNode,
+    FleetNodeIdentity,
+    FleetSnapshot,
+)
+from vonk_control.library.api import install_library_routes
+from vonk_control.metrics.prometheus_api import PrometheusReader, install_metrics_routes
+from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.observation.platform_errors import (
     ObservationCaptureUnavailable,
     observation_capture_unavailable_response,
 )
-from ..observation.transfer import (
+from vonk_control.observation.transfer import (
     ObservationTransferRecord,
     ObservationTransferResponse,
     observation_openapi,
     observation_response,
 )
-from ..operation_api.constants import _ADMIN_OPERATION_IDS
-from ..operation_api.contracts import bounded_error_responses
-from ..operator_acceptance import operator_acceptance
-from ..run_states import ENDED_RUN_STATES
-from .contracts import (
+from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
+from vonk_control.operation_api.contracts import bounded_error_responses
+from vonk_control.operator_acceptance import operator_acceptance
+from vonk_control.operator_projection_api.contracts import (
     _SELECTOR_PATTERN,
     FLEET_OPERATION_IDS,
     FleetActionResponse,
@@ -56,8 +57,14 @@ from .contracts import (
     FleetUpgradeRequest,
     _fleet_work_state,
 )
-from .errors import _node, _operator_error, _require_mutation
-from .services import FleetOperatorServices
+from vonk_control.operator_projection_api.errors import (
+    _node,
+    _operator_error,
+    _require_mutation,
+)
+from vonk_control.operator_projection_api.services import FleetOperatorServices
+from vonk_control.operator_receipt_contract import ReceiptPolicy
+from vonk_control.run_states import ENDED_RUN_STATES
 
 
 def install_operator_projection_routes(

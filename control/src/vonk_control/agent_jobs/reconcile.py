@@ -12,44 +12,48 @@ from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.state_machines import NodeIdentityState
-
-from .. import agent_operation_states as aos
-from ..admission_locking import (
+from vonk_control import agent_operation_states as aos
+from vonk_control.admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
     label_transaction,
     lock_admission_rows,
 )
-from ..agent_operation_facts import attempt_holds_order as _attempt_holds_order
-from ..agent_operation_facts import aware as _aware
-from ..agent_operation_facts import fencing_intent
-from ..cancelled_runtime import cancellation_stop_current
-from ..failure_classification import disposition, error_detail, wait_reason
-from ..lifecycle.agent_operation import AgentOperationAdapter, lapsed_running_orders
-from ..lifecycle.artifact_job import ArtifactJobAdapter
-from ..lifecycle.reconciler import Reconciler
-from ..lifecycle.types import State as _LifecycleState
-from ..logging import log_event
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..own_cleanup import CLEANUP_KINDS
-from ..recovery_policy import WAIT_STEP
-from .endings import end_unobserved_order
-from .observation_receipts import (
+from vonk_control.agent_jobs.endings import end_unobserved_order
+from vonk_control.agent_jobs.observation_receipts import (
     OBSERVATION_KINDS,
     adopt_observation_receipt,
     receipt_state,
     retained_observation_receipt,
 )
-from .ownership import observation_ownership
-from .persistence import _OrderStore
-from .retirement import operator_resume_candidates_in_session
-from .waits import refresh_queue_waits
+from vonk_control.agent_jobs.ownership import observation_ownership
+from vonk_control.agent_jobs.persistence import _OrderStore
+from vonk_control.agent_jobs.retirement import operator_resume_candidates_in_session
+from vonk_control.agent_jobs.waits import refresh_queue_waits
+from vonk_control.agent_operation_facts import (
+    attempt_holds_order as _attempt_holds_order,
+)
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.agent_operation_facts import fencing_intent
+from vonk_control.cancelled_runtime import cancellation_stop_current
+from vonk_control.failure_classification import disposition, error_detail, wait_reason
+from vonk_control.lifecycle.agent_operation import (
+    AgentOperationAdapter,
+    lapsed_running_orders,
+)
+from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
+from vonk_control.lifecycle.reconciler import Reconciler
+from vonk_control.lifecycle.types import State as _LifecycleState
+from vonk_control.logging import log_event
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.own_cleanup import CLEANUP_KINDS
+from vonk_control.recovery_policy import WAIT_STEP
 
 if TYPE_CHECKING:
-    from .service import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
 
 
 def reconcile_orders(self: AgentJobService, limit: int = 100) -> bool:

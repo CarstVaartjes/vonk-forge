@@ -22,22 +22,25 @@ from sqlalchemy import or_, select, update
 
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..categorized_errors import BookkeepingUnknown
-from ..fleet_profiles.read_observation import remaining_storage_read_seconds
-from ..models.cache import ModelCacheSet
-from .artifacts import ArtifactSetManifest, _unique_artifacts
-from .constants import _LOGGER, _MAX_MANIFEST_BYTES, SCHEMA_VERSION
-from .contract import (
+from vonk_control.categorized_errors import BookkeepingUnknown
+from vonk_control.fleet_profiles.read_observation import remaining_storage_read_seconds
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, _unique_artifacts
+from vonk_control.model_cache.constants import (
+    _LOGGER,
+    _MAX_MANIFEST_BYTES,
+    SCHEMA_VERSION,
+)
+from vonk_control.model_cache.contract import (
     ModelCacheObservedObject,
     ModelCacheSetState,
     ModelCacheStorageObservation,
 )
-from .errors import ModelCacheError
-from .source_helpers import _fsync_directory
+from vonk_control.model_cache.errors import ModelCacheError
+from vonk_control.model_cache.source_helpers import _fsync_directory
+from vonk_control.models.cache import ModelCacheSet
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 _REFRESH_SECONDS = 30
 _RECHECK_SECONDS = 5

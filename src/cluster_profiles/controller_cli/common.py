@@ -11,17 +11,17 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol, override, runtime_checkable
 
-from ..control_client.errors import (
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlHTTPError,
     ControlMalformedResponse,
 )
 
 if TYPE_CHECKING:
-    from ..generated_control.models.fleet_profile_endpoints_view import (
+    from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
         FleetProfileEndpointsView,
     )
-    from ..generated_control.models.metric_spec import MetricSpec
+    from cluster_profiles.generated_control.models.metric_spec import MetricSpec
 
 
 MAX_PAGE_LIMIT = 512

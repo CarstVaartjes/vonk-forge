@@ -11,16 +11,18 @@ from vonk_agent_protocol.agent_words import (
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
-
-from ..failure_classification import is_redownload, is_security_failure
-from ..fleet_profile_contract.definitions import FleetProfileAssignment
-from ..fleet_profile_contract.switch_state import FleetProfileSwitchQueueItem
-from ..jobs import states as job_states
-from ..lifecycle.evidence import Residue
-from ..models.fleet import FleetProfileApplication
-from ..run_switch_contract.operations import RunSwitchOperation
-from ..run_switch_contract.vocabulary import RunSwitchPlacementAction
-from .persistence import _persisted_profile_plan, _persisted_profile_progress
+from vonk_control.failure_classification import is_redownload, is_security_failure
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profile_contract.switch_state import FleetProfileSwitchQueueItem
+from vonk_control.fleet_profiles.persistence import (
+    _persisted_profile_plan,
+    _persisted_profile_progress,
+)
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.run_switch_contract.operations import RunSwitchOperation
+from vonk_control.run_switch_contract.vocabulary import RunSwitchPlacementAction
 
 
 def _cache_loss(child: RunSwitchOperation) -> bool:

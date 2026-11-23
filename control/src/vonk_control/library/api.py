@@ -8,26 +8,25 @@ from typing import Annotated, Any, Literal
 from fastapi import FastAPI, HTTPException, Path, Query
 from vonk_forge_contracts import CatalogVocabulary
 
+from vonk_control.api_availability import AVAILABILITY_ERRORS
+from vonk_control.auth import CursorError
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-
-from ..api_availability import AVAILABILITY_ERRORS
-from ..auth import CursorError
-from ..cursor_contract import MAX_CURSOR_LENGTH
-from ..library_projection.common import (
-    LibrarySelectorAmbiguous,
-    SelectorAmbiguityHTTPError,
-)
-from ..model_cache.api import model_cache_http_error
-from ..model_cache.errors import ModelCacheError
-from ..operation_api.constants import _ADMIN_OPERATION_IDS
-from ..operation_api.contracts import bounded_error_responses
-from ..request_fault import RequestFault
-from .contract import (
+from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
+from vonk_control.library.contract import (
     ModelDetailResponse,
     ModelLibraryResponse,
     RecipeDetailResponse,
     RecipeLibraryResponse,
 )
+from vonk_control.library_projection.common import (
+    LibrarySelectorAmbiguous,
+    SelectorAmbiguityHTTPError,
+)
+from vonk_control.model_cache.api import model_cache_http_error
+from vonk_control.model_cache.errors import ModelCacheError
+from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
+from vonk_control.operation_api.contracts import bounded_error_responses
+from vonk_control.request_fault import RequestFault
 
 # Friendly names may contain spaces.  Keep selectors bounded and reject control
 # characters; path routing remains safe because the projection resolves only an

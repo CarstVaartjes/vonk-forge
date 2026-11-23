@@ -22,9 +22,11 @@ from importlib.resources.abc import Traversable
 from pathlib import Path, PurePosixPath
 
 from cluster_profiles.glb_validation.validation import validate_mesh_glb_bytes
-
-from .contracts import FixtureError, FixtureObservationUnknown
-from .values import _strict_json_loads
+from cluster_profiles.qualification_fixtures.contracts import (
+    FixtureError,
+    FixtureObservationUnknown,
+)
+from cluster_profiles.qualification_fixtures.values import _strict_json_loads
 
 _MEDIA_DEADLINE: ContextVar[float | None] = ContextVar(
     "qualification_media_deadline", default=None

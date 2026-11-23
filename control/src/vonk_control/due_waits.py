@@ -34,18 +34,17 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import WaitOwnerKind
-
-from . import (
+from vonk_control import (
     models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
 )
-from .failure_classification import disposition, error_detail, wait_reason
-from .logging import log_event, redact_text
-from .model_primitives import Base
-from .models.waits import ScheduledWaitOwner
-from .persisted_waits import owner_identity
-from .recovery_policy import WAIT_STEP
-from .strict_json import stored_document_detail
-from .wait_contract import WaitEvidence
+from vonk_control.failure_classification import disposition, error_detail, wait_reason
+from vonk_control.logging import log_event, redact_text
+from vonk_control.model_primitives import Base
+from vonk_control.models.waits import ScheduledWaitOwner
+from vonk_control.persisted_waits import owner_identity
+from vonk_control.recovery_policy import WAIT_STEP
+from vonk_control.strict_json import stored_document_detail
+from vonk_control.wait_contract import WaitEvidence
 
 _LOGGER = logging.getLogger(__name__)
 type RowKey = tuple[str | int, ...]

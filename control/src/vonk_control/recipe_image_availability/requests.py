@@ -23,36 +23,31 @@ from vonk_agent_protocol.outcome import SecurityRefusalError
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode, RecipeUpdateCode
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..admission_locking import ConstraintReplay, admitting
-from ..artifact_jobs.lifecycle import (
+from vonk_control.admission_locking import ConstraintReplay, admitting
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     has_pending_removal,
     lock_reference_gates,
 )
-from ..jobs import states as job_states
-from ..jobs.documents import (
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityRetry,
     AvailabilityRuntime,
 )
-from ..lifecycle.evidence import Residue
-from ..models.catalog import CatalogDocument, CatalogDocumentRevision
-from ..models.jobs import Job
-from ..operations.blockers import IdentityConflict, OperationBlocker, make_blocker
-from ..recipe_builds.cancellation import (
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.models.jobs import Job
+from vonk_control.operations.blockers import (
+    IdentityConflict,
+    OperationBlocker,
+    make_blocker,
+)
+from vonk_control.recipe_builds.cancellation import (
     BuildConsumerError,
     lock_availability_build_dependency,
 )
-from ..recipe_operations.availability_intent import (
-    RecipeRevisionIntent,
-    RecipeSelectorIntent,
-)
-from ..revision_images import revision_archives
-from ..stored.rows import read_row_column
-from ..stored.states import CatalogRevisionState
-from ..strict_json import serialize_json_value
-from .contracts import (
+from vonk_control.recipe_image_availability.contracts import (
     _PREPARATION_RECHECK_QUIET,
     _PREPARATION_RETRY_QUIET,
     _SUCCEEDED,
@@ -68,16 +63,26 @@ from .contracts import (
     _read,
     _retry_after,
 )
-from .view_contract import (
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeImageAvailabilityView,
 )
+from vonk_control.recipe_operations.availability_intent import (
+    RecipeRevisionIntent,
+    RecipeSelectorIntent,
+)
+from vonk_control.revision_images import revision_archives
+from vonk_control.stored.rows import read_row_column
+from vonk_control.stored.states import CatalogRevisionState
+from vonk_control.strict_json import serialize_json_value
 
 REQUEST_OBSERVATION_BUDGET_SECONDS = 0.25
 
 
 if TYPE_CHECKING:
-    from ..recipe_update_batches.helpers import RecipeUpdateClaim
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
+    from vonk_control.recipe_update_batches.helpers import RecipeUpdateClaim
 
 
 def start(

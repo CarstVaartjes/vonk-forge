@@ -14,15 +14,14 @@ from vonk_agent_protocol.agent_words import (
     ProfileInstallationPolicy,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
-
-from ..admission_locking import (
+from vonk_control.admission_locking import (
     ConstraintReplan,
     ConstraintReplay,
     admitting,
     label_transaction,
 )
-from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract.definitions import (
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.fleet_profile_contract.definitions import (
     FleetNodeView,
     FleetProfileDefinition,
     FleetProfileDefinitionView,
@@ -33,30 +32,32 @@ from ..fleet_profile_contract.definitions import (
     SavedProfileProjectionIssue,
     UnavailableFleetProfileView,
 )
-from ..fleet_profile_contract.review import FleetProfileApplicationView
-from ..models.fleet import (
-    AgentNode,
-    AgentNodeProfile,
-    FleetProfile,
-    FleetProfileApplication,
-)
-from .contracts import (
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileDefinitionUnavailable,
     FleetProfileInvalid,
     FleetProfileRevisionConflict,
 )
-from .projection_support import (
+from vonk_control.fleet_profiles.projection_support import (
     _aware,
     _digest,
     _profile_definition,
     _with_save_notes,
 )
-from .read_observation import profile_read
+from vonk_control.fleet_profiles.read_observation import profile_read
+from vonk_control.models.fleet import (
+    AgentNode,
+    AgentNodeProfile,
+    FleetProfile,
+    FleetProfileApplication,
+)
 
 if TYPE_CHECKING:
-    from .profile_projection import _ProfilePageReads
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.profile_projection import _ProfilePageReads
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 class FleetProfileService:

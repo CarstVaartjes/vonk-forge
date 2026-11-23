@@ -10,12 +10,10 @@ from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.outcome import InvalidRequestError
-from vonk_control.operator_receipt_contract import ReceiptPolicy
-
-from ..api_availability import AVAILABILITY_ERRORS
-from ..auth import MUTATION_ROLES, Actor
-from ..endpoint_contract import inference_gateway_api_base
-from ..fleet_profile_contract.definitions import (
+from vonk_control.api_availability import AVAILABILITY_ERRORS
+from vonk_control.auth import MUTATION_ROLES, Actor
+from vonk_control.endpoint_contract import inference_gateway_api_base
+from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileDefinitionView,
     FleetProfileDeleteRequest,
     FleetProfileDeletion,
@@ -24,18 +22,25 @@ from ..fleet_profile_contract.definitions import (
     FleetProfileReadView,
     FleetProfileView,
 )
-from ..fleet_profile_contract.endpoints import FleetProfileEndpointsView
-from ..fleet_profile_contract.review import (
+from vonk_control.fleet_profile_contract.endpoints import FleetProfileEndpointsView
+from vonk_control.fleet_profile_contract.review import (
     FleetProfileApplicationView,
     FleetProfileLoadRequest,
     FleetProfilePreview,
     FleetProfilePreviewRequest,
 )
-from ..operation_api.constants import _ADMIN_OPERATION_IDS
-from ..operation_api.contracts import bounded_error_responses
-from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
-from .contracts import FleetProfileConflict, FleetProfilePermissionDenied
-from .service import FleetProfileService
+from vonk_control.fleet_profiles.contracts import (
+    FleetProfileConflict,
+    FleetProfilePermissionDenied,
+)
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
+from vonk_control.operation_api.contracts import bounded_error_responses
+from vonk_control.operator_acceptance import (
+    OperatorReceiptResolver,
+    operator_acceptance,
+)
+from vonk_control.operator_receipt_contract import ReceiptPolicy
 
 #: The canonical lowercase UUID shape every durable identity in this API uses.
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"

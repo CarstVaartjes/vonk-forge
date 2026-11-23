@@ -16,32 +16,31 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.state_machines import RunState
 from vonk_agent_protocol.wire_model import canonical_message
-
-from .. import agent_operation_states as aos
-from ..fleet_profiles.stop_authority import issued_order_link
-from ..fleet_profiles.stop_contract import (
+from vonk_control import agent_operation_states as aos
+from vonk_control.fleet_profiles.stop_authority import issued_order_link
+from vonk_control.fleet_profiles.stop_contract import (
     JobRunStopScope,
     ProfileJobRunStopTarget,
     jobrun_stop_key,
 )
-from ..jobs import states as job_states
-from ..jobs.documents import RecipeStopParent
-from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.artifact_job import ArtifactJobAdapter
-from ..lifecycle.evidence import (
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import RecipeStopParent
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
+from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
     Residue,
     retire_as_unknown,
 )
-from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..lifecycle.types import Outcome
-from ..models.execution import ArtifactJob, RunNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..offline_stops import deferred_stop_nodes
-from ..stored.rows import read_row_column
-from .progress import _parent_execution_mode
-from .rank_authority import _profile_jobrun_parent
+from vonk_control.lifecycle.recipe_operation import RecipeOperationAdapter
+from vonk_control.lifecycle.types import Outcome
+from vonk_control.models.execution import ArtifactJob, RunNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.offline_stops import deferred_stop_nodes
+from vonk_control.recipe_operations.progress import _parent_execution_mode
+from vonk_control.recipe_operations.rank_authority import _profile_jobrun_parent
+from vonk_control.stored.rows import read_row_column
 
 
 class JobRunCompletionMixin:

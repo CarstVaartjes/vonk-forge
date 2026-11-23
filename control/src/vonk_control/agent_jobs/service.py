@@ -32,35 +32,19 @@ from vonk_agent_protocol.outcome import (
     UnknownOutcomeError,
 )
 from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
-
-from .. import agent_operation_states
-from ..agent_operation_facts import aware as _aware
-from ..agent_operation_facts import fencing_intent
-from ..agent_outcome import stored_report
-from ..auth import AgentSource
-from ..categorized_errors import InvalidType, InvalidValue
-from ..jobs.agent_contract import ClaimFacts
-from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.reconciler import Reconciler
-from ..lifecycle.types import Reported
-from ..models.fleet import AgentCertificate, AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..operations.contract import validate_progress_update
-from ..operations.progress import progress_document, sample_progress, stored_progress
-from ..optimistic import Stale, transition
-from ..own_cleanup import CLEANUP_KINDS
-from ..settings import DATABASE_WAIT_BUDGETS
-from .aggregation import _aggregate_parent, _aggregate_parent_state
-from .claim import _claim_once
-from .claim_authority import (
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.aggregation import (
+    _aggregate_parent,
+    _aggregate_parent_state,
+)
+from vonk_control.agent_jobs.claim import _claim_once
+from vonk_control.agent_jobs.claim_authority import (
     _claim_has_authority,
     _recipe_build_runtime_matches,
     _reconcile_agent_upgrade,
     _reject_recipe_build_claim,
 )
-from .claim_notes import (
+from vonk_control.agent_jobs.claim_notes import (
     _excluded_work_refusal,
     _note_malformed_cancel_flag,
     _record_claim_refusal,
@@ -68,10 +52,8 @@ from .claim_notes import (
     _write_refusal_note,
     record_boundary_refusal,
 )
-from .claim_notes import (
-    claim_next_operation as claim,
-)
-from .claim_reconcile import (
+from vonk_control.agent_jobs.claim_notes import claim_next_operation as claim
+from vonk_control.agent_jobs.claim_reconcile import (
     _cancel_superseded_operation,
     _claimable_operations,
     _fail_spent_start_budgets,
@@ -79,18 +61,18 @@ from .claim_reconcile import (
     _settle_lapsed,
     _superseded_cancellation_state,
 )
-from .completion import _report_event, note_report
-from .contracts import (
+from vonk_control.agent_jobs.completion import _report_event, note_report
+from vonk_control.agent_jobs.contracts import (
     AgentConfigurationConflict,
     AgentFence,
     AgentResultRefused,
     ResultConsumer,
     SupersededAgentEffect,
 )
-from .endings import end_unobserved_order
-from .evidence import sanitized_failure_report
-from .heartbeat import heartbeat, known_superseded_cancellation
-from .identity import (
+from vonk_control.agent_jobs.endings import end_unobserved_order
+from vonk_control.agent_jobs.evidence import sanitized_failure_report
+from vonk_control.agent_jobs.heartbeat import heartbeat, known_superseded_cancellation
+from vonk_control.agent_jobs.identity import (
     _active,
     _fence_token,
     _identity_is_active,
@@ -100,26 +82,61 @@ from .identity import (
     _runtime_identity,
     _verify_contact_source,
 )
-from .orchestration import enqueue, enqueue_in_session, notify_available
-from .predicates import _document
-from .reconcile import (
+from vonk_control.agent_jobs.orchestration import (
+    enqueue,
+    enqueue_in_session,
+    notify_available,
+)
+from vonk_control.agent_jobs.predicates import _document
+from vonk_control.agent_jobs.reconcile import (
     _order_reconciler,
     _sweep_lapsed_attempts,
     _sweep_would_act,
     reconcile_orders,
 )
-from .results import fail, record_late_result, record_result, succeed
-from .retirement import operator_resume_candidates_in_session
-from .retry import superseded_cancellation_deadline
-from .scope import _lock_operation_scopes, _lock_target_scopes, _target_scope
-from .stored import column_value
-from .supersession import (
+from vonk_control.agent_jobs.results import (
+    fail,
+    record_late_result,
+    record_result,
+    succeed,
+)
+from vonk_control.agent_jobs.retirement import operator_resume_candidates_in_session
+from vonk_control.agent_jobs.retry import superseded_cancellation_deadline
+from vonk_control.agent_jobs.scope import (
+    _lock_operation_scopes,
+    _lock_target_scopes,
+    _target_scope,
+)
+from vonk_control.agent_jobs.stored import column_value
+from vonk_control.agent_jobs.supersession import (
     abandon_superseded_idempotent_operations_in_session,
     assess_superseded_agent_effects_in_session,
     request_run_job_cancellation_in_session,
     request_superseded_workload_cancellation_in_session,
 )
-from .waits import refresh_queue_waits
+from vonk_control.agent_jobs.waits import refresh_queue_waits
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.agent_operation_facts import fencing_intent
+from vonk_control.agent_outcome import stored_report
+from vonk_control.auth import AgentSource
+from vonk_control.categorized_errors import InvalidType, InvalidValue
+from vonk_control.jobs.agent_contract import ClaimFacts
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.reconciler import Reconciler
+from vonk_control.lifecycle.types import Reported
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.operations.contract import validate_progress_update
+from vonk_control.operations.progress import (
+    progress_document,
+    sample_progress,
+    stored_progress,
+)
+from vonk_control.optimistic import Stale, transition
+from vonk_control.own_cleanup import CLEANUP_KINDS
+from vonk_control.settings import DATABASE_WAIT_BUDGETS
 
 
 class AgentJobService:

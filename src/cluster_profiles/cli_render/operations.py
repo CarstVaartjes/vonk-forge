@@ -6,8 +6,7 @@ import shlex
 from collections.abc import Mapping
 from enum import StrEnum
 
-from ..cli_states_generated import CANCELLED
-from .common import (
+from cluster_profiles.cli_render.common import (
     _actions,
     _bytes,
     _failure,
@@ -21,8 +20,9 @@ from .common import (
     _warn,
     _words,
 )
-from .profile import _endpoints_view, _profile_endpoints
-from .progress import _measured_progress, progress_line
+from cluster_profiles.cli_render.profile import _endpoints_view, _profile_endpoints
+from cluster_profiles.cli_render.progress import _measured_progress, progress_line
+from cluster_profiles.cli_states_generated import CANCELLED
 
 
 class _Alarm(StrEnum):

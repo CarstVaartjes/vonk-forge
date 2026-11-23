@@ -18,57 +18,73 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.state_machines import ReservationState
-
-from ..categorized_errors import MissingRecord
-from ..failure_classification import is_definite
-from ..fleet_profile_contract.applications import FleetProfileChildOperation
-from ..fleet_profile_contract.assessment import (
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.failure_classification import is_definite
+from vonk_control.fleet_profile_contract.applications import FleetProfileChildOperation
+from vonk_control.fleet_profile_contract.assessment import (
     FleetProfileAdmissionDecision,
     FleetProfileAssignmentAssessment,
 )
-from ..fleet_profile_contract.definitions import FleetProfileAssignment
-from ..fleet_profile_contract.review import FleetProfilePreview
-from ..fleet_profile_contract.switch_state import FleetProfileSwitchAdapterState
-from ..jobs import states as job_states
-from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import ResourceReservation
-from ..models.fleet import FleetProfileApplication
-from ..models.telemetry import NodeInventorySnapshot
-from ..preparation_contract import RuntimeImageIdentity
-from ..recipe_operations.runtime_specs import resolve_recipe_entities
-from ..run_switch_contract.operations import RunSwitchOperation
-from ..run_switch_contract.plans import RunSwitchAssessment
-from ..run_switch_contract.requests import (
-    RunSwitchApplyRequest,
-    SparkGroup,
-    SparkGroupNode,
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profile_contract.switch_state import (
+    FleetProfileSwitchAdapterState,
 )
-from ..run_switch_operations.errors import RunSwitchOperationConflict
-from ..run_switch_operations.service import RunSwitchOperationService
-from .assessment_support import (
-    _disk_shortfalls,
-)
-from .capacity import plan_kept_runs
-from .contracts import (
+from vonk_control.fleet_profiles.assessment_support import _disk_shortfalls
+from vonk_control.fleet_profiles.capacity import plan_kept_runs
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileAdmissionEffectBusy,
     FleetProfileInvalid,
     FleetProfileRecheckContractDefect,
     FleetProfileResourceRecheckUnavailable,
 )
-from .dependencies import _LOGGER
-from .error_summary import _error_summary, _normalized_failure_text
-from .persistence import (
+from vonk_control.fleet_profiles.dependencies import _LOGGER
+from vonk_control.fleet_profiles.error_summary import (
+    _error_summary,
+    _normalized_failure_text,
+)
+from vonk_control.fleet_profiles.persistence import (
     _intended_profile,
     _persisted_profile_plan,
     _persisted_profile_progress,
     _reviewed_profile_plan,
     _stored_recipe,
 )
-from .switch_children import _assignment_intent, _cache_loss, _ending_disposition
-from .switch_dispatch import RunSwitchFleetProfileAdapter as _SwitchDispatch
-from .switch_observation import RunSwitchFleetProfileAdapter as _SwitchObservation
-from .switch_projection import RunSwitchFleetProfileAdapter as _SwitchProjection
+from vonk_control.fleet_profiles.switch_children import (
+    _assignment_intent,
+    _cache_loss,
+    _ending_disposition,
+)
+from vonk_control.fleet_profiles.switch_dispatch import (
+    RunSwitchFleetProfileAdapter as _SwitchDispatch,
+)
+from vonk_control.fleet_profiles.switch_observation import (
+    RunSwitchFleetProfileAdapter as _SwitchObservation,
+)
+from vonk_control.fleet_profiles.switch_projection import (
+    RunSwitchFleetProfileAdapter as _SwitchProjection,
+)
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
+)
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.preparation_contract import RuntimeImageIdentity
+from vonk_control.recipe_operations.runtime_specs import resolve_recipe_entities
+from vonk_control.run_switch_contract.operations import RunSwitchOperation
+from vonk_control.run_switch_contract.plans import RunSwitchAssessment
+from vonk_control.run_switch_contract.requests import (
+    RunSwitchApplyRequest,
+    SparkGroup,
+    SparkGroupNode,
+)
+from vonk_control.run_switch_operations.errors import RunSwitchOperationConflict
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 class RunSwitchFleetProfileAdapter(

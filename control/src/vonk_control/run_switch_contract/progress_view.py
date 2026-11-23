@@ -10,34 +10,26 @@ from pydantic import BaseModel, ValidationError
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OutcomeKind
 from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
-
-from ..lifecycle.evidence import (
-    BookkeepingReason,
-    retire_as_unknown,
-)
-from ..lifecycle.run_switch import (
-    set_member_state,
-)
-from ..operations.progress import project_progress, sample_progress
-from ..run_switch_contract.vocabulary import RunSwitchProgressState
-from ..run_switch_operations.constants import _PROGRESS_STATE_ADAPTER
-from ..run_switch_operations.image_receipts import (
-    _plan_target_node_ids,
-    _planned_transfer_bytes,
-    _planned_transfer_parts,
-)
-from ..stall_window import last_progress_at, stall_deadline
-from .evidence import RunSwitchPhase
-from .observation import (
-    RunSwitchObservedEvidence,
-)
-from .operations import RunSwitchOperationResult
-from .plans import RunSwitchPlan
-from .progress import (
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.lifecycle.run_switch import set_member_state
+from vonk_control.operations.progress import project_progress, sample_progress
+from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+from vonk_control.run_switch_contract.observation import RunSwitchObservedEvidence
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.progress import (
     RunSwitchMemberProgress,
     RunSwitchMemberReceipt,
     RunSwitchProgress,
 )
+from vonk_control.run_switch_contract.vocabulary import RunSwitchProgressState
+from vonk_control.run_switch_operations.constants import _PROGRESS_STATE_ADAPTER
+from vonk_control.run_switch_operations.image_receipts import (
+    _plan_target_node_ids,
+    _planned_transfer_bytes,
+    _planned_transfer_parts,
+)
+from vonk_control.stall_window import last_progress_at, stall_deadline
 
 #: Preparation, transfer and verification end after this long without progress.
 RECOVERY_STALL_WINDOW = timedelta(hours=1)

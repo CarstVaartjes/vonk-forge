@@ -11,10 +11,9 @@ from typing import TYPE_CHECKING, cast
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.outcome import SecurityRefusalError
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
-
-from ..compiled_execution_plan import VerifiedModelObject
-from .model_cache import model_file_receipt
-from .types import (
+from vonk_control.compiled_execution_plan import VerifiedModelObject
+from vonk_control.distribution.model_cache import model_file_receipt
+from vonk_control.distribution.types import (
     DistributionError,
     DistributionUnknown,
     ObjectSource,
@@ -23,8 +22,8 @@ from .types import (
 )
 
 if TYPE_CHECKING:
-    from ..model_cache.artifacts import ArtifactSetManifest
-    from ..model_cache.service import ModelCacheService
+    from vonk_control.model_cache.artifacts import ArtifactSetManifest
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 def verified_model_receipts(

@@ -70,37 +70,28 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.evidence import RunDegradedReason
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
-
-from .. import agent_operation_states as aos
-from ..agent_jobs.supersession import _cancel_order
-from ..agent_operation_facts import aware, job_attempt_did_not_launch
-from ..artifact_jobs import states as ajs
-from ..artifact_jobs.evidence import (
+from vonk_control import agent_operation_states as aos
+from vonk_control.agent_jobs.supersession import _cancel_order
+from vonk_control.agent_operation_facts import aware, job_attempt_did_not_launch
+from vonk_control.artifact_jobs import states as ajs
+from vonk_control.artifact_jobs.evidence import (
     ArtifactJobResultEvidence,
     dump_result_evidence,
     read_result_evidence,
 )
-from ..categorized_errors import InvalidValue
-from ..models.execution import STOPPABLE_RUN_STATES, ArtifactJob, RecipeRun
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..persisted_waits import lifecycle_wait
-from ..settings import DATABASE_WAIT_BUDGETS
-from ..stall_window import stall_deadline
-from ..stored.rows import read_row_column
-from .adapter import Dispatch
-from .agent_operation import (
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.lifecycle.adapter import Dispatch
+from vonk_control.lifecycle.agent_operation import (
     JOB_RUN_OPERATION,
     STOP_ACTION,
     AgentOperationAdapter,
     receipt_effect,
     set_parent_state,
 )
-from .core import transition
-from .job_ranks import fan_in_cancellation_key, resolve_owner
-from .reconciler import settle
-from .types import (
+from vonk_control.lifecycle.core import transition
+from vonk_control.lifecycle.job_ranks import fan_in_cancellation_key, resolve_owner
+from vonk_control.lifecycle.reconciler import settle
+from vonk_control.lifecycle.types import (
     Effect,
     Event,
     Lifecycle,
@@ -110,6 +101,14 @@ from .types import (
     State,
     StopResult,
 )
+from vonk_control.models.execution import STOPPABLE_RUN_STATES, ArtifactJob, RecipeRun
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.persisted_waits import lifecycle_wait
+from vonk_control.settings import DATABASE_WAIT_BUDGETS
+from vonk_control.stall_window import stall_deadline
+from vonk_control.stored.rows import read_row_column
 
 KIND = "artifact-job"
 WAITING = ajs.NEEDS_OPERATOR

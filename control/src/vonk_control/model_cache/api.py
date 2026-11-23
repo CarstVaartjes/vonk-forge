@@ -17,34 +17,15 @@ from vonk_agent_protocol.outcome import (
     UnknownOutcomeError,
 )
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_control.operator_receipt_contract import ReceiptPolicy
-
-from ..api_availability import AVAILABILITY_ERRORS
-from ..auth import MUTATION_ROLES, Actor, CursorCodec
-from ..bounded_json import require_integer, require_sequence
-from ..cache_removal_review import CacheRemovalReview
-from ..library_projection.common import (
+from vonk_control.api_availability import AVAILABILITY_ERRORS
+from vonk_control.auth import MUTATION_ROLES, Actor, CursorCodec
+from vonk_control.bounded_json import require_integer, require_sequence
+from vonk_control.cache_removal_review import CacheRemovalReview
+from vonk_control.library_projection.common import (
     LibrarySelectorAmbiguous,
     SelectorAmbiguityHTTPError,
 )
-from ..operation_api.constants import _ADMIN_OPERATION_IDS
-from ..operation_api.contracts import (
-    OperationApiServices,
-    OperationListPage,
-    OperationProvider,
-    OperationQuery,
-    bounded_error_responses,
-)
-from ..operation_api.providers import observation_cursors
-from ..operations.contract import AvailabilityOperationFailure
-from ..operations.item_contract import (
-    OperationItem,
-    OperationOwnerReference,
-    OperationResultFacts,
-)
-from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
-from ..strict_json import read_stored_model
-from .contract import (
+from vonk_control.model_cache.contract import (
     UUID_PATTERN,
     CacheOperationKind,
     ModelCacheCancellationRequest,
@@ -54,15 +35,36 @@ from .contract import (
     ModelCacheRemovalRequest,
     ModelCacheRemovalResult,
 )
-from .errors import (
+from vonk_control.model_cache.errors import (
     ModelCacheConflict,
     ModelCacheError,
     ModelCacheNotFound,
     ModelCacheResolutionError,
     ModelCacheSelectorAmbiguous,
 )
-from .progress import project_cache_progress
-from .service import ModelCacheService
+from vonk_control.model_cache.progress import project_cache_progress
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
+from vonk_control.operation_api.contracts import (
+    OperationApiServices,
+    OperationListPage,
+    OperationProvider,
+    OperationQuery,
+    bounded_error_responses,
+)
+from vonk_control.operation_api.providers import observation_cursors
+from vonk_control.operations.contract import AvailabilityOperationFailure
+from vonk_control.operations.item_contract import (
+    OperationItem,
+    OperationOwnerReference,
+    OperationResultFacts,
+)
+from vonk_control.operator_acceptance import (
+    OperatorReceiptResolver,
+    operator_acceptance,
+)
+from vonk_control.operator_receipt_contract import ReceiptPolicy
+from vonk_control.strict_json import read_stored_model
 
 MODEL_CACHE_OPERATION_IDS = {
     ("get", "/api/model/operations/{operation_id}"): "getModelOperation",

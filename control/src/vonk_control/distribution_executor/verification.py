@@ -5,17 +5,16 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from vonk_agent_protocol.agent_words import ProfileChildPhase
-
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.phase_results import (
+from vonk_control.distribution_executor.identity import DistributionIdentity
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import (
     RunSwitchCachedTransferResult,
     RunSwitchTargetTransferEvidenceResult,
     RunSwitchTargetTransferResult,
     RunSwitchVerifyResult,
 )
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.progress import ArtifactVerificationEvidence
-from .identity import DistributionIdentity
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.progress import ArtifactVerificationEvidence
 
 
 class DistributionVerification(DistributionIdentity):

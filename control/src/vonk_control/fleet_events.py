@@ -16,9 +16,8 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
-
-from .auth import CursorError
-from .fleet_event_contract import (
+from vonk_control.auth import CursorError
+from vonk_control.fleet_event_contract import (
     AgentOperationPayload,
     FleetEventPayload,
     InstallationNodePayload,
@@ -30,17 +29,22 @@ from .fleet_event_contract import (
     RunNodePayload,
     validate_fleet_event_payload,
 )
-from .models.execution import InstallationNode, RecipeInstallation, RecipeRun, RunNode
-from .models.fleet import AgentNodeProfile
-from .models.jobs import Job
-from .models.operations import AgentOperation
-from .models.telemetry import (
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    RecipeRun,
+    RunNode,
+)
+from vonk_control.models.fleet import AgentNodeProfile
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.models.telemetry import (
     FleetEventCursor,
     FleetStreamEvent,
     NodeInventoryItemsSnapshot,
     NodeTelemetryLatest,
 )
-from .strict_json import serialize_json_value
+from vonk_control.strict_json import serialize_json_value
 
 EVENT_TYPES = frozenset(
     {"node-telemetry", "node-profile", "recipe-state", "operation-state"}

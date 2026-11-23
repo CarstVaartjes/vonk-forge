@@ -19,13 +19,12 @@ from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.admission import AdmissionCode
-
-from . import (
+from vonk_control import (
     models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
 )
-from .bounded_retry import REQUEST_PAUSES, bounded_attempts
-from .model_primitives import Base
-from .settings import DATABASE_WAIT_BUDGETS
+from vonk_control.bounded_retry import REQUEST_PAUSES, bounded_attempts
+from vonk_control.model_primitives import Base
+from vonk_control.settings import DATABASE_WAIT_BUDGETS
 
 _BUSY_SQLSTATES = frozenset({"55P03", "40P01", "40001", "57014"})
 _ROW_LOCK_ORDER = (

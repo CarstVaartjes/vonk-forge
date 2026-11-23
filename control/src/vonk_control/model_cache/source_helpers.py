@@ -9,9 +9,14 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-
-from .constants import _GITHUB_RELEASE_ASSET_HOST, _HF_CANONICAL_HOST
-from .errors import ModelCacheConflictInvalid, ModelCacheResolutionInvalid
+from vonk_control.model_cache.constants import (
+    _GITHUB_RELEASE_ASSET_HOST,
+    _HF_CANONICAL_HOST,
+)
+from vonk_control.model_cache.errors import (
+    ModelCacheConflictInvalid,
+    ModelCacheResolutionInvalid,
+)
 
 
 def _model_selector(value: object) -> str:

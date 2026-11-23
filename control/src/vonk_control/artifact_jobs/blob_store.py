@@ -33,10 +33,9 @@ from vonk_agent_protocol.outcome import (
     SecurityRefusalError,
     UnknownOutcomeError,
 )
-
-from ..bounded_retry import bounded_async_attempts
-from ..categorized_errors import InvalidValue
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.bounded_retry import bounded_async_attempts
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
 
 # The reference fence is a short critical section around one blob verification
 # and its durable attachment, so a bounded nonblocking claim is enough: the

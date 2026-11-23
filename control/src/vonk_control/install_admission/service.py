@@ -16,8 +16,7 @@ from vonk_agent_protocol.state_machines import (
     InstallationState,
     ReservationState,
 )
-
-from ..admission_locking import (
+from vonk_control.admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
     acquire_admission_keys,
@@ -26,39 +25,45 @@ from ..admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
-from ..disk_reservations import (
-    outstanding_disk_reservation_bytes,
-)
-from ..fleet_profiles.capacity import inherited_profile_disk
-from ..inventory.items_contract import InventorySnapshotKind
-from ..machine_states import reservation_live
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import InstallationNode, RecipeInstallation, ResourceReservation
-from ..models.fleet import AgentNode
-from ..models.mapping import ClusterMapping, ClusterMappingNode
-from ..models.telemetry import NodeSnapshot
-from ..recipe_operations.execution_contract import (
-    RecipeExecutionContractError,
-    installation_plan_document,
-)
-from ..recipe_operations.runtime_specs import (
-    RecipeRuntimeSpecError,
-    resolve_recipe_entities,
-)
-from ..stored.states import CatalogRevisionState, ClusterMappingState, RecipeBuildState
-from .contracts import (
+from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
+from vonk_control.fleet_profiles.capacity import inherited_profile_disk
+from vonk_control.install_admission.contracts import (
     InstallAdmissionBusy,
     InstallEvidenceChanged,
     InstallPlan,
     InstallPlanStale,
 )
-from .identity import _primary_model_sha256
-from .planning import InstallPlanningService
-from .validation import (
+from vonk_control.install_admission.identity import _primary_model_sha256
+from vonk_control.install_admission.planning import InstallPlanningService
+from vonk_control.install_admission.validation import (
     _active_recipe_revision,
     require_admissible,
     require_same_execution,
+)
+from vonk_control.inventory.items_contract import InventorySnapshotKind
+from vonk_control.machine_states import reservation_live
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    ResourceReservation,
+)
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.models.telemetry import NodeSnapshot
+from vonk_control.recipe_operations.execution_contract import (
+    RecipeExecutionContractError,
+    installation_plan_document,
+)
+from vonk_control.recipe_operations.runtime_specs import (
+    RecipeRuntimeSpecError,
+    resolve_recipe_entities,
+)
+from vonk_control.stored.states import (
+    CatalogRevisionState,
+    ClusterMappingState,
+    RecipeBuildState,
 )
 
 

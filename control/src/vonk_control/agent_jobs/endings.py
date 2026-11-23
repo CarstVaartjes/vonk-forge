@@ -8,16 +8,15 @@ from typing import TYPE_CHECKING
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
-
-from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.types import CancelRequested
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from .retirement import release_owned_reservations_in_session
+from vonk_control.agent_jobs.retirement import release_owned_reservations_in_session
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.types import CancelRequested
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
 
 if TYPE_CHECKING:
-    from .service import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
 
 
 def end_unobserved_order(

@@ -14,27 +14,30 @@ from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import AvailabilityJobPayload
+from vonk_control.lifecycle.core import STOP_BUDGET
 from vonk_control.lifecycle.evidence import Residue
-
-from ..jobs import states as job_states
-from ..jobs.documents import AvailabilityJobPayload
-from ..lifecycle.core import STOP_BUDGET
-from ..model_cache.errors import ModelCacheError
-from ..models.jobs import Job
-from ..operations.contract import AvailabilityOperationFailure
-from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
-from ..strict_json import serialize_json_value
-from .contracts import (
+from vonk_control.model_cache.errors import ModelCacheError
+from vonk_control.models.jobs import Job
+from vonk_control.operations.contract import AvailabilityOperationFailure
+from vonk_control.recipe_image_availability.contracts import (
     OPERATION_KIND,
     RecipeImageAvailabilityClaim,
     _AvailabilityClaimLost,
     _failure_code,
     _failure_detail,
 )
+from vonk_control.runtime_image_preparation.contracts import (
+    RuntimeImagePreparationError,
+)
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from ..recipe_update_batches.helpers import RecipeUpdateClaim
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
+    from vonk_control.recipe_update_batches.helpers import RecipeUpdateClaim
 
 
 def _release_cancelled_claim(

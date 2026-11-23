@@ -11,14 +11,13 @@ from vonk_forge_contracts import RecipeDefinition
 from vonk_forge_contracts.qualification_status import QualificationStatus
 
 from vonk_agent_protocol.state_machines import AssetAvailability
-
-from ..auth import CursorCodec
-from ..catalog.revision_contract import (
+from vonk_control.auth import CursorCodec
+from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
 )
-from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
-from ..library.contract import (
+from vonk_control.inventory.repository import INVENTORY_MAX_AGE_SECONDS
+from vonk_control.library.contract import (
     FreshnessPolicy,
     LibraryFacetValues,
     LibraryLocalProgress,
@@ -27,16 +26,9 @@ from ..library.contract import (
     LibraryRecipeProjection,
     LibraryResourceProjection,
 )
-from ..library.image_presence import ImagePresenceIndex
-from ..library.storage_observation import LibraryStorageObserver
-from ..model_cache import states as model_cache_states
-from ..model_cache.contract import (
-    ModelCacheOperationState,
-    ModelCacheUsage,
-)
-from ..models.catalog import CatalogDocumentRevision
-from ..wait_contract import QueueWait
-from .catalog import (
+from vonk_control.library.image_presence import ImagePresenceIndex
+from vonk_control.library.storage_observation import LibraryStorageObserver
+from vonk_control.library_projection.catalog import (
     _catalog_documents,
     _document_texts,
     _documents_for_snapshot,
@@ -47,27 +39,31 @@ from .catalog import (
     library_vocabulary,
     refresh_catalog,
 )
-from .common import (
+from vonk_control.library_projection.common import (
     _LOCAL_STATE_PRIORITY,
     DocumentText,
     LibraryControllerState,
     LibrarySelectorAmbiguous,
     _note_unreadable,
 )
-from .local_state import (
+from vonk_control.library_projection.local_state import (
     _apply_image_presence,
     _assessed,
     _database_local_state,
     _local,
     _local_state_snapshot,
 )
-from .views import (
+from vonk_control.library_projection.views import (
     authoring_recipe_detail,
     model_detail,
     models,
     recipe_detail,
     recipe_library,
 )
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.contract import ModelCacheOperationState, ModelCacheUsage
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.wait_contract import QueueWait
 
 REQUEST_BUDGET_SECONDS = 8.0
 IMAGE_BUDGET_SECONDS = 2.0

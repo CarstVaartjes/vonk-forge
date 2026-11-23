@@ -17,11 +17,10 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitResumeCondition,
 )
 from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
-
-from .agent_operation_facts import aware
-from .agent_upgrades.contract import AgentUpgradeRolloutPayload
-from .jobs import states as job_states
-from .jobs.documents import (
+from vonk_control.agent_operation_facts import aware
+from vonk_control.agent_upgrades.contract import AgentUpgradeRolloutPayload
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import (
     AvailabilityJobPayload,
     RecipeBuildCleanupParent,
     RecipeBuildParent,
@@ -34,29 +33,35 @@ from .jobs.documents import (
     RecipeUninstallParent,
     RunSwitchJobPayload,
 )
-from .models.cache import (
+from vonk_control.models.cache import (
     ArtifactLifecycleGate,
     ModelCacheOperation,
     RecipeLibrarySyncRun,
 )
-from .models.coordinator import CoordinatorFailure
-from .models.execution import ArtifactJob, RecipeInstallation, RecipeRun
-from .models.fleet import (
+from vonk_control.models.coordinator import CoordinatorFailure
+from vonk_control.models.execution import ArtifactJob, RecipeInstallation, RecipeRun
+from vonk_control.models.fleet import (
     AgentCertificate,
     AgentIssuedCertificateRevocation,
     FleetProfileApplication,
     FleetProfileSelection,
 )
-from .models.jobs import Job
-from .models.operations import AgentOperation
-from .models.routes import RoutePublicationOwner
-from .models.waits import ScheduledWaitOwner
-from .operations.blockers import BlockingOperation, OperationBlocker, make_blocker
-from .recipe_image_availability.removal_contract import RecipeCacheRemovalOwner
-from .recipe_update_batches.contract import RecipeUpdateDocument
-from .stored.json_values import binding_for
-from .strict_json import warn_unreadable_once
-from .wait_contract import QueueWait, WaitEvidence, typed_wait_reason
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.models.routes import RoutePublicationOwner
+from vonk_control.models.waits import ScheduledWaitOwner
+from vonk_control.operations.blockers import (
+    BlockingOperation,
+    OperationBlocker,
+    make_blocker,
+)
+from vonk_control.recipe_image_availability.removal_contract import (
+    RecipeCacheRemovalOwner,
+)
+from vonk_control.recipe_update_batches.contract import RecipeUpdateDocument
+from vonk_control.stored.json_values import binding_for
+from vonk_control.strict_json import warn_unreadable_once
+from vonk_control.wait_contract import QueueWait, WaitEvidence, typed_wait_reason
 
 
 def read_wait(owner: ScheduledWaitOwner) -> QueueWait | None:

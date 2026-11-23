@@ -13,26 +13,21 @@ from fastapi import (
     Response,
 )
 
-from ..auth import (
-    Actor,
-)
-from ..download_contract import download_responses
-from ..metrics.registry import MetricsRegistry
-from ..observation.platform import (
-    PlatformObserver,
-    api_only_observation,
-)
-from ..observation.platform_errors import (
+from vonk_control.auth import Actor
+from vonk_control.download_contract import download_responses
+from vonk_control.metrics.registry import MetricsRegistry
+from vonk_control.observation.platform import PlatformObserver, api_only_observation
+from vonk_control.observation.platform_errors import (
     ObservationCaptureUnavailable,
     observation_capture_unavailable_response,
 )
-from ..observation.transfer import (
+from vonk_control.observation.transfer import (
     ObservationTransferRecord,
     ObservationTransferResponse,
     observation_openapi,
     observation_response,
 )
-from ..operation_api.contracts import (
+from vonk_control.operation_api.contracts import (
     HealthzResponse,
     ReadyzResponse,
     bounded_error_responses,

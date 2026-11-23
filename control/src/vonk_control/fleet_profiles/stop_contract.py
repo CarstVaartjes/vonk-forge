@@ -17,9 +17,8 @@ from vonk_agent_protocol.outcome import InvalidRequestError
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..categorized_errors import BookkeepingUnknown
-from ..strict_json import StrictJSONModel
+from vonk_control.categorized_errors import BookkeepingUnknown
+from vonk_control.strict_json import StrictJSONModel
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 

@@ -16,21 +16,22 @@ from vonk_agent_protocol.agent_words import (
 )
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-
-from ..operations.blockers import OperationBlocker, ProgressStall
-from ..run_switch_contract.progress import RunSwitchProgress
-from ..strict_json import StrictModel
-from ..wait_contract import QueueWait
-from .definitions import FleetProfileAssignment, FleetProfileScope
-from .effects import FleetProfileChildProgress, FleetProfileRunEffect
-from .switch_state import (
+from vonk_control.fleet_profile_contract.definitions import (
+    FleetProfileAssignment,
+    FleetProfileScope,
+)
+from vonk_control.fleet_profile_contract.effects import (
+    FleetProfileChildProgress,
+    FleetProfileRunEffect,
+)
+from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileChildResult,
     FleetProfileStepResult,
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchChildKind,
     FleetProfileSwitchChildResult,
 )
-from .vocabulary import (
+from vonk_control.fleet_profile_contract.vocabulary import (
     Digest,
     FleetProfileCancellationState,
     FleetProfileInstallationPolicy,
@@ -40,6 +41,10 @@ from .vocabulary import (
     NodeId,
     UuidId,
 )
+from vonk_control.operations.blockers import OperationBlocker, ProgressStall
+from vonk_control.run_switch_contract.progress import RunSwitchProgress
+from vonk_control.strict_json import StrictModel
+from vonk_control.wait_contract import QueueWait
 
 
 class FleetProfileIntendedConfiguration(StrictModel):

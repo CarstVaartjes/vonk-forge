@@ -17,25 +17,22 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.recipes import RecipeUpdateCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
+from vonk_control.admission_locking import ConstraintReplay, admitting
+from vonk_control.auth import MUTATION_ROLES
+from vonk_control.catalog.queries import active_head_revision
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-
-from ..admission_locking import ConstraintReplay, admitting
-from ..auth import MUTATION_ROLES
-from ..catalog.queries import active_head_revision
-from ..models.catalog import CatalogDocumentRevision
-from ..models.fleet import User
-from ..models.jobs import Job
-from ..recipe_image_availability.contracts import (
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import User
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityInvalid,
     RecipeImageAvailabilityRefused,
     RecipeImageAvailabilityUnknown,
 )
-from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
-from ..revision_images import revision_images
-from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
-from ..stored.states import CatalogRevisionState
-from ..strict_json import serialize_json_value
-from .contract import (
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
+from vonk_control.recipe_update_batches.contract import (
     UPDATE_KIND,
     RecipeUpdateChild,
     RecipeUpdateDocument,
@@ -44,11 +41,17 @@ from .contract import (
     RecipeUpdateScope,
     read_update_document,
 )
+from vonk_control.revision_images import revision_images
+from vonk_control.runtime_image_preparation.contracts import (
+    RuntimeImagePreparationError,
+)
+from vonk_control.stored.states import CatalogRevisionState
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeUpdateBatches
+    from vonk_control.recipe_update_batches.service import RecipeUpdateBatches
 
-from .helpers import _binding_digest, _encoded, _now
+from vonk_control.recipe_update_batches.helpers import _binding_digest, _encoded, _now
 
 
 class RequestsMixin:

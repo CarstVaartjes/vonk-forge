@@ -16,24 +16,23 @@ from sqlalchemy import select
 from sqlalchemy.orm import object_session
 
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_control.admission_locking import AdmissionLockBusy
+from vonk_control.install_admission.contracts import InstallAdmissionBusy
+from vonk_control.models.jobs import Job
 from vonk_control.owner_liveness import Owner, OwnerKind, OwnerRef, owner
-
-from ..admission_locking import AdmissionLockBusy
-from ..install_admission.contracts import InstallAdmissionBusy
-from ..models.jobs import Job
-from ..recipe_builds.common import RecipeBuildAdmissionBusy
-from ..recipe_operations.lifecycle_contract import START_CHILD_KINDS
-from ..run_admission import (
+from vonk_control.recipe_builds.common import RecipeBuildAdmissionBusy
+from vonk_control.recipe_operations.lifecycle_contract import START_CHILD_KINDS
+from vonk_control.run_admission import (
     RETRYABLE_PLAN_BLOCKERS,
     RUN_ADMISSION_WAIT_CODES,
     RunAdmissionBusy,
 )
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..stall_window import Verdict, progress_deadline
-from .awaited_children import awaited_jobs
-from .constants import _FINAL_VERIFICATION_MAX_SECONDS
-from .errors import RunSwitchPostStopEvidencePending
-from .planning_helpers import _aware, _stored_job_plan
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_operations.awaited_children import awaited_jobs
+from vonk_control.run_switch_operations.constants import _FINAL_VERIFICATION_MAX_SECONDS
+from vonk_control.run_switch_operations.errors import RunSwitchPostStopEvidencePending
+from vonk_control.run_switch_operations.planning_helpers import _aware, _stored_job_plan
+from vonk_control.stall_window import Verdict, progress_deadline
 
 #: Dependency recovery before verification: stayed unreadable.
 DEPENDENCY_WINDOW = timedelta(hours=1)

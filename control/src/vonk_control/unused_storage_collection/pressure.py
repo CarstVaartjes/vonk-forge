@@ -15,29 +15,35 @@ from sqlalchemy.exc import SQLAlchemyError
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.state_machines import InstallationState
-
-from ..artifact_jobs.lifecycle import (
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     lock_reference_gates,
 )
-from ..capabilities import CapabilityUnavailableError
-from ..exact_integer_storage import DecimalIntegerOrderKey
-from ..inventory.repository import INVENTORY_MAX_AGE
-from ..logging import log_event
-from ..models.cache import ArtifactLifecycleGate, ModelCacheSet
-from ..models.execution import InstallationNode, RecipeInstallation
-from ..persisted_waits import schedule_wait, wait_due
-from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
-from ..storage_demands import NAS_IMAGES, NAS_MODELS, StorageDemand, spark_scope
-from .common import (
+from vonk_control.capabilities import CapabilityUnavailableError
+from vonk_control.exact_integer_storage import DecimalIntegerOrderKey
+from vonk_control.inventory.repository import INVENTORY_MAX_AGE
+from vonk_control.logging import log_event
+from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheSet
+from vonk_control.models.execution import InstallationNode, RecipeInstallation
+from vonk_control.persisted_waits import schedule_wait, wait_due
+from vonk_control.runtime_image_preparation.contracts import (
+    RuntimeImagePreparationError,
+)
+from vonk_control.storage_demands import (
+    NAS_IMAGES,
+    NAS_MODELS,
+    StorageDemand,
+    spark_scope,
+)
+from vonk_control.unused_storage_collection.common import (
     _LOGGER,
     _RECEIPT_SUFFIX,
     _eviction_order,
     _Kept,
     _Stopping,
 )
-from .evidence import (
+from vonk_control.unused_storage_collection.evidence import (
     StorageItemKind,
     _CollectorEvidence,
     _DueRemovalTarget,
@@ -46,7 +52,7 @@ from .evidence import (
     _Pressure,
     _Round,
 )
-from .references import (
+from vonk_control.unused_storage_collection.references import (
     _code,
     _latest_snapshots,
     _model_removal_in_flight,
@@ -54,7 +60,7 @@ from .references import (
 )
 
 if TYPE_CHECKING:
-    from .service import UnusedStorageCollector
+    from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
 
 def _pressures(self: UnusedStorageCollector, now: datetime) -> list[_Pressure]:

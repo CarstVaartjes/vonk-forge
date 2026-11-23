@@ -26,52 +26,68 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     WaitReason,
 )
-
-from .. import agent_operation_states
-from ..agent_operation_facts import (
-    RESTART_REISSUE_OPERATIONS as _RESTART_REISSUE_OPERATIONS,
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.claim_authority import (
+    dispatch_wait,
+    recipe_build_disk_wait,
 )
-from ..agent_operation_facts import (
-    attempt_holds_open_launch_budget as _attempt_holds_open_launch_budget,
+from vonk_control.agent_jobs.claim_reconcile import _first_claimable_id
+from vonk_control.agent_jobs.contracts import (
+    _MUTATING_OPERATIONS,
+    CLAIM_LEASE_SECONDS,
+    mutations_conflict,
 )
-from ..agent_operation_facts import attempt_holds_order as _attempt_holds_order
-from ..agent_operation_facts import aware as _aware
-from ..agent_operation_facts import fencing_intent
-from ..auth import AgentSource
-from ..categorized_errors import InvalidValue
-from ..inventory.items import inventory_items, runtime_value
-from ..jobs import states as job_states
-from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.evidence import Residue
-from ..lifecycle.types import CancelRequested, Outcome, Reported
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..operations.progress import stored_progress
-from ..own_cleanup import CLEANUP_KINDS
-from ..persisted_waits import schedule_wait
-from ..recovery_policy import WAIT_STEP
-from .claim_authority import dispatch_wait, recipe_build_disk_wait
-from .claim_reconcile import _first_claimable_id
-from .contracts import _MUTATING_OPERATIONS, CLAIM_LEASE_SECONDS, mutations_conflict
-from .endings import end_unobserved_order
-from .evidence import (
+from vonk_control.agent_jobs.endings import end_unobserved_order
+from vonk_control.agent_jobs.evidence import (
     _exact_service_stop_receipt_covers_start,
     _lease_expiry_reason,
     _profile_stop_covers_jobrun_mutations,
 )
-from .predicates import _anchor_start_budget, _claim_predicate, _claim_refusal_reason
-from .retry import (
+from vonk_control.agent_jobs.predicates import (
+    _anchor_start_budget,
+    _claim_predicate,
+    _claim_refusal_reason,
+)
+from vonk_control.agent_jobs.retry import (
     _parked_retry_evidence,
     _renew_distribution_grant,
     _retry_not_authorized_for_current_attempt,
     agent_upgrade_in_flight_on_spark,
 )
-from .stored import column_field, column_is_document, column_value
+from vonk_control.agent_jobs.stored import (
+    column_field,
+    column_is_document,
+    column_value,
+)
+from vonk_control.agent_operation_facts import (
+    RESTART_REISSUE_OPERATIONS as _RESTART_REISSUE_OPERATIONS,
+)
+from vonk_control.agent_operation_facts import (
+    attempt_holds_open_launch_budget as _attempt_holds_open_launch_budget,
+)
+from vonk_control.agent_operation_facts import (
+    attempt_holds_order as _attempt_holds_order,
+)
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.agent_operation_facts import fencing_intent
+from vonk_control.auth import AgentSource
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.inventory.items import inventory_items, runtime_value
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.types import CancelRequested, Outcome, Reported
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.operations.progress import stored_progress
+from vonk_control.own_cleanup import CLEANUP_KINDS
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recovery_policy import WAIT_STEP
 
 if TYPE_CHECKING:
-    from .service import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
 
 
 def _claim_once(

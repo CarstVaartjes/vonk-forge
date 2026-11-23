@@ -26,13 +26,12 @@ from vonk_forge_contracts.resolver import (
 )
 
 from vonk_agent_protocol.job_limits import MAX_TIMEOUT_SECONDS
-
-from ..catalog.revision_contract import read_model_set
-from ..harnesses.canonical import compile_canonical_harness
-from ..harnesses.errors import HarnessCompileError
-from ..models.catalog import CatalogDocumentRevision
-from ..platform_ports import serving_port
-from ..runtime.spec_contract import (
+from vonk_control.catalog.revision_contract import read_model_set
+from vonk_control.harnesses.canonical import compile_canonical_harness
+from vonk_control.harnesses.errors import HarnessCompileError
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.platform_ports import serving_port
+from vonk_control.runtime.spec_contract import (
     RuntimeSpec,
     SpecArgument,
     SpecEndpoint,
@@ -49,8 +48,8 @@ from ..runtime.spec_contract import (
     SpecTopology,
     SpecWritablePath,
 )
-from ..runtime.writable_paths import document as writable_path_document
-from ..stored.states import CatalogRevisionState
+from vonk_control.runtime.writable_paths import document as writable_path_document
+from vonk_control.stored.states import CatalogRevisionState
 
 RUNTIME_INTERFACE = "vonk.runtime.v1"
 

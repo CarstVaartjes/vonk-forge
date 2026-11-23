@@ -7,10 +7,7 @@ from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.reason_codes.admission import InstallAdmissionCode
-
-from ..models.catalog import CatalogDocumentRevision
-from ..stored.states import CatalogRevisionState
-from .contracts import (
+from vonk_control.install_admission.contracts import (
     _REFRESHABLE_PREFLIGHT_BLOCKERS,
     _RETRYABLE_INSTALL_BLOCKERS,
     UNSETTLED_PLAN_PREFIX,
@@ -19,6 +16,8 @@ from .contracts import (
     InstallPlanStale,
     InstallPreflightExpired,
 )
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.stored.states import CatalogRevisionState
 
 
 def require_admissible(plan: InstallPlan) -> None:

@@ -17,9 +17,8 @@ from vonk_forge_contracts import EndpointAlias
 
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_BIGINT
 from vonk_agent_protocol.state_machines import GatewayRouteState
-
-from ..strict_json import StrictModel
-from .litellm import LiteLlmModelInfo
+from vonk_control.gateway.litellm import LiteLlmModelInfo
+from vonk_control.strict_json import StrictModel
 
 
 class RouteEndpointDocument(StrictModel):

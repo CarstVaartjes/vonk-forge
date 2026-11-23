@@ -18,21 +18,17 @@ from fastapi import Path as ApiPath
 
 from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName
 from vonk_agent_protocol.outcome import InvalidRequestError
+from vonk_control.agent_jobs.contracts import OperatorRetirementRefused
+from vonk_control.api.common import JobQueue
+from vonk_control.api.roles import require_mutation_role
+from vonk_control.api_availability import AVAILABILITY_ERRORS
+from vonk_control.auth import Actor, CursorCodec, CursorError
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-from vonk_control.operator_receipt_contract import JobOperatorReceipt, ReceiptPolicy
-
-from ..agent_jobs.contracts import OperatorRetirementRefused
-from ..api_availability import AVAILABILITY_ERRORS
-from ..auth import (
-    Actor,
-    CursorCodec,
-    CursorError,
-)
-from ..cursor_contract import MAX_CURSOR_LENGTH
-from ..failure_evidence import FailureEvidenceService
-from ..jobs.operator_receipts import read_job_operator_receipt
-from ..model_cache.contract import UUID_PATTERN
-from ..operation_api.contracts import (
+from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
+from vonk_control.failure_evidence import FailureEvidenceService
+from vonk_control.jobs.operator_receipts import read_job_operator_receipt
+from vonk_control.model_cache.contract import UUID_PATTERN
+from vonk_control.operation_api.contracts import (
     JobDetailResponse,
     JobResumeRequest,
     JobResumeResponse,
@@ -41,20 +37,23 @@ from ..operation_api.contracts import (
     OperationsResponse,
     bounded_error_responses,
 )
-from ..operation_api.providers import _global_get_operation, _global_list_operations
-from ..operation_api.responses import (
+from vonk_control.operation_api.providers import (
+    _global_get_operation,
+    _global_list_operations,
+)
+from vonk_control.operation_api.responses import (
     bounded_operation_detail,
     bounded_operations_response,
     decode_offset,
     job_response,
 )
-from ..operator_acceptance import operator_acceptance
-from ..operator_receipt_contract import ReceiptCode
-from ..strict_json import warn_unreadable_once
-from .common import (
-    JobQueue,
+from vonk_control.operator_acceptance import operator_acceptance
+from vonk_control.operator_receipt_contract import (
+    JobOperatorReceipt,
+    ReceiptCode,
+    ReceiptPolicy,
 )
-from .roles import require_mutation_role
+from vonk_control.strict_json import warn_unreadable_once
 
 
 def register_job_routes(

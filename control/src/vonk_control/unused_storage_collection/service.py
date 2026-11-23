@@ -11,13 +11,13 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..inventory.repository import INVENTORY_MAX_AGE
-from ..logging import log_event
-from ..models.execution import InstallationNode, RecipeInstallation
-from ..oci_image_store import IMAGE_CACHE_DIRECTORY
-from ..persisted_waits import read_wait
-from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from ..settings import (
+from vonk_control.inventory.repository import INVENTORY_MAX_AGE
+from vonk_control.logging import log_event
+from vonk_control.models.execution import InstallationNode, RecipeInstallation
+from vonk_control.oci_image_store import IMAGE_CACHE_DIRECTORY
+from vonk_control.persisted_waits import read_wait
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
+from vonk_control.settings import (
     STORAGE_EVICTION_RESERVE_FLOOR_BYTES,
     STORAGE_EVICTION_RESERVE_FRACTION,
     STORAGE_INEFFECTIVE_COOLDOWN_SECONDS,
@@ -25,7 +25,7 @@ from ..settings import (
     STORAGE_LOW_FREE_FRACTION,
     STORAGE_SCAN_INTERVAL_SECONDS,
 )
-from ..storage_demands import (
+from vonk_control.storage_demands import (
     NAS_IMAGES,
     NAS_MODELS,
     STORAGE_EVICTING,
@@ -35,8 +35,7 @@ from ..storage_demands import (
     StorageRelief,
     spark_scope,
 )
-from ..worker.memory_contract import WorkerMemoryComponent
-from .common import (
+from vonk_control.unused_storage_collection.common import (
     _COLLECTABLE_STATES,
     _HOLDING_STATES,
     _KEPT_WORDS,
@@ -53,7 +52,7 @@ from .common import (
     _kept_sentence,
     _model_objects,
 )
-from .evidence import (
+from vonk_control.unused_storage_collection.evidence import (
     StorageItemKind,
     _CollectorEvidence,
     _DueRemovalTarget,
@@ -62,7 +61,7 @@ from .evidence import (
     _Outcome,
     _Round,
 )
-from .pressure import (
+from vonk_control.unused_storage_collection.pressure import (
     _check_round,
     _nas_filesystems,
     _pressure,
@@ -72,15 +71,17 @@ from .pressure import (
     _remove,
     _remove_within_budget,
 )
-from .protected_objects import protected_model_objects
-from .references import (
+from vonk_control.unused_storage_collection.protected_objects import (
+    protected_model_objects,
+)
+from vonk_control.unused_storage_collection.references import (
     _installation_kept,
     _installation_last_used,
     _installation_pointing,
     _latest_snapshots,
     _spark_settling,
 )
-from .removal import (
+from vonk_control.unused_storage_collection.removal import (
     _damaged_manifest_bytes,
     _image_items,
     _model_items,
@@ -91,6 +92,7 @@ from .removal import (
     _stop_failed_runs,
     _uninstall,
 )
+from vonk_control.worker.memory_contract import WorkerMemoryComponent
 
 
 class UnusedStorageCollector:

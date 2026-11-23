@@ -9,34 +9,40 @@ from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, stored_words
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-
-from ..categorized_errors import InvalidValue
-from ..lifecycle.types import State
-from ..logging import redact_text
-from ..models.cache import ModelCacheOperation, ModelCacheSet
-from ..models.catalog import CatalogDocumentRevision
-from ..operations.contract import AvailabilityOperationFailure
-from ..persisted_waits import read_wait
-from ..strict_json import read_stored_model, serialize_json_value
-from . import states as model_cache_states
-from .cancellation import _payload_of
-from .catalog_helpers import _datetime, _iso, _parse_iso
-from .constants import SCHEMA_VERSION
-from .contract import (
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.lifecycle.types import State
+from vonk_control.logging import redact_text
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.cancellation import _payload_of
+from vonk_control.model_cache.catalog_helpers import _datetime, _iso, _parse_iso
+from vonk_control.model_cache.constants import SCHEMA_VERSION
+from vonk_control.model_cache.contract import (
     CacheOperationKind,
     ModelCacheCancellation,
     ModelCacheOperationResponse,
     ModelCacheOperatorAction,
     ModelCacheRemovalPayload,
 )
-from .errors import ModelCacheConflictInvalid, ModelCacheNotFoundInvalid
-from .persistence import _cache_failure, _derived_result, _operation_progress
-from .source_helpers import _request_key
-from .transfer_admission import refreshes
-from .views import CacheOperationView
+from vonk_control.model_cache.errors import (
+    ModelCacheConflictInvalid,
+    ModelCacheNotFoundInvalid,
+)
+from vonk_control.model_cache.persistence import (
+    _cache_failure,
+    _derived_result,
+    _operation_progress,
+)
+from vonk_control.model_cache.source_helpers import _request_key
+from vonk_control.model_cache.transfer_admission import refreshes
+from vonk_control.model_cache.views import CacheOperationView
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.operations.contract import AvailabilityOperationFailure
+from vonk_control.persisted_waits import read_wait
+from vonk_control.strict_json import read_stored_model, serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class OperationsMixin:

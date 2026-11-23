@@ -11,30 +11,30 @@ from typing import cast as typing_cast
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..categorized_errors import (
-    MissingRecord,
-)
-from ..jobs.documents import (
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.jobs.documents import (
     RunSwitchCleanupIntent,
     RunSwitchProfileStopIntent,
     RunSwitchRunIntent,
     RunSwitchStopIntent,
 )
-from ..models.jobs import Job
-from ..run_switch_contract.operations import RunSwitchOperation
-from ..run_switch_contract.requests import (
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_contract.operations import RunSwitchOperation
+from vonk_control.run_switch_contract.requests import (
     RunSwitchApplyRequest,
     RunSwitchCleanupApplyRequest,
     RunSwitchProfileStopScope,
     RunSwitchStopApplyRequest,
 )
-from .constants import _OPERATION_KINDS
-from .errors import RunSwitchRequestInvalid
-from .observation_helpers import _plan_blockers_are_waitable, _require_reviewed_plan
+from vonk_control.run_switch_operations.constants import _OPERATION_KINDS
+from vonk_control.run_switch_operations.errors import RunSwitchRequestInvalid
+from vonk_control.run_switch_operations.observation_helpers import (
+    _plan_blockers_are_waitable,
+    _require_reviewed_plan,
+)
 
 if TYPE_CHECKING:
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 class AcceptanceMixin:

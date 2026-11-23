@@ -16,11 +16,11 @@ from pydantic import BaseModel
 from sqlalchemy.orm import sessionmaker
 from starlette.routing import Mount, Route
 
-from .api.application import create_app
-from .auth import TokenCodec
-from .browser_auth import BrowserAuthService
-from .jobs.queue import JobService
-from .strict_json import route_endpoint
+from vonk_control.api.application import create_app
+from vonk_control.auth import TokenCodec
+from vonk_control.browser_auth import BrowserAuthService
+from vonk_control.jobs.queue import JobService
+from vonk_control.strict_json import route_endpoint
 
 
 class ContractGraphError(ValueError):

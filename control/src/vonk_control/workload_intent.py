@@ -24,8 +24,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
-
-from .models.fleet import AgentNode
+from vonk_control.models.fleet import AgentNode
 
 # Every lost race is another request's committed intent, so a loop that keeps
 # losing means the Sparks are churning. The request ends as a typed wait

@@ -36,16 +36,13 @@ from typing import Any
 
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitOwnerKind
-
-from ..agent_operation_facts import aware
-from ..categorized_errors import InvalidValue
-from ..jobs import states as job_states
-from ..models.jobs import Job
-from ..persisted_waits import initialize_wait, lifecycle_wait, wait_due
-from .adapter import Dispatch
-from .core import transition
-from .evidence import keep_recorded_outcome
-from .types import (
+from vonk_control.agent_operation_facts import aware
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.adapter import Dispatch
+from vonk_control.lifecycle.core import transition
+from vonk_control.lifecycle.evidence import keep_recorded_outcome
+from vonk_control.lifecycle.types import (
     TERMINAL_STATES,
     CancelRequested,
     Decision,
@@ -57,6 +54,8 @@ from .types import (
     State,
     StopResult,
 )
+from vonk_control.models.jobs import Job
+from vonk_control.persisted_waits import initialize_wait, lifecycle_wait, wait_due
 
 KIND = "recipe-operation"
 _MAX_REASON = 1024

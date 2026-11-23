@@ -27,14 +27,13 @@ from vonk_forge_contracts.api_checks import (
 from vonk_agent_protocol.error_response import RequestValidationProblem
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.state_machines import AssetAvailability, RunState
-from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-
-from ..catalog.revision_contract import (
+from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
     read_catalog_document,
 )
-from ..library.contract import (
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from vonk_control.library.contract import (
     LibraryCacheState,
     LibraryLocalState,
     LibraryModelIdentity,
@@ -42,12 +41,12 @@ from ..library.contract import (
     ModelLibraryResponse,
     RecipeLibraryResponse,
 )
-from ..machine_states import RUN_LIVE
-from ..models.catalog import CatalogDocument, CatalogDocumentRevision
-from ..operator_receipt_contract import ReceiptOwner
-from ..request_fault import RequestFault
-from ..strict_json import serialize_json_value
-from ..unreadable_rows import LOGGED_UNREADABLE, note_unreadable
+from vonk_control.machine_states import RUN_LIVE
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.request_fault import RequestFault
+from vonk_control.strict_json import serialize_json_value
+from vonk_control.unreadable_rows import LOGGED_UNREADABLE, note_unreadable
 
 """Bounded canonical Model to Recipe Library projection."""
 

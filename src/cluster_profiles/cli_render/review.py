@@ -5,10 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from enum import StrEnum
 
-from ..generated_control.models.fleet_profile_gpu_clock_effect import (
-    FleetProfileGpuClockEffect,
-)
-from .common import (
+from cluster_profiles.cli_render.common import (
     _bytes,
     _field,
     _headroom,
@@ -19,7 +16,10 @@ from .common import (
     _text,
     _words,
 )
-from .library import _option_choices
+from cluster_profiles.cli_render.library import _option_choices
+from cluster_profiles.generated_control.models.fleet_profile_gpu_clock_effect import (
+    FleetProfileGpuClockEffect,
+)
 
 
 class ReviewVerdict(StrEnum):

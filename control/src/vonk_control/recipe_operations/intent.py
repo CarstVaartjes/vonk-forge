@@ -12,24 +12,25 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
 )
-
-from ..jobs import states as job_states
-from ..lifecycle.evidence import (
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
     Damaged,
     Residue,
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun, RunNode
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from .errors import RecipeRequestInvalid, RecipeRetryLater
-from .progress import (
-    _cancel_requested,
-    _parent_intent,
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    RecipeRun,
+    RunNode,
 )
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.recipe_operations.errors import RecipeRequestInvalid, RecipeRetryLater
+from vonk_control.recipe_operations.progress import _cancel_requested, _parent_intent
 
 
 def _bound_workload_intent(job: Job) -> int:

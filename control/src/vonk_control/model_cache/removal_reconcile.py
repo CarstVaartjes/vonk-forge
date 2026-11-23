@@ -14,9 +14,8 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-
-from ..agent_operation_facts import aware as _aware
-from ..artifact_jobs.lifecycle import (
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     check_removal_fence_nowait,
@@ -26,27 +25,28 @@ from ..artifact_jobs.lifecycle import (
     reserve_removal,
     supersede_removal_nowait,
 )
-from ..categorized_errors import InvalidValue
-from ..lifecycle.evidence import Residue
-from ..lifecycle.types import Effect, Outcome, Reported
-from ..logging import log_event, redact_text
-from ..models.cache import ArtifactLifecycleGate, ModelCacheOperation, ModelCacheSet
-from ..models.jobs import Job
-from ..operations.contract import AvailabilityOperationFailure
-from . import states as model_cache_states
-from .artifacts import _is_digest
-from .catalog_helpers import _iso
-from .constants import _LOGGER, _TRANSFER_CLAIM_SECONDS, REMOVAL_BATCH_SECONDS
-from .contract import (
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.types import Effect, Outcome, Reported
+from vonk_control.logging import log_event, redact_text
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.artifacts import _is_digest
+from vonk_control.model_cache.catalog_helpers import _iso
+from vonk_control.model_cache.constants import (
+    _LOGGER,
+    _TRANSFER_CLAIM_SECONDS,
+    REMOVAL_BATCH_SECONDS,
+)
+from vonk_control.model_cache.contract import (
     ModelCacheDownloadPayload,
     ModelCacheOperationKind,
     ModelCacheRemovalPayload,
     ModelCacheRepairPayload,
     ModelCacheRetry,
 )
-from .errors import ModelCacheStorageError, _ArtifactWriterBusy
-from .lineage import lineage_contents, model_sets
-from .persistence import (
+from vonk_control.model_cache.errors import ModelCacheStorageError, _ArtifactWriterBusy
+from vonk_control.model_cache.lineage import lineage_contents, model_sets
+from vonk_control.model_cache.persistence import (
     _cache_failure,
     _manifest_of,
     _model_removal_intent_digest,
@@ -55,11 +55,18 @@ from .persistence import (
     _store_operation_payload,
     _updated,
 )
-from .progress import cache_phase, progress_document
-from .removal_execution import _untouched
+from vonk_control.model_cache.progress import cache_phase, progress_document
+from vonk_control.model_cache.removal_execution import _untouched
+from vonk_control.models.cache import (
+    ArtifactLifecycleGate,
+    ModelCacheOperation,
+    ModelCacheSet,
+)
+from vonk_control.models.jobs import Job
+from vonk_control.operations.contract import AvailabilityOperationFailure
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class RemovalReconcileMixin:

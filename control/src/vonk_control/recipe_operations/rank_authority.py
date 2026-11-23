@@ -9,33 +9,29 @@ from sqlalchemy.orm import Session
 from vonk_forge_contracts import RecipeDefinition
 
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..fleet_profiles.stop_contract import ProfileJobRunStopJob
-from ..lifecycle.evidence import (
+from vonk_control.fleet_profiles.stop_contract import ProfileJobRunStopJob
+from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
     Damaged,
     Residue,
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import RecipeInstallation, RecipeRun
-from ..models.jobs import Job
-from ..models.mapping import ClusterMapping, ClusterMappingNode
-from ..stored.rows import read_row_column
-from ..strict_json import read_stored_model
-from .execution_contract import (
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation, RecipeRun
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.recipe_operations.execution_contract import (
     StoredInstallationPlan,
     StoredRunPlan,
     parse_stored_installation_plan,
     parse_stored_run_plan,
 )
-from .observation_helpers import _active_recipe_revision
-from .progress import (
-    _catalog_recipe,
-    _lower_hex_digest,
-)
-from .results import _AcceptedRanks
+from vonk_control.recipe_operations.observation_helpers import _active_recipe_revision
+from vonk_control.recipe_operations.progress import _catalog_recipe, _lower_hex_digest
+from vonk_control.recipe_operations.results import _AcceptedRanks
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import read_stored_model
 
 
 def _ranks_from_mapping(

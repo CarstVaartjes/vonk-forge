@@ -10,30 +10,17 @@ from sqlalchemy.orm import Session, load_only
 
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..artifact_jobs.lifecycle import (
-    ArtifactReferenceUnverified,
-)
-from ..content_identity import recipe_model_digests, recipes_bound_to
-from ..machine_states import DISTRIBUTION_HELD, RUN_LIVE
-from ..model_cache import states as model_cache_states
-from ..model_cache.contract import ModelCacheSetState
-from ..model_cache.errors import ModelCacheError
-from ..model_cache.lineage import lineage_contents, model_sets, stored_set_bindings
-from ..model_cache.resolution import resolve_recipe_set
-from ..models.cache import ModelCacheOperation, ModelCacheSet
-from ..models.execution import RecipeInstallation, RecipeRun
-from ..models.fleet import FleetProfile, FleetProfileApplication
-from ..models.jobs import Job
-from ..models.operations import ArtifactDistributionAssignment
-from ..reference_facts import profiles_naming
-from .intents import (
+from vonk_control.artifact_jobs.lifecycle import ArtifactReferenceUnverified
+from vonk_control.artifact_reference_scan.intents import (
     _profile_plan,
     _run_switch_kinds,
     _run_switch_plan,
 )
-from .model_sets import _protect_saved, _selectors_revisions
-from .types import (
+from vonk_control.artifact_reference_scan.model_sets import (
+    _protect_saved,
+    _selectors_revisions,
+)
+from vonk_control.artifact_reference_scan.types import (
     _ACTIVE_INSTALLATIONS,
     _ACTIVE_PROFILE_APPLICATIONS,
     _ACTIVE_RUN_SWITCH_JOBS,
@@ -41,6 +28,23 @@ from .types import (
     _finding,
     _reason_projection,
 )
+from vonk_control.content_identity import recipe_model_digests, recipes_bound_to
+from vonk_control.machine_states import DISTRIBUTION_HELD, RUN_LIVE
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.contract import ModelCacheSetState
+from vonk_control.model_cache.errors import ModelCacheError
+from vonk_control.model_cache.lineage import (
+    lineage_contents,
+    model_sets,
+    stored_set_bindings,
+)
+from vonk_control.model_cache.resolution import resolve_recipe_set
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
+from vonk_control.models.execution import RecipeInstallation, RecipeRun
+from vonk_control.models.fleet import FleetProfile, FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import ArtifactDistributionAssignment
+from vonk_control.reference_facts import profiles_naming
 
 
 def model_set_reference_findings(

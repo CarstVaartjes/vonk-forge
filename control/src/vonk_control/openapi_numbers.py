@@ -32,8 +32,8 @@ from fastapi.openapi.utils import (
 from pydantic.json_schema import models_json_schema
 from starlette.routing import BaseRoute
 
-from .fleet_projection.common import FleetSnapshot
-from .observation.platform import PlatformObservation
+from vonk_control.fleet_projection.common import FleetSnapshot
+from vonk_control.observation.platform import PlatformObservation
 
 UPSTREAM_ASSEMBLER_SHA256 = (
     "41a50551f99619f9333ac64edf7cd397b64f721244b89a82916c69f233239def"

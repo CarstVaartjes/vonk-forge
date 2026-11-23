@@ -15,16 +15,16 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .lifecycle.evidence import Residue
-from .model_primitives import Base, _lower_hex
-from .run_switch_contract.identity import RunSwitchCancellation
-from .run_switch_contract.journal import (
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.model_primitives import Base, _lower_hex
+from vonk_control.run_switch_contract.identity import RunSwitchCancellation
+from vonk_control.run_switch_contract.journal import (
     JournalRepairPurpose,
     RunSwitchJournalRepairEndEvidence,
     RunSwitchJournalRepairEvidence,
     RunSwitchJournalRepairPendingState,
 )
-from .stored.json_values import ContractJSON
+from vonk_control.stored.json_values import ContractJSON
 
 
 class RunSwitchJournalRepairPending(Base):

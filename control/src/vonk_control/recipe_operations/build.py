@@ -21,8 +21,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..admission_locking import (
+from vonk_control.admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
     ConstraintReplay,
@@ -32,39 +31,45 @@ from ..admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
-from ..agent_jobs.predicates import _JsonFlagIsTrue
-from ..jobs import states as job_states
-from ..jobs.documents import (
+from vonk_control.agent_jobs.predicates import _JsonFlagIsTrue
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import (
     RecipeBuildIntent,
     RecipeBuildParent,
     controller_recipe_document,
 )
-from ..lifecycle.evidence import (
-    BookkeepingReason,
-    retire_as_unknown,
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.lifecycle.image_availability import PrebuiltImageAdapter
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.owner_liveness import OwnerKind, issued_for, live_build_job
+from vonk_control.prebuilt_images import policy_prebuilt_reference
+from vonk_control.recipe_builds.cancellation import (
+    build_cancellation,
+    read_build_intent,
 )
-from ..lifecycle.image_availability import PrebuiltImageAdapter
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..owner_liveness import OwnerKind, issued_for, live_build_job
-from ..prebuilt_images import policy_prebuilt_reference
-from ..recipe_builds.cancellation import build_cancellation, read_build_intent
-from ..recipe_builds.common import RecipeBuildAdmissionBusy, RecipeBuildPlan
-from ..source_policy import SourcePolicyReport
-from ..stored.rows import read_row_column
-from ..stored.states import RecipeBuildState
-from ..strict_json import serialize_json_value
-from .errors import RecipeRequestInvalid, RecipeRetryLater
-from .interfaces import RecipeOperationView, new_recipe_job
-from .lifecycle_contract import (
+from vonk_control.recipe_builds.common import RecipeBuildAdmissionBusy, RecipeBuildPlan
+from vonk_control.recipe_operations.errors import RecipeRequestInvalid, RecipeRetryLater
+from vonk_control.recipe_operations.interfaces import (
+    RecipeOperationView,
+    new_recipe_job,
+)
+from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationCancellationResult,
 )
-from .results import _recorded_result, _recorded_result_document
+from vonk_control.recipe_operations.results import (
+    _recorded_result,
+    _recorded_result_document,
+)
+from vonk_control.source_policy import SourcePolicyReport
+from vonk_control.stored.rows import read_row_column
+from vonk_control.stored.states import RecipeBuildState
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class BuildMixin:

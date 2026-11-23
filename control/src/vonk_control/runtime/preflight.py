@@ -25,11 +25,10 @@ from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightFinding,
     RuntimePreflightRequest,
 )
-
-from ..inventory.items import inventory_items
-from ..inventory.items_contract import PreflightInventoryItem
-from ..models.fleet import AgentNode
-from ..recipe_operations.runtime_specs import recipe_topology
+from vonk_control.inventory.items import inventory_items
+from vonk_control.inventory.items_contract import PreflightInventoryItem
+from vonk_control.models.fleet import AgentNode
+from vonk_control.recipe_operations.runtime_specs import recipe_topology
 
 
 @dataclass(frozen=True, slots=True)

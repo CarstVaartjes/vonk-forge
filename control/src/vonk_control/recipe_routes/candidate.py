@@ -18,31 +18,28 @@ from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN, read_recipe
 
 from vonk_agent_protocol.state_machines import RouteState as RunRouteState
 from vonk_agent_protocol.state_machines import RunState
-
-from ..gateway.litellm import LiteLlmPolicy, RouteState, ServedModelInfo
-from ..gateway.route_bundle_contract import (
+from vonk_control.gateway.litellm import LiteLlmPolicy, RouteState, ServedModelInfo
+from vonk_control.gateway.route_bundle_contract import (
     RouteAcceptedModelPolicy,
     RouteAcceptedRunIdentity,
     RouteIdentityDocument,
     RouteRankIdentity,
     RouteRunIdentity,
 )
-from ..gateway.route_model_info import RouteModelInfoReader
-from ..interface_adapters import InterfaceAdapterError, interface_adapter
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import RecipeInstallation, RecipeRun, RunNode
-from ..models.fleet import AgentNode
-from ..models.mapping import ClusterMapping
-from ..presence import ManagementAddressPolicy, PresenceError
-from ..recipe_operations.execution_contract import (
+from vonk_control.gateway.route_model_info import RouteModelInfoReader
+from vonk_control.interface_adapters import InterfaceAdapterError, interface_adapter
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.presence import ManagementAddressPolicy, PresenceError
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_endpoint,
     parse_stored_run_plan,
     run_plan_document,
 )
-from ..run_states import ENDED_RUN_STATES
-from ..security.route_authority import require_route_authority
-from .shared import (
+from vonk_control.recipe_routes.shared import (
     _UPSTREAM_MODEL,
     RecipeEndpointAuthorityRefused,
     RecipeRankStopped,
@@ -52,11 +49,13 @@ from .shared import (
     _RecipeCandidate,
     _RecipeEndpoint,
 )
+from vonk_control.run_states import ENDED_RUN_STATES
+from vonk_control.security.route_authority import require_route_authority
 
 _ALIAS = re.compile(ENDPOINT_ALIAS_PATTERN)
 
 if TYPE_CHECKING:
-    from .service import RecipeRouteService
+    from vonk_control.recipe_routes.service import RecipeRouteService
 
 
 def _candidate_once(

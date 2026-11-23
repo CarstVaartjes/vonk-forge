@@ -11,50 +11,58 @@ from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-
-from ..admission_locking import ConstraintReplay, admitting
-from ..artifact_jobs.lifecycle import (
+from vonk_control.admission_locking import ConstraintReplay, admitting
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactKind,
     ArtifactLifecycleError,
     ArtifactReferenceUnsettled,
 )
-from ..artifact_reference_scan.model_references import model_set_reference_findings
-from ..artifact_reference_scan.model_sets import model_set_objects
-from ..cache_removal_review import (
+from vonk_control.artifact_reference_scan.model_references import (
+    model_set_reference_findings,
+)
+from vonk_control.artifact_reference_scan.model_sets import model_set_objects
+from vonk_control.cache_removal_review import (
     CacheRemovalBlocker,
     CacheRemovalFinding,
     CacheRemovalReview,
     CacheRemovalReviewContent,
     seal_cache_removal_review,
 )
-from ..categorized_errors import InvalidValue
-from ..content_identity import recipes_bound_to
-from ..lifecycle.evidence import Residue
-from ..models.cache import (
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.content_identity import recipes_bound_to
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.artifacts import _is_digest, _unique_artifacts
+from vonk_control.model_cache.catalog_helpers import _recipe_model_content_digests
+from vonk_control.model_cache.contract import (
+    ModelCacheRemovalPayload,
+    ModelCacheSetState,
+)
+from vonk_control.model_cache.errors import (
+    ModelCacheRemovalOwnerInvalid,
+    ModelCacheStorageInvalid,
+)
+from vonk_control.model_cache.fleet_removal import model_installations, model_reference
+from vonk_control.model_cache.lineage import (
+    first_requested_sets,
+    lineage_contents,
+    model_sets,
+)
+from vonk_control.model_cache.persistence import _operation_removal
+from vonk_control.model_cache.source_helpers import _model_selector, _request_key
+from vonk_control.model_cache.views import CacheOperationView, ModelCacheRemovalScope
+from vonk_control.models.cache import (
     ArtifactLifecycleGate,
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
 )
-from ..models.catalog import CatalogDocumentRevision
-from ..unused_storage_collection.evidence import _Evidence
-from . import states as model_cache_states
-from .artifacts import _is_digest, _unique_artifacts
-from .catalog_helpers import _recipe_model_content_digests
-from .contract import ModelCacheRemovalPayload, ModelCacheSetState
-from .errors import (
-    ModelCacheRemovalOwnerInvalid,
-    ModelCacheStorageInvalid,
-)
-from .fleet_removal import model_installations, model_reference
-from .lineage import first_requested_sets, lineage_contents, model_sets
-from .persistence import _operation_removal
-from .source_helpers import _model_selector, _request_key
-from .views import CacheOperationView, ModelCacheRemovalScope
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.unused_storage_collection.evidence import _Evidence
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class RemovalReviewMixin:

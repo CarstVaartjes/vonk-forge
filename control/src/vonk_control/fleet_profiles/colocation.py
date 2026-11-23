@@ -7,8 +7,7 @@ from collections.abc import Collection, Sequence
 from vonk_agent_protocol.agent_words import ProfileAction, ProfileReasonSeverity
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
-
-from ..fleet_profile_contract.assessment import (
+from vonk_control.fleet_profile_contract.assessment import (
     FleetProfileAssignmentAssessment,
     FleetProfileAssignmentPreview,
     FleetProfileReason,

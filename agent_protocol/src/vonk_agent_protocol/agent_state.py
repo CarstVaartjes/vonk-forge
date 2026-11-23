@@ -14,18 +14,18 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, field_validator
 
-from .agent_words import HostHelperResponseStatus
-from .claims import AgentRuntimeIdentity
-from .compiled_execution_plan import CompiledPlacement
-from .contracts import AgentClaim
-from .helper_response import HostHelperProcessLogs
-from .package_upgrade import (
+from vonk_agent_protocol.agent_words import HostHelperResponseStatus
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.compiled_execution_plan import CompiledPlacement
+from vonk_agent_protocol.contracts import AgentClaim
+from vonk_agent_protocol.helper_response import HostHelperProcessLogs
+from vonk_agent_protocol.package_upgrade import (
     PackageActivationOutcome,
     PackageActivationPhase,
     PackageRollbackAuthority,
 )
-from .recipe_operations import RecipeReconciliationIdentity
-from .wire_model import (
+from vonk_agent_protocol.recipe_operations import RecipeReconciliationIdentity
+from vonk_agent_protocol.wire_model import (
     MAX_RUN_GENERATION,
     Digest,
     Uuid4Text,

@@ -21,10 +21,9 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-
-from .adapter import KindAdapter
-from .core import transition
-from .types import (
+from vonk_control.lifecycle.adapter import KindAdapter
+from vonk_control.lifecycle.core import transition
+from vonk_control.lifecycle.types import (
     Command,
     Effect,
     Event,

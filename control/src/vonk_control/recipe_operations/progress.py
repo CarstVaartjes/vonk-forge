@@ -7,14 +7,21 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
-from ..agent_operation_facts import job_start_deadline
-from .errors import RecipeRequestInvalid
-from .interfaces import _TERMINAL_JOB_STATES
-from .observation_helpers import _RECIPE_PARENT_READERS, RecipeWirePayload, _aware
-from .results import _recorded_result
+from vonk_control.agent_operation_facts import job_start_deadline
+from vonk_control.recipe_operations.errors import RecipeRequestInvalid
+from vonk_control.recipe_operations.interfaces import _TERMINAL_JOB_STATES
+from vonk_control.recipe_operations.observation_helpers import (
+    _RECIPE_PARENT_READERS,
+    RecipeWirePayload,
+    _aware,
+)
+from vonk_control.recipe_operations.results import _recorded_result
 
 if TYPE_CHECKING:
-    from .observation_helpers import RecipeParent, _PhaseGroups
+    from vonk_control.recipe_operations.observation_helpers import (
+        RecipeParent,
+        _PhaseGroups,
+    )
 
 from pydantic import TypeAdapter
 from sqlalchemy import select
@@ -39,13 +46,12 @@ from vonk_agent_protocol.wire_model import (
     OperationProgress,
     canonical_message,
 )
-
-from ..distributed_lifecycle import (
+from vonk_control.distributed_lifecycle import (
     DistributedLifecycleError,
     canonical_distributed_readiness,
 )
-from ..fleet_profiles.stop_contract import ProfileJobRunStopJob
-from ..jobs.documents import (
+from vonk_control.fleet_profiles.stop_contract import ProfileJobRunStopJob
+from vonk_control.jobs.documents import (
     DistributedRecoveryMarker,
     RecipeBuildParent,
     RecipeJobActivateParent,
@@ -53,27 +59,23 @@ from ..jobs.documents import (
     RecipeStartParent,
     RecipeStopParent,
 )
-from ..lifecycle.evidence import (
-    Damaged,
-    Residue,
-    read_or_rebuild,
-)
-from ..models.catalog import CatalogDocumentRevision
-from ..models.jobs import Job
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..operations.progress import (
+from vonk_control.lifecycle.evidence import Damaged, Residue, read_or_rebuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operations.progress import (
     aggregate_progress,
     member_progress,
     project_progress_for_state,
     stored_progress,
 )
-from ..run_switch_contract.requests import RunSwitchReconciliationAuthority
-from ..stored.states import CatalogRevisionState
-from ..strict_json import read_stored_model, serialize_json_value
-from .lifecycle_contract import (
+from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationCancellationResult,
 )
-from .runtime_specs import recipe_topology
+from vonk_control.recipe_operations.runtime_specs import recipe_topology
+from vonk_control.run_switch_contract.requests import RunSwitchReconciliationAuthority
+from vonk_control.stored.states import CatalogRevisionState
+from vonk_control.strict_json import read_stored_model, serialize_json_value
 
 
 def _parse_recipe_parent(job: Job) -> RecipeParent:

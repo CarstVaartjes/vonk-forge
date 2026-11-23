@@ -8,15 +8,25 @@ import time
 from collections.abc import Callable, Mapping
 from typing import cast
 
-from ..cli_files import read_json_document, write_private_document
-from ..cli_outcome import ObservationStatus
-from ..cli_select import SelectorError
-from ..control_client.errors import ControlClientError, ControlMalformedResponse
-from ..control_client.schema import validate_control_document
-from .common import ControllerClient, _known_http_refusal_status, _profile_number
-from .observation import _bounded_timeout, _poll_path
-from .profile_options import _apply_option_choices, _configure_option_target
-from .selection import (
+from cluster_profiles.cli_files import read_json_document, write_private_document
+from cluster_profiles.cli_outcome import ObservationStatus
+from cluster_profiles.cli_select import SelectorError
+from cluster_profiles.control_client.errors import (
+    ControlClientError,
+    ControlMalformedResponse,
+)
+from cluster_profiles.control_client.schema import validate_control_document
+from cluster_profiles.controller_cli.common import (
+    ControllerClient,
+    _known_http_refusal_status,
+    _profile_number,
+)
+from cluster_profiles.controller_cli.observation import _bounded_timeout, _poll_path
+from cluster_profiles.controller_cli.profile_options import (
+    _apply_option_choices,
+    _configure_option_target,
+)
+from cluster_profiles.controller_cli.selection import (
     _read_concurrently,
     _resolve_recipe_selector,
     _resolve_spark_selectors,

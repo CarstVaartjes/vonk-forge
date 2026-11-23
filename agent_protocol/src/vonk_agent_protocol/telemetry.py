@@ -13,14 +13,14 @@ from typing import Any, ClassVar
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 from pydantic_core import ValidationError
 
-from .gpu_clock import GpuClockObservation
-from .optional_evidence import (
+from vonk_agent_protocol.gpu_clock import GpuClockObservation
+from vonk_agent_protocol.optional_evidence import (
     EvidenceGroup,
     OptionalEvidenceModel,
     fail_open_on_optional_evidence,
 )
-from .reason_codes.evidence import AgentEvidenceCode
-from .wire_model import (
+from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
+from vonk_agent_protocol.wire_model import (
     MAX_TELEMETRY_CAPACITY_BYTES,
     AgentProtocolError,
     CanonicalUUID,

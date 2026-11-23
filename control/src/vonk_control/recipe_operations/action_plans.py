@@ -17,26 +17,28 @@ from vonk_agent_protocol.state_machines import (
     ReservationState,
     RunState,
 )
-
-from ..jobs import states as job_states
-from ..lifecycle.evidence import (
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
     Residue,
     retire_as_unknown,
 )
-from ..models.execution import (
+from vonk_control.models.execution import (
     InstallationNode,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
     RunNode,
 )
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..stored.rows import read_row_column
-from .constants import _MAX_ACTION_NODES, _MAX_ACTIVE_RUNS, _MEMORY_RESERVATION_KINDS
-from .errors import RecipeRequestInvalid, RecipeRetryLater
-from .impact_plans import (
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_operations.constants import (
+    _MAX_ACTION_NODES,
+    _MAX_ACTIVE_RUNS,
+    _MEMORY_RESERVATION_KINDS,
+)
+from vonk_control.recipe_operations.errors import RecipeRequestInvalid, RecipeRetryLater
+from vonk_control.recipe_operations.impact_plans import (
     StopNodeImpact,
     StopPlan,
     UninstallActiveRun,
@@ -45,20 +47,21 @@ from .impact_plans import (
     stop_plan,
     uninstall_plan,
 )
-from .intent import _active_owned_workload_jobs
-from .observation_helpers import _active_recipe_revision
-from .progress import (
+from vonk_control.recipe_operations.intent import _active_owned_workload_jobs
+from vonk_control.recipe_operations.observation_helpers import _active_recipe_revision
+from vonk_control.recipe_operations.progress import (
     _lower_hex_digest,
     _primary_model_identity,
     _recipe_model_identities,
 )
-from .rank_authority import (
+from vonk_control.recipe_operations.rank_authority import (
     _installation_accepted_ranks,
     _uninstall_recipe,
 )
+from vonk_control.stored.rows import read_row_column
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class ActionPlansMixin:

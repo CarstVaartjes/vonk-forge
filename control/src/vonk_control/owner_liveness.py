@@ -44,42 +44,47 @@ from vonk_agent_protocol.state_machines import (
     InstallationState,
 )
 from vonk_agent_protocol.wire_model import canonical_message
-
-from . import agent_operation_states
-from .agent_contacts import last_seen
-from .agent_operation_facts import (
+from vonk_control import agent_operation_states
+from vonk_control.agent_contacts import last_seen
+from vonk_control.agent_operation_facts import (
     AGENT_ORDER_RECOVERY_BUDGET,
     attempt_holds_order,
     aware,
     fencing_intent,
     job_run_bound,
 )
-from .fleet_profile_contract.applications import FleetProfileApplicationProgress
-from .fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
-from .inventory.repository import MAX_INVENTORY_FUTURE_SKEW
-from .jobs import states as job_states
-from .model_cache import states as model_cache_states
-from .models.cache import ModelCacheOperation, RecipeBuild, RecipeLibrarySyncRun
-from .models.execution import (
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
+from vonk_control.fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
+from vonk_control.inventory.repository import MAX_INVENTORY_FUTURE_SKEW
+from vonk_control.jobs import states as job_states
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.models.cache import (
+    ModelCacheOperation,
+    RecipeBuild,
+    RecipeLibrarySyncRun,
+)
+from vonk_control.models.execution import (
     STOPPABLE_RUN_STATES,
     InstallationNode,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
 )
-from .models.fleet import (
+from vonk_control.models.fleet import (
     AgentCertificateRotation,
     AgentEnrollment,
     AgentNode,
     FleetProfileApplication,
 )
-from .models.jobs import Job
-from .models.operations import AgentOperation, AgentOperationAttempt
-from .models.operations import AgentOperation as StoredOperation
-from .stall_window import progress_deadline
-from .stored.rows import read_row_column
-from .stored.states import LibrarySyncRunState, RecipeBuildState
-from .strict_json import read_stored_model
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.stall_window import progress_deadline
+from vonk_control.stored.rows import read_row_column
+from vonk_control.stored.states import LibrarySyncRunState, RecipeBuildState
+from vonk_control.strict_json import read_stored_model
 
 #: A Job in one of these has ended; nothing it owns can still be used by it.
 JOB_ENDED_STATES = job_states.words(

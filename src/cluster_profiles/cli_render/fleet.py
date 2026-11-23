@@ -8,31 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 
-from ..cli_states_generated import (
-    ENDPOINT_UNAVAILABLE,
-    RUN_LOST,
-    RUN_RUNNING,
-    UNKNOWN,
-    GpuClockMetric,
-    RouteState,
-)
-from ..cli_telemetry_render import NOT_REPORTED, gpu_readings, round_half_up
-from ..cli_telemetry_render import size as _size
-from ..generated_control.models.display_memory_observation import (
-    DisplayMemoryObservation,
-)
-from ..generated_control.models.gpu_clock_observation import GpuClockObservation
-from ..generated_control.models.gpu_clock_policy import GpuClockPolicy
-from ..generated_control.models.gpu_clock_range import GpuClockRange
-from ..generated_control.models.gpu_clock_unavailable import GpuClockUnavailable
-from ..generated_control.models.host_check_advice import HostCheckAdvice
-from ..generated_control.models.run_presence import RunPresence
-from ..generated_control.models.swap_checkpoint import SwapCheckpoint
-from ..generated_control.models.swap_intent import SwapIntent
-from ..generated_control.models.swap_observation import SwapObservation
-from ..generated_control.models.swap_policy import SwapPolicy
-from ..generated_control.types import Unset
-from .common import (
+from cluster_profiles.cli_render.common import (
     _bytes,
     _field,
     _is_update_notice,
@@ -49,8 +25,40 @@ from .common import (
     _warn,
     _words,
 )
-from .host_checks import host_check_lines
-from .throttle import throttle_words
+from cluster_profiles.cli_render.host_checks import host_check_lines
+from cluster_profiles.cli_render.throttle import throttle_words
+from cluster_profiles.cli_states_generated import (
+    ENDPOINT_UNAVAILABLE,
+    RUN_LOST,
+    RUN_RUNNING,
+    UNKNOWN,
+    GpuClockMetric,
+    RouteState,
+)
+from cluster_profiles.cli_telemetry_render import (
+    NOT_REPORTED,
+    gpu_readings,
+    round_half_up,
+)
+from cluster_profiles.cli_telemetry_render import size as _size
+from cluster_profiles.generated_control.models.display_memory_observation import (
+    DisplayMemoryObservation,
+)
+from cluster_profiles.generated_control.models.gpu_clock_observation import (
+    GpuClockObservation,
+)
+from cluster_profiles.generated_control.models.gpu_clock_policy import GpuClockPolicy
+from cluster_profiles.generated_control.models.gpu_clock_range import GpuClockRange
+from cluster_profiles.generated_control.models.gpu_clock_unavailable import (
+    GpuClockUnavailable,
+)
+from cluster_profiles.generated_control.models.host_check_advice import HostCheckAdvice
+from cluster_profiles.generated_control.models.run_presence import RunPresence
+from cluster_profiles.generated_control.models.swap_checkpoint import SwapCheckpoint
+from cluster_profiles.generated_control.models.swap_intent import SwapIntent
+from cluster_profiles.generated_control.models.swap_observation import SwapObservation
+from cluster_profiles.generated_control.models.swap_policy import SwapPolicy
+from cluster_profiles.generated_control.types import Unset
 
 NO_SPARKS = "No Sparks are enrolled."
 #: Installed-but-stopped recipes shown by default; `--wide` shows every one.

@@ -7,27 +7,28 @@ import shlex
 import time
 from collections.abc import Callable, Mapping
 
-from ..cli_outcome import (
-    operation_state,
+from cluster_profiles.cli_outcome import operation_state
+from cluster_profiles.control_client.errors import (
+    ControlClientError,
+    ControlMalformedResponse,
 )
-from ..control_client.errors import ControlClientError, ControlMalformedResponse
-from ..control_client.schema import validate_control_document
-from .common import (
+from cluster_profiles.control_client.schema import validate_control_document
+from cluster_profiles.controller_cli.common import (
     ControllerClient,
     NoLoadedProfile,
     _profile_number,
     _quoted,
     _request_key,
 )
-from .confirmation import _confirm_action, _require_confirmation
-from .observation import (
-    _bounded_timeout,
-    _poll_path,
+from cluster_profiles.controller_cli.confirmation import (
+    _confirm_action,
+    _require_confirmation,
 )
-from .profile_authoring import _profile_authoring
-from .profile_load import _load_profile
-from .selection import _read_concurrently, _spark_names
-from .submission import _submit_idempotent_request
+from cluster_profiles.controller_cli.observation import _bounded_timeout, _poll_path
+from cluster_profiles.controller_cli.profile_authoring import _profile_authoring
+from cluster_profiles.controller_cli.profile_load import _load_profile
+from cluster_profiles.controller_cli.selection import _read_concurrently, _spark_names
+from cluster_profiles.controller_cli.submission import _submit_idempotent_request
 
 
 def _list_profiles(client: ControllerClient, remaining: float) -> object:

@@ -21,13 +21,12 @@ from sqlalchemy import event
 from sqlalchemy.orm import Session, SessionTransaction
 
 from vonk_agent_protocol.state_machines import RunState
-
-from ..admission_locking import set_admission_timeout
-from ..models.execution import RecipeRun
-from .run_transitions import end_unfinished_run
+from vonk_control.admission_locking import set_admission_timeout
+from vonk_control.models.execution import RecipeRun
+from vonk_control.recipe_operations.run_transitions import end_unfinished_run
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 _LOGGER = logging.getLogger(__name__)
 _STAGED = "vonk.start_cleanup.staged"

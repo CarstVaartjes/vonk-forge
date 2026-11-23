@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from .cli_render.common import _field, _reported, _table, _utc
-from .generated_control.models.platform_observation import PlatformObservation
+from cluster_profiles.cli_render.common import _field, _reported, _table, _utc
+from cluster_profiles.generated_control.models.platform_observation import (
+    PlatformObservation,
+)
 
 
 def render_platform(observation: PlatformObservation) -> None:

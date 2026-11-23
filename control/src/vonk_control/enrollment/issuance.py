@@ -34,36 +34,16 @@ from vonk_agent_protocol.state_machines import (
     EnrollmentRecordState,
     NodeIdentityState,
 )
-from vonk_control.enrollment.contract import EnrollmentGrant, EnrollmentIssuanceClaim
-
-from ..categorized_errors import InvalidValue
-from ..models.fleet import (
-    AgentCertificate,
-    AgentCertificateRotation,
-    AgentEnrollment,
-    AgentEnrollmentGrant,
-    AgentIssuedCertificateRevocation,
-    AgentNode,
-)
-from ..persisted_waits import schedule_wait
-from ..pki import CertificateAuthority, IssuedCertificate
-from ..security.enrollment import (
-    require_admitted_request,
-    require_fresh_enrollment,
-    require_grant,
-    require_optional_node,
-    require_provider_verification,
-    validate_issued_binding,
-)
-from ..settings import DATABASE_WAIT_BUDGETS
-from ..step_ca import StepCAIssuancePending
-from .contract import (
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.enrollment.contract import (
     ENROLLMENT_ID_PATTERN,
+    EnrollmentGrant,
     EnrollmentGrantStatus,
+    EnrollmentIssuanceClaim,
     EnrollmentObservationOutcome,
 )
-from .ending import retain_ended_effect
-from .persistence import (
+from vonk_control.enrollment.ending import retain_ended_effect
+from vonk_control.enrollment.persistence import (
     _issuance_binding,
     _issued,
     _lock_node_issuance,
@@ -72,12 +52,12 @@ from .persistence import (
     _replay_matches,
     _require_issuance_binding,
 )
-from .types import (
+from vonk_control.enrollment.types import (
     MAX_ENROLLMENT_GRANT_TTL_SECONDS,
     EnrollmentDenied,
     EnrollmentIssuanceUncertain,
 )
-from .validation import (
+from vonk_control.enrollment.validation import (
     EVIDENCE_REFUSAL_REASONS,
     _decode_token,
     _digest,
@@ -88,6 +68,26 @@ from .validation import (
     _validate_evidence,
     _validate_node_id,
 )
+from vonk_control.models.fleet import (
+    AgentCertificate,
+    AgentCertificateRotation,
+    AgentEnrollment,
+    AgentEnrollmentGrant,
+    AgentIssuedCertificateRevocation,
+    AgentNode,
+)
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.pki import CertificateAuthority, IssuedCertificate
+from vonk_control.security.enrollment import (
+    require_admitted_request,
+    require_fresh_enrollment,
+    require_grant,
+    require_optional_node,
+    require_provider_verification,
+    validate_issued_binding,
+)
+from vonk_control.settings import DATABASE_WAIT_BUDGETS
+from vonk_control.step_ca import StepCAIssuancePending
 
 _LOGGER = logging.getLogger("vonk_control.enrollment")
 

@@ -10,15 +10,9 @@ from vonk_forge_contracts import RecipeDefinition
 from vonk_forge_contracts.recipe import RecipeDecisionSettings, RecipeGenerationSettings
 
 from vonk_agent_protocol.reason_codes.resources import ResourcePlanningCode
-
-from ..resource_planning_contract import (
-    ResourceRecipeProjection,
-)
-from ..run_switch_contract.evidence import EffectiveSettingsSelection
-from ..run_switch_contract.vocabulary import RunSwitchChangeEffect
-from .identity import _canonical, _digest
-from .reasons import _reason
-from .types import (
+from vonk_control.resource_planning.identity import _canonical, _digest
+from vonk_control.resource_planning.reasons import _reason
+from vonk_control.resource_planning.types import (
     _CHANGE_EFFECTS,
     Effect,
     EffectiveResourceSettings,
@@ -26,6 +20,9 @@ from .types import (
     PreparationDecision,
     SettingsResolution,
 )
+from vonk_control.resource_planning_contract import ResourceRecipeProjection
+from vonk_control.run_switch_contract.evidence import EffectiveSettingsSelection
+from vonk_control.run_switch_contract.vocabulary import RunSwitchChangeEffect
 
 
 def resolve_effective_settings(value: object) -> SettingsResolution:

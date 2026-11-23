@@ -16,9 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-
-from .categorized_errors import UnsettledOutcome
-from .runtime.asset_contract import RuntimeAssetInventory
+from vonk_control.categorized_errors import UnsettledOutcome
+from vonk_control.runtime.asset_contract import RuntimeAssetInventory
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_PRIVATE_KEY_BYTES = 16 * 1024

@@ -33,17 +33,18 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.reason_codes.images import ImageStoreCode
 from vonk_agent_protocol.state_machines import DistributionAssignmentState
-
-from .artifact_jobs.lifecycle import (
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     lock_reference_gates,
 )
-from .artifact_reference_scan.image_references import runtime_image_reference_findings
-from .logging import log_event
-from .models.cache import RecipeBuild
-from .models.operations import ArtifactDistributionAssignment
-from .oci_image_store import (
+from vonk_control.artifact_reference_scan.image_references import (
+    runtime_image_reference_findings,
+)
+from vonk_control.logging import log_event
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.operations import ArtifactDistributionAssignment
+from vonk_control.oci_image_store import (
     IMAGE_CACHE_DIRECTORY,
     REFERENCE_SCAN_FAILED,
     REFERENCED_MANIFEST_DAMAGED,
@@ -51,10 +52,12 @@ from .oci_image_store import (
     OciImageStore,
     StoreUnknown,
 )
-from .owner_liveness import builds_in_flight
-from .runtime_image_preparation.contracts import RuntimeImagePreparationError
-from .runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from .stored.states import RecipeBuildState
+from vonk_control.owner_liveness import builds_in_flight
+from vonk_control.runtime_image_preparation.contracts import (
+    RuntimeImagePreparationError,
+)
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
+from vonk_control.stored.states import RecipeBuildState
 
 _LOGGER = logging.getLogger(__name__)
 _ADDRESS = re.compile(r"^[0-9a-f]{64}$")

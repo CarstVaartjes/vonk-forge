@@ -24,52 +24,64 @@ from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.wire_model import canonical_message
-
-from .. import agent_operation_states
-from ..agent_operation_facts import (
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.contracts import _TERMINAL_PARENT_STATES
+from vonk_control.agent_jobs.endings import end_unobserved_order
+from vonk_control.agent_jobs.evidence import _failure_result
+from vonk_control.agent_jobs.predicates import _claim_refusal_reason
+from vonk_control.agent_jobs.retry import (
+    _retry_authorized_for_current_attempt,
+    schedule_agent_upgrade_retry,
+)
+from vonk_control.agent_jobs.stored import (
+    column_field,
+    column_is_document,
+    column_value,
+)
+from vonk_control.agent_operation_facts import (
     _WORKLOAD_INTENT_OPERATIONS,
     aware,
     fencing_intent,
 )
-from ..cancelled_runtime import cancellation_stop_current
-from ..disk_reservations import outstanding_disk_charges
-from ..gpu.health import gpu_health_reason
-from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS, InventoryRepository
-from ..jobs import states as job_states
-from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..lifecycle.types import Outcome, Reported
-from ..models.cache import RecipeBuild
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..offline_stops import is_deferred_stop
-from ..operations.blockers import make_blocker
-from ..own_cleanup import CLEANUP_KINDS
-from ..package_activation import matches_receipt
-from ..persisted_waits import schedule_wait
-from ..recipe_builds.common import (
+from vonk_control.cancelled_runtime import cancellation_stop_current
+from vonk_control.disk_reservations import outstanding_disk_charges
+from vonk_control.gpu.health import gpu_health_reason
+from vonk_control.inventory.repository import (
+    INVENTORY_MAX_AGE_SECONDS,
+    InventoryRepository,
+)
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.agent_operation import (
+    AgentOperationAdapter,
+    set_parent_state,
+)
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.lifecycle.types import Outcome, Reported
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.offline_stops import is_deferred_stop
+from vonk_control.operations.blockers import make_blocker
+from vonk_control.own_cleanup import CLEANUP_KINDS
+from vonk_control.package_activation import matches_receipt
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recipe_builds.common import (
     BUILD_ARTIFACT_FORMAT,
     _build_disk_envelope,
     _build_disk_reserve,
 )
-from ..recipe_operations.execution_contract import (
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_policy,
 )
-from ..recipe_operations.observation_helpers import reinstall_in_flight
-from ..recovery_policy import WAIT_STEP
-from ..spark_disk import spark_free_bytes
-from .contracts import _TERMINAL_PARENT_STATES
-from .endings import end_unobserved_order
-from .evidence import _failure_result
-from .predicates import _claim_refusal_reason
-from .retry import _retry_authorized_for_current_attempt, schedule_agent_upgrade_retry
-from .stored import column_field, column_is_document, column_value
+from vonk_control.recipe_operations.observation_helpers import reinstall_in_flight
+from vonk_control.recovery_policy import WAIT_STEP
+from vonk_control.spark_disk import spark_free_bytes
 
 if TYPE_CHECKING:
-    from .service import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
 
 
 def recipe_build_disk_wait(

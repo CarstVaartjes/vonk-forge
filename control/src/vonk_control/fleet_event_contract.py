@@ -10,8 +10,7 @@ from vonk_forge_contracts import EndpointAlias
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.wire_model import canonical_message
-
-from .strict_json import StrictJSONModel
+from vonk_control.strict_json import StrictJSONModel
 
 
 class _FleetEventModel(StrictJSONModel):

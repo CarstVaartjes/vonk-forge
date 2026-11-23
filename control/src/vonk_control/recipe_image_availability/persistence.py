@@ -19,22 +19,18 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
-from vonk_control.lifecycle.evidence import Residue
-
-from ..catalog.queries import active_head_revision
-from ..jobs import states as job_states
-from ..jobs.documents import AvailabilityJobPayload
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..model_cache.views import ModelCacheRemovalScope
-from ..models.catalog import CatalogDocumentRevision
-from ..models.jobs import Job
-from ..recipe_operations.availability_intent import (
-    RecipeSelectorIntent,
+from vonk_control.catalog.queries import active_head_revision
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import AvailabilityJobPayload
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
 )
-from ..revision_images import revision_images
-from ..stored.rows import read_row_column
-from ..stored.states import CatalogRevisionState
-from .contracts import (
+from vonk_control.model_cache.views import ModelCacheRemovalScope
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability.contracts import (
     _ACTIVE,
     _SHA256,
     _WAITING,
@@ -49,23 +45,29 @@ from .contracts import (
     _read,
     _RecipeRemovalSelection,
 )
-from .reader_contract import (
+from vonk_control.recipe_image_availability.reader_contract import (
     RecoveredAvailabilityPayload,
     StoredAvailabilityIdentity,
 )
-from .removal_contract import (
+from vonk_control.recipe_image_availability.removal_contract import (
     RecipeCacheRemovalIntent,
     RecipeCacheRemovalOwner,
     RecipeCacheRemovalPlan,
     RecipeCacheRemovalResult,
 )
-from .view_contract import (
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeCacheRemovalStatus,
     RecipeImageAvailabilityView,
 )
+from vonk_control.recipe_operations.availability_intent import RecipeSelectorIntent
+from vonk_control.revision_images import revision_images
+from vonk_control.stored.rows import read_row_column
+from vonk_control.stored.states import CatalogRevisionState
 
 if TYPE_CHECKING:
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
 
 
 def _payload(

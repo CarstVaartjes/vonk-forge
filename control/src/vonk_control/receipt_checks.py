@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from .operator_receipt_contract import ReceiptCode
+from vonk_control.operator_receipt_contract import ReceiptCode
 
 
 def _refused(detail: str, *, unavailable: bool = False) -> HTTPException:

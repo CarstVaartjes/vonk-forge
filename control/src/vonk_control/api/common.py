@@ -25,11 +25,10 @@ from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 from vonk_agent_protocol.reason_codes.catalog import CatalogCode
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..auth import agent_identity_from_scope
-from ..auth_api import LoginRequestInvalid
-from ..catalog.api import CatalogProblem
-from ..logging import log_event, redact_text
+from vonk_control.auth import agent_identity_from_scope
+from vonk_control.auth_api import LoginRequestInvalid
+from vonk_control.catalog.api import CatalogProblem
+from vonk_control.logging import log_event, redact_text
 
 """Versioned authenticated control API."""
 

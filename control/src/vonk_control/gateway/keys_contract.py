@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import ConfigDict, Field
 
-from ..strict_json import StrictJSONModel
+from vonk_control.strict_json import StrictJSONModel
 
 
 class GatewayKeyView(StrictJSONModel):

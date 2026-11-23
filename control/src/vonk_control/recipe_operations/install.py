@@ -14,8 +14,7 @@ from vonk_agent_protocol.outcome import (
 )
 from vonk_agent_protocol.reason_codes.admission import InstallAdmissionCode
 from vonk_agent_protocol.state_machines import InstallationState
-
-from ..admission_locking import (
+from vonk_control.admission_locking import (
     AdmissionLockBusy,
     ConstraintReplay,
     acquire_admission_keys,
@@ -23,24 +22,24 @@ from ..admission_locking import (
     admission_wait_exhausted,
     node_admission_key,
 )
-from ..install_admission.contracts import InstallAdmissionBusy, InstallPlan
-from ..install_admission.validation import (
+from vonk_control.install_admission.contracts import InstallAdmissionBusy, InstallPlan
+from vonk_control.install_admission.validation import (
     require_admissible as require_install_admissible,
 )
-from ..install_admission.validation import (
+from vonk_control.install_admission.validation import (
     require_same_execution as require_same_install_execution,
 )
-from ..models.execution import RecipeInstallation
-from ..strict_json import serialize_json_value
-from .errors import (
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.recipe_operations.errors import (
     RecipeRequestInvalid,
     RecipeRetryLater,
     retry_later_unless_deterministic,
 )
-from .interfaces import RecipeOperationView
+from vonk_control.recipe_operations.interfaces import RecipeOperationView
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class InstallMixin:

@@ -18,30 +18,29 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.state_machines import RouteState, RunState
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.failure_classification import disposition, error_detail, wait_reason
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.recipe_operation import RecipeOperationAdapter
+from vonk_control.logging import log_event, redact_text
+from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.models.jobs import Job
+from vonk_control.optimistic import Stale, transition
 from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
-
-from ..categorized_errors import InvalidValue
-from ..failure_classification import disposition, error_detail, wait_reason
-from ..jobs import states as job_states
-from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..logging import log_event, redact_text
-from ..models.execution import RecipeRun, RunNode
-from ..models.jobs import Job
-from ..optimistic import Stale, transition
-from ..persisted_waits import schedule_wait
-from ..recipe_routes.shared import (
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recipe_operations.constants import _INITIAL_OBSERVATION_GRACE_SECONDS
+from vonk_control.recipe_operations.execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_run_plan,
+)
+from vonk_control.recipe_operations.lifecycle_contract import RecipeOperationResult
+from vonk_control.recipe_routes.shared import (
     RecipeRouteOwnerBusy,
     _RecipeRunContended,
     publication_disposition,
 )
-from ..recovery_policy import RECOVERY, ROUTE_RECOVERY, WAIT_STEP, schedule
-from ..stall_window import stall_deadline
-from .constants import _INITIAL_OBSERVATION_GRACE_SECONDS
-from .execution_contract import (
-    RecipeExecutionContractError,
-    parse_stored_run_plan,
-)
-from .lifecycle_contract import RecipeOperationResult
+from vonk_control.recovery_policy import RECOVERY, ROUTE_RECOVERY, WAIT_STEP, schedule
+from vonk_control.stall_window import stall_deadline
 
 _LOGGER = logging.getLogger("vonk-control-worker")
 

@@ -19,8 +19,7 @@ from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeErro
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-
-from ..artifact_jobs.lifecycle import (
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     check_removal_fence_nowait,
@@ -28,26 +27,23 @@ from ..artifact_jobs.lifecycle import (
     release_dead_removal_nowait,
     retryable_artifact_database_error,
 )
-from ..artifact_reference_scan.image_references import runtime_image_reference_reasons
-from ..categorized_errors import InvalidValue
-from ..failure_classification import error_code
-from ..jobs import states as job_states
-from ..logging import log_event
-from ..model_cache import states as model_cache_states
-from ..model_cache.constants import REMOVAL_BATCH_SECONDS
-from ..model_cache.contract import (
-    ModelCacheRemovalResult,
+from vonk_control.artifact_reference_scan.image_references import (
+    runtime_image_reference_reasons,
 )
-from ..model_cache.errors import ModelCacheError, ModelCacheNotFound
-from ..models.jobs import Job
-from ..operations.contract import (
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.failure_classification import error_code
+from vonk_control.jobs import states as job_states
+from vonk_control.logging import log_event
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.constants import REMOVAL_BATCH_SECONDS
+from vonk_control.model_cache.contract import ModelCacheRemovalResult
+from vonk_control.model_cache.errors import ModelCacheError, ModelCacheNotFound
+from vonk_control.models.jobs import Job
+from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     sanitize_failure_evidence,
 )
-from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
-from ..stored.rows import read_row_column
-from ..strict_json import read_stored_model, serialize_json_value
-from .contracts import (
+from vonk_control.recipe_image_availability.contracts import (
     _LOGGER,
     REMOVE_OPERATION_KIND,
     ModelCacheRemovalCoordinator,
@@ -57,16 +53,23 @@ from .contracts import (
     _removal_retry_is_due,
     availability_disposition,
 )
-from .removal_contract import (
+from vonk_control.recipe_image_availability.removal_contract import (
     RecipeCacheRemovalModelChild,
     RecipeCacheRemovalOwner,
 )
+from vonk_control.runtime_image_preparation.contracts import (
+    RuntimeImagePreparationError,
+)
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import read_stored_model, serialize_json_value
 
 REMOVAL_PASS_BUDGET_SECONDS = 0.25
 
 
 if TYPE_CHECKING:
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
 
 
 def reconcile_removal_gates(

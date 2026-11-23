@@ -13,10 +13,8 @@ from vonk_forge_contracts.model import ModelReference
 
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..bounded_json import require_integer, require_mapping
-from ..strict_json import serialize_json_value
-from .constants import (
+from vonk_control.bounded_json import require_integer, require_mapping
+from vonk_control.model_cache.constants import (
     _DIGEST_LENGTH,
     _EMPTY_SHA256,
     _MAX_MANIFEST_BYTES,
@@ -24,16 +22,20 @@ from .constants import (
     SCHEMA_VERSION,
     SOURCE_POLICY,
 )
-from .contract import (
+from vonk_control.model_cache.contract import (
     CacheIdentity,
     CacheIdentityArtifact,
     CacheManifest,
     CacheManifestArtifact,
     CacheManifestArtifactPart,
 )
-from .errors import ModelCacheResolutionInvalid
-from .providers import PROVIDERS
-from .source_helpers import _valid_relative_path, _validate_source
+from vonk_control.model_cache.errors import ModelCacheResolutionInvalid
+from vonk_control.model_cache.providers import PROVIDERS
+from vonk_control.model_cache.source_helpers import (
+    _valid_relative_path,
+    _validate_source,
+)
+from vonk_control.strict_json import serialize_json_value
 
 
 @dataclass(frozen=True, slots=True)

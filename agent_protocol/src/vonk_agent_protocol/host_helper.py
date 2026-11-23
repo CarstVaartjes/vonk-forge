@@ -12,22 +12,22 @@ from pydantic import (
     model_validator,
 )
 
-from .document_limits import (
+from vonk_agent_protocol.document_limits import (
     MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
     MAX_HOST_RUNTIME_REQUEST_BYTES,
 )
-from .gpu_clock import GpuClockIntent
-from .package_upgrade import PackageRollbackAuthority
-from .recipe_jobs import RecipeJobRunRequest
-from .recipe_operations import (
+from vonk_agent_protocol.gpu_clock import GpuClockIntent
+from vonk_agent_protocol.package_upgrade import PackageRollbackAuthority
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
+from vonk_agent_protocol.recipe_operations import (
     RecipeReconciliationIdentity,
     RecipeStartPayload,
     RecipeStopPayload,
 )
-from .run_inspect_target import ContainerRunTarget, RunInspectTarget
-from .swap import SwapIntent
-from .wire_model import (
+from vonk_agent_protocol.run_inspect_target import ContainerRunTarget, RunInspectTarget
+from vonk_agent_protocol.swap import SwapIntent
+from vonk_agent_protocol.wire_model import (
     MAX_RUN_GENERATION,
     AgentProtocolError,
     Uuid4Text,

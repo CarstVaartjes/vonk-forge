@@ -14,7 +14,8 @@ import shlex
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 
-from ..cli_states_generated import (
+from cluster_profiles.cli_render.common import _bytes, _field, _object, _records, _time
+from cluster_profiles.cli_states_generated import (
     ASSET_MODEL_OBJECT,
     ASSET_MODEL_SET,
     ASSET_REMOVE,
@@ -24,14 +25,19 @@ from ..cli_states_generated import (
     ASSET_RUNTIME_IMAGE,
     ASSET_VERIFIED,
 )
-from ..generated_control.models.cache_removal_asset import CacheRemovalAsset
-from ..generated_control.models.cache_removal_finding import CacheRemovalFinding
-from ..generated_control.models.cache_removal_review import CacheRemovalReview
-from ..generated_control.models.fleet_model_removal_effects import (
+from cluster_profiles.generated_control.models.cache_removal_asset import (
+    CacheRemovalAsset,
+)
+from cluster_profiles.generated_control.models.cache_removal_finding import (
+    CacheRemovalFinding,
+)
+from cluster_profiles.generated_control.models.cache_removal_review import (
+    CacheRemovalReview,
+)
+from cluster_profiles.generated_control.models.fleet_model_removal_effects import (
     FleetModelRemovalEffects,
 )
-from ..generated_control.types import UNSET
-from .common import _bytes, _field, _object, _records, _time
+from cluster_profiles.generated_control.types import UNSET
 
 _NAMED_OWNERS = 3
 

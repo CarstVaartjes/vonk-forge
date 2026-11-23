@@ -10,16 +10,16 @@ from typing import Annotated, NamedTuple
 
 from pydantic import ConfigDict, Field, model_validator
 
-from .claims import AgentRuntimeIdentity
-from .host_helper import (
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ContainerRuntimeActionName,
     SignedHostHelperGrant,
 )
-from .integer_domains import MAX_DATABASE_BIGINT
-from .package_upgrade import PackageActivationReceipt
-from .recipe_operations import RecipeReconciliationIdentity
-from .wire_model import UUID4_PATTERN, StrictJSONModel
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_BIGINT
+from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
+from vonk_agent_protocol.recipe_operations import RecipeReconciliationIdentity
+from vonk_agent_protocol.wire_model import UUID4_PATTERN, StrictJSONModel
 
 
 class _AgentGrantRequest(StrictJSONModel):

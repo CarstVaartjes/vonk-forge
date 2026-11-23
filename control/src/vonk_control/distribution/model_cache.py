@@ -10,15 +10,17 @@ from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
 from vonk_agent_protocol.outcome import SecurityRefusalError
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
-
-from ..compiled_execution_plan import DistributionObjectReceipt, VerifiedModelObject
-from ..model_cache.errors import ModelCacheNotFound
+from vonk_control.compiled_execution_plan import (
+    DistributionObjectReceipt,
+    VerifiedModelObject,
+)
+from vonk_control.model_cache.errors import ModelCacheNotFound
 
 if TYPE_CHECKING:
-    from ..model_cache.service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
-from .types import (
+from vonk_control.distribution.types import (
     DistributionError,
     DistributionRefused,
     DistributionUnknown,

@@ -9,30 +9,28 @@ from typing import cast as _typing_cast
 
 from sqlalchemy.orm import Session
 
-from ..artifact_jobs.lifecycle import (
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     lock_reference_gates,
     require_reference_open,
 )
-from ..artifact_reference_scan.model_sets import require_model_sets_open
-from ..catalog.revision_contract import RecipeRevisionProjection
-from ..fleet_profile_contract.definitions import FleetProfileAssignmentInput
-from ..fleet_profile_contract.review import FleetProfilePreview
-from ..lifecycle.evidence import Residue
-from ..model_cache.fleet_removal import _model_objects
-from ..model_cache.persistence import _operation_removal
-from ..models.cache import ModelCacheOperation
-from .contracts import (
-    FleetProfileAdmissionEffectBusy,
-)
-from .projection_support import (
-    _effective_option_choices,
-)
+from vonk_control.artifact_reference_scan.model_sets import require_model_sets_open
+from vonk_control.catalog.revision_contract import RecipeRevisionProjection
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignmentInput
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profiles.contracts import FleetProfileAdmissionEffectBusy
+from vonk_control.fleet_profiles.projection_support import _effective_option_choices
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.model_cache.fleet_removal import _model_objects
+from vonk_control.model_cache.persistence import _operation_removal
+from vonk_control.models.cache import ModelCacheOperation
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 class FleetProfileService:

@@ -28,13 +28,12 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
-
-from ..categorized_errors import InvalidValue
-from ..fleet_model_removal_contract import STORE_RETENTION_MAX_AGE
-from ..jobs import states as job_states
-from ..model_cache import states as model_cache_states
-from ..models.cache import ArtifactLifecycleGate, ModelCacheOperation
-from ..models.jobs import Job
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.fleet_model_removal_contract import STORE_RETENTION_MAX_AGE
+from vonk_control.jobs import states as job_states
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheOperation
+from vonk_control.models.jobs import Job
 
 ArtifactKind = Literal["model-set", "model-object", "runtime-image"]
 RemovalOwnerKind = Literal["model-cache-operation", "recipe-image-job"]

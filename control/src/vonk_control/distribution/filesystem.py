@@ -12,10 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
-
-from ..oci_image_store import IMAGE_CACHE_DIRECTORY, StoreUnknown
-from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from .types import (
+from vonk_control.distribution.types import (
     DistributionError,
     DistributionRefused,
     DistributionUnknown,
@@ -23,6 +20,8 @@ from .types import (
     _artifact_set_digest,
     contained_content,
 )
+from vonk_control.oci_image_store import IMAGE_CACHE_DIRECTORY, StoreUnknown
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 
 class FilesystemObjectSource:

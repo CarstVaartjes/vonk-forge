@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ..lifecycle.evidence import Residue, read_or_rebuild
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..strict_json import read_stored_document
+from vonk_control.lifecycle.evidence import Residue, read_or_rebuild
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.strict_json import read_stored_document
 
 
 def _stored_result(value: object) -> RunSwitchOperationResult | Residue | None:

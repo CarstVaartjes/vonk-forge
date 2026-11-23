@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
-from .types import Lifecycle, Observed, StopResult
+from vonk_control.lifecycle.types import Lifecycle, Observed, StopResult
 
 
 @dataclass(frozen=True, slots=True)

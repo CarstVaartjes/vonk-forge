@@ -14,54 +14,45 @@ from fastapi import (
 )
 
 from vonk_agent_protocol.capability_reply import ControllerCapability
-
-from ..agent_api.common import AgentApiServices, EnrollmentRateLimiter
-from ..agent_api.routes import install_agent_routes
-from ..artifact_jobs.api import (
-    install_artifact_job_routes,
-)
-from ..artifact_jobs.service import ArtifactJobService
-from ..auth import (
-    CursorCodec,
-    TokenCodec,
-)
-from ..auth_api import install_auth_routes
-from ..browser_auth import BrowserAuthService
-from ..capabilities import RecoveringService
-from ..catalog.api import install_catalog_routes
-from ..cli_update_contract import install_cli_update_contract_routes
-from ..failure_evidence import FailureEvidenceService
-from ..failure_evidence_api import install_failure_evidence_routes
-from ..fleet_profiles.api import install_fleet_profile_routes
-from ..fleet_profiles.application_cancel_api import (
+from vonk_control.agent_api.common import AgentApiServices, EnrollmentRateLimiter
+from vonk_control.agent_api.routes import install_agent_routes
+from vonk_control.api.common import JobQueue
+from vonk_control.api.errors import install_error_handlers
+from vonk_control.api.middleware import install_request_boundaries
+from vonk_control.api.roles import make_actor_dependency
+from vonk_control.api.routes_activity import register_activity_routes
+from vonk_control.api.routes_jobs import register_job_routes
+from vonk_control.api.routes_platform import register_platform_routes
+from vonk_control.artifact_jobs.api import install_artifact_job_routes
+from vonk_control.artifact_jobs.service import ArtifactJobService
+from vonk_control.auth import CursorCodec, TokenCodec
+from vonk_control.auth_api import install_auth_routes
+from vonk_control.browser_auth import BrowserAuthService
+from vonk_control.capabilities import RecoveringService
+from vonk_control.catalog.api import install_catalog_routes
+from vonk_control.cli_update_contract import install_cli_update_contract_routes
+from vonk_control.failure_evidence import FailureEvidenceService
+from vonk_control.failure_evidence_api import install_failure_evidence_routes
+from vonk_control.fleet_profiles.api import install_fleet_profile_routes
+from vonk_control.fleet_profiles.application_cancel_api import (
     install_profile_application_cancel_route,
 )
-from ..gateway.keys import GatewayKeyService, install_gateway_key_routes
-from ..installation_reconciliation_api import install_installation_reconciliation_routes
-from ..metrics.prometheus_api import PrometheusReader
-from ..metrics.registry import MetricsRegistry
-from ..model_cache.api import install_model_operator_routes
-from ..observation.platform import (
-    PlatformObserver,
-    api_only_capture,
+from vonk_control.gateway.keys import GatewayKeyService, install_gateway_key_routes
+from vonk_control.installation_reconciliation_api import (
+    install_installation_reconciliation_routes,
 )
-from ..operation_api.contracts import OperationApiServices, bounded_error_responses
-from ..operator_acceptance import (
-    ControllerAPIRoute,
-    OperatorReceiptResolver,
+from vonk_control.metrics.prometheus_api import PrometheusReader
+from vonk_control.metrics.registry import MetricsRegistry
+from vonk_control.model_cache.api import install_model_operator_routes
+from vonk_control.observation.platform import PlatformObserver, api_only_capture
+from vonk_control.operation_api.contracts import (
+    OperationApiServices,
+    bounded_error_responses,
 )
-from ..operator_projection_api.services import FleetOperatorServices
-from ..recipe_image_availability.api import install_recipe_operator_routes
-from ..run_switch_operations.service import RunSwitchOperationService
-from .common import (
-    JobQueue,
-)
-from .errors import install_error_handlers
-from .middleware import install_request_boundaries
-from .roles import make_actor_dependency
-from .routes_activity import register_activity_routes
-from .routes_jobs import register_job_routes
-from .routes_platform import register_platform_routes
+from vonk_control.operator_acceptance import ControllerAPIRoute, OperatorReceiptResolver
+from vonk_control.operator_projection_api.services import FleetOperatorServices
+from vonk_control.recipe_image_availability.api import install_recipe_operator_routes
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 def create_app(

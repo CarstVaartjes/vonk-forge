@@ -18,9 +18,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from vonk_agent_protocol.reason_codes.resources import StorageDemandCode
-
-from .settings import STORAGE_DEMAND_TTL_SECONDS
-from .worker.memory_contract import WorkerMemoryComponent
+from vonk_control.settings import STORAGE_DEMAND_TTL_SECONDS
+from vonk_control.worker.memory_contract import WorkerMemoryComponent
 
 _LOGGER = logging.getLogger(__name__)
 

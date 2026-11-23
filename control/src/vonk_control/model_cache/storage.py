@@ -12,28 +12,31 @@ from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheBlockerCode
-
-from ..models.cache import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
-from ..storage_demands import NAS_MODELS, StorageDemands
-from . import states as model_cache_states
-from .artifacts import (
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.artifacts import (
     ArtifactSetManifest,
     _is_hex,
     _unique_artifacts,
 )
-from .constants import _DIGEST_LENGTH
-from .contract import (
+from vonk_control.model_cache.constants import _DIGEST_LENGTH
+from vonk_control.model_cache.contract import (
     CacheOperationKind,
     ModelCacheDownloadPayload,
     ModelCacheSetState,
     ModelCacheTransfer,
 )
-from .errors import ModelCacheError
-from .persistence import _manifest_of
-from .views import StorageSummary
+from vonk_control.model_cache.errors import ModelCacheError
+from vonk_control.model_cache.persistence import _manifest_of
+from vonk_control.model_cache.views import StorageSummary
+from vonk_control.models.cache import (
+    ModelCacheOperation,
+    ModelCacheSet,
+    ModelCacheSetArtifact,
+)
+from vonk_control.storage_demands import NAS_MODELS, StorageDemands
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class StorageShortfall(NamedTuple):

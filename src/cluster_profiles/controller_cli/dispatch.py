@@ -5,15 +5,19 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 
-from ..cli_files import PrivateOutput
-from ..cli_json_contract import Word
-from .common import ControllerClient, _quoted, _request_key
-from .confirmation import _confirm_action
-from .fleet import _fleet
-from .library import _job, _model, _recipe
-from .metrics import _metrics
-from .profile import _profile
-from .run import _run
+from cluster_profiles.cli_files import PrivateOutput
+from cluster_profiles.cli_json_contract import Word
+from cluster_profiles.controller_cli.common import (
+    ControllerClient,
+    _quoted,
+    _request_key,
+)
+from cluster_profiles.controller_cli.confirmation import _confirm_action
+from cluster_profiles.controller_cli.fleet import _fleet
+from cluster_profiles.controller_cli.library import _job, _model, _recipe
+from cluster_profiles.controller_cli.metrics import _metrics
+from cluster_profiles.controller_cli.profile import _profile
+from cluster_profiles.controller_cli.run import _run
 
 
 def run_controller(

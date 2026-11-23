@@ -28,37 +28,18 @@ from vonk_agent_protocol.state_machines import (
     adopt_machine_state,
 )
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..api_availability import AVAILABILITY_ERRORS
-from ..catalog.queries import active_head_revision
-from ..content_identity import recipe_content_membership
-from ..library.assessment import unassessed
-from ..library.contract import (
+from vonk_control.api_availability import AVAILABILITY_ERRORS
+from vonk_control.catalog.queries import active_head_revision
+from vonk_control.content_identity import recipe_content_membership
+from vonk_control.library.assessment import unassessed
+from vonk_control.library.contract import (
     LibraryCacheState,
     LibraryLocalProgress,
     LibraryLocalState,
     LibraryRecipeProjection,
 )
-from ..library.image_presence import ImageKey, ImagePresence
-from ..machine_states import INSTALLATION_ACTIVE
-from ..model_cache import states as model_cache_states
-from ..model_cache.contract import (
-    CacheManifest,
-    CacheOperationKind,
-    ModelCacheOperationProgress,
-)
-from ..model_cache.errors import ModelCacheError
-from ..model_cache.lineage import verifies_model
-from ..model_cache.resolution import resolve_recipe_set
-from ..models.cache import ModelCacheOperation, ModelCacheSet, RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import RecipeInstallation, RecipeRun, RunNode
-from ..operator_receipt_contract import ReceiptOwner
-from ..persisted_waits import read_wait
-from ..revision_images import revision_images
-from ..stored.rows import read_row_column
-from ..stored.states import CatalogRevisionState, RecipeBuildState
-from .common import (
+from vonk_control.library.image_presence import ImageKey, ImagePresence
+from vonk_control.library_projection.common import (
     _ACTIVE_RUN_STATES,
     _RUN_STATES,
     LibraryControllerState,
@@ -67,9 +48,27 @@ from .common import (
     compose_recipe_state,
     highest_state,
 )
+from vonk_control.machine_states import INSTALLATION_ACTIVE
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.contract import (
+    CacheManifest,
+    CacheOperationKind,
+    ModelCacheOperationProgress,
+)
+from vonk_control.model_cache.errors import ModelCacheError
+from vonk_control.model_cache.lineage import verifies_model
+from vonk_control.model_cache.resolution import resolve_recipe_set
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet, RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.persisted_waits import read_wait
+from vonk_control.revision_images import revision_images
+from vonk_control.stored.rows import read_row_column
+from vonk_control.stored.states import CatalogRevisionState, RecipeBuildState
 
 if TYPE_CHECKING:
-    from .service import LibraryProjection
+    from vonk_control.library_projection.service import LibraryProjection
 
 
 def _assessed(

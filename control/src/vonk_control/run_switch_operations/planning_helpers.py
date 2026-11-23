@@ -23,23 +23,20 @@ from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.reason_codes.vocabulary import run_switch_code
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..categorized_errors import (
-    InvalidValue,
-)
-from ..jobs.documents import RecipeStartParent, RunSwitchJobPayload
-from ..memory_reservations import (
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.jobs.documents import RecipeStartParent, RunSwitchJobPayload
+from vonk_control.memory_reservations import (
     MEMORY_RESERVATION_KINDS,
     reviewed_run_memory_reservations,
 )
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.telemetry import NodeInventorySnapshot
-from ..operations.blockers import SwapShortfallEvidence
-from ..resource_planning.memory_kinds import memory_reservation_kinds
-from ..resource_planning.settings import resolve_effective_settings
-from ..resource_planning.types import ResourceReason
-from ..run_switch_contract.evidence import (
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.operations.blockers import SwapShortfallEvidence
+from vonk_control.resource_planning.memory_kinds import memory_reservation_kinds
+from vonk_control.resource_planning.settings import resolve_effective_settings
+from vonk_control.resource_planning.types import ResourceReason
+from vonk_control.run_switch_contract.evidence import (
     ConditionalPostStopMemoryCheck,
     EffectiveParallelism,
     EffectiveSettingsSelection,
@@ -48,21 +45,21 @@ from ..run_switch_contract.evidence import (
     SparkFit,
     StopImpact,
 )
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.vocabulary import (
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.vocabulary import (
     RunSwitchReasonScope,
     RunSwitchReasonSeverity,
 )
-from ..stored.rows import read_row_column
-from .constants import (
+from vonk_control.run_switch_operations.constants import (
     _CHANGE_EFFECTS_ADAPTER,
     _KNOBS_ADAPTER,
     _MEMORY_STOP_CONDITIONAL_REFUSALS,
     _SWAP_COMPONENT,
 )
-from .contracts import ScopeIntentStatus
-from .interfaces import ArtifactInspection
+from vonk_control.run_switch_operations.contracts import ScopeIntentStatus
+from vonk_control.run_switch_operations.interfaces import ArtifactInspection
+from vonk_control.stored.rows import read_row_column
 
 #: The lock-contention word of every admission owner a phase can wait on.
 _CAPACITY_BUSY = frozenset(

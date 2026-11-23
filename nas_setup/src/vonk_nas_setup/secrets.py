@@ -18,9 +18,13 @@ from vonk_agent_protocol.installer_setup import (
     NasStepCaControllerRequest,
     single_line,
 )
-
-from .filesystem import ObservationUnavailable, SetupError, read_member, retry
-from .pki import load_ed25519_private_key, normalize_intermediate_key
+from vonk_nas_setup.filesystem import (
+    ObservationUnavailable,
+    SetupError,
+    read_member,
+    retry,
+)
+from vonk_nas_setup.pki import load_ed25519_private_key, normalize_intermediate_key
 
 
 def generated(payload: NasInstallTemplate) -> NasGeneratedSecrets:

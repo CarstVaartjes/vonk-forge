@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from functools import cache
 
-from ..http_failure import TransientReason
-from ..lifecycle_vocabulary import (
+from vonk_agent_protocol.http_failure import TransientReason
+from vonk_agent_protocol.lifecycle_vocabulary import (
     FailureCode,
     InvalidRequestReason,
     ResourceBlockerCode,
@@ -14,8 +14,7 @@ from ..lifecycle_vocabulary import (
     SecurityRefusalReason,
     WaitReason,
 )
-from ..wire_model import WireEnum, WireModel
-from .admission import (
+from vonk_agent_protocol.reason_codes.admission import (
     AdmissionCode,
     CertificateCode,
     ControllerErrorCode,
@@ -23,31 +22,38 @@ from .admission import (
     InstallDegradedReason,
     UninstallPlanCode,
 )
-from .catalog import (
+from vonk_agent_protocol.reason_codes.catalog import (
     CatalogCode,
     CatalogSyncCode,
     LibraryAssessmentCode,
     LibraryProjectionCode,
 )
-from .evidence import (
+from vonk_agent_protocol.reason_codes.evidence import (
     AgentEvidenceCode,
     ArtifactLifecycleCode,
     NodeOfflineReason,
     OperationFailureCode,
     RunDegradedReason,
 )
-from .fleet import ClusterMappingCode, DistributionCode, TopologyCode
-from .helpers import HelperErrorCode, HelperOperationCode
-from .images import ImageStoreCode, PrebuiltImageCode
-from .model_cache import (
+from vonk_agent_protocol.reason_codes.fleet import (
+    ClusterMappingCode,
+    DistributionCode,
+    TopologyCode,
+)
+from vonk_agent_protocol.reason_codes.helpers import (
+    HelperErrorCode,
+    HelperOperationCode,
+)
+from vonk_agent_protocol.reason_codes.images import ImageStoreCode, PrebuiltImageCode
+from vonk_agent_protocol.reason_codes.model_cache import (
     CacheReferenceReason,
     ModelAccessReason,
     ModelCacheBlockerCode,
     ModelCacheCode,
     ModelCacheFailureCode,
 )
-from .profiles import ProfileReasonCode, ProjectionCode
-from .recipes import (
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode, ProjectionCode
+from vonk_agent_protocol.reason_codes.recipes import (
     RecipeBuildCode,
     RecipeImageCode,
     RecipeOperationCode,
@@ -55,15 +61,25 @@ from .recipes import (
     RecipeUpdateCode,
     ReconcileCode,
 )
-from .resources import (
+from vonk_agent_protocol.reason_codes.resources import (
     ResourcePlanningCode,
     ResourceTerm,
     ResourceTermProblem,
     StorageDemandCode,
 )
-from .runs import JournalRepairCode, RunSwitchCode, StopPlanCode, SupersedeCode
-from .runtime import RuntimeImageCode, RuntimePreflightCode, RuntimePreflightFindingCode
-from .sources import SourceBundleCode, SourcePolicyCode
+from vonk_agent_protocol.reason_codes.runs import (
+    JournalRepairCode,
+    RunSwitchCode,
+    StopPlanCode,
+    SupersedeCode,
+)
+from vonk_agent_protocol.reason_codes.runtime import (
+    RuntimeImageCode,
+    RuntimePreflightCode,
+    RuntimePreflightFindingCode,
+)
+from vonk_agent_protocol.reason_codes.sources import SourceBundleCode, SourcePolicyCode
+from vonk_agent_protocol.wire_model import WireEnum, WireModel
 
 #: Every domain enum, in the order the wire schema lists them.
 REASON_CODE_ENUMS: tuple[type[WireEnum], ...] = (

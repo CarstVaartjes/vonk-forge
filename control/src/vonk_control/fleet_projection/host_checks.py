@@ -17,8 +17,7 @@ from typing import Annotated
 from pydantic import Field, StringConstraints
 
 from vonk_agent_protocol.host_tuning import HostTuning, HostUnit, InstalledUnit
-
-from ..strict_json import StrictModel
+from vonk_control.strict_json import StrictModel
 
 Text256 = Annotated[str, StringConstraints(min_length=1, max_length=256)]
 Text512 = Annotated[str, StringConstraints(min_length=1, max_length=512)]

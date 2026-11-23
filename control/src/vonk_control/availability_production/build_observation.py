@@ -16,30 +16,29 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
-
-from ..failure_classification import disposition, is_security_failure
-from ..failure_evidence import safe_text
-from ..jobs import states as job_states
-from ..models.cache import RecipeBuild
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..operations.blockers import OperationBlocker, make_blocker
-from ..recipe_builds.common import PrebuiltDecision, _valid_succeeded_receipt
-from ..recipe_image_availability.contracts import (
+from vonk_control.failure_classification import disposition, is_security_failure
+from vonk_control.failure_evidence import safe_text
+from vonk_control.jobs import states as job_states
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operations.blockers import OperationBlocker, make_blocker
+from vonk_control.recipe_builds.common import PrebuiltDecision, _valid_succeeded_receipt
+from vonk_control.recipe_image_availability.contracts import (
     BuildUnsettled,
     RecipeImageAvailabilityError,
 )
-from ..recipe_operations.execution_contract import (
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_policy,
 )
-from ..recipe_operations.runtime_specs import (
+from vonk_control.recipe_operations.runtime_specs import (
     ResolvedRecipe,
     compile_runtime_spec,
 )
-from ..recovery_policy import kind_for_failure_fields
-from ..runtime.spec_contract import SpecRuntime
-from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from ..strict_json import read_stored_model
+from vonk_control.recovery_policy import kind_for_failure_fields
+from vonk_control.runtime.spec_contract import SpecRuntime
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
+from vonk_control.strict_json import read_stored_model
 
 
 # Controller prebuilt pulls hold no Spark or builder slot while waiting.

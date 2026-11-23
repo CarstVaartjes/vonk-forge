@@ -18,10 +18,10 @@ from typing import Literal
 from sqlalchemy import delete, or_, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from .auth import ADMIN_ROLE, Actor
-from .db.connections import require_durable_commit
-from .models.fleet import LoginSession, User
-from .passwords import hash_password, verify_password
+from vonk_control.auth import ADMIN_ROLE, Actor
+from vonk_control.db.connections import require_durable_commit
+from vonk_control.models.fleet import LoginSession, User
+from vonk_control.passwords import hash_password, verify_password
 
 _ADMIN_SUBJECT = "admin"
 _ADMIN_ROLE = ADMIN_ROLE

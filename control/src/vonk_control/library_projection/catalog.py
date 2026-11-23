@@ -9,14 +9,13 @@ from sqlalchemy import and_, or_, select
 from vonk_forge_contracts import CatalogVocabulary, ModelDefinition, RecipeDefinition
 
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-
-from ..catalog.queries import WITHOUT_DOCUMENT, active_head_revision
-from ..catalog.revision_contract import (
+from vonk_control.catalog.queries import WITHOUT_DOCUMENT, active_head_revision
+from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
     read_catalog_projection,
 )
-from ..library.contract import (
+from vonk_control.library.contract import (
     LibraryFacetValues,
     LibraryLocalState,
     LibraryModelProjection,
@@ -26,16 +25,7 @@ from ..library.contract import (
     LibraryResourceProjection,
     _utc,
 )
-from ..model_cache.contract import (
-    CacheManifest,
-    ModelStorageSnapshot,
-)
-from ..models.cache import ModelCacheSet, RecipeLibrarySyncRun
-from ..models.catalog import CatalogDocument, CatalogDocumentRevision
-from ..operator_receipt_contract import ReceiptOwner
-from ..stored.rows import read_row_column
-from ..stored.states import CatalogRevisionState, LibrarySyncRunState
-from .common import (
+from vonk_control.library_projection.common import (
     DocumentText,
     _document_text,
     _model_identity,
@@ -43,9 +33,15 @@ from .common import (
     _recipe_creator,
     _recipe_usage,
 )
+from vonk_control.model_cache.contract import CacheManifest, ModelStorageSnapshot
+from vonk_control.models.cache import ModelCacheSet, RecipeLibrarySyncRun
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.stored.rows import read_row_column
+from vonk_control.stored.states import CatalogRevisionState, LibrarySyncRunState
 
 if TYPE_CHECKING:
-    from .service import LibraryProjection
+    from vonk_control.library_projection.service import LibraryProjection
 
 
 def _library_release(self: LibraryProjection) -> LibraryRelease | None:

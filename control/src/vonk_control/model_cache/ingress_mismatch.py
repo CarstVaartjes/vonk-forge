@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from .contract import ModelCacheIngressMismatch
+from vonk_control.model_cache.contract import ModelCacheIngressMismatch
 
 #: Consecutive ingress digest mismatches after which the download ends.
 INGRESS_MISMATCH_LIMIT = 2

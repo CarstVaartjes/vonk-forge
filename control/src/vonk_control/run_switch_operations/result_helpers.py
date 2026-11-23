@@ -13,53 +13,54 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitReason,
 )
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..bounded_json import require_mapping
-from ..distribution_assignment import NodeDistributionAssignment
-from ..distribution_executor.receipts import _ChildView
-from ..failure_classification import disposition, error_detail, is_security_failure
-from ..lifecycle.evidence import (
-    Residue,
+from vonk_control.bounded_json import require_mapping
+from vonk_control.distribution_assignment import NodeDistributionAssignment
+from vonk_control.distribution_executor.receipts import _ChildView
+from vonk_control.failure_classification import (
+    disposition,
+    error_detail,
+    is_security_failure,
 )
-from ..models.jobs import Job
-from ..operations.blockers import OperationBlocker
-from ..persisted_waits import read_wait
-from ..recipe_operations.interfaces import RecipeOperationView
-from ..recipe_operations.lifecycle_contract import RecipeLifecycleResult
-from ..recovery_policy import (
-    FailureKind,
-    kind_for_failure_fields,
-)
-from ..run_switch_contract.evidence import RunSwitchPhase
-from ..run_switch_contract.observation import (
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.jobs import Job
+from vonk_control.operations.blockers import OperationBlocker
+from vonk_control.persisted_waits import read_wait
+from vonk_control.recipe_operations.interfaces import RecipeOperationView
+from vonk_control.recipe_operations.lifecycle_contract import RecipeLifecycleResult
+from vonk_control.recovery_policy import FailureKind, kind_for_failure_fields
+from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+from vonk_control.run_switch_contract.observation import (
     RunSwitchObservedEvidence,
     RunSwitchStoredLifecycle,
 )
-from ..run_switch_contract.operations import (
+from vonk_control.run_switch_contract.operations import (
     RunSwitchOperation,
     RunSwitchOperationResult,
 )
-from ..run_switch_contract.phase_results import (
+from vonk_control.run_switch_contract.phase_results import (
     RunSwitchDistributionChildResult,
     RunSwitchPhaseResult,
 )
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.progress import RunSwitchMemberReceipt
-from ..run_switch_contract.progress_view import RECOVERY_STALL_WINDOW
-from ..run_switch_contract.vocabulary import (
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.progress import RunSwitchMemberReceipt
+from vonk_control.run_switch_contract.progress_view import RECOVERY_STALL_WINDOW
+from vonk_control.run_switch_contract.vocabulary import (
     RunSwitchMemberState,
     RunSwitchPhaseKind,
     RunSwitchSubphase,
 )
-from ..stall_window import stall_deadline
-from .constants import (
+from vonk_control.run_switch_operations.constants import (
     _MEMBER_STATE_ADAPTER,
     _PHASES,
     _SUBPHASE_ADAPTER,
 )
-from .errors import RunSwitchRetryLater, retry_later_unless_deterministic
-from .planning_helpers import _aware
-from .results import _stored_result
+from vonk_control.run_switch_operations.errors import (
+    RunSwitchRetryLater,
+    retry_later_unless_deterministic,
+)
+from vonk_control.run_switch_operations.planning_helpers import _aware
+from vonk_control.run_switch_operations.results import _stored_result
+from vonk_control.stall_window import stall_deadline
 
 
 def _bound_workload_intent(progress: RunSwitchOperationResult) -> int:

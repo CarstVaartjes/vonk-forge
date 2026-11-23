@@ -13,53 +13,61 @@ from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
-from vonk_control.run_switch_operations.results import _persisted_result
-
-from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
-from ..artifact_jobs.lifecycle import (
+from vonk_control.admission_locking import (
+    AdmissionLockBusy,
+    AdmissionRowLock,
+    lock_admission_rows,
+)
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     require_reference_open,
 )
-from ..content_identity import ImageContent, differing_image_fields
-from ..fleet_profiles.capacity import (
-    accepted_profile_runtime_image,
-)
-from ..jobs import states as job_states
-from ..models.fleet import AgentNode
-from ..run_switch_contract.evidence import RunSwitchPhase
-from ..run_switch_contract.observation import (
-    RunSwitchObservedImageIdentity,
-)
-from ..run_switch_contract.operations import (
+from vonk_control.content_identity import ImageContent, differing_image_fields
+from vonk_control.fleet_profiles.capacity import accepted_profile_runtime_image
+from vonk_control.jobs import states as job_states
+from vonk_control.models.fleet import AgentNode
+from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+from vonk_control.run_switch_contract.observation import RunSwitchObservedImageIdentity
+from vonk_control.run_switch_contract.operations import (
     RunSwitchOperationResult,
     RunSwitchRuntimeImageReferenceIntent,
 )
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..runtime_image_preparation.contracts import RuntimeImagePreparationUnknown
-from ..runtime_image_preparation.contracts import (
-    RuntimeImageReceipt as RuntimeImageReceiptDocument,
-)
-from ..stored.rows import read_row_column
-from ..strict_json import (
-    read_stored_model,
-)
-from .contracts import ScopeIntentStatus
-from .errors import (
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.contracts import ScopeIntentStatus
+from vonk_control.run_switch_operations.errors import (
     RunSwitchOperationConflict,
     _RuntimeImageIdentityUnknown,
     _RuntimeImageOwnerChanged,
 )
-from .identity_helpers import _stated_bytes, _string_or_none
-from .image_receipts import _require_profile_runtime_image
-from .ownership import _lock_phase_owner
-from .planning_helpers import (
+from vonk_control.run_switch_operations.identity_helpers import (
+    _stated_bytes,
+    _string_or_none,
+)
+from vonk_control.run_switch_operations.image_receipts import (
+    _require_profile_runtime_image,
+)
+from vonk_control.run_switch_operations.ownership import _lock_phase_owner
+from vonk_control.run_switch_operations.planning_helpers import (
     _now,
     _run_switch_payload,
     _scope_intent_status,
     _stored_job_plan,
 )
-from .result_helpers import _bound_workload_intent, _progress_damaged, _read_progress
+from vonk_control.run_switch_operations.result_helpers import (
+    _bound_workload_intent,
+    _progress_damaged,
+    _read_progress,
+)
+from vonk_control.run_switch_operations.results import _persisted_result
+from vonk_control.runtime_image_preparation.contracts import (
+    RuntimeImagePreparationUnknown,
+)
+from vonk_control.runtime_image_preparation.contracts import (
+    RuntimeImageReceipt as RuntimeImageReceiptDocument,
+)
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import read_stored_model
 
 
 def _persist_run_switch_runtime_image_reference(

@@ -33,10 +33,9 @@ from vonk_agent_protocol.source_bundles import (
     SourceBundleManifest,
 )
 from vonk_agent_protocol.wire_model import canonical_message
-
-from .identity_insert import insert_identity
-from .models.catalog import RecipeSourceBundle, SourceBundleArchive
-from .source_bundle_contract import SourceBundleVerification
+from vonk_control.identity_insert import insert_identity
+from vonk_control.models.catalog import RecipeSourceBundle, SourceBundleArchive
+from vonk_control.source_bundle_contract import SourceBundleVerification
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session, sessionmaker

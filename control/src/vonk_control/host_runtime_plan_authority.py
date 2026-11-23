@@ -27,23 +27,27 @@ from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 from vonk_agent_protocol.state_machines import InstallationState, RunState
 from vonk_agent_protocol.wire_model import canonical_message
-
-from .cancelled_runtime import cancellation_stop_current
-from .categorized_errors import InvalidType
-from .jobs.documents import RecipeStopParent
-from .models.catalog import CatalogDocumentRevision
-from .models.execution import ArtifactJob, RecipeInstallation, RecipeRun, RunNode
-from .models.jobs import Job
-from .models.mapping import ClusterMapping, ClusterMappingNode
-from .models.operations import AgentOperation
-from .own_cleanup import own_runtime_target
-from .recipe_operations.execution_contract import (
+from vonk_control.cancelled_runtime import cancellation_stop_current
+from vonk_control.categorized_errors import InvalidType
+from vonk_control.jobs.documents import RecipeStopParent
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
+    ArtifactJob,
+    RecipeInstallation,
+    RecipeRun,
+    RunNode,
+)
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.models.operations import AgentOperation
+from vonk_control.own_cleanup import own_runtime_target
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_plan,
 )
-from .stored.rows import read_row_column
-from .stored.states import ClusterMappingState
-from .strict_json import read_stored_model, serialize_json_value
+from vonk_control.stored.rows import read_row_column
+from vonk_control.stored.states import ClusterMappingState
+from vonk_control.strict_json import read_stored_model, serialize_json_value
 
 
 class RuntimePlanAuthorityError(ValueError):

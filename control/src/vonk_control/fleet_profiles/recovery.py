@@ -19,49 +19,48 @@ from vonk_agent_protocol.agent_words import (
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
-
-from ..evidence_repeats import load_subject, note_repeat
-from ..fleet_profile_contract.applications import (
+from vonk_control.evidence_repeats import load_subject, note_repeat
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileChildOperation,
 )
-from ..fleet_profile_contract.assessment import FleetProfilePlanStep
-from ..fleet_profile_contract.vocabulary import FleetProfileOperationState
-from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..lifecycle.fleet_profile import FleetProfileAdapter
-from ..models.fleet import AgentNode, FleetProfileApplication
-from ..operations.blockers import OperationBlocker, make_blocker
-from ..persisted_waits import wait_due
-from . import states as fleet_profile_states
-from .assessment_support import (
-    _progress_with_blockers,
-)
-from .continuing_effects import (
+from vonk_control.fleet_profile_contract.assessment import FleetProfilePlanStep
+from vonk_control.fleet_profile_contract.vocabulary import FleetProfileOperationState
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.fleet_profiles.assessment_support import _progress_with_blockers
+from vonk_control.fleet_profiles.continuing_effects import (
     _application_is_current_selection,
     _superseding_intent,
 )
-from .contracts import (
-    FleetProfileConflict,
-)
-from .dependencies import (
+from vonk_control.fleet_profiles.contracts import FleetProfileConflict
+from vonk_control.fleet_profiles.dependencies import (
     _LOGGER,
     _MAX_PARKED_APPLICATION_OBSERVATIONS,
     _OPERATION_STATE_ADAPTER,
     ENDING_BLOCKER_CODES,
     PROFILE_REPEATED_FAILURE_CODE,
 )
-from .error_summary import _normalized_failure_text
-from .persistence import (
+from vonk_control.fleet_profiles.error_summary import _normalized_failure_text
+from vonk_control.fleet_profiles.persistence import (
     _persisted_profile_progress,
     _unreadable_revisions,
 )
-from .projection_support import (
-    _aware,
+from vonk_control.fleet_profiles.projection_support import _aware
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
 )
+from vonk_control.lifecycle.fleet_profile import FleetProfileAdapter
+from vonk_control.models.fleet import AgentNode, FleetProfileApplication
+from vonk_control.operations.blockers import OperationBlocker, make_blocker
+from vonk_control.persisted_waits import wait_due
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 class FleetProfileService:

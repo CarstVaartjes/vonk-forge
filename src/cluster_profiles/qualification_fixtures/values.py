@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 
-from .contracts import FixtureError
+from cluster_profiles.qualification_fixtures.contracts import FixtureError
 
 
 def _object(value: object, label: str) -> Mapping[str, object]:

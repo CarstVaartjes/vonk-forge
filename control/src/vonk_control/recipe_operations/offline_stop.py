@@ -21,44 +21,45 @@ from vonk_agent_protocol.outcome import (
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.state_machines import RunState
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.fleet_profiles.stop_contract import OfflineStopIntent
-
-from ..admission_locking import (
+from vonk_control.admission_locking import (
     AdmissionLockBusy,
     acquire_admission_keys,
     is_admission_contention,
     node_admission_key,
 )
-from ..agent_contacts import last_seen
-from ..cancelled_runtime import reconcile_cancelled_runtime
-from ..fleet_profiles.stop_contract import ProfileJobRunStopJob
-from ..jobs.documents import RecipeStopParent
-from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..logging import redact_text
-from ..models.execution import RecipeRun, RunNode
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..offline_stops import deferred_stop_nodes
-from ..owner_liveness import OwnerKind
-from ..persisted_waits import schedule_wait
-from ..stored.rows import read_row_column
-from ..strict_json import serialize_json_value
-from .intent import _bound_workload_intent
-from .interfaces import _TERMINAL_JOB_STATES, UndispatchedStopView
-from .lifecycle_contract import (
+from vonk_control.agent_contacts import last_seen
+from vonk_control.cancelled_runtime import reconcile_cancelled_runtime
+from vonk_control.fleet_profiles.stop_contract import (
+    OfflineStopIntent,
+    ProfileJobRunStopJob,
+)
+from vonk_control.jobs.documents import RecipeStopParent
+from vonk_control.lifecycle.recipe_operation import RecipeOperationAdapter
+from vonk_control.logging import redact_text
+from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.offline_stops import deferred_stop_nodes
+from vonk_control.owner_liveness import OwnerKind
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recipe_operations.intent import _bound_workload_intent
+from vonk_control.recipe_operations.interfaces import (
+    _TERMINAL_JOB_STATES,
+    UndispatchedStopView,
+)
+from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationProgressResult,
     RecipeOperationResult,
 )
-from .observation_helpers import _aware
-from .progress import (
-    _parent_identity,
-    _recorded_parent,
-)
-from .results import _recorded_result
+from vonk_control.recipe_operations.observation_helpers import _aware
+from vonk_control.recipe_operations.progress import _parent_identity, _recorded_parent
+from vonk_control.recipe_operations.results import _recorded_result
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class OfflineStopMixin:

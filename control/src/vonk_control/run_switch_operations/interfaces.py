@@ -15,28 +15,27 @@ from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.lifecycle_vocabulary import ResourceBlockerCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
-from ..lifecycle_preflight_contract import LifecyclePreflightCheckpoint
-from ..models.cache import RecipeBuild
-from ..models.execution import RecipeRun, RunNode
-from ..recipe_operations.interfaces import RecipeOperationView
-from ..run_switch_contract.evidence import (
+from vonk_control.lifecycle_preflight_contract import LifecyclePreflightCheckpoint
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.recipe_operations.interfaces import RecipeOperationView
+from vonk_control.run_switch_contract.evidence import (
     ConditionalPostStopMemoryCheck,
     FreshnessEvidence,
     RunSwitchPhase,
     RunSwitchReason,
     SparkFit,
 )
-from ..run_switch_contract.operations import (
+from vonk_control.run_switch_contract.operations import (
     RunSwitchOperation,
     RunSwitchOperationResult,
 )
-from ..run_switch_contract.phase_results import RunSwitchPhaseResult
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.vocabulary import RunSwitchCoverage
+from vonk_control.run_switch_contract.phase_results import RunSwitchPhaseResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.vocabulary import RunSwitchCoverage
 
 if TYPE_CHECKING:
-    from ..distribution_executor.receipts import _ChildView
+    from vonk_control.distribution_executor.receipts import _ChildView
 
 
 @dataclass(frozen=True, slots=True)

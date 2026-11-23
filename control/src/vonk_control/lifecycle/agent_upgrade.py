@@ -32,16 +32,13 @@ from typing import Any
 
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitOwnerKind
-
-from ..agent_operation_facts import aware
-from ..jobs import states as job_states
-from ..models.jobs import Job, JobAttempt
-from ..persisted_waits import lifecycle_wait, wait_due
-from .adapter import Dispatch
-from .core import transition
-from .reconciler import Settled
-from .reconciler import settle as settle_event
-from .types import (
+from vonk_control.agent_operation_facts import aware
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.adapter import Dispatch
+from vonk_control.lifecycle.core import transition
+from vonk_control.lifecycle.reconciler import Settled
+from vonk_control.lifecycle.reconciler import settle as settle_event
+from vonk_control.lifecycle.types import (
     Decision,
     Effect,
     Event,
@@ -52,6 +49,8 @@ from .types import (
     State,
     StopResult,
 )
+from vonk_control.models.jobs import Job, JobAttempt
+from vonk_control.persisted_waits import lifecycle_wait, wait_due
 
 KIND = "agent-upgrade"
 _MAX_REASON = 512

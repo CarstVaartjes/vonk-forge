@@ -13,44 +13,47 @@ from vonk_forge_contracts import RecipeDefinition
 from vonk_agent_protocol.agent_words import ProfileAction, ProfileProjectionKind
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..fleet_profile_contract.applications import (
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
     FleetProfileIntendedConfiguration,
 )
-from ..fleet_profile_contract.assessment import FleetProfileScopePreview
-from ..fleet_profile_contract.definitions import FleetProfileAssignment
-from ..fleet_profile_contract.effects import FleetProfileEffects
-from ..fleet_profile_contract.review import FleetProfilePreview
-from ..fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
-from ..jobs import states as job_states
-from ..jobs.documents import DistributionJobPayload, RunSwitchJobPayload, _RecipeParent
-from ..lifecycle.evidence import (
+from vonk_control.fleet_profile_contract.assessment import FleetProfileScopePreview
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profile_contract.effects import FleetProfileEffects
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
+from vonk_control.fleet_profiles.activity import _profile_activity_state
+from vonk_control.fleet_profiles.contracts import (
+    FleetProfileConflict,
+    FleetProfileReviewStale,
+    _FleetProfileSupersededIntentConflict,
+)
+from vonk_control.fleet_profiles.projection_support import (
+    _aware,
+    _digest,
+    _validate_remaining_effects,
+)
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import (
+    DistributionJobPayload,
+    RunSwitchJobPayload,
+    _RecipeParent,
+)
+from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
     Damaged,
     Residue,
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import RecipeRun
-from ..models.fleet import AgentNode, FleetProfileApplication
-from ..models.jobs import Job
-from ..run_route_name import carries_alias
-from ..stored.rows import read_row_column
-from ..strict_json import read_stored_document, stored_document_detail
-from .activity import _profile_activity_state
-from .contracts import (
-    FleetProfileConflict,
-    FleetProfileReviewStale,
-    _FleetProfileSupersededIntentConflict,
-)
-from .projection_support import (
-    _aware,
-    _digest,
-    _validate_remaining_effects,
-)
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.fleet import AgentNode, FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.run_route_name import carries_alias
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import read_stored_document, stored_document_detail
 
 
 def _without_values[T](read: Callable[[], T]) -> Callable[[], T | Damaged]:

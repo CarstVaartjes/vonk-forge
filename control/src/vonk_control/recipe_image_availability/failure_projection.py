@@ -19,26 +19,26 @@ from vonk_agent_protocol.wire_model import (
     OperationProgress,
     canonical_message,
 )
-from vonk_control.lifecycle.evidence import Residue
-
-from ..failure_classification import is_definite, is_redownload
-from ..jobs import states as job_states
-from ..jobs.documents import AvailabilityJobResult, AvailabilityUnknownEnd
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..lifecycle.image_availability import preparation_deadline
-from ..lifecycle.types import State
-from ..model_cache.errors import ModelCacheError
-from ..models.jobs import Job
-from ..operations.blockers import make_blocker
-from ..operations.contract import (
+from vonk_control.failure_classification import is_definite, is_redownload
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import AvailabilityJobResult, AvailabilityUnknownEnd
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
+)
+from vonk_control.lifecycle.image_availability import preparation_deadline
+from vonk_control.lifecycle.types import State
+from vonk_control.model_cache.errors import ModelCacheError
+from vonk_control.models.jobs import Job
+from vonk_control.operations.blockers import make_blocker
+from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     sanitize_failure_evidence,
 )
-from ..operations.progress import aggregate_progress
-from ..persisted_waits import read_wait, schedule_wait
-from ..stored.rows import read_row_column
-from ..strict_json import serialize_json_value
-from .contracts import (
+from vonk_control.operations.progress import aggregate_progress
+from vonk_control.persisted_waits import read_wait, schedule_wait
+from vonk_control.recipe_image_availability.contracts import (
     _INTEGRITY_FAILURE_CODES,
     _LOGGER,
     OPERATION_KIND,
@@ -53,16 +53,20 @@ from .contracts import (
     _retry_after,
     availability_disposition,
 )
-from .reader_contract import (
+from vonk_control.recipe_image_availability.reader_contract import (
     StoredAvailabilityIdentity,
 )
-from .scheduling import _expire_preparation
-from .view_contract import (
+from vonk_control.recipe_image_availability.scheduling import _expire_preparation
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeImageAvailabilityView,
 )
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
 
 
 def note_waiting_for_worker(self: RecipeImageAvailabilityService, busy: int) -> None:

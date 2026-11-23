@@ -19,23 +19,22 @@ from vonk_forge_contracts.model import (
 )
 
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-
-from ..bounded_json import require_mapping
-from ..catalog.revision_contract import read_shared_catalog_document
-from ..categorized_errors import InvalidType
-from ..models.catalog import CatalogDocumentRevision
-from .artifacts import ArtifactSetManifest, _is_hex
-from .constants import (
-    _DIGEST_LENGTH,
-    ProviderKind,
-)
-from .errors import (
+from vonk_control.bounded_json import require_mapping
+from vonk_control.catalog.revision_contract import read_shared_catalog_document
+from vonk_control.categorized_errors import InvalidType
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, _is_hex
+from vonk_control.model_cache.constants import _DIGEST_LENGTH, ProviderKind
+from vonk_control.model_cache.errors import (
     ModelCacheConflictInvalid,
     ModelCacheResolutionError,
     ModelCacheResolutionInvalid,
 )
-from .input_contracts import CatalogArtifact, CatalogArtifactPart
-from .providers import PROVIDERS
+from vonk_control.model_cache.input_contracts import (
+    CatalogArtifact,
+    CatalogArtifactPart,
+)
+from vonk_control.model_cache.providers import PROVIDERS
+from vonk_control.models.catalog import CatalogDocumentRevision
 
 
 def _source_for_catalog_artifact(

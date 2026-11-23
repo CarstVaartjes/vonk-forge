@@ -20,20 +20,20 @@ from sqlalchemy.exc import (
 )
 from sqlalchemy.orm import Session, sessionmaker
 
-from .. import (
+from vonk_control import (
     models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
 )
-from ..exact_integer_adoption import reconcile_exact_integer_schema
-from ..fleet_events import FleetEventRecorder
-from ..logging import redact_text
-from ..model_primitives import Base
-from ..settings import DATABASE_WAIT_BUDGETS
-from ..stored.rows import install_write_guard
-from .constants import (
+from vonk_control.db.constants import (
     _ALEMBIC_CONFIG,
     _DATABASE_RETRYABLE_ERRORS,
     _DATABASE_STARTUP_TIMEOUT_SECONDS,
 )
+from vonk_control.exact_integer_adoption import reconcile_exact_integer_schema
+from vonk_control.fleet_events import FleetEventRecorder
+from vonk_control.logging import redact_text
+from vonk_control.model_primitives import Base
+from vonk_control.settings import DATABASE_WAIT_BUDGETS
+from vonk_control.stored.rows import install_write_guard
 
 
 class _DatabaseStartupContention(RuntimeError):

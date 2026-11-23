@@ -8,9 +8,9 @@ from typing import Annotated, Self
 
 from pydantic import Field, field_validator, model_validator
 
-from .lifecycle_vocabulary import LifecycleState
-from .outcome import UnknownError
-from .wire_model import StrictJSONModel, WireModel, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.outcome import UnknownError
+from vonk_agent_protocol.wire_model import StrictJSONModel, WireModel, canonical_message
 
 CertificateGeneration = Annotated[int, Field(ge=1, le=2**64 - 1)]
 

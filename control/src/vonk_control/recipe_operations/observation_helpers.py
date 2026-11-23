@@ -26,11 +26,9 @@ from vonk_agent_protocol.recipe_operations import (
 )
 from vonk_agent_protocol.state_machines import InstallationState, RunState
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.owner_liveness import run_has_live_operation
-
-from ..fleet_profiles.stop_contract import ProfileJobRunStopJob
-from ..jobs import states as job_states
-from ..jobs.documents import (
+from vonk_control.fleet_profiles.stop_contract import ProfileJobRunStopJob
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import (
     RecipeBuildCleanupParent,
     RecipeBuildParent,
     RecipeInstallParent,
@@ -41,36 +39,36 @@ from ..jobs.documents import (
     RecipeStopParent,
     RecipeUninstallParent,
 )
-from ..lifecycle.evidence import (
+from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
     Residue,
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import (
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
     STOPPABLE_NOT_RUNNING_RUN_STATES,
     STOPPABLE_RUN_STATES,
     RecipeInstallation,
     RecipeRun,
     RunNode,
 )
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..owner_liveness import OwnerKind
-from ..stored.rows import read_row_column
-from ..stored.states import CatalogRevisionState, RecipeBuildState
-from ..strict_json import read_stored_model
-from .errors import RecipeRetryLater
-from .execution_contract import (
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.owner_liveness import OwnerKind, run_has_live_operation
+from vonk_control.recipe_operations.errors import RecipeRetryLater
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_plan,
     parse_stored_build_policy,
     parse_stored_run_plan,
 )
-from .lifecycle_contract import JOB_ACTIVATION
-from .results import _RANK_FAILED
+from vonk_control.recipe_operations.lifecycle_contract import JOB_ACTIVATION
+from vonk_control.recipe_operations.results import _RANK_FAILED
+from vonk_control.stored.rows import read_row_column
+from vonk_control.stored.states import CatalogRevisionState, RecipeBuildState
+from vonk_control.strict_json import read_stored_model
 
 
 def wait_for_installation_upkeep(session: Session, installation_id: str) -> None:

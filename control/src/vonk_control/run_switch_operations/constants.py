@@ -13,10 +13,9 @@ from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPha
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, ResourceBlockerCode
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
-from ..jobs import states as job_states
-from ..models.catalog import CatalogDocumentRevision
-from ..run_switch_contract.vocabulary import (
+from vonk_control.jobs import states as job_states
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.run_switch_contract.vocabulary import (
     RunSwitchBuildEvidenceState,
     RunSwitchChangeEffect,
     RunSwitchContainerBuildState,
@@ -27,7 +26,7 @@ from ..run_switch_contract.vocabulary import (
     RunSwitchReasonSeverity,
     RunSwitchSubphase,
 )
-from ..stored.states import CatalogRevisionState
+from vonk_control.stored.states import CatalogRevisionState
 
 _ARTIFACT_PHASES = frozenset({ProfileChildPhase.TRANSFER, ProfileChildPhase.VERIFY})
 

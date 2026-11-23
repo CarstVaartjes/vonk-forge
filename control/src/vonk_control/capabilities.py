@@ -21,8 +21,7 @@ from vonk_agent_protocol.capability_reply import (
     ControllerCapability,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-
-from .capability_contract import CapabilityAvailability, CapabilityStatus
+from vonk_control.capability_contract import CapabilityAvailability, CapabilityStatus
 
 
 class CapabilityUnavailableError(Exception):

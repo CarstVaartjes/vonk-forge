@@ -10,8 +10,7 @@ from vonk_agent_protocol.error_response import (
 )
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..categorized_errors import BookkeepingUnknown
+from vonk_control.categorized_errors import BookkeepingUnknown
 
 
 class ObservationCaptureUnavailable(BookkeepingUnknown):

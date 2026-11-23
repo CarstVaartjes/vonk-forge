@@ -18,27 +18,13 @@ from vonk_agent_protocol.error_response import (
     ErrorContextResponse,
 )
 from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
-from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-
-from ..agent_api.common import (
+from vonk_control.agent_api.common import (
     MAX_RECIPE_IMAGE_BYTES,
     AgentApiServices,
     activation_agent_identity,
     active_agent_identity,
 )
-from ..artifact_jobs.api import (
-    MAX_ARTIFACT_INPUT_UPLOAD_BYTES,
-    MAX_ARTIFACT_OUTPUT_UPLOAD_BYTES,
-)
-from ..auth import (
-    TrustedProxyAgentIdentityMiddleware,
-)
-from ..failure_classification import disposition as failure_disposition
-from ..http_errors import RetryAfterMiddleware
-from ..logging import current_request_id
-from ..metrics.registry import MetricsRegistry
-from ..observation.delivery import ObservationDeliveryMiddleware
-from .common import (
+from vonk_control.api.common import (
     _ARTIFACT_INPUT_UPLOAD,
     _ARTIFACT_OUTPUT_UPLOAD,
     _LOGIN_PATH,
@@ -54,6 +40,17 @@ from .common import (
     _reject_duplicate_json_keys,
     _RequestBodyTooLarge,
 )
+from vonk_control.artifact_jobs.api import (
+    MAX_ARTIFACT_INPUT_UPLOAD_BYTES,
+    MAX_ARTIFACT_OUTPUT_UPLOAD_BYTES,
+)
+from vonk_control.auth import TrustedProxyAgentIdentityMiddleware
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from vonk_control.failure_classification import disposition as failure_disposition
+from vonk_control.http_errors import RetryAfterMiddleware
+from vonk_control.logging import current_request_id
+from vonk_control.metrics.registry import MetricsRegistry
+from vonk_control.observation.delivery import ObservationDeliveryMiddleware
 
 
 def install_request_boundaries(

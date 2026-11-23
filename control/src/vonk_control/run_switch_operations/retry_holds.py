@@ -13,38 +13,40 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_control.run_switch_operations.results import _persisted_result
-
-from ..bounded_json import require_integer
-from ..jobs import states as job_states
-from ..lifecycle.run_switch import (
-    RunSwitchAdapter,
-)
-from ..lifecycle.types import (
-    State as _LifecycleState,
-)
-from ..models.jobs import Job
-from ..recipe_operations.errors import RecipeOperationConflict
-from ..run_switch_contract.operations import (
+from vonk_control.bounded_json import require_integer
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.run_switch import RunSwitchAdapter
+from vonk_control.lifecycle.types import State as _LifecycleState
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_operations.errors import RecipeOperationConflict
+from vonk_control.run_switch_contract.operations import (
     RunSwitchAwaitedInventory,
     RunSwitchOperationResult,
 )
-from ..run_switch_contract.progress_view import _observe_progress
-from ..stored.rows import read_row_column
-from .constants import (
+from vonk_control.run_switch_contract.progress_view import _observe_progress
+from vonk_control.run_switch_operations.constants import (
     _INSTALL_PREFLIGHT_REFRESH_REASON,
     _LOGGER,
     _OBSERVING,
     _TERMINAL_STATES,
 )
-from .errors import RunSwitchIssuedWorkloadPending
-from .ownership import _checkpoint_matches, _complete_cancellation
-from .planning_helpers import _aware, _now, _start_parent
-from .provider import _ADAPTER
-from .result_helpers import _read_progress
+from vonk_control.run_switch_operations.errors import RunSwitchIssuedWorkloadPending
+from vonk_control.run_switch_operations.ownership import (
+    _checkpoint_matches,
+    _complete_cancellation,
+)
+from vonk_control.run_switch_operations.planning_helpers import (
+    _aware,
+    _now,
+    _start_parent,
+)
+from vonk_control.run_switch_operations.provider import _ADAPTER
+from vonk_control.run_switch_operations.result_helpers import _read_progress
+from vonk_control.run_switch_operations.results import _persisted_result
+from vonk_control.stored.rows import read_row_column
 
 if TYPE_CHECKING:
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 class RetryHoldsMixin:

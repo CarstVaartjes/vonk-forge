@@ -12,35 +12,25 @@ from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-
-from ..categorized_errors import (
-    MissingRecord,
-)
-from ..jobs import states as job_states
-from ..lifecycle.evidence import (
-    Residue,
-)
-from ..models.execution import RecipeInstallation, RecipeRun, RunNode
-from ..models.jobs import Job
-from ..recipe_routes.shared import route_health_recovery_pending
-from ..run_admission import (
-    RunPlan,
-)
-from .interfaces import (
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_operations.interfaces import (
     RecipeOperationView,
     RecipeRunRankStatus,
     RecipeRunRecoveryOwner,
     RecipeRunStatus,
 )
-from .observation_helpers import _aware, _run_is_one_shot
-from .progress import (
-    _parent_identity,
-    _parent_recovery,
-)
-from .rank_authority import _run_accepted_ranks
+from vonk_control.recipe_operations.observation_helpers import _aware, _run_is_one_shot
+from vonk_control.recipe_operations.progress import _parent_identity, _parent_recovery
+from vonk_control.recipe_operations.rank_authority import _run_accepted_ranks
+from vonk_control.recipe_routes.shared import route_health_recovery_pending
+from vonk_control.run_admission import RunPlan
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class RunObservationMixin:

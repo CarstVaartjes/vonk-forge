@@ -45,27 +45,30 @@ from vonk_agent_protocol.state_machines import (
     NodeIdentityState,
 )
 from vonk_agent_protocol.wire_model import AgentProtocolError
-
-from ..agent_jobs.service import AgentJobService
-from ..auth import (
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.auth import (
     AgentIdentity,
     AgentSource,
     agent_source_from_scope,
     validated_agent_identity_from_scope,
 )
-from ..distribution.service import DistributionService
-from ..enrollment.bootstrap import EnrollmentBootstrapConfig, InstallerUrl
-from ..enrollment.contract import EnrollmentId
-from ..enrollment.responses import _now
-from ..enrollment.service import EnrollmentService
-from ..host_helper_authority import HostRuntimeAuthorityService
-from ..http_errors import SecurityHTTPError, temporary_http_answer
-from ..logging import log_event
-from ..models.fleet import AgentCertificate, AgentNode
-from ..models.operations import AgentOperation
-from ..presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
-from ..source_bundles import SourceBundleStoreProtocol
-from ..strict_json import StrictJSONModel, read_stored_model
+from vonk_control.distribution.service import DistributionService
+from vonk_control.enrollment.bootstrap import EnrollmentBootstrapConfig, InstallerUrl
+from vonk_control.enrollment.contract import EnrollmentId
+from vonk_control.enrollment.responses import _now
+from vonk_control.enrollment.service import EnrollmentService
+from vonk_control.host_helper_authority import HostRuntimeAuthorityService
+from vonk_control.http_errors import SecurityHTTPError, temporary_http_answer
+from vonk_control.logging import log_event
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.operations import AgentOperation
+from vonk_control.presence import (
+    AgentPresenceService,
+    ManagementAddressPolicy,
+    PresenceError,
+)
+from vonk_control.source_bundles import SourceBundleStoreProtocol
+from vonk_control.strict_json import StrictJSONModel, read_stored_model
 
 """mTLS-authenticated machine agent API routes."""
 

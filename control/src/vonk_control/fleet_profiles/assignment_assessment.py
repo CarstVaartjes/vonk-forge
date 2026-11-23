@@ -15,38 +15,35 @@ from vonk_agent_protocol.state_machines import (
     InstallationState,
     ObservedAssignmentState,
 )
-
-from ..cluster_mappings import mapping_option_choices
-from ..content_identity import catalog_reference_membership
-from ..fleet_profile_contract.definitions import FleetProfileAssignment
-from ..fleet_profile_contract.vocabulary import FleetProfileAssignmentState
-from ..installation_transitions import IN_FLIGHT
-from ..machine_states import rank_installed
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import (
+from vonk_control.cluster_mappings import mapping_option_choices
+from vonk_control.content_identity import catalog_reference_membership
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profile_contract.vocabulary import FleetProfileAssignmentState
+from vonk_control.fleet_profiles.contracts import _AssignmentState
+from vonk_control.fleet_profiles.dependencies import _ACTIVE_INSTALL_STATES
+from vonk_control.fleet_profiles.persistence import _stored_recipe
+from vonk_control.fleet_profiles.projection_support import _effective_option_choices
+from vonk_control.installation_transitions import IN_FLIGHT
+from vonk_control.machine_states import rank_installed
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
     STOPPABLE_RUN_STATES,
     InstallationNode,
     RecipeInstallation,
     RecipeRun,
     RunNode,
 )
-from ..models.fleet import AgentNode
-from ..models.mapping import ClusterMapping, ClusterMappingNode
-from ..preparation_contract import RuntimeImageIdentity
-from ..recipe_operations.execution_contract import (
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.preparation_contract import RuntimeImageIdentity
+from vonk_control.recipe_operations.execution_contract import (
     installation_matches_runtime_image,
     installation_serves_authorised_ports,
 )
-from ..recipe_operations.observation_helpers import _run_is_one_shot
-from ..run_readiness import run_not_ready_for_profile
-from ..stored.states import ClusterMappingState, RecipeBuildState
-from .contracts import _AssignmentState
-from .dependencies import _ACTIVE_INSTALL_STATES
-from .persistence import _stored_recipe
-from .projection_support import (
-    _effective_option_choices,
-)
+from vonk_control.recipe_operations.observation_helpers import _run_is_one_shot
+from vonk_control.run_readiness import run_not_ready_for_profile
+from vonk_control.stored.states import ClusterMappingState, RecipeBuildState
 
 
 @dataclass

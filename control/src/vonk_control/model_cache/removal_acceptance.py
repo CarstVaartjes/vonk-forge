@@ -18,49 +18,49 @@ from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-
-from ..admission_locking import admitting
-from ..artifact_jobs.lifecycle import (
+from vonk_control.admission_locking import admitting
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     RemovalOwnerKind,
     removal_fences_match,
     reserve_removal,
 )
-from ..categorized_errors import InvalidValue
-from ..fleet_model_removal_contract import (
-    FleetModelRemovalCheckpoint,
-)
-from ..lifecycle.model_cache import ModelCacheAdapter
-from ..models.cache import ArtifactLifecycleGate, ModelCacheOperation
-from ..operations.contract import AvailabilityRecoveryAction
-from ..strict_json import serialize_json_value
-from .constants import SCHEMA_VERSION, SOURCE_POLICY
-from .contract import (
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.fleet_model_removal_contract import FleetModelRemovalCheckpoint
+from vonk_control.lifecycle.model_cache import ModelCacheAdapter
+from vonk_control.model_cache.constants import SCHEMA_VERSION, SOURCE_POLICY
+from vonk_control.model_cache.contract import (
     ModelCacheCounters,
     ModelCacheOperationPhase,
     ModelCacheOperationProgress,
     ModelCacheRemovalPayload,
     ModelCacheRetry,
 )
-from .errors import (
+from vonk_control.model_cache.errors import (
     ModelCacheConflictInvalid,
     ModelCacheStorageRefused,
     _ArtifactWriterBusy,
     _reference_error_type,
 )
-from .fleet_removal import _model_objects
-from .lineage import lineage_contents, model_sets
-from .persistence import (
+from vonk_control.model_cache.fleet_removal import _model_objects
+from vonk_control.model_cache.lineage import lineage_contents, model_sets
+from vonk_control.model_cache.persistence import (
     _model_removal_intent_digest,
     _write_operation_payload,
 )
-from .progress import cache_progress, progress_document
-from .split_transfer import HELD_PARTIALS_OWNERS, REPAIR_PARTIALS_PREFIX
-from .views import CacheOperationView, ModelCacheRemovalScope
+from vonk_control.model_cache.progress import cache_progress, progress_document
+from vonk_control.model_cache.split_transfer import (
+    HELD_PARTIALS_OWNERS,
+    REPAIR_PARTIALS_PREFIX,
+)
+from vonk_control.model_cache.views import CacheOperationView, ModelCacheRemovalScope
+from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheOperation
+from vonk_control.operations.contract import AvailabilityRecoveryAction
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 # Concurrent first creation of one lock file by pool threads can fail spuriously

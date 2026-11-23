@@ -32,11 +32,10 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.inventory import NetworkInterface
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, stored_words
-
-from .agent_operation_states import ORDER
-from .catalog.revision_collection import GRACE
-from .models.operations import AgentOperation, AgentOperationAttempt
-from .operations.progress import stored_progress
+from vonk_control.agent_operation_states import ORDER
+from vonk_control.catalog.revision_collection import GRACE
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operations.progress import stored_progress
 
 _LOGGER = logging.getLogger(__name__)
 #: The transfers a Spark is judged by: its newest ones, of real model size.

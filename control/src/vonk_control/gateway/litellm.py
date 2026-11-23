@@ -23,10 +23,10 @@ from vonk_forge_contracts.api import (
 )
 from vonk_forge_contracts.recipe import Scalar
 
-from ..strict_json import StrictModel
+from vonk_control.strict_json import StrictModel
 
 if TYPE_CHECKING:
-    from .route_bundle_contract import RouteAcceptedModelPolicy
+    from vonk_control.gateway.route_bundle_contract import RouteAcceptedModelPolicy
 
 _UPSTREAM_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,119}\Z")
 

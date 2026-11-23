@@ -14,35 +14,39 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, object_session
 
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-
-from ..lifecycle.evidence import BookkeepingReason, Damaged, Residue, read_or_rebuild
-from ..lifecycle.types import Lifecycle, State
-from ..logging import log_event
-from ..models.cache import ModelCacheOperation, ModelCacheSet
-from ..operations.contract import AvailabilityOperationFailure
-from ..stored.rows import read_row_column
-from . import states as model_cache_states
-from .artifacts import ArtifactSetManifest, _unique_artifacts
-from .constants import _LOGGER
-from .contract import (
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Damaged,
+    Residue,
+    read_or_rebuild,
+)
+from vonk_control.lifecycle.types import Lifecycle, State
+from vonk_control.logging import log_event
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, _unique_artifacts
+from vonk_control.model_cache.constants import _LOGGER
+from vonk_control.model_cache.contract import (
     CacheManifest,
     ModelCacheDownloadPayload,
     ModelCacheOperationPayload,
     ModelCacheRemovalPayload,
     ModelCacheSetState,
 )
-from .errors import ModelCacheError
-from .persistence import (
+from vonk_control.model_cache.errors import ModelCacheError
+from vonk_control.model_cache.persistence import (
     _manifest_of,
     _operation_payload,
     _operation_progress,
     _store_operation_payload,
 )
-from .progress import cache_phase, progress_document
-from .provider_waits import payload_kinds, provider_wait_end
+from vonk_control.model_cache.progress import cache_phase, progress_document
+from vonk_control.model_cache.provider_waits import payload_kinds, provider_wait_end
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
+from vonk_control.operations.contract import AvailabilityOperationFailure
+from vonk_control.stored.rows import read_row_column
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 _CACHE_SESSION: ContextVar[tuple[ModelCacheService, Session, bool] | None] = ContextVar(

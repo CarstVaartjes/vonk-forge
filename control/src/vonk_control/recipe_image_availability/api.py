@@ -17,27 +17,27 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_control.operator_receipt_contract import ReceiptPolicy
-
-from ..auth import MUTATION_ROLES
-from ..bounded_json import require_integer, require_sequence
-from ..cache_removal_review import CacheRemovalReview
-from ..logging import redact_text
-from ..model_cache.contract import UUID_PATTERN
-from ..operation_api.constants import _ADMIN_OPERATION_IDS
-from ..operation_api.contracts import bounded_error_responses
-from ..operations.contract import (
-    AvailabilityOperationFailure,
+from vonk_control.auth import MUTATION_ROLES
+from vonk_control.bounded_json import require_integer, require_sequence
+from vonk_control.cache_removal_review import CacheRemovalReview
+from vonk_control.logging import redact_text
+from vonk_control.model_cache.contract import UUID_PATTERN
+from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
+from vonk_control.operation_api.contracts import bounded_error_responses
+from vonk_control.operations.contract import AvailabilityOperationFailure
+from vonk_control.operator_acceptance import (
+    OperatorReceiptResolver,
+    operator_acceptance,
 )
-from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
-from ..recipe_update_batches.contract import RecipeUpdateRequest, RecipeUpdateResponse
-from ..strict_json import StrictJSONModel, read_stored_model
-from .contracts import (
+from vonk_control.operator_receipt_contract import ReceiptPolicy
+from vonk_control.recipe_image_availability.contracts import (
     SOURCE_POLICY_REFUSED_CODE,
     RecipeImageAvailabilityError,
 )
-from .removal_contract import RecipeRemovalUnavailableView
-from .response_contract import (
+from vonk_control.recipe_image_availability.removal_contract import (
+    RecipeRemovalUnavailableView,
+)
+from vonk_control.recipe_image_availability.response_contract import (
     RecipeImageAvailabilityAction,
     RecipeImageAvailabilityChild,
     RecipeImageAvailabilityChildKind,
@@ -46,11 +46,18 @@ from .response_contract import (
     RecipeOperatorResponse,
     RecipeOperatorState,
 )
-from .service import RecipeImageAvailabilityService
-from .view_contract import (
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
+)
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeCacheRemovalStatus,
     RecipeImageAvailabilityView,
 )
+from vonk_control.recipe_update_batches.contract import (
+    RecipeUpdateRequest,
+    RecipeUpdateResponse,
+)
+from vonk_control.strict_json import StrictJSONModel, read_stored_model
 
 
 class RecipeDownloadRequest(StrictJSONModel):

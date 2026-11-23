@@ -18,30 +18,25 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitReason,
 )
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
-from ..categorized_errors import (
-    InvalidValue,
-    MissingRecord,
+from vonk_control.categorized_errors import InvalidValue, MissingRecord
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.run_switch import RunSwitchAdapter
+from vonk_control.models.jobs import Job
+from vonk_control.operation_api.contracts import OperationListPage, OperationQuery
+from vonk_control.operation_api.providers import _activity_keyset_filter
+from vonk_control.operations.item_contract import OperationItem
+from vonk_control.run_switch_contract.operations import RunSwitchOperation
+from vonk_control.run_switch_operations.activity import (
+    _activity_progress,
+    _activity_result,
 )
-from ..jobs import states as job_states
-from ..lifecycle.run_switch import (
-    RunSwitchAdapter,
-)
-from ..models.jobs import Job
-from ..operation_api.contracts import OperationListPage, OperationQuery
-from ..operation_api.providers import _activity_keyset_filter
-from ..operations.item_contract import OperationItem
-from ..run_switch_contract.operations import RunSwitchOperation
-from ..strict_json import (
-    warn_unreadable_once,
-)
-from .activity import _activity_progress, _activity_result
-from .constants import _OPERATION_KINDS
-from .errors import RunSwitchOperationConflict
-from .planning_helpers import _aware, _stored_job_plan
+from vonk_control.run_switch_operations.constants import _OPERATION_KINDS
+from vonk_control.run_switch_operations.errors import RunSwitchOperationConflict
+from vonk_control.run_switch_operations.planning_helpers import _aware, _stored_job_plan
+from vonk_control.strict_json import warn_unreadable_once
 
 if TYPE_CHECKING:
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 _ADAPTER = RunSwitchAdapter()

@@ -27,28 +27,14 @@ from vonk_agent_protocol.recipe_jobs import (
     RecipeJobRunResult,
 )
 from vonk_agent_protocol.wire_model import AgentProtocolError
-
-from .. import agent_operation_states
-from ..agent_jobs.retry import result_disposition
-from ..bounded_retry import bounded_attempts
-from ..categorized_errors import MissingRecord
-from ..compiled_artifact_contract import CompiledArtifactContract
-from ..installed_bytes import demote_ranks_on_lost_image
-from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.artifact_job import (
-    ArtifactJobAdapter,
-    agent_ending,
-    receipt_account,
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.retry import result_disposition
+from vonk_control.artifact_jobs import states as ajs
+from vonk_control.artifact_jobs.blob_store import (
+    ArtifactBlobStoreError,
+    StoredArtifactBlob,
 )
-from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..lifecycle.job_ranks import owner_order
-from ..lifecycle.types import Effect, Outcome, Reported
-from ..models.execution import ArtifactJob, ArtifactJobFile
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from . import states as ajs
-from .blob_store import ArtifactBlobStoreError, StoredArtifactBlob
-from .contracts import (
+from vonk_control.artifact_jobs.contracts import (
     ArtifactJobInvalid,
     ArtifactJobUnavailableError,
     ArtifactOutputBreachError,
@@ -57,8 +43,28 @@ from .contracts import (
     _validate_outputs_against_contract,
     _validate_outputs_against_limits,
 )
-from .evidence import ArtifactJobResultEvidence
-from .inputs import ArtifactJobService as InputService
+from vonk_control.artifact_jobs.evidence import ArtifactJobResultEvidence
+from vonk_control.artifact_jobs.inputs import ArtifactJobService as InputService
+from vonk_control.bounded_retry import bounded_attempts
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.compiled_artifact_contract import CompiledArtifactContract
+from vonk_control.installed_bytes import demote_ranks_on_lost_image
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.artifact_job import (
+    ArtifactJobAdapter,
+    agent_ending,
+    receipt_account,
+)
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
+)
+from vonk_control.lifecycle.job_ranks import owner_order
+from vonk_control.lifecycle.types import Effect, Outcome, Reported
+from vonk_control.models.execution import ArtifactJob, ArtifactJobFile
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
 
 
 class ArtifactJobService(InputService):

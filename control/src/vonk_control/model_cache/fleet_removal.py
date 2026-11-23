@@ -21,29 +21,28 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.state_machines import InstallationState
-
-from ..admission_locking import (
+from vonk_control.admission_locking import (
     AdmissionRowLock,
     ConstraintReplay,
     admitting,
     lock_admission_rows,
 )
-from ..agent_operation_facts import aware
-from ..artifact_jobs.lifecycle import (
+from vonk_control.agent_operation_facts import aware
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactLifecycleError,
     ArtifactReferenceUnverified,
 )
-from ..cache_removal_review import (
+from vonk_control.cache_removal_review import (
     CacheAssetDisposition,
     CacheRemovalBlocker,
     CacheRemovalReview,
     CacheRemovalReviewContent,
     seal_cache_removal_review,
 )
-from ..catalog.queries import active_head_revision
-from ..catalog.revision_contract import read_catalog_document
-from ..content_identity import installations_using_models, recipes_bound_to
-from ..fleet_model_removal_contract import (
+from vonk_control.catalog.queries import active_head_revision
+from vonk_control.catalog.revision_contract import read_catalog_document
+from vonk_control.content_identity import installations_using_models, recipes_bound_to
+from vonk_control.fleet_model_removal_contract import (
     FLEET_REMOVAL_DEADLINE,
     FleetModelRemovalCheckpoint,
     FleetModelRemovalEffects,
@@ -52,49 +51,61 @@ from ..fleet_model_removal_contract import (
     FleetRemovalObservationIssue,
     FleetRemovalTarget,
 )
-from ..fleet_model_removal_contract import (
-    FleetRemovalDisposition as D,
-)
-from ..fleet_model_removal_contract import (
-    FleetRemovalReason as R,
-)
-from ..inventory.repository import spark_model_objects
-from ..jobs import states as job_states
-from ..lifecycle.evidence import (
+from vonk_control.fleet_model_removal_contract import FleetRemovalDisposition as D
+from vonk_control.fleet_model_removal_contract import FleetRemovalReason as R
+from vonk_control.inventory.repository import spark_model_objects
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
     Residue,
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..machine_states import RUN_LIVE
-from ..models.cache import (
+from vonk_control.machine_states import RUN_LIVE
+from vonk_control.model_cache.contract import CacheManifest, CacheOperationKind
+from vonk_control.model_cache.errors import ModelCacheConflictInvalid
+from vonk_control.model_cache.lineage import (
+    first_requested_sets,
+    lineage_contents,
+    model_sets,
+)
+from vonk_control.model_cache.persistence import (
+    _operation_removal,
+    _store_operation_payload,
+)
+from vonk_control.model_cache.source_helpers import _model_selector, _request_key
+from vonk_control.model_cache.views import CacheOperationView, ModelCacheRemovalScope
+from vonk_control.models.cache import (
     ArtifactLifecycleGate,
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
 )
-from ..models.catalog import CatalogDocumentRevision, CatalogRecipeModelReference
-from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.telemetry import NodeInventorySnapshot
-from ..recipe_operations.errors import RecipeRequestInvalid
-from ..recipe_operations.execution_contract import parse_stored_installation_plan
-from ..strict_json import read_stored_model
-from ..unused_storage_collection.evidence import _Evidence
-from ..unused_storage_collection.references import (
+from vonk_control.models.catalog import (
+    CatalogDocumentRevision,
+    CatalogRecipeModelReference,
+)
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    RecipeRun,
+)
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.recipe_operations.errors import RecipeRequestInvalid
+from vonk_control.recipe_operations.execution_contract import (
+    parse_stored_installation_plan,
+)
+from vonk_control.strict_json import read_stored_model
+from vonk_control.unused_storage_collection.evidence import _Evidence
+from vonk_control.unused_storage_collection.references import (
     _installation_kept,
     _installation_pointing,
 )
-from .contract import CacheManifest, CacheOperationKind
-from .errors import ModelCacheConflictInvalid
-from .lineage import first_requested_sets, lineage_contents, model_sets
-from .persistence import _operation_removal, _store_operation_payload
-from .source_helpers import _model_selector, _request_key
-from .views import CacheOperationView, ModelCacheRemovalScope
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 def _model_objects(

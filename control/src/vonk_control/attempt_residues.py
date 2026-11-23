@@ -74,26 +74,29 @@ from vonk_agent_protocol.state_machines import (
     InstallationState,
     RunState,
 )
-from vonk_control.owner_liveness import ADOPTION_WINDOW
-
-from .agent_operation_facts import aware as _aware
-from .covered_installation_claims import release_covered_installation_claims
-from .installation_transitions import end_orphaned_installation
-from .jobs import states as job_states
-from .logging import log_event
-from .machine_states import DISTRIBUTION_HELD, rank_installed
-from .models.catalog import CatalogDocumentRevision
-from .models.execution import InstallationNode, RecipeInstallation, RecipeRun
-from .models.jobs import Job
-from .models.operations import ArtifactDistributionAssignment
-from .owner_liveness import (
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.covered_installation_claims import release_covered_installation_claims
+from vonk_control.installation_transitions import end_orphaned_installation
+from vonk_control.jobs import states as job_states
+from vonk_control.logging import log_event
+from vonk_control.machine_states import DISTRIBUTION_HELD, rank_installed
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    RecipeRun,
+)
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import ArtifactDistributionAssignment
+from vonk_control.owner_liveness import (
+    ADOPTION_WINDOW,
     OWNER_SETTLE_GRACE,
     OwnerKind,
     installations_named_by_live_jobs,
     referencing_active_job,
 )
-from .persisted_waits import schedule_wait
-from .reservation_owners import release_dead_owner_reservations
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.reservation_owners import release_dead_owner_reservations
 
 _LOGGER = logging.getLogger(__name__)
 #: How long an unowned incomplete installation is left alone before it is

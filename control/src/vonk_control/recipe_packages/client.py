@@ -36,9 +36,8 @@ from vonk_forge_contracts.catalog_reader import CatalogSection, RefusalReason
 from vonk_forge_contracts.resolver import validate_recipe_models
 
 from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
-
-from ..catalog.sync_contract import ManagedCatalogSyncProblem
-from ..recipe_library_types import (
+from vonk_control.catalog.sync_contract import ManagedCatalogSyncProblem
+from vonk_control.recipe_library_types import (
     CatalogModel,
     RecipeLibraryError,
     RecipeLibraryItem,
@@ -47,26 +46,15 @@ from ..recipe_library_types import (
     RecipePackageEntry,
     _snapshot_content,
 )
-from ..recipe_release import (
-    MAX_BUNDLE_BYTES,
-    MAX_CHECKSUMS_BYTES,
-    RELEASE_BUNDLE,
-    RELEASE_CHECKSUMS,
-    RELEASE_INDEX,
-    RELEASE_LIBRARY,
-    parse_release_checksums,
-    verify_release_checksums,
-)
-from ..source_bundles import SourceBundleError, generate_source_bundle
-from . import catalog_read
-from .archive import (
+from vonk_control.recipe_packages import catalog_read
+from vonk_control.recipe_packages.archive import (
     _BoundedTarInfo,
     _json,
     _safe_path,
     _sha256,
     _validate_package_paths,
 )
-from .contracts import (
+from vonk_control.recipe_packages.contracts import (
     _RELEASE_LIST,
     _RELEASE_TAG,
     RecipePackageError,
@@ -78,6 +66,17 @@ from .contracts import (
     _select_release,
     _VerifiedRelease,
 )
+from vonk_control.recipe_release import (
+    MAX_BUNDLE_BYTES,
+    MAX_CHECKSUMS_BYTES,
+    RELEASE_BUNDLE,
+    RELEASE_CHECKSUMS,
+    RELEASE_INDEX,
+    RELEASE_LIBRARY,
+    parse_release_checksums,
+    verify_release_checksums,
+)
+from vonk_control.source_bundles import SourceBundleError, generate_source_bundle
 
 PACKAGE_REPOSITORY = "CarstVaartjes/vonk-forge-recipes"
 

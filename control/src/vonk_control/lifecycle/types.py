@@ -25,8 +25,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     OutcomeKind,
     StopOutcome,
 )
-
-from ..failure_classification import disposition, error_detail
+from vonk_control.failure_classification import disposition, error_detail
 
 #: The closed vocabulary is defined once, in the shared contract
 #: (``vonk_agent_protocol.lifecycle_vocabulary``), and generated for Rust and

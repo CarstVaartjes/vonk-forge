@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import argparse
 
-from ..generated_control.models.metrics_series_response import MetricsSeriesResponse
-from .common import ControllerClient
-from .selection import _resolve_spark_selectors, _spark_names
+from cluster_profiles.controller_cli.common import ControllerClient
+from cluster_profiles.controller_cli.selection import (
+    _resolve_spark_selectors,
+    _spark_names,
+)
+from cluster_profiles.generated_control.models.metrics_series_response import (
+    MetricsSeriesResponse,
+)
 
 
 def _metrics(args: argparse.Namespace, client: ControllerClient) -> dict:  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]

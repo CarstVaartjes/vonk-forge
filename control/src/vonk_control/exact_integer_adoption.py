@@ -24,12 +24,12 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.schema import CreateTable, DropTable
 
-from . import (
+from vonk_control import (
     models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
 )
-from .exact_integer_storage import DecimalIntegerAtMost, DecimalIntegerToken
-from .model_primitives import Base
-from .settings import DATABASE_WAIT_BUDGETS
+from vonk_control.exact_integer_storage import DecimalIntegerAtMost, DecimalIntegerToken
+from vonk_control.model_primitives import Base
+from vonk_control.settings import DATABASE_WAIT_BUDGETS
 
 _COLUMNS = {
     "catalog_document_revisions": ("download_bytes", "installed_bytes"),

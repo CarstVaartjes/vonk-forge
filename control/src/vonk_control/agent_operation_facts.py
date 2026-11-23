@@ -20,18 +20,13 @@ from vonk_agent_protocol.agent_words import FailureStage
 from vonk_agent_protocol.contracts import AgentClaim
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
-
-from . import agent_operation_states
-from .models.jobs import Job
-from .models.operations import AgentOperation as StoredOperation
-from .models.operations import AgentOperationAttempt
-from .operations.progress import stored_progress
-from .stall_window import (
-    last_progress_at,
-    latest_progress,
-    stall_deadline,
-)
-from .stored.rows import read_row_column
+from vonk_control import agent_operation_states
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.operations.progress import stored_progress
+from vonk_control.stall_window import last_progress_at, latest_progress, stall_deadline
+from vonk_control.stored.rows import read_row_column
 
 LIFECYCLE_RESTART_OPERATIONS = frozenset(
     {

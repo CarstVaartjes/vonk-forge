@@ -10,10 +10,12 @@ from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 from vonk_agent_protocol.wire_model import canonical_message
-
-from ..models.fleet import AgentNode
-from ..models.telemetry import NodeInventoryItemsSnapshot
-from .items_contract import AgentInventoryItems, PreflightInventoryItem
+from vonk_control.inventory.items_contract import (
+    AgentInventoryItems,
+    PreflightInventoryItem,
+)
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.telemetry import NodeInventoryItemsSnapshot
 
 
 def inventory_items(node: AgentNode | None) -> AgentInventoryItems:

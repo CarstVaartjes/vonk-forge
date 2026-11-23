@@ -11,14 +11,13 @@ from vonk_agent_protocol.compiled_execution_plan import (
 )
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.admission import InstallAdmissionCode
-
-from ..content_identity import same_image
-from ..models.cache import RecipeBuild
-from .contracts import (
+from vonk_control.content_identity import same_image
+from vonk_control.install_admission.contracts import (
     InstallEvidenceChanged,
     InstallNodePlan,
     StoredInstallIdentityDamaged,
 )
+from vonk_control.models.cache import RecipeBuild
 
 
 def _primary_model_sha256(document: Mapping[str, object]) -> str:

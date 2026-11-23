@@ -68,22 +68,12 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitOwnerKind,
     WaitReason,
 )
-
-from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
-from ..jobs import states as job_states
-from ..jobs.documents import AvailabilityJobPayload
-from ..models.jobs import Job
-from ..persisted_waits import initialize_wait, lifecycle_wait, wait_due
-from ..recipe_image_availability.clocks_contract import StoredAvailabilityClocks
-from ..recipe_image_availability.removal_contract import RECIPE_CACHE_REMOVE_KIND
-from ..recipe_update_batches.contract import UPDATE_KIND
-from ..stall_window import stall_deadline
-from ..stored.rows import read_row_column
-from ..strict_json import serialize_json_value
-from ..wait_contract import typed_wait_reason
-from .adapter import Dispatch
-from .core import STOP_BUDGET, transition
-from .types import (
+from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import AvailabilityJobPayload
+from vonk_control.lifecycle.adapter import Dispatch
+from vonk_control.lifecycle.core import STOP_BUDGET, transition
+from vonk_control.lifecycle.types import (
     TERMINAL_STATES,
     CancelRequested,
     Claimed,
@@ -98,6 +88,19 @@ from .types import (
     State,
     StopResult,
 )
+from vonk_control.models.jobs import Job
+from vonk_control.persisted_waits import initialize_wait, lifecycle_wait, wait_due
+from vonk_control.recipe_image_availability.clocks_contract import (
+    StoredAvailabilityClocks,
+)
+from vonk_control.recipe_image_availability.removal_contract import (
+    RECIPE_CACHE_REMOVE_KIND,
+)
+from vonk_control.recipe_update_batches.contract import UPDATE_KIND
+from vonk_control.stall_window import stall_deadline
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import serialize_json_value
+from vonk_control.wait_contract import typed_wait_reason
 
 KIND = "image-availability"
 OPERATION_KIND = "recipe.image.availability.v2"

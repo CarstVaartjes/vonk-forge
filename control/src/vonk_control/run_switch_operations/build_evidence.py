@@ -7,30 +7,30 @@ from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
-from ..disk_reservations import runtime_images_named_on_nodes
-from ..inventory.items import inventory_items
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision, RecipeSourceBundle
-from ..models.fleet import AgentNode
-from ..preparation_contract import (
-    RuntimeImageIdentity,
-)
-from ..recipe_operations.execution_contract import (
+from vonk_control.disk_reservations import runtime_images_named_on_nodes
+from vonk_control.inventory.items import inventory_items
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision, RecipeSourceBundle
+from vonk_control.models.fleet import AgentNode
+from vonk_control.preparation_contract import RuntimeImageIdentity
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_plan,
 )
-from ..run_switch_contract.evidence import (
+from vonk_control.run_switch_contract.evidence import (
     BuildCompatibilityEvidence,
     BuildSourceEvidence,
     RunSwitchBuildEvidence,
     RunSwitchReason,
     RuntimeImageStorageImpact,
 )
-from ..run_switch_contract.requests import SparkGroup
-from .constants import _BUILD_EVIDENCE_STATE_ADAPTER
-from .identity_helpers import _is_hex_digest, _normalise_architecture
-from .planning_helpers import _as_reason, _digest
+from vonk_control.run_switch_contract.requests import SparkGroup
+from vonk_control.run_switch_operations.constants import _BUILD_EVIDENCE_STATE_ADAPTER
+from vonk_control.run_switch_operations.identity_helpers import (
+    _is_hex_digest,
+    _normalise_architecture,
+)
+from vonk_control.run_switch_operations.planning_helpers import _as_reason, _digest
 
 
 class BuildEvidenceMixin:

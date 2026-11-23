@@ -21,9 +21,9 @@ from vonk_forge_contracts.qualification_status import (
 from vonk_agent_protocol.wire_model import canonical_message
 
 if TYPE_CHECKING:
-    from .catalog.revision_contract import PublishedDocument
-    from .catalog.sync_contract import ManagedCatalogSyncProblem
-    from .recipe_packages.client import RecipePackageHandle
+    from vonk_control.catalog.revision_contract import PublishedDocument
+    from vonk_control.catalog.sync_contract import ManagedCatalogSyncProblem
+    from vonk_control.recipe_packages.client import RecipePackageHandle
 
 
 class RecipeLibraryError(RuntimeError):

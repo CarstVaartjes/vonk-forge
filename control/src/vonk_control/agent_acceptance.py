@@ -26,25 +26,31 @@ from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 from vonk_agent_protocol.state_machines import CertificateRecordState
 from vonk_agent_protocol.telemetry import TelemetryRequest
 from vonk_agent_protocol.wire_model import canonical_message
-
-from . import agent_operation_states
-from .agent_jobs.evidence import sanitized_failure_report
-from .agent_jobs.stored import column_message, column_value
-from .agent_operation_facts import aware
-from .agent_outcome import stored_report
-from .auth import agent_identity_from_scope
-from .inventory.items import inventory_items, runtime_value
-from .models.cache import RecipeBuild
-from .models.execution import RunNode
-from .models.fleet import AgentCertificate, AgentNode
-from .models.operations import AgentOperation, AgentOperationAttempt
-from .models.telemetry import NodeInventorySnapshot, NodeTelemetrySample
-from .operator_receipt_contract import AcceptanceReceipt, ReceiptOwner, ReceiptPolicy
-from .receipt_checks import _available, _identity, _refused, _require
-from .telemetry.samples import _same_sample
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.evidence import sanitized_failure_report
+from vonk_control.agent_jobs.stored import column_message, column_value
+from vonk_control.agent_operation_facts import aware
+from vonk_control.agent_outcome import stored_report
+from vonk_control.auth import agent_identity_from_scope
+from vonk_control.inventory.items import inventory_items, runtime_value
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import RunNode
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.models.telemetry import NodeInventorySnapshot, NodeTelemetrySample
+from vonk_control.operator_receipt_contract import (
+    AcceptanceReceipt,
+    ReceiptOwner,
+    ReceiptPolicy,
+)
+from vonk_control.receipt_checks import _available, _identity, _refused, _require
+from vonk_control.telemetry.samples import _same_sample
 
 if TYPE_CHECKING:
-    from .operator_acceptance import AcceptanceArguments, OperatorReceiptResolver
+    from vonk_control.operator_acceptance import (
+        AcceptanceArguments,
+        OperatorReceiptResolver,
+    )
 
 
 AGENT_POLICIES = frozenset(

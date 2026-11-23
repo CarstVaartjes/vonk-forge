@@ -13,28 +13,22 @@ from sqlalchemy.exc import DBAPIError
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-
-from ..admission_locking import ConstraintReplay, admitting
-from ..artifact_jobs.lifecycle import (
+from vonk_control.admission_locking import ConstraintReplay, admitting
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     RemovalOwnerKind,
     reserve_removal_owners,
     supersede_removal_nowait,
 )
-from ..cache_removal_review import (
-    refusing_removal_blockers,
-)
-from ..jobs import states as job_states
-from ..jobs.documents import AvailabilityJobPayload
-from ..model_cache.errors import ModelCacheConflict
-from ..models.cache import ArtifactLifecycleGate, ModelCacheOperation
-from ..models.catalog import CatalogDocumentRevision
-from ..models.jobs import Job
-from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
-from ..stored.rows import read_row_column
-from ..strict_json import serialize_json_value
-from .contracts import (
+from vonk_control.cache_removal_review import refusing_removal_blockers
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import AvailabilityJobPayload
+from vonk_control.model_cache.errors import ModelCacheConflict
+from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheOperation
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability.contracts import (
     OPERATION_KIND,
     REMOVE_OPERATION_KIND,
     SCHEMA_VERSION,
@@ -42,23 +36,30 @@ from .contracts import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityInvalid,
 )
-from .persistence import removal_status
-from .removal_contract import (
+from vonk_control.recipe_image_availability.persistence import removal_status
+from vonk_control.recipe_image_availability.removal_contract import (
     RecipeCacheRemovalCheckpoint,
     RecipeCacheRemovalIntent,
     RecipeCacheRemovalModelChild,
     RecipeCacheRemovalOwner,
     RecipeCacheRemovalPlan,
 )
-from .view_contract import (
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeCacheRemovalStatus,
 )
+from vonk_control.runtime_image_preparation.contracts import (
+    RuntimeImagePreparationError,
+)
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import serialize_json_value
 
 REMOVAL_PASS_BUDGET_SECONDS = 0.25
 
 
 if TYPE_CHECKING:
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
 
 
 def remove_selector(

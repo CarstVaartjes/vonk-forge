@@ -17,38 +17,48 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 from vonk_agent_protocol.state_machines import RunState
-
-from .. import agent_operation_states
-from ..admission_locking import (
+from vonk_control import agent_operation_states
+from vonk_control.admission_locking import (
     AdmissionRowLock,
     acquire_admission_keys,
     lock_admission_rows,
     node_admission_key,
 )
-from ..agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
-from ..agent_operation_facts import aware as _aware
-from ..categorized_errors import InvalidValue
-from ..jobs import states as job_states
-from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..lifecycle.types import CancelRequested
-from ..models.execution import RecipeRun
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..offline_stops import pending_run_stop_nodes
-from ..own_cleanup import CLEANUP_KINDS
-from ..recovery_policy import FailureKind
-from ..stall_window import stall_deadline
-from .contracts import (
+from vonk_control.agent_jobs.contracts import (
     _ABANDONABLE_OPERATIONS,
     _CLAIM_REFUSAL_PREFIX,
     SupersededAgentEffect,
 )
-from .evidence import _exact_service_stop_receipt_covers_start
-from .retry import _abandon_operation, superseded_cancellation_deadline
-from .scope import _target_scope
-from .stored import column_field, column_is_document, column_message, column_value
+from vonk_control.agent_jobs.evidence import _exact_service_stop_receipt_covers_start
+from vonk_control.agent_jobs.retry import (
+    _abandon_operation,
+    superseded_cancellation_deadline,
+)
+from vonk_control.agent_jobs.scope import _target_scope
+from vonk_control.agent_jobs.stored import (
+    column_field,
+    column_is_document,
+    column_message,
+    column_value,
+)
+from vonk_control.agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.agent_operation import (
+    AgentOperationAdapter,
+    set_parent_state,
+)
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.lifecycle.types import CancelRequested
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.offline_stops import pending_run_stop_nodes
+from vonk_control.own_cleanup import CLEANUP_KINDS
+from vonk_control.recovery_policy import FailureKind
+from vonk_control.stall_window import stall_deadline
 
 
 def request_superseded_workload_cancellation_in_session(

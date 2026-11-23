@@ -10,29 +10,28 @@ from sqlalchemy import select
 
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.package_source import AgentPackageSource
-
-from ..admission_locking import ConstraintReplay, admitting
-from ..agent_package_source import load_package_source
-from ..identity_insert import insert_identity
-from ..inventory.items import runtime_value
-from ..lifecycle.agent_upgrade import AgentUpgradeAdapter
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from .contract import (
+from vonk_control.admission_locking import ConstraintReplay, admitting
+from vonk_control.agent_package_source import load_package_source
+from vonk_control.agent_upgrades.contract import (
     AgentUpgradePackage,
     AgentUpgradeRequestIntent,
     AgentUpgradeRolloutPayload,
     AgentUpgradeRolloutResult,
 )
+from vonk_control.identity_insert import insert_identity
+from vonk_control.inventory.items import runtime_value
+from vonk_control.lifecycle.agent_upgrade import AgentUpgradeAdapter
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
 
 if TYPE_CHECKING:
-    from .service import AgentUpgradeService
+    from vonk_control.agent_upgrades.service import AgentUpgradeService
 
-from .constants import _ALREADY_CURRENT
-from .errors import AgentUpgradeConflict, AgentUpgradeInvalid
-from .helpers import _summary
-from .intent import _plan_digest, _request_intent
-from .plan import AgentUpgradePlan
+from vonk_control.agent_upgrades.constants import _ALREADY_CURRENT
+from vonk_control.agent_upgrades.errors import AgentUpgradeConflict, AgentUpgradeInvalid
+from vonk_control.agent_upgrades.helpers import _summary
+from vonk_control.agent_upgrades.intent import _plan_digest, _request_intent
+from vonk_control.agent_upgrades.plan import AgentUpgradePlan
 
 
 class AcceptanceMixin:

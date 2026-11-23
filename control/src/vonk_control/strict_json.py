@@ -13,10 +13,9 @@ from pydantic import BaseModel, ConfigDict, RootModel, ValidationError
 
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.wire_model import StrictJSONModel as ProtocolStrictJSONModel
-
-from .http_errors import MAX_RETRY_AFTER_SECONDS
-from .logging import redact_text
-from .warn_once import warn_once
+from vonk_control.http_errors import MAX_RETRY_AFTER_SECONDS
+from vonk_control.logging import redact_text
+from vonk_control.warn_once import warn_once
 
 
 def _serialized_field_name(field_name: str, field: Any, *, by_alias: bool) -> str:

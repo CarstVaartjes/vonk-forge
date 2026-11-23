@@ -45,43 +45,45 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.images import PrebuiltImageCode
 from vonk_agent_protocol.wire_model import canonical_message
-
-from .catalog.revision_contract import BuildSecurityProjection, build_policy_projection
-from .image_store_collection import GRACE
-from .lifecycle.image_availability import PrebuiltImageAdapter
-from .models.cache import RecipeBuild
-from .models.jobs import Job
-from .oci_image_store import (
+from vonk_control.catalog.revision_contract import (
+    BuildSecurityProjection,
+    build_policy_projection,
+)
+from vonk_control.image_store_collection import GRACE
+from vonk_control.lifecycle.image_availability import PrebuiltImageAdapter
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.jobs import Job
+from vonk_control.oci_image_store import (
     IMAGE_CACHE_DIRECTORY,
     STORE_BUSY,
     OciImageStore,
     OciImageStoreError,
     StoreUnknown,
 )
-from .recipe_builds.cancellation import build_cancellation
-from .recipe_builds.common import (
+from vonk_control.recipe_builds.cancellation import build_cancellation
+from vonk_control.recipe_builds.common import (
     canonical_build,
     derive_build_input_identity,
     inspect_package_source_policy,
 )
-from .recipe_library_types import RecipeLibraryItem
-from .recipe_operations.execution_contract import (
+from vonk_control.recipe_library_types import RecipeLibraryItem
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     StoredBuildPolicyReport,
     parse_stored_build_policy,
 )
-from .recipe_operations.observation_helpers import record_build_evidence
-from .recipe_packages.client import load_recipe_package
-from .runtime.adapters import (
+from vonk_control.recipe_operations.observation_helpers import record_build_evidence
+from vonk_control.recipe_packages.client import load_recipe_package
+from vonk_control.runtime.adapters import (
     RUNTIME_ADAPTER_DIGEST_LABEL,
     RUNTIME_ADAPTER_LABEL,
     RUNTIME_INTERFACE_LABEL,
     RUNTIME_INTERFACE_LABEL_VALUE,
     resolve_runtime_adapter,
 )
-from .source_bundles import GeneratedSourceBundle, parse_source_bundle
-from .source_policy import SourcePolicyError, dockerfile_base_images
-from .stored.states import RecipeBuildState
+from vonk_control.source_bundles import GeneratedSourceBundle, parse_source_bundle
+from vonk_control.source_policy import SourcePolicyError, dockerfile_base_images
+from vonk_control.stored.states import RecipeBuildState
 
 _LOGGER = logging.getLogger(__name__)
 

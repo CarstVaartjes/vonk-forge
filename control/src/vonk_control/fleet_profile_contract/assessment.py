@@ -13,25 +13,7 @@ from vonk_forge_contracts import EndpointAlias
 
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool
-
-from ..preparation_contract import (
-    CompatibilityIdentity,
-    ModelArtifactIdentity,
-    PreparationReason,
-    RolloutPreparation,
-    RuntimeImageIdentity,
-)
-from ..run_switch_contract.evidence import (
-    ConditionalPostStopMemoryCheck,
-    EffectiveSettingsSelection,
-    ResourceDemandEvidence,
-    RunSwitchReason,
-    StopImpact,
-)
-from ..run_switch_contract.plans import RunSwitchAssessment
-from ..run_switch_contract.vocabulary import PortNumber
-from ..strict_json import StrictModel
-from .vocabulary import (
+from vonk_control.fleet_profile_contract.vocabulary import (
     DesiredAssignmentStateField,
     Digest,
     FleetProfileAction,
@@ -42,6 +24,23 @@ from .vocabulary import (
     OptionChoices,
     UuidId,
 )
+from vonk_control.preparation_contract import (
+    CompatibilityIdentity,
+    ModelArtifactIdentity,
+    PreparationReason,
+    RolloutPreparation,
+    RuntimeImageIdentity,
+)
+from vonk_control.run_switch_contract.evidence import (
+    ConditionalPostStopMemoryCheck,
+    EffectiveSettingsSelection,
+    ResourceDemandEvidence,
+    RunSwitchReason,
+    StopImpact,
+)
+from vonk_control.run_switch_contract.plans import RunSwitchAssessment
+from vonk_control.run_switch_contract.vocabulary import PortNumber
+from vonk_control.strict_json import StrictModel
 
 
 class FleetProfileReason(StrictModel):

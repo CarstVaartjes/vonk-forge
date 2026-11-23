@@ -13,8 +13,7 @@ from pathlib import PurePosixPath
 import yaml
 
 from vonk_agent_protocol.reason_codes.sources import SourceBundleCode, SourcePolicyCode
-
-from .source_bundles import GeneratedSourceBundle
+from vonk_control.source_bundles import GeneratedSourceBundle
 
 _PINNED_IMAGE = re.compile(r"^[^\s$]+@sha256:([0-9a-f]{64})$")
 _NON_ROOT_USER = re.compile(r"^[1-9][0-9]*(?::[1-9][0-9]*)?$")

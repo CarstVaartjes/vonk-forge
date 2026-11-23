@@ -17,9 +17,8 @@ from starlette.responses import Response
 from starlette.types import Scope
 
 from vonk_agent_protocol.outcome import InvalidRequestError, SecurityRefusalError
-
-from .capabilities import CapabilityUnavailableError
-from .cursor_contract import MAX_CURSOR_LENGTH
+from vonk_control.capabilities import CapabilityUnavailableError
+from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
 
 # The one definition of the administrator role. Browser sessions and their
 # response contract both refer to it, so the set cannot drift.

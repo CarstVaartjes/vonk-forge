@@ -15,32 +15,19 @@ from vonk_forge_contracts import PrebuiltImage
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
-
-from ..catalog.revision_contract import RecipeRevisionProjection
-from ..disk_reservations import outstanding_disk_reservation_bytes
-from ..fleet_profiles.read_observation import observe_selection
-from ..gpu.health import gpu_health_reason
-from ..inventory.items import runtime_value
-from ..models.catalog import CatalogDocumentRevision
-from ..models.fleet import AgentNode
-from ..prebuilt_images import (
+from vonk_control.catalog.revision_contract import RecipeRevisionProjection
+from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
+from vonk_control.fleet_profiles.read_observation import observe_selection
+from vonk_control.gpu.health import gpu_health_reason
+from vonk_control.inventory.items import runtime_value
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import AgentNode
+from vonk_control.prebuilt_images import (
     PREBUILT_KEY_MISMATCH,
     PREBUILT_NOT_PINNED,
     executable_build_key,
 )
-from ..recipe_operations.execution_contract import (
-    RecipeExecutionContractError,
-    build_plan_document,
-    build_policy_document,
-)
-from ..runtime.adapters import RuntimeAdapter
-from ..source_policy import (
-    dockerfile_base_images,
-    inspect_build_source_policy,
-)
-from ..spark_disk import spark_free_bytes
-from ..storage_demands import spark_scope
-from .common import (
+from vonk_control.recipe_builds.common import (
     _BUILD_OBSERVATION_DELAYS,
     _LOGGER,
     BUILD_ARTIFACT_FORMAT,
@@ -66,9 +53,21 @@ from .common import (
     _validate_builder,
     derive_build_input_identity,
 )
+from vonk_control.recipe_operations.execution_contract import (
+    RecipeExecutionContractError,
+    build_plan_document,
+    build_policy_document,
+)
+from vonk_control.runtime.adapters import RuntimeAdapter
+from vonk_control.source_policy import (
+    dockerfile_base_images,
+    inspect_build_source_policy,
+)
+from vonk_control.spark_disk import spark_free_bytes
+from vonk_control.storage_demands import spark_scope
 
 if TYPE_CHECKING:
-    from .service import RecipeBuildService
+    from vonk_control.recipe_builds.service import RecipeBuildService
 
 
 def _admit_spark_build(
