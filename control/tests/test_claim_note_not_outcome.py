@@ -23,8 +23,8 @@ from vonk_control.agent_jobs import _REFUSAL_PREFIXES, AgentJobService
 from vonk_control.models import AgentOperation, Job
 from vonk_control.run_switch_operations.result_helpers import _child_progress_payload
 
-from .agent_jobs_support import COMMIT, parent
 from .runtime_identity_support import claim_agent
+from .test_agent_jobs import COMMIT, parent
 from .test_distributed_recovery_budget import _AdvancingClock
 from .test_recipe_operations import (
     NOW,

@@ -38,12 +38,15 @@ from vonk_control.operation_api import durable_operation_services
 from vonk_control.pki import IssuedCertificate
 
 from .agent_fences import fenced_attempt, fenced_operation, park_for_operator
-from .agent_jobs_support import distribution_payload, superseded_order_payload
 from .ca_test_authority import FixtureCertificateAuthority
 from .node_contacts import contact_row
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
-from .test_agent_jobs_part1 import exercise_upgrade_reconnect
+from .test_agent_jobs import (
+    distribution_payload,
+    exercise_upgrade_reconnect,
+    superseded_order_payload,
+)
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32

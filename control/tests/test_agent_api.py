@@ -110,10 +110,10 @@ from vonk_control.telemetry.samples import TelemetryRepository
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .agent_fences import fenced_attempt, fenced_operation
-from .agent_jobs_support import canonical_start_payload
 from .ca_test_authority import FixtureCertificateAuthority
 from .node_contacts import contact_row
 from .stored_documents_support import valid_policy_report
+from .test_agent_jobs import canonical_start_payload
 from .test_catalog_revision_collection import Catalog
 
 NODE_A = "spk_" + "a" * 32
@@ -3909,7 +3909,7 @@ def test_declared_failure_kind_survives_agent_result_ingress(agent_system) -> No
     both acceptance and the preserved receipt.
     """
 
-    from .agent_jobs_support import distribution_payload
+    from .test_agent_jobs import distribution_payload
 
     client, services, _, clock = agent_system
     services.operations.enqueue(

@@ -12,7 +12,9 @@ from vonk_control.models import AgentOperation, Job
 from vonk_control.operation_api import JobDetailResponse
 
 from .agent_fences import fenced_operation
-from .agent_jobs_support import (
+from .recipe_stop_fixtures import recipe_stop_payload
+from .runtime_identity_support import claim_agent
+from .test_agent_jobs import (
     COMMIT,
     NODE_A,
     NODE_B,
@@ -20,11 +22,9 @@ from .agent_jobs_support import (
     STOP_RESULT,
     parent,
 )
-from .agent_jobs_support import (
+from .test_agent_jobs import (
     service as service,  # noqa: PLC0414 - expose the shared fixture
 )
-from .recipe_stop_fixtures import recipe_stop_payload
-from .runtime_identity_support import claim_agent
 
 
 @pytest.mark.parametrize("sibling_blocked", (False, True))

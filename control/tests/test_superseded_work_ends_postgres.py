@@ -48,9 +48,9 @@ from vonk_control.run_switch_contract import (
 )
 from vonk_control.run_switch_operations import RecipeLifecyclePhaseExecutor
 
-from .agent_jobs_support import superseded_order_payload
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
+from .test_agent_jobs import superseded_order_payload
 from .test_agent_jobs_postgres import COMMIT, NODE_B, parent, service  # noqa: F401
 from .test_profile_port_claims import _ready_profile
 from .test_recipe_operations import (

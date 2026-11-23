@@ -43,12 +43,12 @@ from vonk_control.models import (
 from vonk_control.operations.item_contract import OperationResultFacts, operation_item
 
 from .agent_fences import fenced_attempt
-from .agent_jobs_support import NODE_A, NODE_B, Clock, distribution_payload, parent
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     claim_agent,
     inventory_items_fixture,
 )
+from .test_agent_jobs import NODE_A, NODE_B, Clock, distribution_payload, parent
 
 NOW = datetime(2026, 9, 8, 12, tzinfo=UTC)
 COMMIT = "a" * 64

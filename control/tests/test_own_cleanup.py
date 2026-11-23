@@ -54,7 +54,10 @@ from vonk_control.recipe_operations import RecipeOperationService
 
 from .agent_fences import fenced_operation
 from .agent_grant_requests import own_stop_grant_request, stop_grant_request
-from .agent_jobs_support import (  # noqa: F401 -- pytest fixture
+from .recipe_stop_fixtures import recipe_stop_payload
+from .runtime_identity_support import claim_agent
+from .runtime_image_fixtures import refresh_inventory
+from .test_agent_jobs import (
     COMMIT,
     NODE_A,
     NODE_B,
@@ -62,11 +65,8 @@ from .agent_jobs_support import (  # noqa: F401 -- pytest fixture
     STOP_RESULT,
     canonical_start_payload,
     parent,
-    service,
+    service,  # noqa: F401 -- pytest fixture
 )
-from .recipe_stop_fixtures import recipe_stop_payload
-from .runtime_identity_support import claim_agent
-from .runtime_image_fixtures import refresh_inventory
 from .test_host_helper_authority import (
     NOW,
     RUNTIME_INSTALLATION_ID,
