@@ -298,7 +298,6 @@
   min-width: 0;
 }
 
-.library-cache-state,
 .library-profile-status {
   align-items: start;
   background: var(--panel);
@@ -311,13 +310,11 @@
   padding: 0.75rem 0.85rem;
 }
 
-.library-cache-state p,
 .library-profile-status span,
 .library-profile-status strong {
   margin: 0;
 }
 
-.library-cache-state.is-error,
 .library-profile-status.state-blocked,
 .library-profile-status.state-drifted {
   border-color: color-mix(in srgb, var(--bad) 23%, transparent);
@@ -919,15 +916,6 @@
 }
 .library-model-actions > .library-cache-action {
   margin-top: 0.55rem;
-}
-.library-cache-state {
-  display: inline-block;
-  margin-top: 0.55rem;
-  color: var(--green-text);
-  font-size: 0.68rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 .library-cache-action [role="status"] {
   color: var(--muted);
