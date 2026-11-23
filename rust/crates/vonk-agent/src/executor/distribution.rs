@@ -40,6 +40,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         item.bytes,
                         item.total_bytes.unwrap_or(bytes),
                     );
+                    self.client
+                        .set_progress_fetched(claim.fence, item.fetched.0, item.fetched.1);
                 },
             ),
             lease_deadline.clone(),

@@ -27,7 +27,7 @@ async function serveSnapshot(page: Page, snapshot: components["schemas"]["FleetS
       sha256: createHash("sha256").update(bytes).digest("hex"),
     },
   ];
-  const body = records.map((record) => stringifyContractJson(record) + "\n").join("");
+  const body = records.map((record) => `${stringifyContractJson(record)}\n`).join("");
   await page.route("**/api/fleet", (route) =>
     route.fulfill({ contentType: "application/x-vonk-observation+ndjson", body }),
   );

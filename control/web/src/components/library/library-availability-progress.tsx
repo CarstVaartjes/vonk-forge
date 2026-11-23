@@ -12,17 +12,17 @@ import { Time } from "../ui/time";
 
 export type AvailabilityProgress = {
   phase: string;
-  completedBytes?: WireNumber;
-  totalBytes?: WireNumber;
-  bytesPerSecond?: number;
-  etaSeconds?: number;
-  completedItems?: WireNumber;
-  totalItems?: WireNumber;
-  elapsedSeconds?: number;
-  lastProgressAt?: string;
-  activity?: string;
-  step?: string;
-  logExcerpt?: string;
+  completedBytes?: WireNumber | undefined;
+  totalBytes?: WireNumber | undefined;
+  bytesPerSecond?: number | undefined;
+  etaSeconds?: number | undefined;
+  completedItems?: WireNumber | undefined;
+  totalItems?: WireNumber | undefined;
+  elapsedSeconds?: number | undefined;
+  lastProgressAt?: string | undefined;
+  activity?: string | undefined;
+  step?: string | undefined;
+  logExcerpt?: string | undefined;
 };
 
 function finiteNumber(value: unknown): number | undefined {

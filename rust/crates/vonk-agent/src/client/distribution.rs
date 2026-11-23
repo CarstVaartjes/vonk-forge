@@ -234,14 +234,14 @@ impl AgentHttpClient {
                             tracker
                                 .lock()
                                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                                .report(index, object, bytes, false);
+                                .report(index, object, bytes, false, governor.fetched());
                         },
                     )
                     .await?;
                     tracker
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .report(index, object, object.bytes, true);
+                        .report(index, object, object.bytes, true, governor.fetched());
                     Ok::<_, ClientError>((index, path))
                 }
             })

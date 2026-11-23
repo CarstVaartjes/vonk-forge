@@ -99,7 +99,11 @@ test("merges paged Library responses beyond the first 100 Models", async () => {
   expect(calls).toEqual([undefined, "page-2"]);
 });
 
-type LibraryRequest = { cursor?: string; sort?: string; updatedSince?: string };
+type LibraryRequest = {
+  cursor?: string | undefined;
+  sort?: string | undefined;
+  updatedSince?: string | undefined;
+};
 
 function pagedLibraryApi(calls: LibraryRequest[], api: Partial<ControlApi> = {}) {
   return {

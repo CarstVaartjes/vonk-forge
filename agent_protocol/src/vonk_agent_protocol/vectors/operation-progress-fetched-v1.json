@@ -1,0 +1,41 @@
+{
+  "valid": [
+    {
+      "phase": "copying",
+      "completed_bytes": 40000000000,
+      "total_bytes_known": false,
+      "fetched": {"bytes": 20000000000, "seconds": 40.5}
+    },
+    {
+      "phase": "copying",
+      "completed_bytes": 40000000000,
+      "total_bytes_known": false,
+      "fetched": {"bytes": 0, "seconds": 0.0}
+    },
+    {
+      "phase": "copying",
+      "completed_bytes": 10,
+      "total_bytes_known": false
+    }
+  ],
+  "invalid": [
+    {
+      "phase": "copying",
+      "completed_bytes": 10,
+      "total_bytes_known": false,
+      "fetched": {"bytes": 10}
+    },
+    {
+      "phase": "copying",
+      "completed_bytes": 10,
+      "total_bytes_known": false,
+      "fetched": {"seconds": 1.0}
+    },
+    {
+      "phase": "copying",
+      "completed_bytes": 10,
+      "total_bytes_known": false,
+      "fetched": {"bytes": -1, "seconds": 1.0}
+    }
+  ]
+}

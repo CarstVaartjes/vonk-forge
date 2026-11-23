@@ -25,8 +25,8 @@ export function Sparkline({
   points: readonly Point[];
   start: number;
   end: number;
-  min?: number;
-  max?: number;
+  min?: number | undefined;
+  max?: number | undefined;
   color?: string;
   label: string;
 }) {

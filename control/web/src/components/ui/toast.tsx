@@ -16,9 +16,9 @@ type ToastKind = "success" | "error" | "info";
 export type ToastLink = {
   label: string;
   href: string;
-  onClick?(event: MouseEvent<HTMLAnchorElement>): void;
+  onClick?: ((event: MouseEvent<HTMLAnchorElement>) => void) | undefined;
 };
-type ToastItem = { id: number; kind: ToastKind; message: string; link?: ToastLink };
+type ToastItem = { id: number; kind: ToastKind; message: string; link?: ToastLink | undefined };
 type Toasts = {
   success(message: string): void;
   error(message: string): void;
@@ -98,17 +98,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={toasts}>
       {children}
       {createPortal(
-        <ol
+        <section
           className="toast-region"
-          role="region"
           aria-label="Notifications"
           aria-live="polite"
           aria-relevant="additions"
         >
-          {items.map((item) => (
-            <Toast key={item.id} item={item} onDismiss={dismiss} />
-          ))}
-        </ol>,
+          <ol>
+            {items.map((item) => (
+              <Toast key={item.id} item={item} onDismiss={dismiss} />
+            ))}
+          </ol>
+        </section>,
         document.body,
       )}
     </ToastContext.Provider>

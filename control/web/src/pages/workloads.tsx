@@ -27,9 +27,9 @@ export function WorkloadsPage({
   onNavigateUrl,
 }: {
   api: ControlApi;
-  onLive?(status: LiveStatus | null): void;
-  onOpenSpark?(id: string): void;
-  onNavigateUrl?(url: string): void;
+  onLive?: ((status: LiveStatus | null) => void) | undefined;
+  onOpenSpark?: ((id: string) => void) | undefined;
+  onNavigateUrl?: ((url: string) => void) | undefined;
 }) {
   const fleet = useFleetStream(api);
   const live = liveStatus(fleet);

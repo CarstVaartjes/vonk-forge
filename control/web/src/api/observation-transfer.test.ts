@@ -32,7 +32,7 @@ async function records() {
 function response(values: unknown[]) {
   // Split across arbitrary UTF-8 stream boundaries, including a record newline.
   const bytes = new TextEncoder().encode(
-    values.map((value) => stringifyContractJson(value) + "\n").join(""),
+    values.map((value) => `${stringifyContractJson(value)}\n`).join(""),
   );
   return new Response(
     new ReadableStream({
@@ -153,7 +153,7 @@ test("rejects a record UTF-8 BOM instead of removing it", async () => {
     187,
     191,
     ...new TextEncoder().encode(
-      values.map((value) => stringifyContractJson(value) + "\n").join(""),
+      values.map((value) => `${stringifyContractJson(value)}\n`).join(""),
     ),
   ]);
   await expect(

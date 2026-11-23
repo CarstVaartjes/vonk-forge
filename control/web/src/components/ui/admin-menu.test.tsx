@@ -11,7 +11,7 @@ function renderMenu(overrides: Partial<React.ComponentProps<typeof AdminMenu>> =
     logoutError: "",
     onLogout: vi.fn(),
     onNavigate: vi.fn((event) => event.preventDefault()),
-    role: "Administrator",
+    operatorRole: "Administrator",
     subject: "admin",
     ...overrides,
   };
@@ -84,7 +84,7 @@ test("closes on outside interaction", async () => {
         onDownloadCliToken={async () => ({ expires_at: "" })}
         onLogout={() => undefined}
         onNavigate={onNavigate}
-        role="Administrator"
+        operatorRole="Administrator"
         subject="admin"
       />
     </div>,
@@ -107,7 +107,7 @@ test("closes and disables all operator actions while global navigation is locked
     onDownloadCliToken: vi.fn(async () => ({ expires_at: "" })),
     onLogout,
     onNavigate,
-    role: "Administrator",
+    operatorRole: "Administrator",
     subject: "admin",
   };
   const view = render(<AdminMenu {...props} />);

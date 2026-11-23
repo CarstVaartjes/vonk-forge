@@ -3,10 +3,10 @@ type EmptyStateProps = {
   title: string;
   /** One sentence saying what this list is. */
   description: string;
-  action?: { label: string; onClick(): void };
+  action?: { label: string; onClick(): void } | undefined;
   /** Filters, not the data, caused the empty result. */
   filtered?: boolean;
-  onClearFilters?(): void;
+  onClearFilters?: (() => void) | undefined;
 };
 
 /** Empty list: says what it is and offers one primary action; when filters emptied it, offers to clear them instead. */

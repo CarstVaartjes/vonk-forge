@@ -24,7 +24,7 @@ const exportedCases: { id: string; text: string }[] = [];
 afterEach(() => vi.unstubAllGlobals());
 afterAll(() => {
   const output = process.env.VONK_CONSUMER_OUTPUT;
-  if (output) writeFileSync(output, JSON.stringify({ version: 1, exports: exportedCases }) + "\n");
+  if (output) writeFileSync(output, `${JSON.stringify({ version: 1, exports: exportedCases })}\n`);
 });
 
 test.runIf(Boolean(file))("hosted corpus contains real consumer cases", () => {
