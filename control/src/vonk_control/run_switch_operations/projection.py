@@ -15,6 +15,7 @@ from ..operations.blockers import make_blocker
 from ..persisted_waits import read_wait, wait_due
 from ..run_switch_contract.operations import RunSwitchOperation
 from ..run_switch_contract.progress_view import (
+    _progress_operation_state,
     _progress_view,
 )
 from ..run_switch_journal_repair.discovery import (
@@ -25,11 +26,7 @@ from ..stored.json_values import read_row_column
 from .constants import _OPERATION_KIND_ADAPTER
 from .plan_persistence import _view_identity
 from .planning_helpers import _stored_job_plan
-from .result_helpers import (
-    _parse_persisted_result,
-    _progress_operation_state,
-    _read_progress,
-)
+from .result_helpers import _parse_persisted_result, _read_progress
 
 
 class ProjectionMixin:

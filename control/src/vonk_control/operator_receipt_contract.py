@@ -7,7 +7,7 @@ from pydantic import Field, model_validator
 
 from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName
 
-from .library.contract import UuidId
+from .identifiers import UuidId
 from .strict_json import StrictModel
 
 

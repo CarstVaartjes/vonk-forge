@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
@@ -11,10 +10,9 @@ from vonk_agent_protocol.agent_operations import AgentFailureResult
 from vonk_agent_protocol.agent_words import Disposition, ProfileChildPhase
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
-    OutcomeKind,
     WaitReason,
 )
-from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..bounded_json import require_mapping
 from ..distribution_assignment import NodeDistributionAssignment
@@ -25,7 +23,6 @@ from ..lifecycle.evidence import (
 )
 from ..models.jobs import Job
 from ..operations.blockers import OperationBlocker
-from ..operations.progress import sample_progress
 from ..persisted_waits import read_wait
 from ..recipe_operations.interfaces import RecipeOperationView
 from ..recipe_operations.lifecycle_contract import RecipeLifecycleResult
@@ -52,14 +49,12 @@ from ..run_switch_contract.progress_view import RECOVERY_STALL_WINDOW
 from ..run_switch_contract.vocabulary import (
     RunSwitchMemberState,
     RunSwitchPhaseKind,
-    RunSwitchProgressState,
     RunSwitchSubphase,
 )
 from ..stall_window import stall_deadline
 from .constants import (
     _MEMBER_STATE_ADAPTER,
     _PHASES,
-    _PROGRESS_STATE_ADAPTER,
     _SUBPHASE_ADAPTER,
 )
 from .errors import RunSwitchRetryLater, retry_later_unless_deterministic
@@ -88,25 +83,11 @@ def _progress_state(value: object) -> RunSwitchMemberState | None:
         return None
 
 
-def _progress_operation_state(value: object) -> RunSwitchProgressState:
-    try:
-        return _PROGRESS_STATE_ADAPTER.validate_python(value, strict=True)
-    except ValidationError:
-        return OutcomeKind.UNKNOWN
-
-
 def _progress_subphase(value: object) -> RunSwitchSubphase | None:
     try:
         return _SUBPHASE_ADAPTER.validate_python(value, strict=True)
     except ValidationError:
         return None
-
-
-def _observe_progress(
-    previous: OperationProgress | None, current: OperationProgress, now: datetime
-) -> OperationProgress:
-    """Sample the canonical operation meter without a JSON round trip."""
-    return sample_progress(previous, current, now)
 
 
 def _progress_phase(value: object) -> RunSwitchPhaseKind | None:

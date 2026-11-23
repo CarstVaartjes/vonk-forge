@@ -33,13 +33,13 @@ from ..agent_jobs.contracts import StaleAgentAttempt
 from ..auth import AgentIdentity
 from ..download_contract import download_responses
 from ..http_errors import temporary_http_answer
+from ..identifiers import UuidId
 from ..inventory.repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
     NodeInventoryReport,
     _validated_inventory,
 )
-from ..library.contract import UuidId
 from ..logging import log_event
 from ..models.cache import RecipeBuild
 from ..models.execution import STOPPABLE_NOT_RUNNING_RUN_STATES, RecipeRun, RunNode

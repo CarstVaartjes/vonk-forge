@@ -47,8 +47,7 @@ from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.images import PrebuiltImageCode
 from vonk_agent_protocol.wire_model import canonical_message
 
-from .catalog.entities import build_policy_projection
-from .catalog.revision_contract import BuildSecurityProjection
+from .catalog.revision_contract import BuildSecurityProjection, build_policy_projection
 from .image_store_collection import GRACE
 from .lifecycle.image_availability import PrebuiltImageAdapter
 from .models.cache import RecipeBuild

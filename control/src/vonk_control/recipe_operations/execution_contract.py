@@ -29,7 +29,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName
 from vonk_agent_protocol.wire_model import canonical_message
 
 from ..content_identity import ImageContent, same_image
-from ..library.contract import Digest, ImageDigest, NodeId, Text64, UuidId
+from ..identifiers import UuidId
+from ..library.contract import Digest, ImageDigest, NodeId, Text64
 from ..operations.blockers import SwapShortfallEvidence
 from ..platform_ports import serving_port
 from ..strict_json import StrictJSONModel

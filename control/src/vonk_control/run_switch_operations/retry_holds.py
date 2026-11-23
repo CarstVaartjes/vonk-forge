@@ -29,6 +29,7 @@ from ..run_switch_contract.operations import (
     RunSwitchAwaitedInventory,
     RunSwitchOperationResult,
 )
+from ..run_switch_contract.progress_view import _observe_progress
 from ..stored.json_values import read_row_column
 from .constants import (
     _INSTALL_PREFLIGHT_REFRESH_REASON,
@@ -40,7 +41,7 @@ from .errors import RunSwitchIssuedWorkloadPending
 from .ownership import _checkpoint_matches, _complete_cancellation
 from .planning_helpers import _aware, _now, _start_parent
 from .provider import _ADAPTER
-from .result_helpers import _observe_progress, _read_progress
+from .result_helpers import _read_progress
 
 if TYPE_CHECKING:
     from .service import RunSwitchOperationService

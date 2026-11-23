@@ -32,7 +32,8 @@ from vonk_agent_protocol.recipe_operations import (
 )
 from vonk_agent_protocol.wire_model import canonical_message
 
-from ..library.contract import NodeId, UuidId
+from ..identifiers import UuidId
+from ..library.contract import NodeId
 from ..strict_json import StrictJSONModel
 
 

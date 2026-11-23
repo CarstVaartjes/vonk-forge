@@ -45,6 +45,7 @@ from ..recipe_library_types import (
     RecipeLibraryRelease,
     RecipeLibrarySnapshot,
     RecipePackageEntry,
+    _snapshot_content,
 )
 from ..recipe_release import (
     MAX_BUNDLE_BYTES,
@@ -75,7 +76,6 @@ from .contracts import (
     _newest_major,
     _ReleaseResponse,
     _select_release,
-    _snapshot_content,
     _VerifiedRelease,
 )
 
