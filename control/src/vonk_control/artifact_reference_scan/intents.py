@@ -26,6 +26,7 @@ from ..run_switch_contract.operations import (
     RunSwitchRuntimeImageReferenceIntent,
 )
 from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_operations.constants import _OPERATION_KINDS
 from ..strict_json import read_stored_model
 
 
@@ -167,6 +168,5 @@ def _run_switch_runtime_image_intent(
 
 
 def _run_switch_kinds() -> frozenset[str]:
-    from ..run_switch_operations.constants import _OPERATION_KINDS
 
     return frozenset(_OPERATION_KINDS)

@@ -51,6 +51,7 @@ from vonk_control.run_switch_journal_repair.observation import (
 )
 from vonk_control.run_switch_journal_repair.pending import REPAIR_BUDGET
 from vonk_control.run_switch_operations import advance as advance_owner
+from vonk_control.run_switch_operations import cancellation_retry
 from vonk_control.run_switch_operations.image_receipts import _planned_transfer_parts
 from vonk_control.run_switch_operations.planning_helpers import (
     _run_switch_payload,
@@ -719,9 +720,7 @@ def test_fault_cancel_preserves_issued_child_until_late_exact_fenced_receipts(
             60,
         )
     else:
-        from vonk_control.run_switch_journal_repair import pending as repair_owner
-
-        original_record = repair_owner.record_repair_cancellation
+        original_record = cancellation_retry.record_repair_cancellation
 
         def repair_before_record(*args):
             assert (
@@ -731,7 +730,7 @@ def test_fault_cancel_preserves_issued_child_until_late_exact_fenced_receipts(
             original_record(*args)
 
         monkeypatch.setattr(
-            repair_owner, "record_repair_cancellation", repair_before_record
+            cancellation_retry, "record_repair_cancellation", repair_before_record
         )
     cancellation = planner.cancel(
         switch_id,

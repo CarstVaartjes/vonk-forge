@@ -27,7 +27,16 @@ from vonk_agent_protocol.outcome import (
 from vonk_agent_protocol.state_machines import EnrollmentGrantState
 
 from .api_availability import AVAILABILITY_ERRORS
+from .artifact_jobs.contracts import ArtifactJobResponse
 from .auth import Actor
+from .enrollment.contract import EnrollmentGrantStatus
+from .fleet_profile_contract.definitions import FleetProfileView
+from .fleet_profile_contract.review import FleetProfileApplicationView
+from .fleet_projection.common import FleetNodeIdentity
+from .jobs.operator_receipts import read_job_operator_receipt
+from .model_cache.contract import ModelCacheOperatorResponse
+from .operation_api.contracts import JobResumeRequest, JobResumeResponse
+from .operator_projection_api.contracts import FleetActionResponse
 from .operator_receipt_contract import (
     AcceptanceReceipt,
     ReceiptCode,
@@ -35,6 +44,13 @@ from .operator_receipt_contract import (
     ReceiptPolicy,
     SecurityEdge,
 )
+from .recipe_image_availability.removal_contract import (
+    RecipeRemovalUnavailableView,
+)
+from .recipe_image_availability.view_contract import RecipeCacheRemovalStatus
+from .recipe_update_batches.contract import RecipeUpdateResponse
+from .run_switch_contract.operations import RunSwitchOperation
+from .strict_json import ControllerAPIRoute, route_endpoint
 
 if TYPE_CHECKING:
     from .agent_api.common import AgentApiServices
@@ -75,7 +91,6 @@ def security_edge(edge: SecurityEdge):
 
 
 def security_edge_policy(endpoint: Callable[..., Any]) -> SecurityEdge | None:
-    from .strict_json import route_endpoint
 
     endpoint = route_endpoint(endpoint)
     edge = getattr(endpoint, "__vonk_security_edge__", None)
@@ -88,7 +103,6 @@ def security_edge_policy(endpoint: Callable[..., Any]) -> SecurityEdge | None:
 
 
 def receipt_policy(endpoint: Callable[..., Any]) -> ReceiptPolicy | None:
-    from .strict_json import route_endpoint
 
     value = getattr(route_endpoint(endpoint), "__vonk_acceptance__", None)
     return value if isinstance(value, ReceiptPolicy) else None
@@ -145,7 +159,6 @@ def acceptance_arguments(
         ReceiptPolicy.SECURITY_EDGE,
     }:
         return None
-    from .operation_api.contracts import JobResumeRequest
 
     actor = next((value for value in values.values() if isinstance(value, Actor)), None)
     request_key = getattr(values.get("body"), "request_key", None)
@@ -194,8 +207,6 @@ class OperatorReceiptResolver:
 
     def bind(self, app: FastAPI) -> None:
 
-        from .strict_json import ControllerAPIRoute
-
         for context in iter_route_contexts(app.routes):
             route = context.original_route
             if isinstance(route, ControllerAPIRoute):
@@ -216,26 +227,11 @@ class OperatorReceiptResolver:
         arguments: AcceptanceArguments,
     ) -> AcceptanceReceipt:
         from .agent_acceptance import AGENT_POLICIES, resolve_agent_receipt
-        from .artifact_jobs.contracts import ArtifactJobResponse
-        from .enrollment.contract import EnrollmentGrantStatus
-        from .fleet_profile_contract.definitions import FleetProfileView
-        from .fleet_profile_contract.review import FleetProfileApplicationView
-        from .fleet_projection.common import FleetNodeIdentity
         from .gateway.keys import GatewayKeyCreated, GatewayKeyRevoked
-        from .jobs.operator_receipts import read_job_operator_receipt
-        from .model_cache.contract import ModelCacheOperatorResponse
-        from .operation_api.contracts import JobResumeResponse
-        from .operator_projection_api.contracts import FleetActionResponse
         from .recipe_image_availability.api import (
             RecipeImageAvailabilityResponse,
             RecipeOperatorResponse,
         )
-        from .recipe_image_availability.removal_contract import (
-            RecipeRemovalUnavailableView,
-        )
-        from .recipe_image_availability.view_contract import RecipeCacheRemovalStatus
-        from .recipe_update_batches.contract import RecipeUpdateResponse
-        from .run_switch_contract.operations import RunSwitchOperation
 
         if policy in AGENT_POLICIES:
             _require(isinstance(result, Response))

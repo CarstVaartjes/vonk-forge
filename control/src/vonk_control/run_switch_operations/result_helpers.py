@@ -18,6 +18,7 @@ from vonk_agent_protocol.wire_model import OperationProgress
 
 from ..bounded_json import require_mapping
 from ..distribution_assignment import NodeDistributionAssignment
+from ..distribution_executor.receipts import _ChildView
 from ..failure_classification import disposition, error_detail, is_security_failure
 from ..lifecycle.evidence import (
     Residue,
@@ -62,6 +63,7 @@ from .constants import (
     _SUBPHASE_ADAPTER,
 )
 from .errors import RunSwitchRetryLater, retry_later_unless_deterministic
+from .planning_helpers import _aware
 from .results import _stored_result
 
 
@@ -198,7 +200,6 @@ def _recover_progress(
         )
     except (TypeError, ValueError):
         retained = RunSwitchStoredLifecycle()
-    from .planning_helpers import _aware
 
     progress = RunSwitchOperationResult(
         workload_intent_ordinal=accepted.workload_intent_ordinal,
@@ -283,7 +284,6 @@ def _child_result(
     | None
 ):
     """Read the receipt retained by the owning canonical child DTO."""
-    from ..distribution_executor.receipts import _ChildView
 
     if isinstance(child, RecipeOperationView):
         return child.lifecycle_result
@@ -294,7 +294,6 @@ def _child_result(
 
 def _child_progress_payload(child: object) -> RunSwitchObservedEvidence:
     """Consume explicit executor DTOs at their typed observation boundary."""
-    from ..distribution_executor.receipts import _ChildView
 
     if isinstance(child, RecipeOperationView):
         result, state, reason = _child_result(child), child.state, child.status_reason

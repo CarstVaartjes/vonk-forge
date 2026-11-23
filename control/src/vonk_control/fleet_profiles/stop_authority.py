@@ -48,7 +48,10 @@ from ..models.jobs import Job
 from ..models.mapping import ClusterMappingNode
 from ..models.operations import AgentOperation
 from ..owner_liveness import OwnerKind
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.plans import RunSwitchPlan
 from ..run_switch_contract.vocabulary import RunSwitchPlacementAction
+from ..run_switch_operations.image_receipts import _plan_target_node_ids
 from ..stored.json_values import read_row_column
 from ..strict_json import StrictJSONModel, read_stored_model
 
@@ -272,9 +275,6 @@ def validate_profile_stop_owner(
     # Imports are local because FleetProfileService composes this module's
     # lifecycle owner through RunSwitch.
     from ..jobs.documents import RecipeStopParent, RunSwitchJobPayload
-    from ..run_switch_contract.operations import RunSwitchOperationResult
-    from ..run_switch_contract.plans import RunSwitchPlan
-    from ..run_switch_operations.image_receipts import _plan_target_node_ids
     from ..run_switch_operations.observation_helpers import (
         _phase_request_key,
         _stop_child_request_key,

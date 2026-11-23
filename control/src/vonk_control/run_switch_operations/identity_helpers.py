@@ -125,7 +125,6 @@ def _started_operation_id(value: object) -> str:
 
 
 def _mapping_node(node: SparkGroupNode) -> ClusterMappingPlacement:
-    from ..cluster_mappings import ClusterMappingPlacement
 
     return ClusterMappingPlacement(
         node_id=node.node_id,

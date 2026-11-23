@@ -29,6 +29,7 @@ from .contracts import (
 )
 from .predicates import _document
 from .stored import column_field, column_value
+from .waits import record_queue_waits
 
 if TYPE_CHECKING:
     from .service import AgentJobService
@@ -184,7 +185,6 @@ def enqueue_in_session(
         updated_at=now,
     )
     session.add(stored)
-    from .waits import record_queue_waits
 
     record_queue_waits(session, [stored], now)
     session.flush()

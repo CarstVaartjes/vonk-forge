@@ -19,6 +19,11 @@ from ..lifecycle.run_switch import (
     set_member_state,
 )
 from ..operations.progress import project_progress
+from ..run_switch_operations.image_receipts import (
+    _plan_target_node_ids,
+    _planned_transfer_bytes,
+    _planned_transfer_parts,
+)
 from ..stall_window import last_progress_at, stall_deadline
 from .evidence import RunSwitchPhase
 from .observation import (
@@ -77,10 +82,6 @@ def _merge_measured_evidence(
     now: datetime | None = None,
 ) -> None:
     """Merge typed measured observations while retaining exact phase ownership."""
-    from ..run_switch_operations.image_receipts import (
-        _plan_target_node_ids,
-        _planned_transfer_parts,
-    )
     from ..run_switch_operations.result_helpers import _observe_progress
 
     if isinstance(evidence, RunSwitchObservedEvidence):
@@ -177,10 +178,6 @@ def _merge_measured_evidence(
 def _complete_phase_progress(
     progress: RunSwitchOperationResult, plan: RunSwitchPlan, phase: RunSwitchPhase
 ) -> None:
-    from ..run_switch_operations.image_receipts import (
-        _planned_transfer_bytes,
-        _planned_transfer_parts,
-    )
 
     progress.retry_attempt = None
     if phase.kind != "transfer":
@@ -218,7 +215,6 @@ def _complete_phase_progress(
 def _complete_operation_progress(
     plan: RunSwitchPlan, progress: RunSwitchOperationResult
 ) -> RunSwitchOperationResult:
-    from ..run_switch_operations.image_receipts import _planned_transfer_bytes
 
     total, member_totals = _planned_transfer_bytes(plan)
     if total is not None:
@@ -254,10 +250,6 @@ def _progress_view(
     node_ids: Sequence[str] | None = None,
 ) -> RunSwitchProgress:
     """Project durable typed progress without advancing the operation."""
-    from ..run_switch_operations.image_receipts import (
-        _plan_target_node_ids,
-        _planned_transfer_bytes,
-    )
     from ..run_switch_operations.ownership import _UNKNOWN_MEMBER_NODE_ID
     from ..run_switch_operations.result_helpers import _progress_operation_state
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, get_args
+from typing import get_args
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
@@ -21,8 +21,25 @@ from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
 
 from .agent_operation_facts import aware
 from .jobs import states as job_states
+from .models.cache import (
+    ArtifactLifecycleGate,
+    ModelCacheOperation,
+    RecipeLibrarySyncRun,
+)
+from .models.coordinator import CoordinatorFailure
+from .models.execution import ArtifactJob, RecipeInstallation, RecipeRun
+from .models.fleet import (
+    AgentCertificate,
+    AgentIssuedCertificateRevocation,
+    FleetProfileApplication,
+    FleetProfileSelection,
+)
+from .models.jobs import Job
+from .models.operations import AgentOperation
+from .models.routes import RoutePublicationOwner
 from .models.waits import ScheduledWaitOwner
 from .operations.blockers import BlockingOperation, OperationBlocker, make_blocker
+from .stored.json_values import binding_for
 from .strict_json import warn_unreadable_once
 from .wait_contract import QueueWait, WaitEvidence
 
@@ -205,13 +222,8 @@ def lifecycle_wait(
     )
 
 
-if TYPE_CHECKING:
-    from .models.jobs import Job
-
-
 def _job_owns_contract(owner: Job, contract: type[BaseModel]) -> bool:
     # Opaque engine content is never interpreted as Controller scheduling data.
-    from .stored.json_values import binding_for
 
     schema = binding_for("jobs", "payload").contract_for(owner.kind)
     return schema is contract or contract in get_args(schema)
@@ -239,8 +251,6 @@ def wait_due(owner: ScheduledWaitOwner) -> datetime | None:
         return aware(owner.next_action_at)
     if owner.wait_evidence is not None:
         return None
-    from .models.fleet import FleetProfileApplication
-    from .models.jobs import Job
 
     paths: tuple[tuple[str, ...], ...] = ()
     document: object = None
@@ -293,22 +303,6 @@ def owner_identity(
     owner: ScheduledWaitOwner,
 ) -> tuple[BlockingOperation, WaitOwnerKind]:
     """Identify the existing owner, never infer a wait reason from its prose."""
-    from .models.cache import (
-        ArtifactLifecycleGate,
-        ModelCacheOperation,
-        RecipeLibrarySyncRun,
-    )
-    from .models.coordinator import CoordinatorFailure
-    from .models.execution import ArtifactJob, RecipeInstallation, RecipeRun
-    from .models.fleet import (
-        AgentCertificate,
-        AgentIssuedCertificateRevocation,
-        FleetProfileApplication,
-        FleetProfileSelection,
-    )
-    from .models.jobs import Job
-    from .models.operations import AgentOperation
-    from .models.routes import RoutePublicationOwner
 
     if isinstance(owner, Job):
         previous = read_wait(owner)
@@ -436,11 +430,6 @@ def schedule_wait(
 
 def initialize_wait[T: ScheduledWaitOwner](owner: T, kind: WaitOwnerKind) -> T:
     """Give a new queued owner its initial wait, before it is flushed."""
-
-    from .models.cache import ModelCacheOperation
-    from .models.fleet import FleetProfileApplication
-    from .models.jobs import Job
-    from .models.operations import AgentOperation
 
     identity = getattr(owner, "id", None)
     if identity is None:

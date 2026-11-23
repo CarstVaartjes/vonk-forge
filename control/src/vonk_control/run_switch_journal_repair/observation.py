@@ -13,6 +13,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 
 from ..admission_locking import AdmissionLockBusy
+from ..agent_operation_facts import attempt_is_live, aware
 from ..journal_models import RunSwitchJournalRepairPending
 from ..models.jobs import Job
 from ..models.operations import AgentOperation, AgentOperationAttempt
@@ -63,7 +64,6 @@ def _observe_zero_transfer_journal(
     *,
     purpose: JournalRepairPurpose,
 ) -> JournalRepairDisposition:
-    from ..agent_operation_facts import aware
 
     with sessions() as session:
         snapshot = session.get(Job, operation_id)
@@ -181,7 +181,6 @@ def _observe_zero_transfer_journal(
 
 
 def _child_attempt_is_live(session: Session, child_id: str, now: datetime) -> bool:
-    from ..agent_operation_facts import attempt_is_live
 
     for operation in session.scalars(
         select(AgentOperation).where(AgentOperation.parent_job_id == child_id)

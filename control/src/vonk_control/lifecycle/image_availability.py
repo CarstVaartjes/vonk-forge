@@ -60,7 +60,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
@@ -71,6 +71,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..jobs import states as job_states
+from ..jobs.documents import AvailabilityJobPayload
 from ..models.jobs import Job
 from ..persisted_waits import (
     initialize_wait,
@@ -101,9 +102,6 @@ from .types import (
     State,
     StopResult,
 )
-
-if TYPE_CHECKING:
-    from ..jobs.documents import AvailabilityJobPayload
 
 KIND = "image-availability"
 OPERATION_KIND = "recipe.image.availability.v2"
@@ -303,8 +301,6 @@ class ImageAvailabilityAdapter:
 
         Return the updated typed payload; the caller stores it through its contract.
         """
-
-        from ..jobs.documents import AvailabilityJobPayload
 
         now = aware(now)
         if after.state is State.BACKOFF:

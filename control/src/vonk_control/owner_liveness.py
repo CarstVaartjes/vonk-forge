@@ -46,6 +46,7 @@ from vonk_agent_protocol.state_machines import (
 
 from . import agent_operation_states
 from .agent_contacts import last_seen
+from .agent_operation_facts import attempt_holds_order
 from .fleet_profile_contract.applications import FleetProfileApplicationProgress
 from .fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
 from .inventory.repository import MAX_INVENTORY_FUTURE_SKEW
@@ -378,7 +379,6 @@ def build_holds_disk(
 
 
 def _agent_attempt(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
-    from .agent_operation_facts import attempt_holds_order
 
     operation = session.get(AgentOperation, ref.id)
     if operation is None:

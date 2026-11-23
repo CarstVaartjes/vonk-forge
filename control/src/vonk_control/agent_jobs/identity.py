@@ -28,6 +28,7 @@ from ..agent_contacts import record_contact
 from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import lapsed_renewal_allowed as _lapsed_renewal_allowed
 from ..auth import AgentSource
+from ..cancelled_runtime import cancellation_stop_current
 from ..categorized_errors import InvalidValue
 from ..inventory.items import record_runtime
 from ..jobs import states as job_states
@@ -60,7 +61,6 @@ def _active(
     allow_superseded_cancellation: bool = False,
     allow_lapsed_renewal: bool = False,
 ) -> tuple[StoredOperation, AgentOperationAttempt]:
-    from ..cancelled_runtime import cancellation_stop_current
 
     token = self._fence_token(fence)
     identity_hint = session.execute(

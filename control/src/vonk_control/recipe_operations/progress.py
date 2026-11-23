@@ -7,7 +7,11 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
+from ..agent_operation_facts import job_start_deadline
 from .errors import RecipeRequestInvalid
+from .interfaces import _TERMINAL_JOB_STATES
+from .observation_helpers import _RECIPE_PARENT_READERS, RecipeWirePayload, _aware
+from .results import _recorded_result
 
 if TYPE_CHECKING:
     from .observation_helpers import RecipeParent, _PhaseGroups
@@ -67,7 +71,6 @@ from .runtime_specs import recipe_topology
 
 
 def _parse_recipe_parent(job: Job) -> RecipeParent:
-    from .observation_helpers import _RECIPE_PARENT_READERS
 
     parent = _RECIPE_PARENT_READERS[job.kind].validate_json(
         canonical_message(job.payload)
@@ -170,7 +173,6 @@ def _parent_reconciliation(job: Job) -> RunSwitchReconciliationAuthority | None:
 
 
 def _cancel_requested(job: Job) -> bool:
-    from .results import _recorded_result
 
     return isinstance(
         _recorded_result(job.kind, job.result, subject=job.id),
@@ -287,8 +289,6 @@ def _start_deadline_failure(job: Job, *, now: datetime) -> str | None:
 
     Progress its orders report extends the budget: only a stalled start ends.
     """
-    from ..agent_operation_facts import job_start_deadline
-    from .observation_helpers import _aware
 
     if job.kind != "recipe.start":
         return None
@@ -331,7 +331,6 @@ def _role_phases(
 
 def _stored_phases(job: Job) -> _PhaseGroups | Residue:
     """Read the canonical parent and its typed phase payloads; damage is unknown."""
-    from .observation_helpers import RecipeWirePayload
 
     def read() -> _PhaseGroups | Damaged:
         parent = _parse_recipe_parent(job)
@@ -411,8 +410,6 @@ def _project_recipe_operation_progress(
     session: Session, job: Job, *, now: datetime
 ) -> OperationProgress | None:
     """Read exact current-attempt samples without advancing a child or its parent."""
-    from .interfaces import _TERMINAL_JOB_STATES
-    from .observation_helpers import RecipeWirePayload
 
     with session.no_autoflush:
         rows = tuple(

@@ -17,6 +17,10 @@ from ..run_switch_contract.operations import RunSwitchOperation
 from ..run_switch_contract.progress_view import (
     _progress_view,
 )
+from ..run_switch_journal_repair.discovery import (
+    REPAIR_WAIT,
+    is_zero_transfer_journal_fault,
+)
 from ..stored.json_values import read_row_column
 from .constants import _OPERATION_KIND_ADAPTER
 from .plan_persistence import _view_identity
@@ -66,10 +70,6 @@ class ProjectionMixin:
         if (wait := read_wait(job)) is not None:
             blockers = list(wait.blockers)
         repair_due: datetime | None = None
-        from ..run_switch_journal_repair.discovery import (
-            REPAIR_WAIT,
-            is_zero_transfer_journal_fault,
-        )
 
         if (
             persisted_result is None

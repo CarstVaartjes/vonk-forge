@@ -52,6 +52,7 @@ from ..security.enrollment import (
 )
 from ..step_ca import StepCAError, StepCAIssuancePending, StepCAUnavailable
 from .contract import EnrollmentObservationOutcome, EnrollmentRevocationStatus
+from .ending import retain_ended_effect
 from .persistence import _issuance_binding
 from .rotation import RotationService
 from .types import (
@@ -195,7 +196,6 @@ class EnrollmentService(RotationService):
         they have been blocked. True when any row was confirmed or deleted.
         """
         now = _utc(self._clock())
-        from .ending import retain_ended_effect
 
         if serial is None:
             with self._transaction() as session:

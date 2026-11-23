@@ -19,7 +19,9 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_control.run_switch_operations.results import _persisted_result
 
+from ..agent_jobs.retirement import release_owned_reservations_in_session
 from ..bounded_json import require_integer
+from ..distribution_executor.receipts import _ChildView
 from ..failure_classification import error_code, is_security_failure
 from ..jobs import states as job_states
 from ..lifecycle.run_switch import end_unclaimed_children
@@ -53,7 +55,6 @@ from .result_helpers import _read_progress
 _REOFFER_INTERVAL = timedelta(seconds=5)
 
 if TYPE_CHECKING:
-    from ..distribution_executor.receipts import _ChildView
     from .service import RunSwitchOperationService
 
 
@@ -67,8 +68,6 @@ class EndingsMixin:
         remote effects are retained without withdrawing routes.
         """
         service = typing_cast("RunSwitchOperationService", self)
-
-        from ..agent_jobs.retirement import release_owned_reservations_in_session
 
         with service._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
@@ -265,7 +264,6 @@ class EndingsMixin:
         self, operation_id: str
     ) -> RecipeOperationView | _ChildView | RunSwitchOperation | None:
         service = typing_cast("RunSwitchOperationService", self)
-        from ..distribution_executor.receipts import _ChildView
 
         getter = getattr(service._phase_executor, "get", None)
         if callable(getter):

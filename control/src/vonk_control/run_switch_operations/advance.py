@@ -25,6 +25,7 @@ from ..admission_locking import (
 )
 from ..bounded_json import require_integer
 from ..content_identity import same_image
+from ..distribution_executor.receipts import _ChildView
 from ..failure_classification import disposition, is_definite
 from ..fleet_profiles.capacity import (
     accepted_profile_runtime_image,
@@ -49,6 +50,7 @@ from ..persisted_waits import schedule_wait, wait_due
 from ..recipe_builds.cancellation import needs_container_build
 from ..recipe_builds.common import RecipeBuildAdmissionBusy
 from ..recipe_operations.interfaces import RecipeOperationView
+from ..run_switch_contract.journal import JournalRepairDisposition
 from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_contract.phase_results import RunSwitchDistributionChildResult
 from ..run_switch_contract.progress_view import (
@@ -109,8 +111,6 @@ class AdvanceMixin:
     def _advance(self, operation_id: str) -> bool:
         service = typing_cast("RunSwitchOperationService", self)
         now = _now(service._clock)
-        from ..distribution_executor.receipts import _ChildView
-        from ..run_switch_contract.journal import JournalRepairDisposition
         from ..run_switch_journal_repair.observation import (
             try_repair_zero_transfer_journal,
         )
