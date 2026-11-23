@@ -467,6 +467,14 @@ button:disabled {
   background: var(--raised);
   color: var(--ink);
 }
+/* Compact row actions: desktop pointers only; touch keeps the 44px target. */
+@media (pointer: fine) and (min-width: 54rem) {
+  .button.compact {
+    min-height: 1.75rem;
+    padding: 0.2rem 0.65rem;
+    font-size: 0.78rem;
+  }
+}
 a:focus-visible,
 button:focus-visible,
 input:focus-visible,
@@ -2160,13 +2168,6 @@ progress {
   gap: 0.25rem 0.5rem;
   min-width: 0;
 }
-@media (min-width: 54rem) {
-  .library-profile-actions .button {
-    min-height: 2.25rem;
-    padding: 0.35rem 0.8rem;
-    font-size: 0.82rem;
-  }
-}
 .library-profile-saved h3 {
   margin: 0;
   font-size: 1.15rem;
@@ -2304,6 +2305,12 @@ progress {
 @media (max-width: 34rem) {
   .library-profile-saved {
     padding: 0.75rem;
+  }
+  .library-profile-actions {
+    width: 100%;
+  }
+  .library-profile-actions > .button:not(.secondary):not(.quiet) {
+    width: 100%;
   }
   .library-profile-saved > dl {
     grid-template-columns: minmax(0, 1fr);

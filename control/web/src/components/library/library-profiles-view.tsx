@@ -1284,7 +1284,7 @@ export function LibraryProfilesView({
               <div className="library-profile-actions">
                 <button
                   type="button"
-                  className="button"
+                  className="button compact"
                   disabled={
                     loadingProfile || applicationRunning || (!loadable(preview) && !pendingLoad)
                   }
@@ -1292,13 +1292,17 @@ export function LibraryProfilesView({
                 >
                   {loadingProfile ? "Loading…" : "Load profile"}
                 </button>
-                <button type="button" className="button secondary" onClick={() => setEditing(true)}>
+                <button
+                  type="button"
+                  className="button compact secondary"
+                  onClick={() => setEditing(true)}
+                >
                   Edit profile
                 </button>
                 <ProfileExport api={api} number={selectedProfile.number} />
                 <button
                   type="button"
-                  className="button quiet"
+                  className="button compact quiet"
                   onClick={() => setConfirmingDelete(true)}
                 >
                   Delete profile
