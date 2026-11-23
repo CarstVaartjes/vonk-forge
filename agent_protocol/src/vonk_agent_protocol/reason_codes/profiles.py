@@ -96,6 +96,8 @@ class ProjectionCode(WireEnum):
     INSTALL_PARTIAL = "install.partial"
     INVENTORY_MISSING = "inventory.missing"
     INVENTORY_STALE = "inventory.stale"
+    #: A multi-node run uses fewer RDMA rails than were launched (NCCL log).
+    NETWORK_RAILS_UNDERUSED = "network.rails-underused"
     NETWORK_NAS_ROUTE_WIFI_NO_WIRED_PORT = "network.nas-route-wifi-no-wired-port"
     NETWORK_NAS_ROUTE_WIFI_WIRED_PORT_DOWN = "network.nas-route-wifi-wired-port-down"
     NETWORK_NAS_ROUTE_WIFI_WIRED_PORT_UNUSED = (

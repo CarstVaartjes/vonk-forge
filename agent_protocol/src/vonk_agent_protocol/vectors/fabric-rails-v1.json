@@ -1,0 +1,68 @@
+{
+  "comment": "FabricRails as the agent reports it in HostSettings, whether the Controller raises network.rails-underused (cases), and how the agent reads NCCL's lines from a loading workload's log tail (logs; observed is null while a line is missing). The Rust agent test reads every case through the generated contract and every log; the Controller test projects each case onto a node.",
+  "cases": [
+    {
+      "name": "all launched rails used",
+      "fabric_rails": [
+        {
+          "run_id": "6f1c1d8e-0000-4000-8000-0000000000a1",
+          "provided": 2,
+          "used": 2
+        }
+      ],
+      "underused": false
+    },
+    {
+      "name": "one of two rails used",
+      "fabric_rails": [
+        {
+          "run_id": "6f1c1d8e-0000-4000-8000-0000000000a1",
+          "provided": 2,
+          "used": 1
+        }
+      ],
+      "underused": true
+    },
+    {
+      "name": "nothing seen",
+      "fabric_rails": [],
+      "underused": false
+    }
+  ],
+  "logs": [
+    {
+      "name": "both lines, one rail used",
+      "tail": "loading\nNCCL INFO NCCL_IB_HCA set by environment to =rocep1s0f1:1,roceP2p1s0f1:1\nNCCL INFO NET/IB : Using [0]rocep1s0f1:1/RoCE ; OOB enP7s7:10.0.0.2<0>\n",
+      "observed": {
+        "provided": 2,
+        "used": 1
+      }
+    },
+    {
+      "name": "both lines, both used",
+      "tail": "NCCL INFO NCCL_IB_HCA set by environment to =rocep1s0f1:1,roceP2p1s0f1:1\nNCCL INFO NET/IB : Using [0]rocep1s0f1:1/RoCE [1]roceP2p1s0f1:1/RoCE ; OOB enP7s7:10.0.0.2<0>\n",
+      "observed": {
+        "provided": 2,
+        "used": 2
+      }
+    },
+    {
+      "name": "merged virtual device",
+      "tail": "NCCL INFO NCCL_IB_HCA set by environment to =rocep1s0f1:1,roceP2p1s0f1:1\nNET/IB : Using [0]rocep1s0f1+roceP2p1s0f1:1/RoCE ; OOB x\n",
+      "observed": {
+        "provided": 2,
+        "used": 2
+      }
+    },
+    {
+      "name": "NCCL_DEBUG not set",
+      "tail": "loading weights\n",
+      "observed": null
+    },
+    {
+      "name": "selection without the launched value",
+      "tail": "NCCL INFO NET/IB : Using [0]rocep1s0f1:1/RoCE [1]roceP2p1s0f1:1/RoCE ; OOB enP7s7:10.0.0.2<0>\n",
+      "observed": null
+    }
+  ]
+}

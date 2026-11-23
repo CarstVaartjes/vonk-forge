@@ -3163,6 +3163,35 @@
       "title": "EnumParameter",
       "type": "object"
     },
+    "FabricRails": {
+      "description": "The RDMA rails one multi-node run uses, from NCCL's own log.\n\n``provided`` is the number of devices of the ``NCCL_IB_HCA`` NCCL echoed\n(what the helper launched); ``used`` the devices on its ``NET/IB : Using``\nline. A run whose log shows neither line (no ``NCCL_DEBUG``, one node, lines\nscrolled out of the bounded tail) is not reported at all: unknown is never\nguessed. Informative only; the Controller derives the attention item.",
+      "properties": {
+        "provided": {
+          "maximum": 64,
+          "minimum": 1,
+          "title": "Provided",
+          "type": "integer"
+        },
+        "run_id": {
+          "format": "uuid",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "used": {
+          "maximum": 64,
+          "minimum": 1,
+          "title": "Used",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "provided",
+        "used"
+      ],
+      "title": "FabricRails",
+      "type": "object"
+    },
     "FailureCode": {
       "description": "Closed codes of a definite failed outcome reported by the agent.",
       "enum": [
@@ -8254,6 +8283,15 @@
             }
           ],
           "default": null
+        },
+        "fabric_rails": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FabricRails"
+          },
+          "maxItems": 16,
+          "title": "Fabric Rails",
+          "type": "array"
         },
         "gpu_clock_support": {
           "anyOf": [
@@ -13424,6 +13462,7 @@
         "install.partial",
         "inventory.missing",
         "inventory.stale",
+        "network.rails-underused",
         "network.nas-route-wifi-no-wired-port",
         "network.nas-route-wifi-wired-port-down",
         "network.nas-route-wifi-wired-port-unused",

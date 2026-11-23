@@ -270,6 +270,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     // The inventory lane receives the Controller's verdict; retention acts on it.
     let verdict = LatestVerdict::default();
     let stops = PostStopInventory::default();
+    vonk_agent::fabric_rails::open(&config.data_dir);
     let memory = std::sync::Arc::new(vonk_agent::memory_readings::Ledger::open(
         Path::new("/"),
         &config.data_dir,
@@ -404,6 +405,7 @@ impl<E: vonk_agent::executor::Executor> vonk_agent::executor::Executor for Custo
         let run = memory_run(claim);
         match (claim.operation, run) {
             (vonk_agent_protocol::generated::AgentOperation::RecipeStart, Some(run)) => {
+                vonk_agent::fabric_rails::forget(run);
                 self.memory.load_begins(run);
             }
             (vonk_agent_protocol::generated::AgentOperation::RecipeStop, _) => {
@@ -428,7 +430,10 @@ impl<E: vonk_agent::executor::Executor> vonk_agent::executor::Executor for Custo
                 vonk_agent_protocol::generated::AgentOperation::RecipeStop,
                 Some(run),
                 vonk_agent::outcome::ExecutionResult::Done(_),
-            ) => self.memory.stop_ends(run),
+            ) => {
+                vonk_agent::fabric_rails::forget(run);
+                self.memory.stop_ends(run);
+            }
             (vonk_agent_protocol::generated::AgentOperation::RecipeJobRunV1, _, _) => {
                 self.memory.job_ends();
             }
@@ -841,6 +846,7 @@ async fn run_inventory_lane(
                 inventory.nas_route_interface = evidence.nas_route_interface;
                 if let Some(host) = inventory.host_settings.as_mut() {
                     host.memory_fragmentation = memory.snapshot();
+                    host.fabric_rails = vonk_agent::fabric_rails::snapshot();
                 }
                 let installations = inventory.installations.clone().unwrap_or_default();
                 let runs = inventory.runs.clone().unwrap_or_default();

@@ -283,3 +283,23 @@ NET/IB transport. Do not force undocumented `NCCL_NET_GDR_LEVEL` settings.
 Primary references: [NVIDIA DGX Spark clustering](https://docs.nvidia.com/dgx/dgx-spark/spark-clustering.html)
 for the physical topology and [NVIDIA Sync Cluster Assistant](https://docs.nvidia.com/sync/latest/cluster-assistant.html)
 for the 200 Gb/s negotiated state and 184 Gb/s lower speed-test bound.
+
+## Rail observation (network using N of M rails)
+
+The helper launches NCCL with every same-port device (`NCCL_IB_HCA`, "fabric
+rails" in its journal). A port that NCCL uses through one of its two RDMA
+devices gives about 112 of 200 Gb/s. While a Start loads, the agent already
+reads the container's bounded log tail every 10 seconds (the readiness guard);
+it scans that tail for NCCL's echo of the launched value (`NCCL_IB_HCA set by
+environment to ...`) and for its selection (`NET/IB : Using [0]... [1]...`, a
+`+`-joined name counts each device). Both lines seen with fewer devices used
+than launched report `HostSettings.fabric_rails` (`FabricRails`, shared vector
+`fabric-rails-v1.json`) and the Controller raises the `network.rails-underused`
+attention item, "Network using N of M rails". The run's own state per log is
+`Unseen`, `Provided` or `Observed`.
+
+It stays silent, never guessing, when the lines never appear: `NCCL_DEBUG` is
+not `INFO` (recipes opt in), the run is single-node (NCCL prints no `NET/IB`),
+the lines scrolled out of the bounded tail between two reads, or the
+launched value is an exclusion list (`^`). Observations are kept across agent
+restarts, dropped when the run stops or starts again, and never act on the run.

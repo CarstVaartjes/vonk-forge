@@ -1349,3 +1349,25 @@ def test_page_table_growth_is_judged_by_the_large_blocks_it_can_pin() -> None:
     assert at_risk_bytes(4096, 4096) == 2 * 1024 * 1024
     assert at_risk_bytes(65536, 65536) == 2 * 1024 * 1024
     assert at_risk_bytes(2 * 1024 * 1024, 4096) == 1024**3
+
+
+def _rail_vector() -> dict[str, list[dict[str, object]]]:
+    return json.loads(
+        files("vonk_agent_protocol")
+        .joinpath("vectors/fabric-rails-v1.json")
+        .read_text(encoding="utf-8")
+    )
+
+
+@pytest.mark.parametrize("case", _rail_vector()["cases"], ids=lambda case: case["name"])
+def test_underused_rails_reach_the_node_as_attention(
+    case: dict[str, object],
+) -> None:
+    host: dict[str, object] = {
+        "display_manager_active": False,
+        "graphical_default_target": False,
+        "fabric_rails": case["fabric_rails"],
+    }
+    node = _host_node(host)
+    reasons = [w for w in node.warnings if w.code == "network.rails-underused"]
+    assert bool(reasons) is case["underused"]

@@ -48,6 +48,7 @@ from .common import (
     telemetry_point,
 )
 from .display_memory import display_memory_advice
+from .fabric_rails import fabric_rails_warning
 from .host_checks import host_checks, host_checks_note
 from .memory_fragmentation import memory_fragmentation_warning
 
@@ -515,6 +516,8 @@ def _host_settings_warnings(host: HostSettings | None) -> list[ProjectionReason]
         warnings.append(advice)
     if host is not None and (fragmented := memory_fragmentation_warning(host)):
         warnings.append(fragmented)
+    if host is not None and (rails := fabric_rails_warning(host)):
+        warnings.append(rails)
     return warnings
 
 

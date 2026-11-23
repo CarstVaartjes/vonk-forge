@@ -9,6 +9,7 @@ mod compose_document;
 pub mod config;
 mod display_memory;
 pub mod executor;
+pub mod fabric_rails;
 pub mod failure_evidence;
 mod gpu_health;
 pub mod health;

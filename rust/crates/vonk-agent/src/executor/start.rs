@@ -446,7 +446,15 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             window,
             accepted,
             &stall_at,
-            || self.loading_tail(&runtime_guard_target, request.run_generation),
+            || async {
+                let tail = self
+                    .loading_tail(&runtime_guard_target, request.run_generation)
+                    .await?;
+                if let Some(tail) = &tail {
+                    crate::fabric_rails::note(request.run_id, tail);
+                }
+                Ok(tail)
+            },
             // The order's heartbeat carries this activity to the Controller on
             // its next renewal; that one post classifies and reports its own
             // failures, so no second, unobserved post exists.

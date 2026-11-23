@@ -9,6 +9,7 @@ a reading the agent could not take is ``None`` (unknown), never a default.
 from __future__ import annotations
 
 from typing import Annotated
+from uuid import UUID
 
 from pydantic import AwareDatetime, Field, model_validator
 
@@ -126,3 +127,18 @@ class MemoryFragmentation(WireModel):
     # this boot and the latest.
     idle_stop_first: MemoryPoint | None = None
     idle_stop_latest: MemoryPoint | None = None
+
+
+class FabricRails(WireModel):
+    """The RDMA rails one multi-node run uses, from NCCL's own log.
+
+    ``provided`` is the number of devices of the ``NCCL_IB_HCA`` NCCL echoed
+    (what the helper launched); ``used`` the devices on its ``NET/IB : Using``
+    line. A run whose log shows neither line (no ``NCCL_DEBUG``, one node, lines
+    scrolled out of the bounded tail) is not reported at all: unknown is never
+    guessed. Informative only; the Controller derives the attention item.
+    """
+
+    run_id: UUID
+    provided: Annotated[int, Field(strict=True, ge=1, le=64)]
+    used: Annotated[int, Field(strict=True, ge=1, le=64)]

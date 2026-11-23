@@ -563,6 +563,7 @@ fn host_settings<R: ProcessRunner>(
         swap: None,
         tuning: None,
         memory_fragmentation: None,
+        fabric_rails: Vec::new(),
     })
 }
 

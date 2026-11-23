@@ -121,6 +121,7 @@ fn agent_unknown_observation_matches_the_controller_shared_vector() {
         swap: None,
         tuning: None,
         memory_fragmentation: None,
+        fabric_rails: Vec::new(),
     };
     let vectors: Vec<HostSettings> = serde_json::from_str(include_str!(
         "../../../../../agent_protocol/src/vonk_agent_protocol/vectors/display-memory.json"
