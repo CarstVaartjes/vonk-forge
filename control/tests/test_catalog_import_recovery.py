@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog import entities
 from vonk_control.catalog.revision_contract import (
-    PrebuiltImage,
     RecipeRevisionProjection,
     read_catalog_projection,
 )
@@ -26,7 +25,12 @@ from vonk_control.models.catalog import (
     CatalogDocumentRevision,
 )
 from vonk_control.models.execution import RecipeInstallation, RecipeRun
-from vonk_forge_contracts import RecipeApi, RecipeDefinition, document_sha256
+from vonk_forge_contracts import (
+    PrebuiltImage,
+    RecipeApi,
+    RecipeDefinition,
+    document_sha256,
+)
 
 from .display_fixtures import reword
 from .test_catalog_entities import (

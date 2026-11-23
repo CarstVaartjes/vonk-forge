@@ -14,6 +14,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_forge_contracts import RecipeDefinition
 
+from vonk_control.lifecycle.evidence import Residue
+
 from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     RemovalOwnerKind,
@@ -51,7 +53,6 @@ from ..runtime_image_preparation.contracts import (
     RuntimeImageReceipt,
     RuntimeImageReferenceIntent,
 )
-from ..stored.json_values import Residue
 from ..worker.memory_contract import WorkerMemoryComponent
 from . import (
     cancellation as cancellation_ops,

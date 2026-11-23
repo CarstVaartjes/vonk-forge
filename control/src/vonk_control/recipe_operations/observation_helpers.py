@@ -25,6 +25,8 @@ from vonk_agent_protocol.recipe_operations import (
 )
 from vonk_agent_protocol.state_machines import InstallationState, RunState
 
+from vonk_control.owner_liveness import run_has_live_operation
+
 from ..fleet_profiles.stop_authority import (
     ProfileJobRunStopJob,
 )
@@ -57,7 +59,6 @@ from ..models.execution import (
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
 from ..owner_liveness import OwnerKind
-from ..reservation_owners import run_has_live_operation
 from ..stored.json_values import read_row_column
 from ..stored.states import CatalogRevisionState, RecipeBuildState
 from ..strict_json import read_stored_model

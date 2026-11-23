@@ -13,6 +13,8 @@ from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.recipes import RecipeUpdateCode
 
+from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
+
 from ..categorized_errors import InvalidValue
 from ..lifecycle.recipe_update_batch import CANCEL_BUDGET
 from ..lifecycle.types import State
@@ -25,7 +27,6 @@ from ..recipe_image_availability.contracts import (
     RecipeImageAvailabilityUnknown,
 )
 from ..recipe_operations.availability_intent import RecipeRevisionIntent
-from ..reservation_owners import OwnerKind, OwnerRef, owner
 from ..stall_window import progress_deadline
 from ..strict_json import serialize_json_value
 from .contract import (

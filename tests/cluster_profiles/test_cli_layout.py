@@ -410,3 +410,49 @@ def test_one_time_formatter_owns_isoformat():
         if ".isoformat(" in path.read_text() and path.name != "common.py"
     ]
     assert users == []
+
+
+def _model_item(controller, actions, preparation=None):
+    return {
+        "selector": "p/m",
+        "identity": {"slug": "m", "publisher": "p", "content_sha256": "0" * 64},
+        "local": {
+            "controller": controller,
+            "running_on": [],
+            "preparation": preparation,
+        },
+        "resources": {},
+        "usage": [],
+        "actions": actions,
+    }
+
+
+@pytest.mark.parametrize(
+    ("controller", "actions", "download", "remove"),
+    [
+        ("not_cached", ["download"], True, False),
+        ("cached", ["remove"], False, True),
+        ("not_cached", ["download", "remove"], True, True),
+        ("preparing", [], False, False),
+    ],
+)
+def test_model_hints_follow_the_controller_actions(
+    printed, controller, actions, download, remove
+):
+    lines = printed(
+        _library_item, _model_item(controller, actions), "model", detail=False
+    )
+    assert any("vonkctl model download p/m" in line for line in lines) is download
+    assert any("vonkctl model remove p/m" in line for line in lines) is remove
+
+
+def test_a_cached_model_with_a_succeeded_preparation_still_hints_remove(printed):
+    done = {"state": "succeeded", "phase": "complete", "completed_bytes": 1}
+    lines = printed(
+        _library_item,
+        _model_item("cached", ["remove"], done),
+        "model",
+        detail=False,
+    )
+    assert any("vonkctl model remove p/m" in line for line in lines)
+    assert not any("vonkctl model download" in line for line in lines)

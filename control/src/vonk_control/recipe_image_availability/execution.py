@@ -14,6 +14,8 @@ from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_forge_contracts import RecipeDefinition
 
+from vonk_control.lifecycle.evidence import Residue
+
 from ..failure_classification import is_security_failure
 from ..jobs import states as job_states
 from ..jobs.documents import (
@@ -37,7 +39,7 @@ from ..persisted_waits import schedule_wait, wait_due
 from ..recipe_operations.availability_intent import (
     RecipeRetryIntent,
 )
-from ..stored.json_values import Residue, read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value
 from ..worker.memory_contract import WorkerMemoryComponent
 from .contracts import (

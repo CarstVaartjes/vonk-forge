@@ -42,7 +42,6 @@ from .core import transition
 from .reconciler import Settled
 from .reconciler import settle as settle_event
 from .types import (
-    TERMINAL_STATES,
     Decision,
     Effect,
     Event,
@@ -279,7 +278,6 @@ __all__ = [
     "KEEP",
     "KIND",
     "LIVE_STATES",
-    "TERMINAL_STATES",
     "UNSUPPORTED_DISPATCH",
     "AgentUpgradeAdapter",
 ]

@@ -16,6 +16,7 @@ from sqlalchemy.pool import StaticPool
 from starlette.requests import Request
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OperatorActionName
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, AgentIdentity, TokenCodec
@@ -32,7 +33,6 @@ from vonk_control.recipe_image_availability import requests
 from vonk_control.recipe_image_availability.contracts import (
     OPERATION_KIND,
     RecipeImageAvailabilityUnknown,
-    RecipeImageCode,
 )
 from vonk_control.recipe_image_availability.view_contract import (
     RecipeImageAvailabilityView,

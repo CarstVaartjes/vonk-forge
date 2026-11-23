@@ -49,7 +49,7 @@ from .impact_plans import (
     UninstallPlan,
 )
 from .progress import (
-    _parent_reconciliation as _parent_reconciliation,  # noqa: PLC0414 -- shared helper export
+    _parent_reconciliation,
 )
 from .rank_authority import _uninstall_recipe
 

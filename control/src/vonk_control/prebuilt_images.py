@@ -44,12 +44,7 @@ from vonk_agent_protocol.contracts import (
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.images import PrebuiltImageCode
-from vonk_forge_contracts import (
-    PrebuiltImage,
-    RecipeDefinition,
-    read_recipe,
-    read_recipe_display,
-)
+from vonk_forge_contracts import RecipeDefinition, read_recipe, read_recipe_display
 from vonk_forge_contracts.catalog_index import PREBUILT_REFERENCE_PATTERN
 
 from .catalog.revision_contract import BuildSecurityProjection
@@ -880,7 +875,6 @@ __all__ = [
     "PREBUILT_NOT_PINNED",
     "PREBUILT_USED",
     "PrebuiltDecision",
-    "PrebuiltImage",
     "PrebuiltImageImporter",
     "executable_build_key",
     "library_source_policy_failures",

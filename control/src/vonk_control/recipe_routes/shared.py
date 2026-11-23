@@ -24,13 +24,13 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitReason,
 )
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
+from vonk_agent_protocol.route_activation import ActivationMarker
 
 from ..admission_locking import ConstraintReplay, admitting
 from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
 from ..failure_classification import disposition
 from ..gateway.litellm import LiteLlmGeneration, LiteLlmPolicy, RouteState
 from ..gateway.route_bundle_contract import RouteEndpointDocument
-from ..gateway.route_runtime import ActivationMarker
 from ..models.jobs import Job
 from ..models.routes import RoutePublication, RoutePublicationOwner
 

@@ -1,3 +1,4 @@
+import { FleetRemovalReason } from "../../api/vocabulary.generated";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 import { LifecycleState, ProgressPhase } from "../../api/vocabulary.generated";
@@ -104,12 +105,19 @@ test("a model revision changed since Library display cannot be silently removed"
         selector: "example/model",
         target_identity: "d".repeat(64),
         with_model: null,
+        fleet: {
+          nas_remove: false,
+          nas_reason: FleetRemovalReason.UNUSED,
+          nas_detail: "",
+          targets: [],
+        },
       }),
     ),
     removeModelCache,
   } as unknown as ControlApi;
   render(
     <LibraryCacheAction
+      fleetOnly
       api={api}
       selector="example/model"
       modelContentSha256={"e".repeat(64)}
@@ -117,7 +125,7 @@ test("a model revision changed since Library display cannot be silently removed"
       onPrepared={() => undefined}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Remove from cache" }));
+  fireEvent.click(screen.getByRole("button", { name: "Remove model from fleet" }));
   await waitFor(() =>
     expect(screen.getByRole("alert")).toHaveTextContent("selected content identity"),
   );

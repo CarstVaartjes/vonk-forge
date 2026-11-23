@@ -17,6 +17,8 @@ from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
+from vonk_control.run_switch_operations.results import _persisted_result
+
 from ..bounded_json import require_integer
 from ..failure_classification import error_code, is_security_failure
 from ..jobs import states as job_states
@@ -33,9 +35,9 @@ from ..run_switch_contract.operations import (
     RunSwitchOperationResult,
 )
 from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.progress_view import RECOVERY_STALL_WINDOW
 from ..run_switch_contract.progress_view import (
-    _merge_progress_evidence as _merge_progress_evidence,  # noqa: PLC0414 -- shared helper export
+    RECOVERY_STALL_WINDOW,
+    _merge_progress_evidence,
 )
 from ..stall_window import Verdict, stall_deadline
 from ..stored.json_values import read_row_column
@@ -45,7 +47,7 @@ from .observation_window import checkpoint_deadline, checkpoint_verdict
 from .ownership import _checkpoint_matches, _complete_cancellation
 from .planning_helpers import _aware, _now, _stored_job_plan
 from .provider import _ADAPTER
-from .result_helpers import _persisted_result, _read_progress
+from .result_helpers import _read_progress
 
 #: How soon an ended owner offers again the work another writer held.
 _REOFFER_INTERVAL = timedelta(seconds=5)

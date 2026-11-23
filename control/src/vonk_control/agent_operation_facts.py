@@ -369,8 +369,8 @@ def order_recovery_deadline(
     ``now``. On a present Spark, an order that does not advance has stalled.
     """
 
-    # reservation_owners reaches this module through the profile contracts.
-    from .reservation_owners import OwnerKind, OwnerRef, owner
+    # owner_liveness reaches this module through the profile contracts.
+    from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
 
     if operation.recovery_deadline is None:
         return None

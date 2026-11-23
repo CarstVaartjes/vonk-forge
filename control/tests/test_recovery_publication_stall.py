@@ -11,7 +11,7 @@ from vonk_control.agent_operation_facts import START_STALL_WINDOW
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.fleet import AgentCertificate
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
-from vonk_control.recipe_routes.service import RecipeRecoveryDeadlineError
+from vonk_control.recipe_routes.shared import RecipeRecoveryDeadlineError
 
 from .recipe_operations_support import (
     _queued_distributed_recovery_restart,

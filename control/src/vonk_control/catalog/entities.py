@@ -1084,11 +1084,7 @@ def _actor(actor: str) -> str:
 
 __all__ = [
     "CatalogConflict",
-    "CatalogDocument",
-    "CatalogDocumentHead",
-    "CatalogDocumentRevision",
     "CatalogEntityService",
     "CatalogError",
-    "CatalogRecipeModelReference",
     "CatalogValidationError",
 ]

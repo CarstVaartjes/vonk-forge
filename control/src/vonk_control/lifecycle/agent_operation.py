@@ -83,7 +83,6 @@ from .. import agent_operation_states as aos
 from ..agent_operation_facts import (
     AGENT_ORDER_RECOVERY_BUDGET,
     AGENT_UPGRADE_RECOVERY_FENCE,
-    RESTART_REISSUE_OPERATIONS,
     STALLED_INTERRUPTION_LIMIT,
     STALLED_RETRY_BASE_SECONDS,
     STALLED_RETRY_MAX_SECONDS,
@@ -107,7 +106,7 @@ from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait
 from ..stall_window import stall_deadline
 from ..stored.json_values import read_row_column
 from .adapter import Dispatch
-from .core import OBSERVE_BUDGET, transition
+from .core import transition
 from .evidence import keep_recorded_outcome
 from .reconciler import settle
 from .types import (
@@ -1134,10 +1133,8 @@ def parked_orders(now: datetime):
 __all__ = [
     "IRREVERSIBLE_OPERATIONS",
     "JOB_RUN_OPERATION",
-    "OBSERVE_BUDGET",
     "OPERATOR_ACTIONS",
     "OWNER_KIND",
-    "RESTART_REISSUE_OPERATIONS",
     "STOP_ACTION",
     "AgentOperationAdapter",
     "aggregate_parent_state",

@@ -10,33 +10,13 @@ from __future__ import annotations
 from .cli_states_generated import (
     BACKOFF,
     CANCELLED,
-    DRAFT,
-    ENDPOINT_EXPIRED,
-    ENDPOINT_INSTALLED_ONLY,
-    ENDPOINT_NOT_PUBLISHED_YET,
-    ENDPOINT_UNAVAILABLE,
-    ENDPOINT_WITHDRAWN,
     FAILED,
     NEEDS_OPERATOR,
     OBSERVING,
-    PUBLISHED,
     QUEUED,
-    READY,
     RUNNING,
     SUCCEEDED,
 )
-
-__all__ = [
-    "DRAFT",
-    "ENDPOINT_EXPIRED",
-    "ENDPOINT_INSTALLED_ONLY",
-    "ENDPOINT_NOT_PUBLISHED_YET",
-    "ENDPOINT_UNAVAILABLE",
-    "ENDPOINT_WITHDRAWN",
-    "NEEDS_OPERATOR",
-    "PUBLISHED",
-    "READY",
-]
 
 # -- artifact jobs ---------------------------------------------------------------
 

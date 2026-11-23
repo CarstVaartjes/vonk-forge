@@ -25,7 +25,9 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
 from vonk_control.recipe_packages import client as recipe_packages
+from vonk_control.recipe_packages.contracts import RecipePackageError
 
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
@@ -188,10 +190,10 @@ def test_truncated_gzip_package_raises_only_the_typed_error() -> None:
     )
     package = _repack([_member("manifest.json", b"x" * 4096)])
 
-    with pytest.raises(recipe_packages.RecipePackageError) as raised:
+    with pytest.raises(RecipePackageError) as raised:
         decoder._decode_package(package[: len(package) // 2], None)  # type: ignore[arg-type]
 
-    assert raised.value.code == recipe_packages.RecipePackageCode.EXTRACT_INVALID
+    assert raised.value.code == RecipePackageCode.EXTRACT_INVALID
 
 
 @pytest.mark.parametrize(

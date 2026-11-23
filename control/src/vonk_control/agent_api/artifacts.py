@@ -17,12 +17,15 @@ from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 
+from vonk_control.enrollment.responses import _now
+from vonk_control.operator_receipt_contract import ReceiptPolicy
+
 from ..distribution.types import DistributionError, DistributionUnknown
 from ..download_contract import download_responses, upload_request_body
 from ..http_errors import temporary_http_answer
 from ..models.cache import RecipeBuild
 from ..oci_image_store import IMAGE_CACHE_DIRECTORY
-from ..operator_acceptance import ReceiptPolicy, operator_acceptance
+from ..operator_acceptance import operator_acceptance
 from ..stored.states import RecipeBuildState
 from ..strict_json import _retry_later_response
 from .common import (
@@ -34,7 +37,6 @@ from .common import (
     _authenticated_identity,
     _commit_recipe_image_upload,
     _flush_and_sync,
-    _now,
     _observe_recipe_image_upload,
     _owned_artifact,
     _prepare_recipe_image_upload,

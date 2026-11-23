@@ -5,14 +5,15 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from ..cli_states import RUNNING
-from ..fleet_qualification import (
+from cluster_profiles.cli_states_generated import RUNNING
+from cluster_profiles.fleet_qualification_observation import (
     QualificationObservationUnknown,
     _BudgetClient,
     _durable_key,
     _forget_key,
     _observe,
 )
+
 from .contracts import Batch, Campaign, ResultsLog
 from .lanes import _lanes_from_sparks
 from .profiles import _apply_profile, _quote, _save_profile

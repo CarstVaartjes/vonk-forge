@@ -20,12 +20,13 @@ from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleEffect, LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheBlockerCode
 from vonk_agent_protocol.state_machines import ModelCacheOperatorStatus
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_forge_contracts.model import ModelReference
 
 from ..cursor_contract import MAX_CURSOR_LENGTH
 from ..machine_states import ModelFileStateField
 from ..operations.blockers import OperationBlocker
-from ..operations.contract import AvailabilityOperationFailure, OperationProgress
+from ..operations.contract import AvailabilityOperationFailure
 from ..recipe_image_availability.clocks_contract import readable_or_none
 from ..settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
 from ..strict_json import StrictJSONModel, StrictModel, read_stored_model

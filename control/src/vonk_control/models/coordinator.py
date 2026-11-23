@@ -5,10 +5,13 @@ from datetime import datetime
 from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.wait_contract import WaitEvidence
+
 from ..coordinator_contract import CoordinatorFailureEvidence
 from ..model_primitives import Base
 from ..stored.json_values import ContractJSON
-from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
+from .waits import wait_due_column, wait_evidence_column
 
 
 class CoordinatorFailure(Base):

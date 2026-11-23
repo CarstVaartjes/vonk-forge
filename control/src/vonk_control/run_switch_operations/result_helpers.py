@@ -61,9 +61,6 @@ from .constants import (
     _SUBPHASE_ADAPTER,
 )
 from .errors import RunSwitchRetryLater, retry_later_unless_deterministic
-from .results import (
-    _persisted_result as _persisted_result,  # noqa: PLC0414 -- shared helper export
-)
 from .results import _stored_result
 
 

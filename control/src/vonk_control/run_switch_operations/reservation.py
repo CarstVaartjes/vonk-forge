@@ -21,6 +21,8 @@ from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
+from vonk_control.run_switch_operations.results import _persisted_result
+
 from ..admission_locking import ConstraintReplay, admitting
 from ..agent_jobs.service import AgentJobService
 from ..bounded_json import require_integer, require_mapping
@@ -70,7 +72,7 @@ from .planning_helpers import (
     _stored_job_plan,
 )
 from .provider import _ADAPTER
-from .result_helpers import _persisted_result, _progress_damaged, _read_progress
+from .result_helpers import _progress_damaged, _read_progress
 
 if TYPE_CHECKING:
     from .service import RunSwitchOperationService

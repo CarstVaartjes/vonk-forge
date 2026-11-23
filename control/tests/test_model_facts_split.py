@@ -19,8 +19,8 @@ from typing import Any
 import pytest
 import vonk_control.catalog.service as catalog_service_module
 from sqlalchemy import select, update
+from vonk_agent_protocol.reason_codes.catalog import CatalogCode
 from vonk_control.catalog.entities import (
-    CatalogCode,
     CatalogEntityService,
     CatalogValidationError,
     _digest,

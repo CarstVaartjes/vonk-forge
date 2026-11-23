@@ -422,10 +422,8 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
     # still unresolved. Polling before a fresh receipt must preserve that same
     # Stop, not retire it and make the later receipt impossible to consume.
     from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-    from vonk_control.run_switch_operations.result_helpers import (
-        _persisted_result,
-        _read_progress,
-    )
+    from vonk_control.run_switch_operations.result_helpers import _read_progress
+    from vonk_control.run_switch_operations.results import _persisted_result
     from vonk_control.stored.json_values import read_row_column
 
     # A transient receipt fault leaves a retry checkpoint on the reusable Stop.

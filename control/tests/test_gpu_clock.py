@@ -177,10 +177,11 @@ def test_uncapped_attention_requires_receipt_and_current_evidence(
     from sqlalchemy.orm import sessionmaker
     from vonk_agent_protocol.gpu_clock import GpuClockObservation
     from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+    from vonk_agent_protocol.telemetry import TelemetrySample
     from vonk_control.fleet_projection.service import FleetProjection
     from vonk_control.model_primitives import Base
     from vonk_control.models.fleet import AgentNode
-    from vonk_control.telemetry.samples import TelemetryRepository, TelemetrySample
+    from vonk_control.telemetry.samples import TelemetryRepository
 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

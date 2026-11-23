@@ -153,10 +153,8 @@ export function LibraryCacheAction({
     setBusy(true);
     setError("");
     try {
-      const current = fleetOnly
-        ? await api.modelRemovalReview(selector, controller.signal, true)
-        : await api.modelRemovalReview(selector, controller.signal);
-      if (fleetOnly && !current.fleet) throw new Error("Fleet removal review is unavailable.");
+      const current = await api.modelRemovalReview(selector, controller.signal, true);
+      if (!current.fleet) throw new Error("Fleet removal review is unavailable.");
       if (controller.signal.aborted) return;
       validateRemovalReview(current, { kind: "model", selector, modelContentSha256 });
       setReview(current);
@@ -166,15 +164,10 @@ export function LibraryCacheAction({
     } finally {
       if (!controller.signal.aborted) setBusy(false);
     }
-  }, [api, modelContentSha256, selector, fleetOnly]);
+  }, [api, modelContentSha256, selector]);
 
   const remove = useCallback(async () => {
-    if (
-      !review ||
-      (!review.fleet && review.blockers.length) ||
-      review.target_identity !== modelContentSha256
-    )
-      return;
+    if (!review || review.target_identity !== modelContentSha256) return;
     abort.current?.abort();
     const controller = new AbortController();
     abort.current = controller;
@@ -192,21 +185,11 @@ export function LibraryCacheAction({
       setBusy(false);
       setConfirming(false);
       setReview(null);
-      if (review.fleet) {
-        toast.info(
-          result.state === LifecycleState.SUCCEEDED
-            ? "Fleet cleanup completed; retained parts are shown below."
-            : "Fleet model removal queued.",
-        );
-        setRemoval({ intent, initial: result });
-        return;
-      }
-      if (result.state === "succeeded") {
-        toast.success("Model removed from the cache.");
-        onPrepared();
-        return;
-      }
-      toast.info("Model removal queued.");
+      toast.info(
+        result.state === LifecycleState.SUCCEEDED
+          ? "Fleet cleanup completed; retained parts are shown below."
+          : "Fleet model removal queued.",
+      );
       setRemoval({ intent, initial: result });
     } catch (value) {
       if (controller.signal.aborted) return;
@@ -234,7 +217,6 @@ export function LibraryCacheAction({
         initial={removal.initial}
         initialError={removal.initialError}
         onComplete={() => {
-          if (!fleetOnly) setRemoval(null);
           onPrepared();
         }}
         onDismiss={() => setRemoval(null)}
@@ -245,16 +227,15 @@ export function LibraryCacheAction({
       />
     );
 
-  if (state === "cached" || fleetOnly) {
+  if (fleetOnly) {
     // Confirmation accepts exactly the Controller review shown here.
     return (
       <div className="library-cache-action">
-        {!fleetOnly && <span className="library-cache-state is-ready">Cached</span>}
         {confirming ? (
           <>
             <button
               type="button"
-              className="button secondary"
+              className="button secondary compact"
               disabled={busy || !review || review.blockers.length > 0}
               onClick={() => void remove()}
             >
@@ -262,7 +243,7 @@ export function LibraryCacheAction({
             </button>
             <button
               type="button"
-              className="button secondary"
+              className="button secondary compact"
               disabled={busy}
               onClick={() => setConfirming(false)}
             >
@@ -272,17 +253,22 @@ export function LibraryCacheAction({
         ) : (
           <button
             type="button"
-            className="button secondary"
+            className="button secondary compact"
+            aria-label="Remove model from fleet"
             disabled={busy}
             onClick={() => void reviewRemoval()}
           >
-            {fleetOnly ? "Remove model from fleet" : "Remove from cache"}
+            Remove
           </button>
         )}
         {confirming && busy && <span role="status">Waiting for Controller…</span>}
         {confirming && review && <CacheRemovalReviewDetails review={review} />}
         {confirming && !review && !busy && (
-          <button type="button" className="button secondary" onClick={() => void reviewRemoval()}>
+          <button
+            type="button"
+            className="button secondary compact"
+            onClick={() => void reviewRemoval()}
+          >
             Retry
           </button>
         )}
@@ -298,7 +284,7 @@ export function LibraryCacheAction({
     <div className="library-cache-action">
       <button
         type="button"
-        className="button secondary"
+        className="button secondary compact"
         disabled={busy || state === "preparing"}
         onClick={() => void prepare()}
       >
@@ -306,7 +292,7 @@ export function LibraryCacheAction({
           ? "Downloading…"
           : state === "failed"
             ? "Retry download"
-            : "Download model"}
+            : "Download"}
       </button>
       {(busy || state === "preparing") && <span role="status">{phase || "queued"}</span>}
       {(busy || state === "preparing") && (
