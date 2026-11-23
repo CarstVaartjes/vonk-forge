@@ -8,25 +8,25 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-import vonk_control.catalog_entities as catalog_entities_module
-import vonk_control.catalog_service as catalog_service_module
-import vonk_control.catalog_sync as catalog_sync_module
+import vonk_control.catalog.entities as catalog_entities_module
+import vonk_control.catalog.service as catalog_service_module
+import vonk_control.catalog.sync as catalog_sync_module
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
-from vonk_control.catalog_api import ManagedCatalogSyncResponse, _managed_sync
-from vonk_control.catalog_queries import active_head_revision
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog.api import ManagedCatalogSyncResponse, _managed_sync
+from vonk_control.catalog.queries import active_head_revision
+from vonk_control.catalog.revision_contract import (
     read_catalog_projection,
 )
-from vonk_control.catalog_service import CatalogService
-from vonk_control.catalog_sync import (
+from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync import (
     ManagedRecipeCatalogSyncService,
     _empty_result,
 )
-from vonk_control.catalog_sync_contract import (
+from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncProblem,
     ManagedCatalogSyncRequest,
@@ -728,7 +728,7 @@ def test_worker_sync_runs_when_due_and_leaves_a_live_import_alone(
     tmp_path: Path,
 ) -> None:
     """Catches an early re-read, or a second read beside a live request-led import."""
-    from vonk_control.catalog_sync import AutomaticCatalogSync
+    from vonk_control.catalog.sync import AutomaticCatalogSync
 
     from .test_catalog_sync_retry import Inline
 

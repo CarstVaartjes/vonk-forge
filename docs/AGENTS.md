@@ -1,5 +1,8 @@
 # Documentation guide
 
+The repository rules for agents are in [AGENTS.md](../AGENTS.md); the full text
+of its long sections is [agent-rules.md](agent-rules.md).
+
 The [engineering principles](engineering-principles.md) and
 [architecture overview](architecture-overview.md) own current architectural
 direction. Keep state ownership, lock order, and waiting behavior explicit.

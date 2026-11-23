@@ -65,12 +65,12 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .. import job_states
 from ..agent_operation_facts import aware
+from ..jobs import states as job_states
 from ..lifecycle_preflight import end_unclaimed_probes
 from ..models import AgentOperation as StoredOperation
 from ..models import Job
-from ..operation_blockers import OperationBlocker, make_blocker
+from ..operations.blockers import OperationBlocker, make_blocker
 from ..persisted_waits import lifecycle_wait, schedule_wait, typed_wait_reason, wait_due
 from ..run_switch_contract import (
     RunSwitchMemberReceipt,

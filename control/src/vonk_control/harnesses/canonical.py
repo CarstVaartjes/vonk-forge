@@ -24,8 +24,8 @@ from vonk_forge_contracts.resolver import (
 )
 
 from ..platform_ports import rebind_port_argument, serving_port
-from ..runtime_spec_contract import SpecArtifact, SpecModelIdentity, SpecModelMount
-from ..runtime_writable_paths import (
+from ..runtime.spec_contract import SpecArtifact, SpecModelIdentity, SpecModelMount
+from ..runtime.writable_paths import (
     RUNTIME_REQUIREMENT_DECLARATION,
     RuntimeWritablePath,
     effective_environment,

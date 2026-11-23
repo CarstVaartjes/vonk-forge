@@ -11,7 +11,7 @@ from vonk_agent_protocol import (
     OperationProgress,
 )
 
-from ..operation_item_contract import OperationResultFacts
+from ..operations.item_contract import OperationResultFacts
 from ..run_switch_contract import RunSwitchOperation
 from ..strict_json import read_stored_model
 

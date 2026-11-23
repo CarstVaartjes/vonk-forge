@@ -33,9 +33,9 @@ from vonk_control.artifact_reference_scan import (
 )
 from vonk_control.auth import Actor
 from vonk_control.bounded_json import require_mapping, require_sequence
-from vonk_control.catalog_entities import recipe_document_projection
-from vonk_control.catalog_revision_contract import write_catalog_projection
-from vonk_control.job_documents import (
+from vonk_control.catalog.entities import recipe_document_projection
+from vonk_control.catalog.revision_contract import write_catalog_projection
+from vonk_control.jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityModelChild,
     AvailabilityRetry,
@@ -67,8 +67,8 @@ from vonk_control.models import (
     RecipeBuild,
     User,
 )
-from vonk_control.operation_blockers import make_blocker
-from vonk_control.operation_contract import (
+from vonk_control.operations.blockers import make_blocker
+from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )

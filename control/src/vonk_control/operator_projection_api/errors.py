@@ -55,7 +55,7 @@ def _domain_refusal_detail(error: Exception) -> str:
 
 def _operator_error(error: Exception) -> HTTPException:
     if isinstance(error, LibrarySelectorAmbiguous):
-        from ..library_api import SelectorAmbiguityHTTPError
+        from ..library.api import SelectorAmbiguityHTTPError
 
         return SelectorAmbiguityHTTPError(error)
     if isinstance(error, KeyError):

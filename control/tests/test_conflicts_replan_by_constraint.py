@@ -21,7 +21,7 @@ from vonk_control.admission_locking import (
     admitting,
 )
 from vonk_control.fleet_profiles import FleetProfileConflict
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.model_primitives import Base
 from vonk_control.models import FleetProfileApplication, Job, ResourceReservation
 from vonk_control.run_switch_operations import RunSwitchOperationService

@@ -19,7 +19,7 @@ from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightResult,
 )
 from vonk_control.agent_jobs.waits import refresh_queue_waits
-from vonk_control.inventory_items import inventory_items, record_preflight
+from vonk_control.inventory.items import inventory_items, record_preflight
 from vonk_control.lifecycle_preflight import (
     LifecyclePreflight,
     LifecyclePreflightCheckpoint,
@@ -31,13 +31,13 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     Job,
 )
-from vonk_control.operation_blockers import (
+from vonk_control.operations.blockers import (
     BlockingOperation,
     ProgressAlarmCode,
     make_blocker,
 )
 from vonk_control.persisted_waits import read_wait
-from vonk_control.runtime_preflight import mandatory_capabilities
+from vonk_control.runtime.preflight import mandatory_capabilities
 
 from .agent_fences import fenced_operation
 from .runtime_identity_support import set_inventory_fingerprint

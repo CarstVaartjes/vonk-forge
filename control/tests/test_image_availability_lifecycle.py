@@ -21,8 +21,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import Disposition, LifecycleState, OperationProgress
-from vonk_control import job_states
-from vonk_control.job_documents import (
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityRetry,
     AvailabilityRuntime,

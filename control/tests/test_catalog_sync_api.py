@@ -16,10 +16,10 @@ from importlib.resources import files
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import CursorCodec
-from vonk_control.catalog_revision_contract import read_recipe_projection
-from vonk_control.catalog_service import CatalogService
-from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
-from vonk_control.catalog_sync_contract import (
+from vonk_control.catalog.revision_contract import read_recipe_projection
+from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
+from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )

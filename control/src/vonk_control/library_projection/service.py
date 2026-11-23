@@ -13,12 +13,12 @@ from vonk_forge_contracts.qualification_status import QualificationStatus
 
 from .. import model_cache_states
 from ..auth import CursorCodec
-from ..catalog_revision_contract import (
+from ..catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
 )
-from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS
-from ..library_contract import (
+from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
+from ..library.contract import (
     FreshnessPolicy,
     LibraryFacetValues,
     LibraryLocalProgress,
@@ -27,8 +27,8 @@ from ..library_contract import (
     LibraryRecipeProjection,
     LibraryResourceProjection,
 )
-from ..library_image_presence import ImagePresenceIndex
-from ..library_storage_observation import LibraryStorageObserver
+from ..library.image_presence import ImagePresenceIndex
+from ..library.storage_observation import LibraryStorageObserver
 from ..model_cache_contract import (
     ModelCacheOperationState,
     ModelCacheUsage,

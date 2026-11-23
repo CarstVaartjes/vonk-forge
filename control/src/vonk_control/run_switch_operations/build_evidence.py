@@ -10,7 +10,7 @@ from vonk_agent_protocol import (
 )
 
 from ..disk_reservations import runtime_images_named_on_nodes
-from ..inventory_items import inventory_items
+from ..inventory.items import inventory_items
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,

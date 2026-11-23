@@ -42,10 +42,10 @@ or going never makes an existing run look like a different one. The firewall per
 TCP/UDP on that selected interface/address for native NCCL/RoCE; it does not
 grant arbitrary devices or claim GPUDirect RDMA.
 
-`inventory/reports/fabric.json` is committed as explicitly-labelled
-preconfiguration/staging evidence. Do not populate `inventory/cluster.toml` or
-replace its null post-configuration values until the probes below have been
-captured.
+The site inventory (`cluster.toml`) and the measured reports are the operator's
+own files, kept outside the repository and passed with `--inventory` and
+`--output`. Do not populate the inventory or replace its null
+post-configuration values until the probes below have been captured.
 
 ## Evidence and safety gate
 
@@ -192,8 +192,8 @@ ping -I "$iface" -M do -s "$((mtu - 28))" -c 3 "$peer"
 test -z "$(ip route show default dev "$iface")"
 ```
 
-The verified values above are recorded in `inventory/cluster.toml` and
-`inventory/reports/fabric.json`. Do not replace them using the management LAN
+The verified values above are recorded in the operator's inventory and fabric
+report. Do not replace them using the management LAN
 or link-local GIDs.
 
 ## RDMA, latency, error-counter, and NCCL acceptance
@@ -204,9 +204,9 @@ report; do not install host CUDA, MPI, NCCL, or benchmark source trees merely
 to reproduce this old evidence.
 
 On the existing site, run `scripts/validate-fabric` with `--inventory
-inventory/cluster.toml`, both ordered `--expected-node
+<operator inventory>/cluster.toml`, both ordered `--expected-node
 <SPARK_NODE_ID>=<INVENTORY_SSH_ALIAS>` bindings, and `--output
-inventory/reports/rdma-nccl.json` from the controller only after the recorded
+<operator reports>/rdma-nccl.json` from the controller only after the recorded
 postchecks pass. The wrapper is fail-closed: it validates the exact 200000 Mb/s
 physical-link state, net-device MTU 1500, both recorded HCA/GID/netdev
 consumers, and the RoCE path MTU 1024. It uses `-x 3` with `ib_write_bw`,
@@ -230,7 +230,7 @@ trees; it verifies the completed pinned artifacts before testing the fabric.
 Before a source tree is created, run the non-mutating worker-first gate:
 
 ```bash
-scripts/validate-fabric --inventory inventory/cluster.toml \
+scripts/validate-fabric --inventory <operator inventory>/cluster.toml \
   --expected-node '<SPARK_1_NODE_ID>=vonk-node-1' \
   --expected-node '<SPARK_2_NODE_ID>=vonk-node-2' \
   --output /tmp/rdma-nccl-preflight.json --nccl-preflight-only

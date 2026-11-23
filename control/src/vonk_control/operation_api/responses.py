@@ -20,13 +20,13 @@ from ..auth import CursorCodec, CursorError
 from ..bounded_json import BoundedJSONError, require_sequence
 from ..fleet_profile_contract import FleetProfileApplicationCancellationView
 from ..models import AgentOperation, AgentOperationAttempt
-from ..operation_contract import (
+from ..operations.contract import (
     OperationFailure,
     OperationFailureEvidence,
     OperationRecoveryAction,
     recovery_for_operation,
 )
-from ..operation_item_contract import (
+from ..operations.item_contract import (
     AGENT_OPERATION_KINDS,
     OperationItem,
     OperationResultFacts,
@@ -34,8 +34,8 @@ from ..operation_item_contract import (
     agent_receipt_for,
     operation_item,
 )
-from ..operation_progress import project_progress_for_state
-from ..operation_summary import operation_summary
+from ..operations.progress import project_progress_for_state
+from ..operations.summary import operation_summary
 from ..persisted_waits import read_wait
 from ..strict_json import (
     StrictModel,

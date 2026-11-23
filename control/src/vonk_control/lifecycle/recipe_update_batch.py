@@ -39,8 +39,8 @@ from vonk_agent_protocol import (
     WaitOwnerKind,
 )
 
-from .. import job_states
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
+from ..jobs import states as job_states
 from ..models import Job
 from ..persisted_waits import initialize_wait, lifecycle_wait, wait_due
 from ..recipe_update_contract import RecipeUpdateChild, RecipeUpdateDocument

@@ -88,9 +88,6 @@ from vonk_agent_protocol.package_upgrade import (
 from .. import (
     agent_operation_states as agent_operation_states,
 )
-from .. import (
-    job_states as job_states,
-)
 from ..agent_jobs import (
     AGENT_UPGRADE_RECOVERY_FENCE as AGENT_UPGRADE_RECOVERY_FENCE,
 )

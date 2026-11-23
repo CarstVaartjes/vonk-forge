@@ -22,7 +22,7 @@ _STORAGE = "control/src/vonk_control/unused_storage_collection/"
 # points (``common.spark_eviction_capacity``, ``service.relief_for_spark``), so
 # it is not exempt as a whole.
 COLLECTOR_MODULES = (
-    "control/src/vonk_control/catalog_revision_collection.py",
+    "control/src/vonk_control/catalog/revision_collection.py",
     "control/src/vonk_control/terminal_history_collection.py",
     f"{_STORAGE}removal.py",
     f"{_STORAGE}pressure.py",

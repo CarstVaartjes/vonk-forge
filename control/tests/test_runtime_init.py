@@ -352,7 +352,7 @@ def test_gateway_master_key_is_staged_only_outside_worker_volume(
     stage_compose_secrets(source, shared, gateway_master_key=api_key)
     assert not stale.exists()
 
-    from vonk_control.gateway_keys import MASTER_KEY_FILE
+    from vonk_control.gateway.keys import MASTER_KEY_FILE
 
     assert MASTER_KEY_FILE == runtime_init.GATEWAY_MASTER_KEY_PATH
 

@@ -804,7 +804,7 @@ def test_gpu_clock_uses_the_selected_snapshot_after_saved_edit_and_controller_re
 ) -> None:
     """Catches authoring changing a live cap, dropping assignment JSON, or idle inheritance."""
     from vonk_agent_protocol.gpu_clock import GpuClockRange, default_gpu_clock
-    from vonk_control.gpu_clock import selected_gpu_clock
+    from vonk_control.gpu.clock import selected_gpu_clock
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)

@@ -26,10 +26,7 @@ from vonk_agent_protocol import (
 from ..categorized_errors import (
     InvalidValue,
 )
-from ..job_documents import (
-    RecipeStartParent,
-    RunSwitchJobPayload,
-)
+from ..jobs.documents import RecipeStartParent, RunSwitchJobPayload
 from ..memory_reservations import (
     MEMORY_RESERVATION_KINDS,
     reviewed_run_memory_reservations,
@@ -38,7 +35,7 @@ from ..models import (
     Job,
     NodeInventorySnapshot,
 )
-from ..operation_blockers import SwapShortfallEvidence
+from ..operations.blockers import SwapShortfallEvidence
 from ..resource_planning import (
     ResourceReason,
     memory_reservation_kinds,
@@ -57,7 +54,7 @@ from ..run_switch_contract import (
     SparkFit,
     StopImpact,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .constants import (
     _CHANGE_EFFECTS_ADAPTER,
     _KNOBS_ADAPTER,

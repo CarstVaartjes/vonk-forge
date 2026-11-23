@@ -22,8 +22,8 @@ from vonk_agent_protocol.error_response import (
     RequestValidationProblem,
 )
 from vonk_agent_protocol.failure_evidence import LOG_TAIL_BYTES, FailureDiagnostics
-from vonk_control.catalog_sync import _empty_result
-from vonk_control.catalog_sync_contract import ManagedCatalogSyncResult
+from vonk_control.catalog.sync import _empty_result
+from vonk_control.catalog.sync_contract import ManagedCatalogSyncResult
 from vonk_control.fleet_profile_contract import (
     FleetProfileDefinitionView,
     FleetProfileInput,

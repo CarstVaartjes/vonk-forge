@@ -1,0 +1,966 @@
+"""Stable-cardinality, content-free OpenMetrics exporter."""
+
+from __future__ import annotations
+
+import math
+import re
+import threading
+from collections import defaultdict
+from collections.abc import Callable, Iterable, Sequence
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import (
+    CertificateState,
+    GatewayRouteState,
+    LifecycleState,
+    OperationProgress,
+)
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
+from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
+from vonk_agent_protocol.state_machines import CertificateRecordState
+
+from .. import agent_operation_states
+from ..compose_bundle import ComposeBundle
+from ..jobs import states as job_states
+from ..jobs.queue import without_agent_operation
+from ..models import (
+    AgentCertificate,
+    AgentNode,
+    AgentNodeContact,
+    AgentOperation,
+    AgentOperationAttempt,
+    Job,
+)
+from ..operations.progress import project_progress
+from ..strict_json import read_stored_model
+from ..terminal_history_collection import history_rows_past_grace
+from ..worker.memory_contract import WorkerMemoryReport, WorkerTraceState
+from .readings import (
+    engine_reading_lines,
+    host_reading_lines,
+    node_fact_lines,
+    node_facts,
+)
+
+if TYPE_CHECKING:
+    from ..fleet_projection import FleetSnapshot
+    from ..telemetry.samples import LiveEngineReading
+
+_NODE = re.compile(r"spk_[0-9a-f]{32}")
+_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
+_JOB_KINDS = frozenset(
+    {
+        "agent-upgrade",
+        "artifact-distribution",
+        "fleet.revoke",
+        ProfileChildJobKind.RUN_SWITCH.value,
+        ProfileChildJobKind.STOP.value,
+    }
+)
+_JOB_STATES = frozenset(
+    job_states.words(
+        LifecycleState.QUEUED,
+        LifecycleState.RUNNING,
+        LifecycleState.NEEDS_OPERATOR,
+        LifecycleState.SUCCEEDED,
+        LifecycleState.FAILED,
+    )
+)
+_ROUTE_STATES = frozenset(state.value for state in GatewayRouteState)
+_AGENT_STATES = frozenset({"active", "retired"})
+_AGENT_OPERATIONS = frozenset(
+    {
+        "agent.upgrade.v1",
+        "artifact.distribution.v1",
+        "recipe.build.v1",
+        "recipe.install",
+        "recipe.start",
+        "recipe.job.run.v1",
+        "recipe.stop",
+        "recipe.uninstall",
+        "recipe.reconcile",
+    }
+)
+_VERSION_BUCKETS = frozenset({"supported", "old", "new", "incompatible"})
+_CONNECTION_STATES = ("online", "offline", "unregistered")
+_CERTIFICATE_STATES = tuple(state.value for state in CertificateState)
+_INVENTORY_FRESHNESS = ("fresh", "stale", "missing")
+_TELEMETRY_FRESHNESS = ("live", "delayed", "stale", "missing")
+# Failures that ended within this window count as repeated. A recipe outcome
+# (one failed load) ages out; a platform fault keeps failing new work.
+RECENT_FAILURE_WINDOW = timedelta(hours=1)
+_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
+
+
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def protocol_version_bucket(
+    version: int | None,
+    *,
+    minimum: int = 1,
+    maximum: int = 1,
+) -> str:
+    if minimum < 1 or maximum < minimum:
+        raise ValueError("supported protocol range is invalid")
+    if version is None or isinstance(version, bool) or not isinstance(version, int):
+        return "incompatible"
+    if version < 0:
+        return "incompatible"
+    if version < minimum:
+        return "old"
+    if version > maximum:
+        return "new"
+    return "supported"
+
+
+def runnable_job_ages(
+    rows: Iterable[tuple[str, datetime, datetime | None]],
+    now: datetime,
+) -> dict[str, float]:
+    """Return the oldest queued-but-runnable age per job kind.
+
+    A queued job whose ``next_action_at`` is still in the future is
+    an intentional wait, so it is excluded: only work the durable queue could
+    actually issue now may age into the starvation signal.  This is what keeps
+    the alert honest while another job of a different kind is running.
+    """
+
+    ages: dict[str, float] = {}
+    for kind, created_at, due in rows:
+        if isinstance(due, datetime):
+            due_at = due if due.tzinfo else due.replace(tzinfo=UTC)
+            if due_at > now:
+                continue
+        created = created_at
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=UTC)
+        ages[kind] = max(ages.get(kind, 0.0), max(0.0, (now - created).total_seconds()))
+    return ages
+
+
+def read_runnable_job_ages(session: Session, now: datetime) -> dict[str, float]:
+    """The oldest queued age per kind among jobs the worker queue would claim.
+
+    A queued job whose work is an agent operation waits on that operation's
+    Spark (``queue.spark_busy``, a transfer in progress); the worker never
+    claims it, so it is not starved work.
+    """
+
+    rows = session.execute(
+        select(Job.kind, Job.created_at, Job.next_action_at).where(
+            Job.state.in_(job_states.words(LifecycleState.QUEUED)),
+            without_agent_operation(),
+        )
+    )
+    return runnable_job_ages(
+        ((row.kind, row.created_at, row.next_action_at) for row in rows), now
+    )
+
+
+def _label_value(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+
+
+def _worker_memory_lines(report: WorkerMemoryReport, age: float | None) -> list[str]:
+    """Bounded gauges from the worker's own report.
+
+    Components and cgroup kinds are enums, and the traced allocation list is
+    capped at 25 code locations that are replaced wholesale on each capture.
+    """
+
+    lines = [
+        "# HELP vonk_worker_rss_bytes Resident memory of the control worker process.",
+        "# TYPE vonk_worker_rss_bytes gauge",
+        f"vonk_worker_rss_bytes {report.rss_bytes}",
+        "# HELP vonk_worker_threads Threads in the control worker process.",
+        "# TYPE vonk_worker_threads gauge",
+        f"vonk_worker_threads {report.threads}",
+        "# HELP vonk_worker_python_allocated_blocks Live Python allocator blocks.",
+        "# TYPE vonk_worker_python_allocated_blocks gauge",
+        f"vonk_worker_python_allocated_blocks {report.python_allocated_blocks}",
+    ]
+    if report.peak_rss_bytes is not None:
+        lines += [
+            "# HELP vonk_worker_peak_rss_bytes Peak resident memory of the worker.",
+            "# TYPE vonk_worker_peak_rss_bytes gauge",
+            f"vonk_worker_peak_rss_bytes {report.peak_rss_bytes}",
+        ]
+    if report.children_rss_bytes is not None:
+        lines += [
+            "# HELP vonk_worker_children_rss_bytes Resident memory of worker child processes.",
+            "# TYPE vonk_worker_children_rss_bytes gauge",
+            f"vonk_worker_children_rss_bytes {report.children_rss_bytes}",
+        ]
+    if age is not None:
+        lines += [
+            "# HELP vonk_worker_memory_report_age_seconds Age of the worker memory report.",
+            "# TYPE vonk_worker_memory_report_age_seconds gauge",
+            f"vonk_worker_memory_report_age_seconds {age:g}",
+        ]
+    if report.cgroup:
+        lines += [
+            "# HELP vonk_worker_cgroup_bytes Worker container memory by kind (anon, file, shmem).",
+            "# TYPE vonk_worker_cgroup_bytes gauge",
+        ]
+        lines += [
+            f'vonk_worker_cgroup_bytes{{kind="{item.kind.value}"}} {item.bytes}'
+            for item in report.cgroup
+        ]
+    if report.components:
+        lines += [
+            "# HELP vonk_worker_component_entries Entries held by a named worker cache or queue.",
+            "# TYPE vonk_worker_component_entries gauge",
+        ]
+        lines += [
+            f'vonk_worker_component_entries{{component="{item.component.value}"}} '
+            f"{item.entries}"
+            for item in report.components
+        ]
+    trace = report.trace
+    lines += [
+        "# HELP vonk_worker_trace_state Allocation tracing state (off, sampling, captured).",
+        "# TYPE vonk_worker_trace_state gauge",
+    ]
+    lines += [
+        f'vonk_worker_trace_state{{state="{state.value}"}} '
+        f"{1 if state is trace.state else 0}"
+        for state in WorkerTraceState
+    ]
+    if trace.traced_bytes is not None:
+        lines += [
+            "# HELP vonk_worker_traced_bytes Python heap bytes seen by the last trace.",
+            "# TYPE vonk_worker_traced_bytes gauge",
+            f"vonk_worker_traced_bytes {trace.traced_bytes}",
+        ]
+    if trace.top:
+        lines += [
+            "# HELP vonk_worker_trace_growth_bytes Heap bytes gained at a code location since the last trace began.",
+            "# TYPE vonk_worker_trace_growth_bytes gauge",
+        ]
+        lines += [
+            f'vonk_worker_trace_growth_bytes{{rank="{rank}",'
+            f'location="{_label_value(item.location)}"}} {item.growth_bytes}'
+            for rank, item in enumerate(trace.top, start=1)
+        ]
+    return lines
+
+
+class MetricsRegistry:
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._fleet_source: Callable[[], FleetSnapshot] | None = None
+        self._engine_source: Callable[[], Sequence[LiveEngineReading]] | None = None
+        self._contact_source: Callable[[], list[str]] | None = None
+        self._jobs: dict[tuple[str, str], int] = {}
+        self._runnable_job_ages: dict[str, float] = {}
+        self._route_state = "unavailable"
+        self._backup_age: float | None = None
+        self._backup_successful = False
+        self._backup_restore_verified = False
+        self._backup_restore_verification_age: float | None = None
+        self._api_counts: dict[tuple[str, str], int] = defaultdict(int)
+        self._api_durations: dict[tuple[str, str], list[float]] = defaultdict(list)
+        self._agent_operations: dict[tuple[str, str], int] = {}
+        self._stalled_operations: dict[str, int] = {}
+        self._worker_memory: WorkerMemoryReport | None = None
+        self._worker_memory_age: float | None = None
+        self._compose_bundle: ComposeBundle | None = None
+        self._recent_job_failures: dict[str, int] = {}
+        self._recent_operation_failures: dict[str, int] = {}
+        self._history_rows_past_grace: int | None = None
+
+    def set_history_rows_past_grace(self, count: int) -> None:
+        with self._lock:
+            self._history_rows_past_grace = count
+
+    def set_compose_bundle(self, bundle: ComposeBundle | None) -> None:
+        with self._lock:
+            self._compose_bundle = bundle
+
+    def set_worker_memory(
+        self, report: WorkerMemoryReport | None, now: datetime | None = None
+    ) -> None:
+        """Replace the worker's last published memory report; ``None`` clears it."""
+
+        age = (
+            None
+            if report is None or now is None
+            else max(0.0, (_aware(now) - _aware(report.recorded_at)).total_seconds())
+        )
+        with self._lock:
+            self._worker_memory = report
+            self._worker_memory_age = age
+
+    @staticmethod
+    def _number(value: float, field: str) -> float:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or value < 0
+            or not math.isfinite(value)
+        ):
+            raise ValueError(f"{field} must be a nonnegative finite number")
+        return float(value)
+
+    def set_fleet_source(self, source: Callable[[], FleetSnapshot]) -> None:
+        """Bind the owner, never retain the facts returned by a scrape."""
+        self._fleet_source = source
+
+    def set_engine_source(
+        self, source: Callable[[], Sequence[LiveEngineReading]]
+    ) -> None:
+        """Bind the owner of live engine readings; a scrape reads it fresh."""
+        self._engine_source = source
+
+    @staticmethod
+    def _fleet_values(snapshot: FleetSnapshot):
+        """Project the typed FleetSnapshot without inventing node health."""
+
+        from ..fleet_projection import FleetSnapshot
+
+        if not isinstance(snapshot, FleetSnapshot):
+            raise TypeError("fleet metrics require a typed FleetSnapshot")
+        nodes: dict[
+            str,
+            tuple[
+                str,
+                str,
+                str,
+                str,
+                int | None,
+                int | None,
+                float | None,
+                float | None,
+            ],
+        ] = {}
+        for node in snapshot.nodes:
+            connection = node.connection
+            inventory = node.inventory
+            telemetry = node.telemetry
+            nodes[node.id] = (
+                connection.online_state,
+                connection.certificate_state,
+                "missing" if inventory is None else inventory.freshness,
+                "missing" if telemetry is None else telemetry.freshness,
+                None if inventory is None else inventory.host_memory_free_bytes,
+                None if inventory is None else inventory.disk_free_bytes,
+                None if telemetry is None else telemetry.age_seconds,
+                None if telemetry is None else telemetry.sample.gpu_utilization_percent,
+            )
+        return nodes, {
+            node.id: node.telemetry.sample
+            for node in snapshot.nodes
+            # A silent Spark contributes no value, so sums and energy skip it.
+            if node.telemetry is not None and node.telemetry.freshness != "stale"
+        }
+
+    def set_job_count(self, kind: str, state: str, count: int) -> None:
+        safe_kind = kind if kind in _JOB_KINDS else "other"
+        safe_state = state if state in _JOB_STATES else "other"
+        bounded = int(self._number(count, "job count"))
+        with self._lock:
+            self._jobs[(safe_kind, safe_state)] = bounded
+
+    def replace_job_counts(self, rows: Iterable[tuple[str, str, int]]) -> None:
+        """Atomically replace job counts with bounded, aggregated labels."""
+
+        jobs: dict[tuple[str, str], int] = defaultdict(int)
+        for kind, state, count in rows:
+            safe_kind = kind if kind in _JOB_KINDS else "other"
+            safe_state = state if state in _JOB_STATES else "other"
+            jobs[(safe_kind, safe_state)] += int(self._number(count, "job count"))
+        with self._lock:
+            self._jobs = dict(jobs)
+
+    def replace_runnable_job_ages(self, rows: Iterable[tuple[str, float]]) -> None:
+        """Atomically replace the oldest runnable queued age per bounded kind.
+
+        A queued job that is deliberately deferred (for example an observation
+        retry due in the future) is not runnable and must not appear here, so a
+        starvation alert can distinguish real eligible work from an intentional
+        wait even while another job of a different kind is running.
+        """
+
+        ages: dict[str, float] = {}
+        for kind, age in rows:
+            safe_kind = kind if kind in _JOB_KINDS else "other"
+            ages[safe_kind] = max(
+                ages.get(safe_kind, 0.0),
+                self._number(age, "runnable job age"),
+            )
+        with self._lock:
+            self._runnable_job_ages = ages
+
+    def set_route_state(self, state: str) -> None:
+        if state not in _ROUTE_STATES:
+            raise ValueError("route metric state is invalid")
+        with self._lock:
+            self._route_state = state
+
+    def set_backup_age(self, age_seconds: float | None) -> None:
+        age = None if age_seconds is None else self._number(age_seconds, "backup age")
+        with self._lock:
+            self._backup_age = age
+
+    def set_backup_successful(self, successful: bool) -> None:
+        if not isinstance(successful, bool):
+            raise TypeError("backup success must be a boolean")
+        with self._lock:
+            self._backup_successful = successful
+
+    def set_backup_restore_verified(self, verified: bool) -> None:
+        if not isinstance(verified, bool):
+            raise TypeError("backup restore verification must be a boolean")
+        with self._lock:
+            self._backup_restore_verified = verified
+
+    def set_backup_restore_verification_age(self, age_seconds: float | None) -> None:
+        age = (
+            None
+            if age_seconds is None
+            else self._number(age_seconds, "backup restore verification age")
+        )
+        with self._lock:
+            self._backup_restore_verification_age = age
+
+    def observe_api(
+        self, method: str, status_code: int, duration_seconds: float
+    ) -> None:
+        safe_method = method if method in _METHODS else "OTHER"
+        status_class = (
+            f"{status_code // 100}xx" if 100 <= status_code <= 599 else "other"
+        )
+        duration = self._number(duration_seconds, "API duration")
+        with self._lock:
+            key = (safe_method, status_class)
+            self._api_counts[key] += 1
+            self._api_durations[key].append(duration)
+
+    def replace_recent_failures(
+        self,
+        *,
+        jobs: Iterable[tuple[str, int]],
+        operations: Iterable[tuple[str, int]],
+    ) -> None:
+        """Replace the counts of work that ended failed within the window."""
+
+        def bounded(
+            rows: Iterable[tuple[str, int]], allowed: frozenset[str]
+        ) -> dict[str, int]:
+            counts = dict.fromkeys((*allowed, "other"), 0)
+            for kind, count in rows:
+                key = kind if kind in allowed else "other"
+                counts[key] += int(self._number(count, "failure count"))
+            return counts
+
+        safe_jobs = bounded(jobs, _JOB_KINDS)
+        safe_operations = bounded(operations, _AGENT_OPERATIONS)
+        with self._lock:
+            self._recent_job_failures = safe_jobs
+            self._recent_operation_failures = safe_operations
+
+    def _replace_agent_snapshot(
+        self,
+        *,
+        operations: dict[tuple[str, str], int],
+        stalled: dict[str, int],
+    ) -> None:
+        safe_operations: dict[tuple[str, str], int] = defaultdict(int)
+        for (operation, state), count in operations.items():
+            safe_operations[
+                (
+                    operation if operation in _AGENT_OPERATIONS else "other",
+                    state if state in _JOB_STATES else "other",
+                )
+            ] += int(self._number(count, "operation count"))
+        safe_stalled: dict[str, int] = defaultdict(int)
+        for operation, count in stalled.items():
+            safe_stalled[operation if operation in _AGENT_OPERATIONS else "other"] += (
+                int(self._number(count, "stalled operation count"))
+            )
+        with self._lock:
+            self._agent_operations = dict(safe_operations)
+            self._stalled_operations = dict(safe_stalled)
+
+    def render(self) -> str:
+        with self._lock:
+            jobs = dict(self._jobs)
+            runnable_job_ages = dict(self._runnable_job_ages)
+            route_state = self._route_state
+            backup_age = self._backup_age
+            backup_successful = self._backup_successful
+            backup_restore_verified = self._backup_restore_verified
+            backup_restore_verification_age = self._backup_restore_verification_age
+            api_counts = dict(self._api_counts)
+            api_durations = {
+                key: tuple(values) for key, values in self._api_durations.items()
+            }
+            agent_operations = dict(self._agent_operations)
+            stalled_operations = dict(self._stalled_operations)
+            recent_job_failures = dict(self._recent_job_failures)
+            recent_operation_failures = dict(self._recent_operation_failures)
+            history_rows = self._history_rows_past_grace
+            worker_memory = self._worker_memory
+            worker_memory_age = self._worker_memory_age
+            compose_bundle = self._compose_bundle
+        snapshot = None if self._fleet_source is None else self._fleet_source()
+        nodes, telemetry_samples = (
+            ({}, {}) if snapshot is None else self._fleet_values(snapshot)
+        )
+        contact_lines = [] if self._contact_source is None else self._contact_source()
+        lines = [
+            "# HELP vonk_route_state Current inference route state.",
+            "# TYPE vonk_route_state gauge",
+        ]
+        for state in sorted(_ROUTE_STATES):
+            lines.append(
+                f'vonk_route_state{{state="{state}"}} {1 if state == route_state else 0}'
+            )
+        if backup_age is not None:
+            lines.extend(
+                (
+                    "# HELP vonk_control_backup_age_seconds Age of the last successful encrypted control backup.",
+                    "# TYPE vonk_control_backup_age_seconds gauge",
+                    f"vonk_control_backup_age_seconds {backup_age:g}",
+                )
+            )
+        lines.extend(
+            (
+                "# HELP vonk_control_backup_successful Whether a published, gzip-tested control-plane backup (copied off-host when configured) has ever completed.",
+                "# TYPE vonk_control_backup_successful gauge",
+                f"vonk_control_backup_successful {int(backup_successful)}",
+                "# HELP vonk_control_backup_restore_verified Whether an isolated restore has ever succeeded.",
+                "# TYPE vonk_control_backup_restore_verified gauge",
+                f"vonk_control_backup_restore_verified {int(backup_restore_verified)}",
+            )
+        )
+        if backup_restore_verification_age is not None:
+            lines.extend(
+                (
+                    "# HELP vonk_control_backup_restore_verification_age_seconds Age of the last successful isolated backup restore verification.",
+                    "# TYPE vonk_control_backup_restore_verification_age_seconds gauge",
+                    f"vonk_control_backup_restore_verification_age_seconds {backup_restore_verification_age:g}",
+                )
+            )
+        lines.extend(
+            (
+                "# HELP vonk_node_connection_state Current authenticated Fleet connection state.",
+                "# TYPE vonk_node_connection_state gauge",
+                "# HELP vonk_node_certificate_state Current Fleet certificate validity state.",
+                "# TYPE vonk_node_certificate_state gauge",
+                "# HELP vonk_node_inventory_freshness Current admission inventory freshness.",
+                "# TYPE vonk_node_inventory_freshness gauge",
+                "# HELP vonk_node_telemetry_freshness Current telemetry freshness.",
+                "# TYPE vonk_node_telemetry_freshness gauge",
+                "# HELP vonk_node_telemetry_gpu_utilization_percent Current typed GPU utilization telemetry.",
+                "# TYPE vonk_node_telemetry_gpu_utilization_percent gauge",
+            )
+        )
+        for node_id, (
+            connection_state,
+            certificate_state,
+            inventory_freshness,
+            telemetry_freshness,
+            memory,
+            disk,
+            telemetry_age,
+            gpu_utilization,
+        ) in sorted(nodes.items()):
+            label = f'node_id="{node_id}"'
+            for state in _CONNECTION_STATES:
+                lines.append(
+                    f'vonk_node_connection_state{{{label},state="{state}"}} '
+                    f"{1 if state == connection_state else 0}"
+                )
+            for state in _CERTIFICATE_STATES:
+                lines.append(
+                    f'vonk_node_certificate_state{{{label},state="{state}"}} '
+                    f"{1 if state == certificate_state else 0}"
+                )
+            for state in _INVENTORY_FRESHNESS:
+                lines.append(
+                    f'vonk_node_inventory_freshness{{{label},state="{state}"}} '
+                    f"{1 if state == inventory_freshness else 0}"
+                )
+            for state in _TELEMETRY_FRESHNESS:
+                lines.append(
+                    f'vonk_node_telemetry_freshness{{{label},state="{state}"}} '
+                    f"{1 if state == telemetry_freshness else 0}"
+                )
+            if memory is not None:
+                lines.append(
+                    f"vonk_node_inventory_host_memory_free_bytes{{{label}}} {memory}"
+                )
+            if disk is not None:
+                lines.append(f"vonk_node_inventory_disk_free_bytes{{{label}}} {disk}")
+            if telemetry_age is not None:
+                lines.append(
+                    f"vonk_node_telemetry_age_seconds{{{label}}} {telemetry_age:g}"
+                )
+            if gpu_utilization is not None:
+                lines.append(
+                    f"vonk_node_telemetry_gpu_utilization_percent{{{label}}} "
+                    f"{gpu_utilization:g}"
+                )
+        for name, description in (
+            ("gpu_memory_used_bytes", "GPU memory used in bytes"),
+            ("host_memory_used_bytes", "Host memory used in bytes"),
+            ("gpu_temperature_c", "GPU temperature in Celsius"),
+        ):
+            metric = f"vonk_node_telemetry_{name}"
+            lines.extend((f"# HELP {metric} {description}.", f"# TYPE {metric} gauge"))
+            for node_id, sample in sorted(telemetry_samples.items()):
+                if name == "gpu_temperature_c":
+                    value = sample.gpu_temperature_c
+                else:
+                    total, free = (
+                        (sample.gpu_memory_total_bytes, sample.gpu_memory_free_bytes)
+                        if name == "gpu_memory_used_bytes"
+                        else (sample.memory_total_bytes, sample.memory_available_bytes)
+                    )
+                    value = None if total is None or free is None else total - free
+                if value is not None:
+                    lines.append(f'{metric}{{node_id="{node_id}"}} {value}')
+        lines.extend(host_reading_lines(telemetry_samples))
+        if snapshot is not None:
+            lines.extend(node_fact_lines(node_facts(snapshot)))
+        if self._engine_source is not None:
+            lines.extend(engine_reading_lines(self._engine_source()))
+        lines.extend(
+            (
+                "# HELP vonk_jobs Number of control jobs by bounded kind and state.",
+                "# TYPE vonk_jobs gauge",
+            )
+        )
+        for (kind, state), count in sorted(jobs.items()):
+            lines.append(f'vonk_jobs{{kind="{kind}",state="{state}"}} {count}')
+        lines.extend(
+            (
+                "# HELP vonk_runnable_job_age_seconds Age of the oldest runnable queued control job by kind.",
+                "# TYPE vonk_runnable_job_age_seconds gauge",
+            )
+        )
+        for kind, age in sorted(runnable_job_ages.items()):
+            lines.append(f'vonk_runnable_job_age_seconds{{kind="{kind}"}} {age:g}')
+        lines.extend(
+            (
+                "# HELP vonk_agent_state Current durable outbound-agent lifecycle state.",
+                "# TYPE vonk_agent_state gauge",
+                "# HELP vonk_agent_version_compatibility Agent protocol compatibility bucket.",
+                "# TYPE vonk_agent_version_compatibility gauge",
+                "# HELP vonk_agent_last_seen_age_seconds Age of the latest authenticated agent contact.",
+                "# TYPE vonk_agent_last_seen_age_seconds gauge",
+                "# HELP vonk_agent_certificate_expiry_seconds Seconds until the active agent certificate expires.",
+                "# TYPE vonk_agent_certificate_expiry_seconds gauge",
+            )
+        )
+        lines.extend(contact_lines)
+        lines.extend(
+            (
+                "# HELP vonk_agent_operations Durable agent operations by bounded kind and state.",
+                "# TYPE vonk_agent_operations gauge",
+            )
+        )
+        for (operation, state), count in sorted(agent_operations.items()):
+            lines.append(
+                f'vonk_agent_operations{{operation="{operation}",state="{state}"}} {count}'
+            )
+        if history_rows is not None:
+            lines.extend(
+                (
+                    "# HELP vonk_history_rows_past_grace Ended history past grace that the collector selection admits; plan-referenced and evidence-kept rows are still counted.",
+                    "# TYPE vonk_history_rows_past_grace gauge",
+                    f"vonk_history_rows_past_grace {history_rows}",
+                )
+            )
+        # Every bounded kind is emitted, zero included, so a series never
+        # vanishes and Prometheus never judges a previous process's sample.
+        lines.extend(
+            (
+                "# HELP vonk_recent_job_failures Control jobs that ended failed within the last hour.",
+                "# TYPE vonk_recent_job_failures gauge",
+            )
+        )
+        for kind, count in sorted(recent_job_failures.items()):
+            lines.append(f'vonk_recent_job_failures{{kind="{kind}"}} {count}')
+        lines.extend(
+            (
+                "# HELP vonk_recent_agent_operation_failures Agent operations that ended failed within the last hour.",
+                "# TYPE vonk_recent_agent_operation_failures gauge",
+            )
+        )
+        for operation, count in sorted(recent_operation_failures.items()):
+            lines.append(
+                f'vonk_recent_agent_operation_failures{{operation="{operation}"}} {count}'
+            )
+        lines.extend(
+            (
+                "# HELP vonk_stalled_operations Running agent operations whose declared progress has stopped.",
+                "# TYPE vonk_stalled_operations gauge",
+            )
+        )
+        for operation, count in sorted(stalled_operations.items()):
+            lines.append(f'vonk_stalled_operations{{operation="{operation}"}} {count}')
+        lines.extend(
+            (
+                "# HELP vonk_agent_operation_lease_age_seconds Age since the active operation lease was last updated.",
+                "# TYPE vonk_agent_operation_lease_age_seconds gauge",
+            )
+        )
+        lines.extend(
+            (
+                "# HELP vonk_api_requests_total API responses by method and status class.",
+                "# TYPE vonk_api_requests_total counter",
+            )
+        )
+        for (method, status_class), count in sorted(api_counts.items()):
+            labels = f'method="{method}",status_class="{status_class}"'
+            lines.append(f"vonk_api_requests_total{{{labels}}} {count}")
+            values = api_durations[(method, status_class)]
+            cumulative = 0
+            for bucket in _BUCKETS:
+                cumulative = sum(value <= bucket for value in values)
+                lines.append(
+                    f'vonk_api_request_duration_seconds_bucket{{{labels},le="{bucket:g}"}} {cumulative}'
+                )
+            lines.append(
+                f'vonk_api_request_duration_seconds_bucket{{{labels},le="+Inf"}} {len(values)}'
+            )
+            lines.append(
+                f"vonk_api_request_duration_seconds_sum{{{labels}}} {sum(values):g}"
+            )
+            lines.append(
+                f"vonk_api_request_duration_seconds_count{{{labels}}} {len(values)}"
+            )
+        if worker_memory is not None:
+            lines.extend(_worker_memory_lines(worker_memory, worker_memory_age))
+        if compose_bundle is not None:
+            labels = (
+                f'expected="{compose_bundle.expected}",'
+                f'running="{compose_bundle.running}"'
+            )
+            lines.extend(
+                (
+                    "# HELP vonk_nas_compose_bundle_current Whether the NAS Compose file matches this Controller release.",
+                    "# TYPE vonk_nas_compose_bundle_current gauge",
+                    f"vonk_nas_compose_bundle_current{{{labels}}} {int(compose_bundle.current)}",
+                )
+            )
+        lines.append("# EOF")
+        return "\n".join(lines) + "\n"
+
+
+class OperationalMetricsCollector:
+    """Project bounded metrics from existing durable control-plane state."""
+
+    def __init__(
+        self,
+        registry: MetricsRegistry,
+        sessions: sessionmaker[Session],
+        *,
+        clock: Callable[[], datetime],
+        protocol_minimum: int = AGENT_PROTOCOL_VERSION,
+        protocol_maximum: int = AGENT_PROTOCOL_VERSION,
+    ) -> None:
+        if protocol_minimum < 1 or protocol_maximum < protocol_minimum:
+            raise ValueError("supported protocol range is invalid")
+        self._registry = registry
+        self._sessions = sessions
+        self._clock = clock
+        self._protocol_minimum = protocol_minimum
+        self._protocol_maximum = protocol_maximum
+        registry._contact_source = self.render_contacts
+
+    def refresh(self) -> None:
+        now = _aware(self._clock())
+        with self._sessions() as session:
+            history_rows = history_rows_past_grace(session, now)
+            operation_rows = list(
+                session.execute(
+                    select(AgentOperation.kind, AgentOperation.state, func.count())
+                    .group_by(AgentOperation.kind, AgentOperation.state)
+                    .order_by(AgentOperation.kind, AgentOperation.state)
+                )
+            )
+            # A failed row's last update is when it ended failed.
+            since = now - RECENT_FAILURE_WINDOW
+            recent_job_failures = list(
+                session.execute(
+                    select(Job.kind, func.count())
+                    .where(
+                        Job.state.in_(job_states.words(LifecycleState.FAILED)),
+                        Job.updated_at >= since,
+                    )
+                    .group_by(Job.kind)
+                )
+            )
+            recent_operation_failures = list(
+                session.execute(
+                    select(AgentOperation.kind, func.count())
+                    .where(
+                        AgentOperation.state == agent_operation_states.FAILED,
+                        AgentOperation.updated_at >= since,
+                    )
+                    .group_by(AgentOperation.kind)
+                )
+            )
+            progress_rows = list(
+                session.execute(
+                    select(AgentOperation.kind, AgentOperationAttempt.progress)
+                    .join(
+                        AgentOperationAttempt,
+                        (AgentOperationAttempt.operation_id == AgentOperation.id)
+                        & (
+                            AgentOperationAttempt.attempt
+                            == AgentOperation.current_attempt
+                        ),
+                    )
+                    .where(
+                        AgentOperation.state == LifecycleState.RUNNING,
+                        AgentOperationAttempt.state == LifecycleState.RUNNING,
+                        AgentOperationAttempt.progress.is_not(None),
+                    )
+                    .order_by(AgentOperation.kind, AgentOperation.id)
+                )
+            )
+        operations = {
+            (kind, state): int(count) for kind, state, count in operation_rows
+        }
+        # Stalled work is derived from the same advisory projection the operator
+        # API already exposes: a running operation that declared measurable
+        # progress and has stopped advancing.  A malformed stored snapshot is
+        # skipped rather than failing the whole scrape.
+        stalled: dict[str, int] = defaultdict(int)
+        for kind, progress in progress_rows:
+            try:
+                projected = project_progress(
+                    read_stored_model(OperationProgress, progress), now
+                )
+            except (TypeError, ValueError):
+                continue
+            if projected.activity == "possibly_stalled":
+                stalled[kind] += 1
+        self._registry.set_history_rows_past_grace(history_rows)
+        self._registry.replace_recent_failures(
+            jobs=((kind, int(count)) for kind, count in recent_job_failures),
+            operations=(
+                (kind, int(count)) for kind, count in recent_operation_failures
+            ),
+        )
+        self._registry._replace_agent_snapshot(
+            operations=operations,
+            stalled=dict(stalled),
+        )
+
+    def render_contacts(self) -> list[str]:
+        """Read per-node contact and active lease facts for this scrape only."""
+        now = _aware(self._clock())
+        with self._sessions() as session:
+            agent_nodes = list(
+                session.execute(
+                    select(
+                        AgentNode.node_id,
+                        AgentNode.state,
+                        AgentNodeContact.protocol_version,
+                        AgentNodeContact.last_seen_at,
+                    )
+                    .outerjoin(
+                        AgentNodeContact, AgentNodeContact.node_id == AgentNode.node_id
+                    )
+                    .order_by(AgentNode.node_id)
+                )
+            )
+            certificates = list(
+                session.scalars(
+                    select(AgentCertificate)
+                    .where(
+                        AgentCertificate.state == CertificateRecordState.ACTIVE,
+                        AgentCertificate.revoked_at.is_(None),
+                    )
+                    .order_by(
+                        AgentCertificate.node_id,
+                        AgentCertificate.not_after.desc(),
+                        AgentCertificate.generation.desc(),
+                    )
+                )
+            )
+            lease_rows = list(
+                session.execute(
+                    select(
+                        AgentOperation.node_id,
+                        AgentOperation.kind,
+                        AgentOperation.updated_at,
+                    )
+                    .join(
+                        AgentOperationAttempt,
+                        (AgentOperationAttempt.operation_id == AgentOperation.id)
+                        & (
+                            AgentOperationAttempt.attempt
+                            == AgentOperation.current_attempt
+                        ),
+                    )
+                    .where(
+                        AgentOperation.state == LifecycleState.RUNNING,
+                        AgentOperationAttempt.state == LifecycleState.RUNNING,
+                    )
+                    .order_by(
+                        AgentOperation.node_id, AgentOperation.kind, AgentOperation.id
+                    )
+                )
+            )
+        active_certificates: dict[str, AgentCertificate] = {}
+        for certificate in certificates:
+            active_certificates.setdefault(certificate.node_id, certificate)
+        nodes = {}
+        for node in agent_nodes:
+            certificate = active_certificates.get(node.node_id)
+            nodes[node.node_id] = (
+                node.state,
+                protocol_version_bucket(
+                    node.protocol_version,
+                    minimum=self._protocol_minimum,
+                    maximum=self._protocol_maximum,
+                ),
+                None
+                if node.last_seen_at is None
+                else max(0.0, (now - _aware(node.last_seen_at)).total_seconds()),
+                None
+                if certificate is None
+                else max(0.0, (_aware(certificate.not_after) - now).total_seconds()),
+            )
+        leases: dict[tuple[str, str], float] = {}
+        for node_id, operation, updated_at in lease_rows:
+            key = (node_id, operation)
+            age = max(0.0, (now - _aware(updated_at)).total_seconds())
+            leases[key] = max(leases.get(key, 0.0), age)
+
+        lines: list[str] = []
+        for node_id, (state, version, seen, expiry) in sorted(nodes.items()):
+            if _NODE.fullmatch(node_id) is None:
+                continue
+            state = state if state in _AGENT_STATES else "other"
+            lines.append(f'vonk_agent_state{{node_id="{node_id}",state="{state}"}} 1')
+            lines.append(
+                f'vonk_agent_version_compatibility{{node_id="{node_id}",version_bucket="{version}"}} 1'
+            )
+            if seen is not None:
+                lines.append(
+                    f'vonk_agent_last_seen_age_seconds{{node_id="{node_id}"}} {seen:g}'
+                )
+            if expiry is not None:
+                lines.append(
+                    f'vonk_agent_certificate_expiry_seconds{{node_id="{node_id}"}} {expiry:g}'
+                )
+        for (node_id, operation), age in sorted(leases.items()):
+            if _NODE.fullmatch(node_id) is None:
+                continue
+            operation = operation if operation in _AGENT_OPERATIONS else "other"
+            lines.append(
+                f'vonk_agent_operation_lease_age_seconds{{node_id="{node_id}",operation="{operation}"}} {age:g}'
+            )
+        return lines

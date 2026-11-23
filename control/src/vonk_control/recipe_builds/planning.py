@@ -18,10 +18,10 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import PrebuiltImage
 
-from ..catalog_revision_contract import RecipeRevisionProjection
+from ..catalog.revision_contract import RecipeRevisionProjection
 from ..disk_reservations import outstanding_disk_reservation_bytes
-from ..gpu_health import gpu_health_reason
-from ..inventory_items import runtime_value
+from ..gpu.health import gpu_health_reason
+from ..inventory.items import runtime_value
 from ..models import AgentNode, CatalogDocumentRevision
 from ..prebuilt_images import (
     PREBUILT_KEY_MISMATCH,
@@ -36,7 +36,7 @@ from ..recipe_execution_contract import (
     build_plan_document,
     build_policy_document,
 )
-from ..runtime_adapters import RuntimeAdapter
+from ..runtime.adapters import RuntimeAdapter
 from ..source_policy import (
     dockerfile_base_images,
     inspect_build_source_policy,

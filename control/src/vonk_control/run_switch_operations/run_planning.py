@@ -55,7 +55,7 @@ from ..run_switch_contract import (
 from ..run_switch_observation_contract import (
     RunSwitchObservedImageIdentity,
 )
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from ..strict_json import read_stored_model
 from .constants import _active_recipe_revision, _is_artifact_phase
 from .identity_helpers import _primary_model_digest
@@ -586,7 +586,7 @@ class RunPlanningMixin:
                     ),
                 )
             if request.gpu_clock is not None:
-                from ..gpu_clock_validation import assess_gpu_clock
+                from ..gpu.clock_validation import assess_gpu_clock
 
                 clock_blockers, clock_warnings = assess_gpu_clock(
                     session, node_ids, request.gpu_clock

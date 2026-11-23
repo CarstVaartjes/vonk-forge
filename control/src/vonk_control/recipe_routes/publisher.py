@@ -17,7 +17,7 @@ from vonk_agent_protocol.route_activation import SupervisorPhase
 from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN
 
 from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
-from ..litellm import (
+from ..gateway.litellm import (
     LiteLlmConfig,
     LiteLlmGeneration,
     LiteLlmPolicy,
@@ -26,12 +26,11 @@ from ..litellm import (
     render_config,
     render_empty_config,
 )
-from ..presence import ManagementAddressPolicy, PresenceError
-from ..route_bundle_contract import (
+from ..gateway.route_bundle_contract import (
     RouteAcceptedModelPolicy,
     RouteBundleDocument,
 )
-from ..route_runtime import (
+from ..gateway.route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     AtomicRouteBundlePublisher,
     RouteRuntimeError,
@@ -39,6 +38,7 @@ from ..route_runtime import (
     recipe_route_run_id,
     verify_active_route_bundle,
 )
+from ..presence import ManagementAddressPolicy, PresenceError
 from .shared import (
     _NODE_ID,
     _UPSTREAM_MODEL,

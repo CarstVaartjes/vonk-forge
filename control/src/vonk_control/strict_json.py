@@ -19,7 +19,7 @@ from vonk_agent_protocol import UnknownOutcomeError
 from vonk_agent_protocol.wire_model import StrictJSONModel as ProtocolStrictJSONModel
 
 from .http_errors import MAX_RETRY_AFTER_SECONDS
-from .platform_observation_errors import (
+from .observation.platform_errors import (
     ObservationCaptureUnavailable,
     observation_capture_unavailable_response,
 )

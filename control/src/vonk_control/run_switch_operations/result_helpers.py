@@ -26,10 +26,8 @@ from ..lifecycle.evidence import (
 from ..models import (
     Job,
 )
-from ..operation_blockers import (
-    OperationBlocker,
-)
-from ..operation_progress import sample_progress
+from ..operations.blockers import OperationBlocker
+from ..operations.progress import sample_progress
 from ..persisted_waits import read_wait
 from ..recipe_lifecycle_contract import RecipeLifecycleResult
 from ..recipe_operations import (

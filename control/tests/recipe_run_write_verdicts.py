@@ -26,7 +26,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "agent_jobs/observation_receipts.py": {
         "adopt_observation_receipt": (
-            "907a98f4c3a0c8a4d01a82845e9a5b99607389ad5308755885e1e33c46cffe97",
+            "f57e0f77ab25d966222fc927817d886720f9c143d7ae3ba782e67299f752694b",
             "HTTP/background wait: middleware or per-candidate order sweep classifies conflicts; rollback retains receipt for next pass",
         ),
     },
@@ -148,7 +148,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/start.py": {
         "_start_once": (
-            "d4483cb139547a72919fc5cbc59981c1f6de2d6612178065cf4a9c65acb3bb39",
+            "47b9dec23186d0206a96641ab4c0c760115cc5b34336611e240fa42c7fefae3f",
             "retain: Start admission binds run and capacity",
         ),
     },

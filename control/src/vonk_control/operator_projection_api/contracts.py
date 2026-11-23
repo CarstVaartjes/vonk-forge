@@ -13,7 +13,7 @@ from vonk_agent_protocol import (
 )
 
 from ..agent_api import EnrollmentGrantResponse
-from ..enrollment_contract import (
+from ..enrollment.contract import (
     EnrollmentGrantStatus,
     EnrollmentId,
     EnrollmentObservationOutcome,

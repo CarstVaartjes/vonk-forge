@@ -51,7 +51,7 @@ from vonk_control.distribution import (
 )
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.inventory_items import (
+from vonk_control.inventory.items import (
     inventory_items,
     runtime_value,
 )
@@ -77,7 +77,7 @@ from vonk_control.recipe_start_payloads import (
     bind_compiled_execution_plan,
 )
 from vonk_control.run_admission import RunAdmissionService
-from vonk_control.runtime_adapters import resolve_runtime_adapter
+from vonk_control.runtime.adapters import resolve_runtime_adapter
 from vonk_control.workload_intent import (
     allocate_workload_intent,
     take_workload_intent,
@@ -4388,7 +4388,7 @@ def test_wrong_fence_cannot_finish_work_and_current_fence_can(service) -> None:
 
 def test_cancelled_build_waits_for_platform_cleanup_as_an_observation(service) -> None:
     """A rebuildable child cannot turn pending cleanup into a human gate."""
-    from vonk_control.job_documents import RecipeBuildParent
+    from vonk_control.jobs.documents import RecipeBuildParent
     from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
 
     jobs, sessions, clock = service
@@ -4609,7 +4609,7 @@ def _assert_parent_ending_admit_fresh_request(jobs, sessions, clock, owner):
 def test_stored_parent_identity_normalizes_full_state_and_rejects_damage(service):
     """Catch hashing full Controller state instead of its canonical typed identity."""
     from vonk_control.agent_jobs.stored import column_message, column_value
-    from vonk_control.job_documents import RecipeStartParent
+    from vonk_control.jobs.documents import RecipeStartParent
 
     _jobs, sessions, clock = service
     job = parent(sessions, clock)
@@ -4746,7 +4746,7 @@ def test_gpu_fault_between_admission_and_claim_waits_then_recovers(service) -> N
     # cleanup must remain claimable and a healthy observation must unblock it.
     from vonk_agent_protocol import ProjectionCode
     from vonk_agent_protocol.inventory import GpuHealth
-    from vonk_control.inventory_repository import (
+    from vonk_control.inventory.repository import (
         InventoryRepository,
         NodeInventoryReport,
     )
@@ -4853,7 +4853,7 @@ def test_ended_hold_clears_the_stamped_deadline_of_install_build_and_job_not_sta
 def test_reusable_preflight_survives_operation_history_collection(service) -> None:
     """Catches treating a historical command receipt as current capability storage."""
     from sqlalchemy import delete
-    from vonk_control.runtime_preflight import (
+    from vonk_control.runtime.preflight import (
         admission_blockers,
         latest_result,
         request_digest,
@@ -4894,7 +4894,7 @@ def test_reusable_preflight_survives_operation_history_collection(service) -> No
 def test_failed_child_end_wake_preserves_committed_receipt(service):
     """A failed owner wake cannot turn an already committed report into loss."""
     from vonk_control.run_switch_operations.child_wake import ChildEndWake
-    from vonk_control.runtime_preflight import latest_result, request_digest
+    from vonk_control.runtime.preflight import latest_result, request_digest
 
     from .test_runtime_preflight import request as preflight_request
     from .test_runtime_preflight import result as passing_result

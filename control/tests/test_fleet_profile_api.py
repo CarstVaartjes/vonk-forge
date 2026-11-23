@@ -22,7 +22,7 @@ from vonk_control.api import create_app
 from vonk_control.auth import MUTATION_ROLES, Actor, TokenCodec
 from vonk_control.fleet_profile_contract import FleetProfileApplicationView
 from vonk_control.fleet_profiles import FleetProfileConflict, FleetProfileService
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.models import (
     AgentNode,
     AgentNodeContact,

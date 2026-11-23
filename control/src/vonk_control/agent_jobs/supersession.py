@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
     SupersedeCode,
 )
 
-from .. import agent_operation_states, job_states
+from .. import agent_operation_states
 from ..admission_locking import (
     AdmissionRowLock,
     acquire_admission_keys,
@@ -26,6 +26,7 @@ from ..admission_locking import (
 )
 from ..agent_operation_facts import aware as _aware
 from ..categorized_errors import InvalidValue
+from ..jobs import states as job_states
 from ..lifecycle import CancelRequested
 from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown

@@ -47,7 +47,7 @@ from vonk_control.distribution_executor import (
 )
 from vonk_control.distribution_executor import children as executor_module
 from vonk_control.distribution_executor import durable as durable_executor_module
-from vonk_control.job_documents import (
+from vonk_control.jobs.documents import (
     DistributionJobPayload,
     DistributionTransferProgress,
 )
@@ -69,7 +69,7 @@ from vonk_control.models import (
     RecipeBuild,
 )
 from vonk_control.operation_api import merge_operation_providers
-from vonk_control.operation_item_contract import OperationRow, operation_item
+from vonk_control.operations.item_contract import OperationRow, operation_item
 from vonk_control.run_switch_contract import (
     ArtifactStorageImpact,
     RunSwitchDistributionChildResult,

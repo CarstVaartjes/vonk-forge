@@ -12,14 +12,14 @@ from sqlalchemy import create_engine, delete, event, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.auth import CursorCodec
-from vonk_control.catalog_entities import (
+from vonk_control.catalog.entities import (
     CatalogEntityService,
 )
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog.revision_contract import (
     RecipeRevisionProjection,
     read_catalog_projection,
 )
-from vonk_control.catalog_service import CatalogService
+from vonk_control.catalog.service import CatalogService
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import (
     Base,
@@ -620,7 +620,7 @@ def test_imported_recipe_recreates_missing_lookup_root(
     session: Session,
     service: CatalogEntityService,
 ) -> None:
-    from vonk_control.catalog_service import CatalogService
+    from vonk_control.catalog.service import CatalogService
 
     model = _model()
     _resolve(service, model)

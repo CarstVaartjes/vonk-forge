@@ -19,7 +19,7 @@ from .lifecycle.evidence import (
 from .lifecycle.run_switch import (
     set_member_state,
 )
-from .operation_progress import project_progress
+from .operations.progress import project_progress
 from .run_switch_contract import (
     RunSwitchMemberProgress,
     RunSwitchMemberReceipt,

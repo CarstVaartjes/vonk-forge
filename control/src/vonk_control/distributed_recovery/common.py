@@ -33,14 +33,14 @@ from vonk_forge_contracts import RecipeDefinition, read_recipe
 from ..agent_jobs import release_owned_reservations_in_session
 from ..categorized_errors import UnsettledOutcome
 from ..distributed_lifecycle import DistributedRecoveryInvalid
-from ..job_documents import (
+from ..gateway.litellm import LiteLlmGeneration, ServedModelInfo
+from ..jobs.documents import (
     DistributedRecoveryMarker,
     RecipeStartParent,
     RecipeStopParent,
     RecoveryStartItem,
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..litellm import LiteLlmGeneration, ServedModelInfo
 from ..models import (
     STOPPABLE_NOT_RUNNING_RUN_STATES,
     STOPPABLE_RUN_STATES,
@@ -52,7 +52,7 @@ from ..models import (
     ResourceReservation,
     RunNode,
 )
-from ..operation_blockers import BlockingOperation, make_blocker
+from ..operations.blockers import BlockingOperation, make_blocker
 from ..persisted_waits import read_wait, schedule_wait, write_wait
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -63,8 +63,8 @@ from ..recipe_execution_contract import (
 from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
 from ..recovery_policy import DISTRIBUTED_RECOVERY, schedule
 from ..reservation_owners import run_has_live_operation
-from ..stored_json import read_row_column
-from ..stored_states import CatalogRevisionState
+from ..stored.json_values import read_row_column
+from ..stored.states import CatalogRevisionState
 
 """Durable controller coordination for distributed recipe recovery."""
 

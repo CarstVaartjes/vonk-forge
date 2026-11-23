@@ -26,7 +26,7 @@ from ..http_errors import temporary_http_answer
 from ..models import RecipeBuild
 from ..operator_acceptance import ReceiptPolicy, operator_acceptance
 from ..runtime_image_preparation import IMAGE_CACHE_DIRECTORY
-from ..stored_states import RecipeBuildState
+from ..stored.states import RecipeBuildState
 from ..strict_json import _retry_later_response
 from .common import (
     _DISTRIBUTION_ERROR_CODE,

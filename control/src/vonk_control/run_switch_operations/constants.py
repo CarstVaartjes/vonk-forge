@@ -16,7 +16,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
 from vonk_forge_contracts.recipe import Scalar
 
-from .. import job_states
+from ..jobs import states as job_states
 from ..models import (
     CatalogDocumentRevision,
 )
@@ -31,7 +31,7 @@ from ..run_switch_contract import (
     RunSwitchReasonSeverity,
     RunSwitchSubphase,
 )
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 
 _ARTIFACT_PHASES = frozenset({ProfileChildPhase.TRANSFER, ProfileChildPhase.VERIFY})
 

@@ -19,7 +19,7 @@ from vonk_agent_protocol.swap import (
 )
 from vonk_forge_contracts.memory_admission import evaluate_memory_admission
 
-from ..operation_blockers import SwapShortfallEvidence
+from ..operations.blockers import SwapShortfallEvidence
 from .reasons import _reason, _same_memory_kind
 from .types import (
     CapacityPlan,

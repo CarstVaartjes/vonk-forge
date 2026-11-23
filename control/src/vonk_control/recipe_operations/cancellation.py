@@ -16,7 +16,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .. import agent_operation_states, job_states
+from .. import agent_operation_states
 from ..agent_jobs import (
     _JsonFlagIsTrue,
 )
@@ -24,6 +24,7 @@ from ..categorized_errors import (
     InvalidValue,
     MissingRecord,
 )
+from ..jobs import states as job_states
 from ..lifecycle import Outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
@@ -32,10 +33,7 @@ from ..models import (
     AgentOperation,
     Job,
 )
-from ..recipe_build_cancellation import (
-    BuildConsumerError,
-    build_cancellation,
-)
+from ..recipe_builds.cancellation import BuildConsumerError, build_cancellation
 from ..recipe_lifecycle_contract import (
     RecipeOperationCancellationResult,
 )
@@ -45,7 +43,7 @@ from ..recipe_progress import (
 from ..recipe_progress import (
     _parent_intent as _parent_intent,  # noqa: PLC0414 -- shared helper export
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value
 from .constants import _WORKLOAD_INTENT_KINDS
 from .errors import RecipeOperationConflict, RecipeRequestInvalid

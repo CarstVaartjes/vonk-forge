@@ -8,8 +8,8 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, OperatorActionName
-from vonk_control import job_states
-from vonk_control.jobs import JobService
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.queue import JobService
 from vonk_control.lifecycle import Lifecycle, State, transition
 from vonk_control.lifecycle.job import JobAdapter
 from vonk_control.lifecycle.types import (

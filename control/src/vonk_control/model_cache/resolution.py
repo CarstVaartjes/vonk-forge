@@ -19,8 +19,8 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.model import ModelReference
 
 from ..bounded_retry import bounded_attempts
-from ..catalog_queries import WITHOUT_DOCUMENT, active_head_revision
-from ..catalog_revision_contract import (
+from ..catalog.queries import WITHOUT_DOCUMENT, active_head_revision
+from ..catalog.revision_contract import (
     CatalogRevisionContractError,
     read_shared_catalog_document,
 )
@@ -34,7 +34,7 @@ from ..model_cache_contract import (
 )
 from ..models import CatalogDocumentRevision, ModelCacheSet
 from ..revision_images import RevisionImage, revision_images
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from .artifacts import (
     ArtifactSetManifest,
     ArtifactSpec,

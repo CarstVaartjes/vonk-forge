@@ -13,7 +13,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.inventory_items import runtime_value
+from vonk_control.inventory.items import runtime_value
 from vonk_control.models import (
     AgentNode,
     FleetProfileApplication,

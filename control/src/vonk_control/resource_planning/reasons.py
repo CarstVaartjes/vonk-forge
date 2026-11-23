@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from ..operation_blockers import SwapShortfallEvidence
+from ..operations.blockers import SwapShortfallEvidence
 from .types import ResourceReason
 
 

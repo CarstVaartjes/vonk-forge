@@ -15,22 +15,18 @@ from vonk_agent_protocol import WaitOwnerKind, WaitReason, WaitResumeCondition
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 
 from .. import agent_operation_states
-from ..agent_jobs.contracts import CLAIM_LEASE_SECONDS, holds_claim
-from ..agent_jobs.retry import agent_upgrade_in_flight
-from ..agent_jobs.stored import column_field
 from ..agent_operation_facts import attempt_is_live, aware
-from ..gpu_health import GPU_HEALTH_CODES
+from ..gpu.health import GPU_HEALTH_CODES
 from ..models import AgentOperation, AgentOperationAttempt
-from ..operation_blockers import (
-    BlockingOperation,
-    ProgressAlarmCode,
-    make_blocker,
-)
-from ..operation_progress import stored_progress
+from ..operations.blockers import BlockingOperation, ProgressAlarmCode, make_blocker
+from ..operations.progress import stored_progress
 from ..persisted_waits import read_wait, write_wait
 from ..settings import PROFILE_STALL_WINDOW_SECONDS
 from ..stall_window import last_progress_at
 from ..wait_contract import QueueWait
+from .contracts import CLAIM_LEASE_SECONDS, holds_claim
+from .retry import agent_upgrade_in_flight
+from .stored import column_field
 
 
 def record_queue_waits(

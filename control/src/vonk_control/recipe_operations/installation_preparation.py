@@ -55,7 +55,7 @@ from ..recipe_execution_contract import (
 from ..recipe_progress import (
     _parent_intent as _parent_intent,  # noqa: PLC0414 -- shared helper export
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value
 from .errors import RecipeRetryLater, retry_later_unless_deterministic
 from .interfaces import RecipeOperationView

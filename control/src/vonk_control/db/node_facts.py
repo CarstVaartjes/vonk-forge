@@ -81,7 +81,7 @@ def move_runtime_facts(connection: Connection) -> None:
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
     from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 
-    from ..inventory_items_contract import (
+    from ..inventory.items_contract import (
         AgentInventoryItems,
         InventorySnapshotKind,
         PreflightInventoryItem,
@@ -242,7 +242,7 @@ def move_resource_facts(connection: Connection) -> None:
     from vonk_agent_protocol import canonical_message
     from vonk_agent_protocol.telemetry import HostResourceSample
 
-    from ..inventory_items_contract import InventorySnapshotKind
+    from ..inventory.items_contract import InventorySnapshotKind
     from ..models import NodeInventoryResourceSnapshot
 
     inspector = inspect(connection)

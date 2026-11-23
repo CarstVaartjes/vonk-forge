@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..runtime_writable_paths import EngineTelemetryContract, RuntimeWritablePath
+from ..runtime.writable_paths import EngineTelemetryContract, RuntimeWritablePath
 
 
 @dataclass(frozen=True, slots=True)

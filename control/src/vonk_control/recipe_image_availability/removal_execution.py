@@ -20,7 +20,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from .. import job_states, model_cache_states
+from .. import model_cache_states
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
@@ -34,6 +34,7 @@ from ..artifact_reference_scan import (
 )
 from ..categorized_errors import InvalidValue
 from ..failure_classification import error_code
+from ..jobs import states as job_states
 from ..logging import log_event
 from ..model_cache import (
     ModelCacheError,
@@ -46,7 +47,7 @@ from ..model_cache_contract import (
 from ..models import (
     Job,
 )
-from ..operation_contract import (
+from ..operations.contract import (
     AvailabilityOperationFailure,
     sanitize_failure_evidence,
 )
@@ -57,7 +58,7 @@ from ..recipe_image_removal_contract import (
 from ..runtime_image_preparation import (
     RuntimeImagePreparationError,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .contracts import (
     _LOGGER,

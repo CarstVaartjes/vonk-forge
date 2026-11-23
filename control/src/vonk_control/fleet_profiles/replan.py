@@ -22,7 +22,7 @@ from ..lifecycle.evidence import Residue
 from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..lifecycle.types import State as _LifecycleState
 from ..models import CatalogDocumentRevision, FleetProfile, FleetProfileApplication
-from ..operation_blockers import OperationBlocker, bound_blockers, make_blocker
+from ..operations.blockers import OperationBlocker, bound_blockers, make_blocker
 from ..persisted_waits import schedule_wait
 from ..settings import PROFILE_STALL_WINDOW_SECONDS
 from ..stall_window import Verdict, progress_verdict

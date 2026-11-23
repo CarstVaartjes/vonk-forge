@@ -14,7 +14,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.contracts import AgentUpgradePayload
 
-from .. import agent_operation_states, job_states
+from .. import agent_operation_states
 from ..agent_jobs import (
     schedule_agent_upgrade_retry,
 )
@@ -25,7 +25,8 @@ from ..categorized_errors import (
     InvalidValue,
     MissingRecord,
 )
-from ..job_operator_receipts import (
+from ..jobs import states as job_states
+from ..jobs.operator_receipts import (
     JobOperatorReceipt,
     record_job_operator_receipt,
     replay_job_operator_receipt,

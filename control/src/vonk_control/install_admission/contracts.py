@@ -19,7 +19,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 
-from ..operation_blockers import SwapShortfallEvidence
+from ..operations.blockers import SwapShortfallEvidence
 from ..recipe_execution_contract import (
     StoredAdmissionReason,
     StoredInstallationPlan,

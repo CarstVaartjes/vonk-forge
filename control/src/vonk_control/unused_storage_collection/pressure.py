@@ -21,7 +21,7 @@ from ..artifact_lifecycle import (
 )
 from ..capabilities import CapabilityUnavailableError
 from ..exact_integer_storage import DecimalIntegerOrderKey
-from ..inventory_repository import INVENTORY_MAX_AGE
+from ..inventory.repository import INVENTORY_MAX_AGE
 from ..logging import log_event
 from ..models import (
     ArtifactLifecycleGate,

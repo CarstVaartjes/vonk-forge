@@ -23,15 +23,14 @@ from ..admission_locking import (
     node_admission_key,
 )
 from ..disk_reservations import outstanding_disk_reservation_bytes
-from ..gpu_health import gpu_health_reason
-from ..inventory_items import runtime_value
+from ..gpu.health import gpu_health_reason
+from ..inventory.items import runtime_value
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,
     RecipeBuild,
     ResourceReservation,
 )
-from ..recipe_build_receipts import CompletedRecipeBuild
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     build_plan_document,
@@ -39,7 +38,7 @@ from ..recipe_execution_contract import (
     parse_stored_build_policy,
 )
 from ..spark_disk import spark_free_bytes
-from ..stored_states import CatalogRevisionState, RecipeBuildState
+from ..stored.states import CatalogRevisionState, RecipeBuildState
 from .common import (
     _BUILD_OBSERVATION_DELAYS,
     _OCI_DIGEST,
@@ -57,6 +56,7 @@ from .common import (
     _valid_succeeded_receipt,
     _validate_builder,
 )
+from .receipts import CompletedRecipeBuild
 
 if TYPE_CHECKING:
     from .service import RecipeBuildService

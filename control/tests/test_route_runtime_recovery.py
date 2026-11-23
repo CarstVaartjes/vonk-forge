@@ -13,15 +13,15 @@ from vonk_agent_protocol import (
     UnknownError,
 )
 from vonk_agent_protocol.route_activation import ActivationMarker, SupervisorPhase
-from vonk_control.lifecycle.types import Lifecycle
-from vonk_control.litellm import render_empty_config
-from vonk_control.route_bundle_contract import RouteBundleDocument
-from vonk_control.route_runtime import (
+from vonk_control.gateway.litellm import render_empty_config
+from vonk_control.gateway.route_bundle_contract import RouteBundleDocument
+from vonk_control.gateway.route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     AtomicRouteBundlePublisher,
     FileSupervisorAcknowledger,
     verify_active_route_bundle,
 )
+from vonk_control.lifecycle.types import Lifecycle
 
 from .non_blocking import assert_ended_without_blocking
 

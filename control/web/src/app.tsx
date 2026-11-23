@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useOptionalAuth } from "./auth";
 import type { ControlApi } from "./api/types";
-import { AppShell } from "./components/app-shell";
-import { ToastProvider } from "./components/toast";
-import { VersionLine } from "./components/version-line";
-import { appRoutes, type AppRoute } from "./components/app-shell";
+import { AppShell } from "./components/ui/app-shell";
+import { ToastProvider } from "./components/ui/toast";
+import { VersionLine } from "./components/ui/version-line";
+import { appRoutes, type AppRoute } from "./components/ui/app-shell";
 import type { LiveStatus } from "./hooks/fleet-stream-state";
 import { ActivityPage } from "./pages/activity";
 import { OverviewPage } from "./pages/overview";

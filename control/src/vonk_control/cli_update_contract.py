@@ -12,17 +12,17 @@ from fastapi import FastAPI, Response
 from pydantic import Field
 
 from .build_identity import contract_fingerprint
-from .operation_api import bounded_error_responses
-from .platform_observation import (
+from .observation.platform import (
     ApiRuntimeObservation,
     CapturedPlatformObservation,
     Digest,
     Source,
 )
-from .platform_observation_errors import (
+from .observation.platform_errors import (
     ObservationCaptureUnavailable,
     observation_capture_unavailable_response,
 )
+from .operation_api import bounded_error_responses
 from .strict_json import StrictModel
 
 

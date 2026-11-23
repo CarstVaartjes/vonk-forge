@@ -7,10 +7,13 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from vonk_control import route_runtime
+from vonk_control.gateway import route_runtime
+from vonk_control.gateway.route_runtime import (
+    ActivationMarker,
+    AtomicRouteBundlePublisher,
+)
 from vonk_control.recipe_routes import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes import publisher as publisher_module
-from vonk_control.route_runtime import ActivationMarker, AtomicRouteBundlePublisher
 
 from .observed_actions import observe_action
 from .test_route_runtime import _verified_bundle

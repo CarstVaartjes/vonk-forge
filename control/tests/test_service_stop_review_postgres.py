@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, canonical_message
-from vonk_control.job_documents import RecipeStopParent
+from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentNode,
@@ -578,12 +578,12 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
         RecipeStopResult,
     )
     from vonk_control.agent_jobs import AgentJobService
+    from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
     from vonk_control.presence import ManagementAddressPolicy
     from vonk_control.recipe_routes import (
         AtomicRecipeRoutePublisher,
         RecipeRouteService,
     )
-    from vonk_control.route_runtime import AtomicRouteBundlePublisher
 
     from .agent_fences import fenced_operation
     from .profile_stop_readmission_support import start_on_released_gang

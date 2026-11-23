@@ -14,7 +14,7 @@ from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode
 
 from .models import AgentOperation, AgentOperationAttempt, RecipeInstallation
-from .stored_json import read_row_column
+from .stored.json_values import read_row_column
 
 if TYPE_CHECKING:
     from .fleet_projection.common import ProjectionReason

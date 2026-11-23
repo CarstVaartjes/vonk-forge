@@ -9,12 +9,12 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.jobs import JobService
+from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
+from vonk_control.jobs.queue import JobService
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base
 from vonk_control.presence import ManagementAddressPolicy
-from vonk_control.route_runtime import AtomicRouteBundlePublisher
-from vonk_control.worker import assemble_production_worker
+from vonk_control.worker.assembly import assemble_production_worker
 
 
 def test_the_production_worker_tick_removes_an_abandoned_partial(

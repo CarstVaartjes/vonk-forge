@@ -1,7 +1,7 @@
 """The documents of an agent upgrade rollout: package, intent, plan, result.
 
 ``jobs.payload`` and ``jobs.result`` of an ``agent-upgrade`` job hold these.
-They live apart from :mod:`vonk_control.job_documents` so the operation
+They live apart from :mod:`vonk_control.jobs.documents` so the operation
 projection can read them without importing every job family.
 """
 

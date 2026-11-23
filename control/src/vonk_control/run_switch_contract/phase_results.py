@@ -18,7 +18,7 @@ from vonk_agent_protocol.agent_words import ProfileChildPhase
 
 from ..distribution_assignment import NodeDistributionAssignment
 from ..model_cache_contract import ModelCacheDownloadResult
-from ..operation_blockers import MAX_BLOCKERS, OperationBlocker
+from ..operations.blockers import MAX_BLOCKERS, OperationBlocker
 from ..run_switch_identity_contract import NodeId, UuidId
 from ..runtime_image_preparation import RuntimeImageReceipt
 from ..strict_json import StrictModel

@@ -12,13 +12,14 @@ from typing import NoReturn, Self
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_control import build_identity, platform_observation
+from vonk_control import build_identity
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.build_identity import RuntimeBuildIdentity
 from vonk_control.models import Base, ControlProcessHeartbeat
-from vonk_control.platform_observation import PlatformObserver
-from vonk_control.worker import WorkerHeartbeatRecorder
+from vonk_control.observation import platform as platform_observation
+from vonk_control.observation.platform import PlatformObserver
+from vonk_control.worker.liveness import WorkerHeartbeatRecorder
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import ControlClient

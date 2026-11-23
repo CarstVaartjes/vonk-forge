@@ -20,10 +20,10 @@ from vonk_agent_protocol import (
 )
 from vonk_control.artifact_lifecycle import ArtifactReferenceUnsettled
 from vonk_control.failure_classification import disposition
-from vonk_control.job_documents import AvailabilityJobPayload
+from vonk_control.jobs.documents import AvailabilityJobPayload
 from vonk_control.lifecycle.image_availability import preparation_deadline
 from vonk_control.models import Base, Job
-from vonk_control.operation_contract import (
+from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )

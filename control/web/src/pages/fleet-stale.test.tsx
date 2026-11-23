@@ -1,9 +1,9 @@
-vi.mock("../components/metrics-chart", () => ({ MetricsChart: () => null }));
+vi.mock("../components/ui/metrics-chart", () => ({ MetricsChart: () => null }));
 import { act, render, screen } from "@testing-library/react";
 import { vi } from "vitest";
 import { ApiClient } from "../api/client";
 import type { ControlApi, VisualFleetNode, VisualFleetSnapshot } from "../api/types";
-import { ToastProvider } from "../components/toast";
+import { ToastProvider } from "../components/ui/toast";
 import { OverviewPage } from "./overview";
 
 const node: VisualFleetNode = {

@@ -21,7 +21,7 @@ from .coordinator_contract import CoordinatorFailureEvidence
 from .failure_classification import disposition, error_code, error_detail
 from .logging import redact_text
 from .models import CoordinatorFailure
-from .operation_blockers import BlockingOperation, make_blocker
+from .operations.blockers import BlockingOperation, make_blocker
 from .persisted_waits import read_wait, write_wait
 
 _RETRY_FIRST_SECONDS = 5

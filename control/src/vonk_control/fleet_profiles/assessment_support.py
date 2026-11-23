@@ -30,7 +30,7 @@ from ..fleet_profile_contract import (
 )
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..lifecycle.types import State as _LifecycleState
-from ..operation_blockers import (
+from ..operations.blockers import (
     OperationBlocker,
     StorageReliefEvidence,
     bound_blockers,

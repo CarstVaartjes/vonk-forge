@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.testclient import TestClient
 from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
 from vonk_control.agent_api import common
-from vonk_control.api import application, create_app
+from vonk_control.api import create_app, middleware
 from vonk_control.auth import AgentIdentity, TokenCodec
 from vonk_control.http_errors import temporary_http_answer
 
@@ -20,7 +20,7 @@ from vonk_control.http_errors import temporary_http_answer
 def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     # Routes exercise the production exception handler and middleware, without
     # starting workers or requiring a database for these HTTP-only boundaries.
-    monkeypatch.setattr(application, "active_agent_identity", lambda *_: True)
+    monkeypatch.setattr(middleware, "active_agent_identity", lambda *_: True)
     app = create_app(
         jobs=cast(Any, object()),
         tokens=TokenCodec(b"t" * 32),

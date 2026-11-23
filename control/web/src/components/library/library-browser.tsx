@@ -1,0 +1,163 @@
+import { SkeletonBlock } from "../ui/skeleton";
+import { useEffect, useMemo, useState } from "react";
+import type { MouseEvent } from "react";
+import type {
+  ControlApi,
+  LibraryViewRecipeDetail,
+  LibraryViewSnapshot,
+  VisualFleetSnapshot,
+} from "../../api/types";
+import { modelKey } from "../../lib/library-route";
+import { LibraryPath, type LibraryRoute } from "../../lib/library-route";
+import { LibraryModelsView } from "./library-models-view";
+import { LibraryProfilesView } from "./library-profiles-view";
+import { LibraryRecipeAuthority } from "./library-recipe-detail";
+import {
+  buildLibraryRecipeRecords,
+  EMPTY_LIBRARY_WORKCELL_FILTERS,
+  libraryFiltersFromSearch,
+  libraryFiltersToSearch,
+  LibraryWorkcell,
+} from "./library-workcell";
+
+export type LibrarySubview = "models" | "profiles" | "recipes";
+
+export function LibraryBrowser({
+  api,
+  detail,
+  detailError,
+  detailLoading,
+  fleet,
+  onBusyChange,
+  onNavigate,
+  onNavigatePath,
+  onQueryChange,
+  onRefresh,
+  onRetryDetail,
+  path,
+  query,
+  route,
+  snapshot,
+  subview,
+}: {
+  api: ControlApi;
+  detail?: LibraryViewRecipeDetail;
+  detailError: string;
+  detailLoading: boolean;
+  fleet?: VisualFleetSnapshot;
+  onBusyChange?(busy: boolean): void;
+  onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void;
+  onNavigatePath?(path: string, replace?: boolean): void;
+  onQueryChange(value: string): void;
+  onRefresh(signal: AbortSignal): Promise<void>;
+  onRetryDetail(): void;
+  path: string;
+  query: string;
+  route: LibraryRoute;
+  snapshot: LibraryViewSnapshot;
+  subview: LibrarySubview;
+}) {
+  const [filters, setFilters] = useState(() =>
+    libraryFiltersFromSearch(new URL(path, location.origin).searchParams),
+  );
+  const records = useMemo(() => buildLibraryRecipeRecords(snapshot), [snapshot]);
+  useEffect(() => {
+    setFilters(libraryFiltersFromSearch(new URL(path, location.origin).searchParams));
+  }, [path]);
+  useEffect(() => {
+    if (!filters.model || snapshot.models.some((model) => modelKey(model.model) === filters.model))
+      return;
+    const next = { ...filters, model: "" };
+    setFilters(next);
+    if (onNavigatePath) {
+      const url = new URL(path, location.origin);
+      url.searchParams.delete("model");
+      onNavigatePath(`${url.pathname}${url.search}`, true);
+    }
+  }, [filters, onNavigatePath, path, snapshot]);
+  function updateFilters(next: typeof filters) {
+    setFilters(next);
+    if (!onNavigatePath) return;
+    const url = new URL(path, location.origin);
+    onNavigatePath(
+      `${url.pathname}?${libraryFiltersToSearch(next, url.searchParams).toString()}`,
+      true,
+    );
+  }
+  if (subview === "profiles")
+    return (
+      <LibraryProfilesView
+        api={api}
+        entries={records}
+        fleet={fleet}
+        onBusyChange={onBusyChange}
+        onNavigate={onNavigate}
+      />
+    );
+  if (subview === "models")
+    return (
+      <LibraryModelsView
+        api={api}
+        entries={records}
+        fleet={fleet}
+        filters={filters}
+        modelInventory={snapshot.models}
+        onFiltersChange={updateFilters}
+        onNavigate={onNavigate}
+        onNavigatePath={onNavigatePath}
+        onQueryChange={onQueryChange}
+        onRefresh={onRefresh}
+        path={path}
+        query={query}
+      />
+    );
+  if (route.kind === LibraryPath.RECIPES) {
+    if (detailLoading)
+      return (
+        <section className="library-detail-state">
+          <SkeletonBlock label="Loading the exact Recipe detail" />
+        </section>
+      );
+    if (detailError)
+      return (
+        <section className="library-detail-state is-error" role="alert">
+          <p>{detailError}</p>
+          <button type="button" className="button secondary" onClick={onRetryDetail}>
+            Retry Recipe detail
+          </button>
+        </section>
+      );
+    if (detail)
+      return (
+        <LibraryRecipeAuthority
+          api={api}
+          detail={detail}
+          onBusyChange={onBusyChange}
+          onNavigate={onNavigate}
+        />
+      );
+    return (
+      <section className="library-detail-state" role="status">
+        Recipe detail is not available.
+      </section>
+    );
+  }
+  return (
+    <LibraryWorkcell
+      api={api}
+      detail={detail}
+      detailError={detailError}
+      detailLoading={detailLoading}
+      fleet={fleet}
+      filters={filters ?? EMPTY_LIBRARY_WORKCELL_FILTERS}
+      onFiltersChange={updateFilters}
+      onNavigate={onNavigate}
+      onQueryChange={onQueryChange}
+      onRefresh={onRefresh}
+      onRetryDetail={onRetryDetail}
+      query={query}
+      route={route}
+      snapshot={snapshot}
+    />
+  );
+}

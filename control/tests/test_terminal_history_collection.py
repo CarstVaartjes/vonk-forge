@@ -16,8 +16,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LifecycleState, ReservationState
 from vonk_control import terminal_history_collection
-from vonk_control.catalog_revision_collection import INTERVAL
-from vonk_control.metrics import MetricsRegistry, OperationalMetricsCollector
+from vonk_control.catalog.revision_collection import INTERVAL
+from vonk_control.metrics.registry import MetricsRegistry, OperationalMetricsCollector
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,

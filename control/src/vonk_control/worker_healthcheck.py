@@ -49,7 +49,7 @@ def verify_worker_ready(
 def main() -> None:
     from .db import build_engine, session_factory
     from .settings import Settings
-    from .worker import current_worker_instance_id
+    from .worker.liveness import current_worker_instance_id
 
     settings = Settings.from_env_and_secrets()
     verify_worker_ready(

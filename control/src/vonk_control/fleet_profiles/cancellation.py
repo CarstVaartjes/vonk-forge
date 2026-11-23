@@ -39,7 +39,7 @@ from ..models import (
     FleetProfileApplication,
     FleetProfileSelection,
 )
-from ..operation_blockers import make_blocker
+from ..operations.blockers import make_blocker
 from ..persisted_waits import read_wait, schedule_wait, typed_wait_reason
 from ..settings import PROFILE_STALL_WINDOW_SECONDS
 from ..stall_window import stall_deadline

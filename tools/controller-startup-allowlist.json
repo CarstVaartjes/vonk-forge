@@ -54,7 +54,7 @@
       ]
     },
     {
-      "path": "control/src/vonk_control/worker.py",
+      "path": "control/src/vonk_control/worker/assembly.py",
       "scope": "assemble_production_worker",
       "pure_or_core_calls": [
         "AgentUpgradeService",
@@ -92,7 +92,7 @@
       ]
     },
     {
-      "path": "control/src/vonk_control/worker.py",
+      "path": "control/src/vonk_control/worker/__main__.py",
       "scope": "__main__",
       "pure_or_core_calls": [
         "AgentJobService",

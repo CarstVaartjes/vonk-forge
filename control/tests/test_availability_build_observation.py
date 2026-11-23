@@ -18,13 +18,15 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import (
     AgentOperation as WireAgentOperation,
 )
-from vonk_control import availability_production
-from vonk_control.availability_production import build_recipe_image_availability
+from vonk_control.availability_production import production as availability_production
+from vonk_control.availability_production.production import (
+    build_recipe_image_availability,
+)
 from vonk_control.bounded_json import require_mapping
-from vonk_control.job_documents import AvailabilityJobPayload, RecipeBuildParent
+from vonk_control.jobs.documents import AvailabilityJobPayload, RecipeBuildParent
 from vonk_control.models import AgentOperation, Job, NodeInventorySnapshot, RecipeBuild
 from vonk_control.oci_image_store import OciImageStore
-from vonk_control.operation_contract import AvailabilityOperationFailure
+from vonk_control.operations.contract import AvailabilityOperationFailure
 from vonk_control.prebuilt_images import PrebuiltImageImporter
 from vonk_control.recipe_image_availability import (
     BuildUnsettled,
@@ -32,7 +34,7 @@ from vonk_control.recipe_image_availability import (
 )
 from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
-from vonk_control.stored_json import read_row_column
+from vonk_control.stored.json_values import read_row_column
 from vonk_control.strict_json import read_stored_model, serialize_json_value
 
 from .recipe_removal_review_support import remove_after_review

@@ -14,9 +14,9 @@ from vonk_agent_protocol import (
     RunSwitchCode,
 )
 
-from .. import job_states
 from ..bounded_json import require_integer
 from ..failure_classification import error_code, error_detail, is_definite
+from ..jobs import states as job_states
 from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
@@ -26,10 +26,8 @@ from ..model_cache import ModelCacheService
 from ..models import (
     Job,
 )
-from ..operation_blockers import (
-    bound_blockers,
-)
-from ..stored_json import read_row_column
+from ..operations.blockers import bound_blockers
+from ..stored.json_values import read_row_column
 from .constants import _LOGGER, _OPERATION_KINDS
 from .errors import RunSwitchOperationConflict
 from .evidence_waits import wake_evidence_waits

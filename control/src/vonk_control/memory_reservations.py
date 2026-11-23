@@ -25,7 +25,7 @@ from .resource_planning import (
     memory_reservation_kinds,
 )
 from .run_switch_contract import StopImpact
-from .stored_states import RecipeBuildState
+from .stored.states import RecipeBuildState
 
 MEMORY_RESERVATION_KINDS = ("host-memory", "gpu-memory", "unified-memory")
 

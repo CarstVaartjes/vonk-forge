@@ -6,7 +6,7 @@ from datetime import timedelta
 from sqlalchemy import select
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
-from vonk_control.inventory_items import record_preflight
+from vonk_control.inventory.items import record_preflight
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -15,7 +15,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     Job,
 )
-from vonk_control.runtime_preflight import (
+from vonk_control.runtime.preflight import (
     mandatory_capabilities,
     recipe_requirements,
     request_digest,

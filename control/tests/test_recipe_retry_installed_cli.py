@@ -16,7 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.reason_codes import RecipeImageCode
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.models import Base, CatalogDocument, Job
 from vonk_control.recipe_availability_intent import RecipeRetryIntent
 from vonk_control.recipe_image_availability import (

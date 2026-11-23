@@ -19,7 +19,7 @@ from vonk_control.fleet_events import (
     FleetEventRepository,
 )
 from vonk_control.models import Base, FleetEventCursor, FleetStreamEvent, Job
-from vonk_control.stored_json import write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
 
 NOW = datetime(2026, 8, 15, 12, tzinfo=UTC)
 WRITERS = 8

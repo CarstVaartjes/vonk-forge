@@ -15,7 +15,7 @@ from vonk_control.install_admission import (
     installation_plan_digest_from_stored_document,
 )
 from vonk_control.install_admission.identity import _primary_model_sha256
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )

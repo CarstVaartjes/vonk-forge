@@ -72,15 +72,10 @@ from vonk_control.control_limits import (
     MAX_CONTROL_DOCUMENT_BYTES as MAX_CONTROL_DOCUMENT_BYTES,
 )
 
-from .. import (
-    job_states as job_states,
-)
 from ..auth import (
     MUTATION_ROLES as MUTATION_ROLES,
 )
-from ..catalog_queries import (
-    active_head_revision as active_head_revision,
-)
+from ..catalog.queries import active_head_revision as active_head_revision
 from ..categorized_errors import (
     InvalidValue as InvalidValue,
 )
@@ -120,13 +115,11 @@ from ..operation_api import (
 from ..operation_api import (
     _activity_keyset_filter as _activity_keyset_filter,
 )
-from ..operation_contract import (
+from ..operations.contract import (
     AvailabilityOperationFailure as AvailabilityOperationFailure,
 )
-from ..operation_item_contract import (
-    OperationItem as OperationItem,
-)
-from ..operation_item_contract import (
+from ..operations.item_contract import OperationItem as OperationItem
+from ..operations.item_contract import (
     OperationOwnerReference as OperationOwnerReference,
 )
 from ..recipe_availability_intent import (

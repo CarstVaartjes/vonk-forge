@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_control.artifact_reference_scan import model_set_reference_findings
 from vonk_control.auth import CursorCodec
-from vonk_control.catalog_service import CatalogService
+from vonk_control.catalog.service import CatalogService
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache.resolution import resolve_recipe_set
 from vonk_control.models import (

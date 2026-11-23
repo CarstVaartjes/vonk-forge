@@ -385,7 +385,7 @@ def test_old_receipt_cannot_revive_newer_attempt_or_intent(
 def test_fresh_controller_contract_registration_starts_without_import_cycle():
     """Catches a receipt-handler import breaking a fresh Controller process."""
     subprocess.run(
-        [sys.executable, "-c", "import vonk_control.stored_columns"],
+        [sys.executable, "-c", "import vonk_control.stored.columns"],
         check=True,
         capture_output=True,
         text=True,
@@ -454,7 +454,7 @@ def test_an_invalid_retained_receipt_cannot_starve_another_exact_transfer(
 ):
     """Catches a bounded sweep stuck examining the same unusable history row."""
     from vonk_control.agent_jobs import results as ingress
-    from vonk_control.job_documents import DistributionJobPayload
+    from vonk_control.jobs.documents import DistributionJobPayload
     from vonk_control.run_switch_operations import _stored_job_plan
     from vonk_control.strict_json import read_stored_model
 

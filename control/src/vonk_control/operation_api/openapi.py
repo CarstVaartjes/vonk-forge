@@ -9,7 +9,7 @@ from typing import Annotated
 from fastapi import FastAPI
 from pydantic.json_schema import JsonSchemaValue
 
-from ..stored_json import ExternalPassthrough
+from ..stored.json_values import ExternalPassthrough
 from .constants import _ADMIN_OPERATION_IDS, _HTTP_METHODS
 
 type ExternalSchemaDocument = Annotated[
@@ -140,7 +140,7 @@ def _stored_component_schemas() -> tuple[
     from pydantic import BaseModel
     from pydantic.json_schema import JsonSchemaMode, models_json_schema
 
-    from ..stored_json import bindings, contract_models
+    from ..stored.json_values import bindings, contract_models
 
     stored = {binding.key: contract_models(binding) for binding in bindings().values()}
     members: list[tuple[type[BaseModel], JsonSchemaMode]] = [

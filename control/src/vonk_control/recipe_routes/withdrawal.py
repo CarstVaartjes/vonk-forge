@@ -19,10 +19,8 @@ from vonk_agent_protocol import RouteState as RunRouteState
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.route_activation import SupervisorPhase
 
-from ..litellm import (
-    LiteLlmGeneration,
-    ServedModelInfo,
-)
+from ..gateway.litellm import LiteLlmGeneration, ServedModelInfo
+from ..gateway.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 from ..logging import log_event
 from ..models import (
     Job,
@@ -32,9 +30,6 @@ from ..models import (
 )
 from ..persisted_waits import schedule_wait
 from ..recipe_execution_contract import RouteWithdrawalFollowUp
-from ..route_runtime import (
-    RECIPE_ROUTE_AUTHORITY_ID,
-)
 from .shared import (
     _FOLLOW_UP_REASONS,
     _HEALTH_RECOVERY_ERROR,

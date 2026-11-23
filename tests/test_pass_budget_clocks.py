@@ -20,7 +20,7 @@ SUPPORT = ROOT / "control/tests/pass_budget_clocks.py"
 # do not yield a partial collection pass; their tests own retry/stall clocks.
 WAIT_DEADLINE_MODULES = {
     "vonk_control.artifact_blob_store",
-    "vonk_control.route_runtime",
+    "vonk_control.gateway.route_runtime",
     "vonk_control.recipe_image_availability.requests",
     "vonk_control.exact_integer_adoption",
     "vonk_control.model_cache.download_admission",
@@ -117,13 +117,27 @@ def has_clock_fixture(conftest: ast.Module, support: ast.Module) -> bool:
     return False
 
 
+def _init_is_empty(module: str) -> bool:
+    init = ROOT / "control/src" / module.replace(".", "/") / "__init__.py"
+    if not module.startswith("vonk_control.") or not init.is_file():
+        return False
+    body = ast.parse(init.read_text()).body
+    return all(
+        isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+        for node in body
+    )
+
+
 def budget_imports(tree: ast.Module, modules: tuple[str, ...]) -> set[str]:
     imports: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             imports.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
-            imports.add(node.module or "")
+            # A package whose __init__ imports nothing pulls in only the
+            # submodules named here, never its siblings.
+            if not _init_is_empty(node.module or ""):
+                imports.add(node.module or "")
             imports.update(f"{node.module}.{alias.name}" for alias in node.names)
     return {
         module
@@ -168,10 +182,10 @@ def test_guard_rejects_an_unused_or_incomplete_clock_fixture() -> None:
     )
     assert budget_imports(
         ast.parse(
-            "from vonk_control import catalog_revision_collection as collector\ncollector.CatalogRevisionCollector(sessions, clock=now).collect()"
+            "from vonk_control.catalog import revision_collection as collector\ncollector.CatalogRevisionCollector(sessions, clock=now).collect()"
         ),
         budget_modules(ast.parse(support)),
-    ) == {"vonk_control.catalog_revision_collection"}
+    ) == {"vonk_control.catalog.revision_collection"}
 
 
 def test_deadline_scan_sees_new_literal_constant_and_injected_budgets() -> None:

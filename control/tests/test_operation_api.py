@@ -35,8 +35,8 @@ from vonk_control.fleet_profile_contract import (
 )
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.fleet_projection import FleetSnapshot
-from vonk_control.job_operator_receipts import record_job_operator_receipt
-from vonk_control.jobs import JobService
+from vonk_control.jobs.operator_receipts import record_job_operator_receipt
+from vonk_control.jobs.queue import JobService
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -62,7 +62,7 @@ from vonk_control.operation_api import (
     OperationQuery,
     durable_operation_services,
 )
-from vonk_control.operation_item_contract import operation_item
+from vonk_control.operations.item_contract import operation_item
 from vonk_control.recovery_policy import RecoveryPolicy
 
 from .agent_fences import fenced_attempt, fenced_operation, park_for_operator

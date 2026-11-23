@@ -43,7 +43,7 @@ from vonk_control.operation_api import (
     operation_detail_response,
 )
 from vonk_control.operation_api.responses import _job_operation_response
-from vonk_control.operation_blockers import ProgressAlarmCode
+from vonk_control.operations.blockers import ProgressAlarmCode
 from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
 from cluster_profiles.cli_render import progress_line

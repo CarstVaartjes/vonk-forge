@@ -134,7 +134,7 @@ def canonical_openapi(
     # models. They remain generated payload contracts even though an individual
     # HTTP record carries a transfer envelope rather than the whole model.
     from .fleet_projection import FleetSnapshot
-    from .platform_observation import PlatformObservation
+    from .observation.platform import PlatformObservation
 
     _, payload_graph = models_json_schema(
         [(FleetSnapshot, "serialization"), (PlatformObservation, "serialization")],

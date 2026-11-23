@@ -11,9 +11,9 @@ from importlib import resources
 from pathlib import Path
 
 import pytest
-import vonk_control.availability_production as availability_production_module
+import vonk_control.availability_production.production as availability_production_module
 import vonk_control.recipe_builds as recipe_builds_module
-import vonk_control.runtime_adapters as runtime_adapters_module
+import vonk_control.runtime.adapters as runtime_adapters_module
 from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
@@ -29,11 +29,13 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.agent_jobs import AgentJobService, superseded_cancellation_deadline
-from vonk_control.availability_production import build_recipe_image_availability
+from vonk_control.availability_production.production import (
+    build_recipe_image_availability,
+)
 from vonk_control.bounded_json import require_integer
-from vonk_control.catalog_entities import CatalogEntityService
+from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
@@ -62,7 +64,7 @@ from vonk_control.recipe_operations import (
     record_build_evidence,
 )
 from vonk_control.run_admission import RunAdmissionService
-from vonk_control.runtime_adapters import resolve_runtime_adapter
+from vonk_control.runtime.adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,

@@ -54,15 +54,15 @@ from ..enrollment import (
 )
 from ..enrollment import EnrollmentDenied as EnrollmentDenied
 from ..enrollment import RemoteRevocationUncertain as RemoteRevocationUncertain
-from ..enrollment_bootstrap import accepted_installer_url as accepted_installer_url
-from ..enrollment_contract import ENROLLMENT_ID_PATTERN as ENROLLMENT_ID_PATTERN
-from ..enrollment_contract import EnrollmentGrant as EnrollmentGrant
-from ..enrollment_contract import EnrollmentGrantStatus as EnrollmentGrantStatus
-from ..enrollment_contract import EnrollmentId as EnrollmentId
-from ..enrollment_contract import (
+from ..enrollment.bootstrap import accepted_installer_url as accepted_installer_url
+from ..enrollment.contract import ENROLLMENT_ID_PATTERN as ENROLLMENT_ID_PATTERN
+from ..enrollment.contract import EnrollmentGrant as EnrollmentGrant
+from ..enrollment.contract import EnrollmentGrantStatus as EnrollmentGrantStatus
+from ..enrollment.contract import EnrollmentId as EnrollmentId
+from ..enrollment.contract import (
     EnrollmentObservationOutcome as EnrollmentObservationOutcome,
 )
-from ..enrollment_contract import (
+from ..enrollment.contract import (
     EnrollmentRevocationStatus as EnrollmentRevocationStatus,
 )
 from ..failure_evidence import AttemptPhase as AttemptPhase
@@ -79,22 +79,22 @@ from ..logging import log_event as log_event
 from ..logging import redact_text as redact_text
 from ..models import AgentOperation as AgentOperation
 from ..models import AgentOperationAttempt as AgentOperationAttempt
-from ..observation_transfer import (
-    ObservationTransferRecord as ObservationTransferRecord,
-)
-from ..observation_transfer import (
-    ObservationTransferResponse as ObservationTransferResponse,
-)
-from ..observation_transfer import observation_openapi as observation_openapi
-from ..observation_transfer import observation_response as observation_response
-from ..operation_api import bounded_error_responses as bounded_error_responses
-from ..operation_item_contract import OperationResultFacts as OperationResultFacts
-from ..platform_observation_errors import (
+from ..observation.platform_errors import (
     ObservationCaptureUnavailable as ObservationCaptureUnavailable,
 )
-from ..platform_observation_errors import (
+from ..observation.platform_errors import (
     observation_capture_unavailable_response as observation_capture_unavailable_response,
 )
+from ..observation.transfer import (
+    ObservationTransferRecord as ObservationTransferRecord,
+)
+from ..observation.transfer import (
+    ObservationTransferResponse as ObservationTransferResponse,
+)
+from ..observation.transfer import observation_openapi as observation_openapi
+from ..observation.transfer import observation_response as observation_response
+from ..operation_api import bounded_error_responses as bounded_error_responses
+from ..operations.item_contract import OperationResultFacts as OperationResultFacts
 from ..request_fault import RequestFault as RequestFault
 from ..strict_json import StrictJSONModel as StrictJSONModel
 from ..strict_json import stored_document_detail as stored_document_detail

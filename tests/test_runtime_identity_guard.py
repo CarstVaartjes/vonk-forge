@@ -32,7 +32,7 @@ def test_numeric_runtime_builders_supply_identity() -> None:
     for path in (ROOT / "rust/crates").rglob("*.rs"):
         if (
             path == projection
-            or path.name == "tests.rs"
+            or path.name.endswith("tests.rs")
             or any(part in {"tests", "test_support"} for part in path.parts)
         ):
             continue

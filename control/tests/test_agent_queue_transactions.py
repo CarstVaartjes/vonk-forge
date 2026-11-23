@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,

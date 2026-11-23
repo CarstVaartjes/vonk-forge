@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import Engine, Table, select, text
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
-from vonk_control.catalog_entities import CatalogEntityService
+from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.model_cache import (
     CacheOperationView,
     ModelCacheService,

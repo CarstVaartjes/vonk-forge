@@ -27,7 +27,7 @@ from ..run_switch_observation_contract import (
     RunSwitchEffectiveBuildReceipt,
     RunSwitchObservedImageIdentity,
 )
-from ..stored_states import RecipeBuildState
+from ..stored.states import RecipeBuildState
 from .errors import RunSwitchRetryLater
 from .identity_helpers import _is_hex_digest, _is_oci_digest, _node_missing_bytes
 

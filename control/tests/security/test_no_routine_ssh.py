@@ -31,13 +31,13 @@ def test_production_api_and_worker_do_not_import_direct_runtime_or_subprocess() 
             imports = _imports(path)
             source = path.read_text()
             assert "subprocess" not in imports
-            assert "vonk_control.runtime" not in imports
             assert "vonk_control.legacy_runtime" not in imports
             assert "RuntimeHandlers" not in source
             assert "LegacyRuntimeHandlers" not in source
 
-    worker = (PACKAGE / "worker.py").read_text()
-    worker_imports = _imports(PACKAGE / "worker.py")
+    worker_files = sorted((PACKAGE / "worker").glob("*.py"))
+    worker = "\n".join(path.read_text() for path in worker_files)
+    worker_imports = set().union(*(_imports(path) for path in worker_files))
     assert {
         "git_policy",
         "code_host",
@@ -62,18 +62,8 @@ def test_production_api_and_worker_do_not_import_direct_runtime_or_subprocess() 
         assert forbidden not in worker
 
 
-def test_runtime_module_contains_no_process_or_transport_implementation() -> None:
-    path = PACKAGE / "runtime.py"
-    imports = _imports(path)
-    source = path.read_text()
-
-    assert "subprocess" not in imports
-    assert "RuntimeHandlers" not in source
-    assert "run_bounded" not in source
-    assert "ssh" not in source.lower()
-
-
 def test_retired_runtime_modules_are_absent() -> None:
+    assert not (PACKAGE / "runtime.py").exists()
     assert not (PACKAGE / "legacy_runtime.py").exists()
     assert not (PACKAGE / "legacy_route_runtime.py").exists()
 

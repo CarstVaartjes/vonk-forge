@@ -17,12 +17,9 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
 from ..content_identity import ImageContent, same_image
 from ..models import RecipeBuild
-from ..operation_contract import AvailabilityRecoveryAction
-from ..runtime_adapters import (
-    RuntimeAdapter,
-    resolve_runtime_adapter,
-)
-from ..runtime_spec_contract import RuntimeSpec
+from ..operations.contract import AvailabilityRecoveryAction
+from ..runtime.adapters import RuntimeAdapter, resolve_runtime_adapter
+from ..runtime.spec_contract import RuntimeSpec
 from .contracts import (
     _IMAGE_DIGEST,
     _RUNTIME_ARCHITECTURE,

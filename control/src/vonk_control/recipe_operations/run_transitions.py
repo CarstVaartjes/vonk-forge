@@ -31,7 +31,7 @@ from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..models import Job, RecipeInstallation, RecipeRun, RunNode
 from ..recipe_progress import _role_phases, _topology_order
 from ..recipe_stop_payloads import RecipeStopAuthorityError, durable_run_stop_payloads
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .observation_helpers import _active_recipe_revision
 
 if TYPE_CHECKING:

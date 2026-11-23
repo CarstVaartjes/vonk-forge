@@ -351,7 +351,7 @@ def test_postgres_concurrent_owner_newer_intent_fences_stale_claim_and_restarts(
 
     from sqlalchemy.orm import sessionmaker
     from vonk_agent_protocol import LifecycleState, RecipeImageCode, WaitReason
-    from vonk_control.job_documents import AvailabilityJobResult
+    from vonk_control.jobs.documents import AvailabilityJobResult
     from vonk_control.models import Base, Job
     from vonk_control.recipe_image_availability import BuildUnsettled
 

@@ -56,7 +56,7 @@ from .runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     RuntimeImagePreparationError,
 )
-from .stored_states import RecipeBuildState
+from .stored.states import RecipeBuildState
 
 _LOGGER = logging.getLogger(__name__)
 _ADDRESS = re.compile(r"^[0-9a-f]{64}$")

@@ -40,7 +40,7 @@ from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.recipe_routes import RecipeRouteService
 from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.storage_demands import StorageDemands
-from vonk_control.stored_json import write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
 from vonk_control.unused_storage_collection import UnusedStorageCollector
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 

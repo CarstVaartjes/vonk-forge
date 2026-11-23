@@ -5,7 +5,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from vonk_agent_protocol import canonical_message
 from vonk_control import recipe_progress
-from vonk_control.job_documents import RecipeStopParent
+from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.models import AgentOperation, Job, RecipeRun
 from vonk_control.recipe_runtime_specs import RecipeRuntimeSpecError
 

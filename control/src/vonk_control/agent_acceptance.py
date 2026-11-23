@@ -24,7 +24,7 @@ from vonk_agent_protocol.telemetry import TelemetryRequest
 
 from .agent_operation_facts import aware
 from .auth import agent_identity_from_scope
-from .inventory_items import inventory_items, runtime_value
+from .inventory.items import inventory_items, runtime_value
 from .models import (
     AgentCertificate,
     AgentNode,
@@ -36,7 +36,7 @@ from .models import (
     RunNode,
 )
 from .operator_receipt_contract import AcceptanceReceipt, ReceiptOwner, ReceiptPolicy
-from .telemetry import _same_sample
+from .telemetry.samples import _same_sample
 
 if TYPE_CHECKING:
     from .operator_acceptance import AcceptanceArguments, OperatorReceiptResolver

@@ -27,7 +27,7 @@ from vonk_control.recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     compile_runtime_spec,
 )
-from vonk_control.runtime_spec_contract import RuntimeSpec
+from vonk_control.runtime.spec_contract import RuntimeSpec
 
 from .recipe_library_source import recipe_library_root
 

@@ -10,7 +10,9 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from vonk_agent_protocol import LifecycleState
-from vonk_control.availability_production import build_recipe_image_availability
+from vonk_control.availability_production.production import (
+    build_recipe_image_availability,
+)
 from vonk_control.bounded_json import require_mapping
 from vonk_control.models import Job, User
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage

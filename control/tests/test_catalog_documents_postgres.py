@@ -12,7 +12,7 @@ from alembic.config import Config
 from sqlalchemy import Table, inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-from vonk_control.catalog_entities import (
+from vonk_control.catalog.entities import (
     CatalogConflict,
     CatalogEntityService,
 )

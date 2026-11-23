@@ -16,7 +16,6 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import RecipeDefinition
 
-from .. import job_states
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     RemovalOwnerKind,
@@ -32,7 +31,8 @@ from ..cache_removal_review import (
 )
 from ..categorized_errors import InvalidValue
 from ..install_admission import InstallPlan
-from ..job_documents import (
+from ..jobs import states as job_states
+from ..jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityModelChild,
     AvailabilityRuntime,
@@ -47,9 +47,7 @@ from ..models import (
     ModelCacheOperation,
     RecipeBuild,
 )
-from ..operation_blockers import (
-    OperationBlocker,
-)
+from ..operations.blockers import OperationBlocker
 from ..recipe_availability_intent import (
     RecipeAvailabilityIntent,
     RecipeRevisionIntent,
@@ -77,8 +75,8 @@ from ..runtime_image_preparation import (
     RuntimeImageReceipt,
     RuntimeImageReferenceIntent,
 )
-from ..stored_json import Residue
-from ..worker_memory_contract import WorkerMemoryComponent
+from ..stored.json_values import Residue
+from ..worker.memory_contract import WorkerMemoryComponent
 from . import (
     cancellation as cancellation_ops,
 )

@@ -89,7 +89,7 @@ def test_model_access_url_without_credentials_remains_useful() -> None:
 
 
 def test_persisted_failure_evidence_does_not_retain_signed_download_queries() -> None:
-    from vonk_control.operation_contract import sanitize_failure_evidence
+    from vonk_control.operations.contract import sanitize_failure_evidence
 
     safe = sanitize_failure_evidence(
         {

@@ -22,11 +22,8 @@ from ..enrollment import (
     EnrollmentIssuanceUncertain,
     RenewalIssuanceUncertain,
 )
+from ..enrollment.body import _bounded_enrollment_body, _scan_enrollment_grants
 from ..enrollment.responses import unknown_response
-from ..enrollment_body import (
-    _bounded_enrollment_body,
-    _scan_enrollment_grants,
-)
 from ..operation_api import bounded_error_responses
 from ..operator_acceptance import ReceiptPolicy, operator_acceptance
 from .common import (

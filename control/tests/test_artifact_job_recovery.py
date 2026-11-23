@@ -30,7 +30,7 @@ from vonk_control.agent_jobs import AgentJobService
 from vonk_control.artifact_jobs import ArtifactJobInvalid, ArtifactJobUnavailableError
 from vonk_control.bounded_retry import REQUEST_PAUSES
 from vonk_control.failure_evidence import FailureEvidenceService
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )

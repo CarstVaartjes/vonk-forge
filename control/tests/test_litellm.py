@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from vonk_control.litellm import (
+from vonk_control.gateway.litellm import (
     LiteLlmPolicy,
     RouteState,
     render_config,
     render_empty_config,
 )
-from vonk_control.route_bundle_contract import RouteAcceptedModelPolicy
+from vonk_control.gateway.route_bundle_contract import RouteAcceptedModelPolicy
 
 
 def _snapshot():

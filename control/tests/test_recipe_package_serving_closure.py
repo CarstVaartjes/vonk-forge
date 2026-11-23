@@ -6,7 +6,7 @@ import json
 from importlib.resources import files
 
 import pytest
-from vonk_control.recipe_packages import _validate_package_paths
+from vonk_control.recipe_packages.archive import _validate_package_paths
 from vonk_forge_contracts import read_recipe
 
 FIXTURE = "qualification/fixtures/jfk-inaugural-10s.wav"
