@@ -35,10 +35,8 @@ from ..admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
-from ..agent_jobs import (
-    AgentJobService,
-    release_owned_reservations_in_session,
-)
+from ..agent_jobs.retirement import release_owned_reservations_in_session
+from ..agent_jobs.service import AgentJobService
 from ..bounded_json import require_mapping
 from ..compiled_execution_plan import (
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
@@ -46,9 +44,7 @@ from ..compiled_execution_plan import (
     validate_compiled_launch_payload,
 )
 from ..identity_insert import insert_identity
-from ..install_admission import (
-    InstallAdmissionBusy,
-)
+from ..install_admission.contracts import InstallAdmissionBusy
 from ..jobs import states as job_states
 from ..jobs.documents import controller_recipe_document
 from ..lifecycle.agent_operation import retry_scheduled
@@ -56,14 +52,10 @@ from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
 )
-from ..models import (
-    AgentNode,
-    AgentOperation,
-    Job,
-    RecipeInstallation,
-    RecipeRun,
-    ResourceReservation,
-)
+from ..models.execution import RecipeInstallation, RecipeRun, ResourceReservation
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from ..own_cleanup import CLEANUP_KINDS
 from ..recipe_lifecycle_contract import (
     START_CHILD_KINDS,

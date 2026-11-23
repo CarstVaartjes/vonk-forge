@@ -8,7 +8,7 @@ from collections.abc import Callable
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS, InventoryRepository
-from ..models import RecipeBuild
+from ..models.cache import RecipeBuild
 from ..source_bundles import SourceBundleStoreProtocol
 from ..storage_demands import StorageDemands
 from .common import (

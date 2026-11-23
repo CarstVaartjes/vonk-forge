@@ -21,20 +21,20 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from ..fleet_profile_contract import (
+from ..fleet_profile_contract.applications import FleetProfileIntendedConfiguration
+from ..fleet_profile_contract.assessment import FleetProfileReason
+from ..fleet_profile_contract.definitions import (
     FleetProfileAssignment,
     FleetProfileDefinition,
-    FleetProfileEffects,
-    FleetProfileIntendedConfiguration,
-    FleetProfilePreview,
-    FleetProfileReason,
-    FleetProfileSupersedeCode,
 )
+from ..fleet_profile_contract.effects import FleetProfileEffects
+from ..fleet_profile_contract.review import FleetProfilePreview
+from ..fleet_profile_contract.vocabulary import FleetProfileSupersedeCode
 from ..lifecycle.evidence import Residue
 from ..operations.blockers import OperationBlocker, make_blocker
 from ..preparation_contract import RuntimeImageIdentity
-from ..run_switch_contract import RunSwitchAssessment
-from ..run_switch_operations import RunSwitchOperationConflict
+from ..run_switch_contract.plans import RunSwitchAssessment
+from ..run_switch_operations.errors import RunSwitchOperationConflict
 from ..storage_demands import StorageRelief
 from ..wait_contract import QueueWait
 

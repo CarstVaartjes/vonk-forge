@@ -41,10 +41,7 @@ from ..model_cache_contract import (
     ModelCacheRetry,
 )
 from ..model_cache_progress import cache_progress, progress_document
-from ..models import (
-    ArtifactLifecycleGate,
-    ModelCacheOperation,
-)
+from ..models.cache import ArtifactLifecycleGate, ModelCacheOperation
 from ..operations.contract import AvailabilityRecoveryAction
 from ..strict_json import serialize_json_value
 from .constants import SCHEMA_VERSION, SOURCE_POLICY

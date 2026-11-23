@@ -20,22 +20,18 @@ from ..bounded_json import require_integer
 from ..failure_classification import error_code, is_security_failure
 from ..jobs import states as job_states
 from ..lifecycle.run_switch import end_unclaimed_children
-from ..models import (
-    Job,
-    RecipeRun,
-)
+from ..models.execution import RecipeRun
+from ..models.jobs import Job
 from ..operations.blockers import OperationBlocker, bound_blockers
 from ..persisted_waits import schedule_wait
-from ..recipe_operations import (
-    RecipeOperationView,
-    RecipeRequestInvalid,
-)
+from ..recipe_operations.errors import RecipeRequestInvalid
+from ..recipe_operations.interfaces import RecipeOperationView
 from ..reservation_owners import release_dead_owner_reservations
-from ..run_switch_contract import (
+from ..run_switch_contract.operations import (
     RunSwitchOperation,
     RunSwitchOperationResult,
-    RunSwitchPlan,
 )
+from ..run_switch_contract.plans import RunSwitchPlan
 from ..run_switch_progress import RECOVERY_STALL_WINDOW
 from ..run_switch_progress import (
     _merge_progress_evidence as _merge_progress_evidence,  # noqa: PLC0414 -- shared helper export

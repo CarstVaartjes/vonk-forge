@@ -19,8 +19,8 @@ from vonk_agent_protocol.failure_evidence import (
     FailureProperty,
 )
 from vonk_control.failure_evidence import MAX_LOG_BYTES
-from vonk_control.models import RecipeRun, RunNode
-from vonk_control.operator_projection_api import AgentFailureLogProvider
+from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.operator_projection_api.logs import AgentFailureLogProvider
 
 from .test_agent_api import NODE_A, NODE_B, agent_headers, make_agent_system
 

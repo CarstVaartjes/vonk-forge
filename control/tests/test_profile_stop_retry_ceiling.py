@@ -13,11 +13,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, RunState
-from vonk_control.models import (
-    FleetProfileApplication,
-    FleetProfileSelection,
-    RecipeRun,
-)
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.fleet import FleetProfileApplication, FleetProfileSelection
 from vonk_control.operations.blockers import PHASE_RETRY_CODE
 from vonk_control.recovery_policy import RECOVERY
 

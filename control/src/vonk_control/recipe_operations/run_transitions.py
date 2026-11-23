@@ -26,9 +26,10 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from ..distributed_recovery import ended_run_state
+from ..distributed_recovery.common import ended_run_state
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..models import Job, RecipeInstallation, RecipeRun, RunNode
+from ..models.execution import RecipeInstallation, RecipeRun, RunNode
+from ..models.jobs import Job
 from ..recipe_progress import _role_phases, _topology_order
 from ..recipe_stop_payloads import RecipeStopAuthorityError, durable_run_stop_payloads
 from ..stored.json_values import read_row_column

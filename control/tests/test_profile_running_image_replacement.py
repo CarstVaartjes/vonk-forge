@@ -14,19 +14,13 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.inventory.items import runtime_value
-from vonk_control.models import (
-    AgentNode,
-    FleetProfileApplication,
-    Job,
-    RecipeBuild,
-    RecipeInstallation,
-    RecipeRun,
-)
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import RecipeInstallation, RecipeRun
+from vonk_control.models.fleet import AgentNode, FleetProfileApplication
+from vonk_control.models.jobs import Job
 from vonk_control.recipe_execution_contract import parse_stored_installation_plan
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
-    RuntimeImageReceipt,
-)
+from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .runtime_image_fixtures import place_test_image, remove_test_image

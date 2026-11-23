@@ -60,8 +60,8 @@ def test_explicit_authority_denial_has_no_start_effect_and_allows_fresh_admissio
 
     from sqlalchemy import select
     from vonk_agent_protocol import AgentOperation
-    from vonk_control.models import Job
-    from vonk_control.run_switch_contract import RunSwitchApplyRequest
+    from vonk_control.models.jobs import Job
+    from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 
     from .test_run_switch_operations import _request
 

@@ -11,7 +11,7 @@ from ..agent_upgrade_contract import (
     AgentUpgradePackage,
     AgentUpgradeRolloutResult,
 )
-from ..models import Job
+from ..models.jobs import Job
 from ..strict_json import read_stored_model
 
 

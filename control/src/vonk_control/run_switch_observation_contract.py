@@ -15,12 +15,10 @@ from vonk_agent_protocol import OperationProgress
 
 from .recipe_image_availability_clocks_contract import readable_or_none
 from .recipe_lifecycle_contract import LifecycleNodeResult
-from .run_switch_contract import (
-    RunSwitchAction,
-    RunSwitchCancellation,
-    RunSwitchMemberReceipt,
-)
-from .runtime_image_preparation import RuntimeImageReceipt
+from .run_switch_contract.progress import RunSwitchMemberReceipt
+from .run_switch_contract.vocabulary import RunSwitchAction
+from .run_switch_identity_contract import RunSwitchCancellation
+from .runtime_image_preparation.contracts import RuntimeImageReceipt
 
 
 class RunSwitchObservedEvidence(BaseModel):

@@ -19,16 +19,19 @@ from sqlalchemy import event, text
 from sqlalchemy.orm import sessionmaker
 from starlette.types import Message, Scope
 from vonk_agent_protocol import canonical_message
-from vonk_control import db
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.db import connections as connection_owner
-from vonk_control.fleet_projection import FleetNode, FleetProjection, FleetSnapshot
-from vonk_control.models import AgentNode, AgentNodeContact, AgentNodeProfile, Base
+from vonk_control.db.connections import build_engine
+from vonk_control.fleet_projection.common import FleetNode, FleetSnapshot
+from vonk_control.fleet_projection.service import FleetProjection
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentNode, AgentNodeContact, AgentNodeProfile
 from vonk_control.observation import transfer as observation_transfer
 from vonk_control.observation.platform import PlatformObservation, PlatformObserver
 from vonk_control.observation.transfer import ObservationTransferRecord
+from vonk_control.settings import DATABASE_WAIT_BUDGETS
 from vonk_control.strict_json import serialize_json_value
 
 from cluster_profiles.observation_transfer_reader import receive_observation
@@ -75,7 +78,7 @@ def _worker_process(engine, *, now: datetime | None = None) -> str:
 import os
 from datetime import UTC, datetime
 from sqlalchemy.orm import sessionmaker
-from vonk_control.db import build_engine
+from vonk_control.db.connections import build_engine
 from vonk_control.worker.liveness import WorkerHeartbeatRecorder
 engine = build_engine(os.environ['VONK_TEST_OBSERVATION_DATABASE_URL'], component='observation-worker-proof')
 try:
@@ -175,7 +178,7 @@ def test_slow_stream_releases_sql_and_keeps_original_observation(
     # behavior under test, and a suspended stream may take longer than 30s.
     now = datetime(2026, 1, 1, tzinfo=UTC)
     first_worker = _worker_process(postgres_engine, now=now)
-    engine = db.build_engine(
+    engine = build_engine(
         postgres_engine.url.render_as_string(hide_password=False),
         component="observation-proof",
     )
@@ -347,11 +350,9 @@ def test_real_sql_capture_timeout_is_retryable_and_same_read_repairs(
     monkeypatch.setattr(
         connection_owner,
         "DATABASE_WAIT_BUDGETS",
-        replace(
-            db.DATABASE_WAIT_BUDGETS, lock_timeout_ms=250, statement_timeout_ms=250
-        ),
+        replace(DATABASE_WAIT_BUDGETS, lock_timeout_ms=250, statement_timeout_ms=250),
     )
-    engine = db.build_engine(
+    engine = build_engine(
         postgres_engine.url.render_as_string(hide_password=False),
         component="observation-timeout-proof",
     )

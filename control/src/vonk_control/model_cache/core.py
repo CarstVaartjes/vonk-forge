@@ -15,8 +15,8 @@ from sqlalchemy.orm import Session, object_session
 from vonk_agent_protocol import ModelCacheCode
 
 from .. import model_cache_states
-from ..lifecycle import Lifecycle, State
 from ..lifecycle.evidence import BookkeepingReason, Damaged, Residue, read_or_rebuild
+from ..lifecycle.types import Lifecycle, State
 from ..logging import log_event
 from ..model_cache_contract import (
     CacheManifest,
@@ -26,7 +26,7 @@ from ..model_cache_contract import (
     ModelCacheSetState,
 )
 from ..model_cache_progress import cache_phase, progress_document
-from ..models import ModelCacheOperation, ModelCacheSet
+from ..models.cache import ModelCacheOperation, ModelCacheSet
 from ..operations.contract import AvailabilityOperationFailure
 from ..stored.json_values import read_row_column
 from .artifacts import ArtifactSetManifest, _unique_artifacts

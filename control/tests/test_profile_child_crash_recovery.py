@@ -7,19 +7,15 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import (
-    RunSwitchFleetProfileAdapter,
-    build_production_fleet_profile_service,
-)
-from vonk_control.models import (
-    AgentOperation,
-    CatalogDocumentRevision,
-    FleetProfileApplication,
-    Job,
-    RecipeInstallation,
-)
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .test_fleet_profiles import _uuid
 from .test_recipe_operations import installed_recipe, setup_services

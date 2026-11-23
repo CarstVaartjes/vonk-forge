@@ -21,27 +21,22 @@ from typing import Any
 
 from sqlalchemy import Engine, create_engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.attempt_residues import AttemptResidueReconciler
-from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
-from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import (
-    FleetProfileService,
-    build_production_fleet_profile_service,
-)
-from vonk_control.models import (
-    CatalogDocument,
-    CatalogDocumentRevision,
-    RecipeBuild,
-)
+from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
-from vonk_control.recipe_operations import RecipeOperationService
-from vonk_control.recipe_routes import RecipeRouteService
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.recipe_routes.service import RecipeRouteService
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.storage_demands import StorageDemands
 from vonk_control.stored.json_values import write_guard_mode
-from vonk_control.unused_storage_collection import UnusedStorageCollector
+from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from tests.display_fixtures import reword

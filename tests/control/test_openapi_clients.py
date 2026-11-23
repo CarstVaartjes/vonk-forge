@@ -54,7 +54,7 @@ def test_enrollment_and_error_producers_reach_generated_http_consumer() -> None:
     import httpx2
     from vonk_agent_protocol import LifecycleState
     from vonk_agent_protocol.error_response import BoundedErrorResponse
-    from vonk_control.operator_projection_api import FleetActionResponse
+    from vonk_control.operator_projection_api.contracts import FleetActionResponse
     from vonk_control.strict_json import serialize_json_value
 
     from cluster_profiles.generated_control.api.default import (

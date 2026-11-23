@@ -23,9 +23,9 @@ from vonk_agent_protocol import (
 from .. import model_cache_states
 from ..bounded_retry import bounded_attempts
 from ..cached_file_verification import verified_files
-from ..lifecycle import Effect, Outcome, Reported, Tick
+from ..lifecycle.types import Effect, Outcome, Reported, Tick
 from ..model_cache_progress import cache_phase, progress_document
-from ..models import ModelCacheOperation
+from ..models.cache import ModelCacheOperation
 from ..runtime_init import RuntimeSecretError, read_runtime_secret
 from .artifacts import ArtifactSetManifest, ArtifactSpec, _unique_artifacts
 from .constants import (

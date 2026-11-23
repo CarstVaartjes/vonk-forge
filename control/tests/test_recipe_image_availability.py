@@ -27,7 +27,7 @@ from vonk_control.artifact_lifecycle import (
     ArtifactIdentity,
     check_removal_fence_nowait,
 )
-from vonk_control.artifact_reference_scan import (
+from vonk_control.artifact_reference_scan.image_references import (
     runtime_image_reference_findings,
     runtime_image_reference_reasons,
 )
@@ -41,7 +41,8 @@ from vonk_control.jobs.documents import (
     AvailabilityRetry,
     AvailabilityRuntime,
 )
-from vonk_control.model_cache import ModelCacheError, ModelCacheService
+from vonk_control.model_cache.errors import ModelCacheError
+from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_cache_contract import (
     CacheManifest,
     ModelCacheCounters,
@@ -52,21 +53,25 @@ from vonk_control.model_cache_contract import (
     ModelCacheSetState,
 )
 from vonk_control.model_cache_progress import cache_progress, progress_document
-from vonk_control.models import (
-    AgentNode,
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import (
     ArtifactLifecycleGate,
-    Base,
-    CatalogDocument,
-    CatalogDocumentHead,
-    CatalogDocumentRevision,
-    FleetProfile,
-    FleetProfileApplication,
-    Job,
     ModelCacheOperation,
     ModelCacheSet,
     RecipeBuild,
+)
+from vonk_control.models.catalog import (
+    CatalogDocument,
+    CatalogDocumentHead,
+    CatalogDocumentRevision,
+)
+from vonk_control.models.fleet import (
+    AgentNode,
+    FleetProfile,
+    FleetProfileApplication,
     User,
 )
+from vonk_control.models.jobs import Job
 from vonk_control.operations.blockers import make_blocker
 from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
@@ -74,10 +79,12 @@ from vonk_control.operations.contract import (
 )
 from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_availability_intent import RecipeRevisionIntent
-from vonk_control.recipe_image_availability import (
+from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityError,
-    RecipeImageAvailabilityService,
     RecipeImageAvailabilityUnknown,
+)
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
 )
 from vonk_control.recipe_image_availability_api import (
     _recipe_error,
@@ -91,14 +98,14 @@ from vonk_control.recipe_image_availability_view_contract import (
 from vonk_control.recipe_image_removal_contract import (
     RecipeCacheRemovalOwner,
 )
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
+from vonk_control.runtime_image_preparation.contracts import (
     PulledImageEvidence,
     RuntimeImagePreparationError,
     RuntimeImageReceipt,
     RuntimeImageReferenceIntent,
     read_runtime_image_reference_intent,
 )
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import serialize_json_value
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
@@ -1474,7 +1481,7 @@ def test_damaged_removal_owner_does_not_hold_up_later_request(
         good = session.scalar(select(Job).where(Job.request_id == good_key))
         assert bad is not None and bad.state == LifecycleState.SUCCEEDED
         assert good is not None and good.state == LifecycleState.SUCCEEDED
-        from vonk_control.models import ArtifactLifecycleGate
+        from vonk_control.models.cache import ArtifactLifecycleGate
 
         assert (
             session.scalar(

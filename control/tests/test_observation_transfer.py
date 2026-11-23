@@ -19,16 +19,17 @@ from pydantic import JsonValue, TypeAdapter
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-from vonk_control.fleet_projection import (
-    FleetProjection,
+from vonk_control.fleet_projection.common import (
     FleetSnapshot,
     UnavailableRecipePresence,
 )
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.fleet_stream_contract import FleetRefreshEvent
-from vonk_control.models import AgentNode, AgentNodeContact, Base
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentNode, AgentNodeContact
 from vonk_control.observation.transfer import (
     ObservationTransferChunk,
     ObservationTransferComplete,
@@ -259,7 +260,7 @@ def test_transfer_identity_and_hash_owner_and_export_reject_terminal_newline():
 
 
 def test_whole_membership_has_no_observation_only_512_group_cap(tmp_path):
-    from vonk_control.fleet_projection import UnavailableRunPresence
+    from vonk_control.fleet_projection.common import UnavailableRunPresence
 
     snapshot = _large_snapshot(tmp_path)
     node = snapshot.nodes[0]

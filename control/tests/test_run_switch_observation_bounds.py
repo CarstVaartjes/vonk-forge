@@ -10,13 +10,12 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import RouteState, RunState, RunSwitchCode
 from vonk_control.jobs.documents import RunSwitchJobPayload
-from vonk_control.models import Job, RecipeRun
-from vonk_control.run_switch_contract import (
-    RunSwitchApplyRequest,
-    RunSwitchFinalVerifyResult,
-    RunSwitchOperationResult,
-)
-from vonk_control.run_switch_operations import PhaseExecution
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import RunSwitchFinalVerifyResult
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
+from vonk_control.run_switch_operations.interfaces import PhaseExecution
 from vonk_control.run_switch_operations.observation_helpers import (
     _start_child_request_key,
 )
@@ -109,7 +108,7 @@ def test_expired_observation_preserves_published_route_and_admits_new_operation(
 
 
 def _pending_stop(tmp_path):
-    from vonk_control.run_switch_contract import RunSwitchStopApplyRequest
+    from vonk_control.run_switch_contract.requests import RunSwitchStopApplyRequest
 
     service, _parent, _index = _parked_start_switch(tmp_path, healthy=True)
     with service._sessions.begin() as session:
@@ -126,7 +125,7 @@ def _pending_stop(tmp_path):
 
 def test_a_stale_stop_preview_is_replanned_and_its_key_replays(tmp_path):
     """Catches a Stop refused as stale, or its retry refused for another digest."""
-    from vonk_control.run_switch_contract import RunSwitchStopApplyRequest
+    from vonk_control.run_switch_contract.requests import RunSwitchStopApplyRequest
 
     service, parent, _index = _parked_start_switch(tmp_path, healthy=True)
     with service._sessions() as session:
@@ -162,13 +161,11 @@ def test_a_stale_stop_preview_is_replanned_and_its_key_replays(tmp_path):
 def test_unknown_stop_expires_across_restart_without_blocking_fresh_request(tmp_path):
     """Catches retryable observation exceptions escaping the stop's time bound."""
     from vonk_agent_protocol import LifecycleState
-    from vonk_control.run_switch_operations import (
-        RunSwitchOperationService,
-        RunSwitchRetryLater,
-    )
     from vonk_control.run_switch_operations.constants import (
         _FINAL_VERIFICATION_MAX_SECONDS,
     )
+    from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     service, operation, run_id = _pending_stop(tmp_path)
     sessions = service._sessions
@@ -268,7 +265,7 @@ def test_observed_stop_settles_lost_child_acknowledgement_and_admits_fresh(tmp_p
     """Catches a parked stop child blocking even after its exact ranks stopped."""
     from vonk_agent_protocol import LifecycleState
     from vonk_agent_protocol.agent_words import ProfileChildPhase
-    from vonk_control.models import RunNode
+    from vonk_control.models.execution import RunNode
     from vonk_control.reservation_owners import release_dead_owner_reservations
 
     service, operation, run_id = _pending_stop(tmp_path)

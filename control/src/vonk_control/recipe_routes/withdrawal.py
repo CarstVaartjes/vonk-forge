@@ -22,12 +22,9 @@ from vonk_agent_protocol.route_activation import SupervisorPhase
 from ..gateway.litellm import LiteLlmGeneration, ServedModelInfo
 from ..gateway.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 from ..logging import log_event
-from ..models import (
-    Job,
-    RecipeRun,
-    RoutePublication,
-    RoutePublicationOwner,
-)
+from ..models.execution import RecipeRun
+from ..models.jobs import Job
+from ..models.routes import RoutePublication, RoutePublicationOwner
 from ..persisted_waits import schedule_wait
 from ..recipe_execution_contract import RouteWithdrawalFollowUp
 from .shared import (

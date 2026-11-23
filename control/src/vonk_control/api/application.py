@@ -14,15 +14,12 @@ from fastapi import (
 )
 from vonk_agent_protocol.capability_reply import ControllerCapability
 
-from ..agent_api import (
-    AgentApiServices,
-    EnrollmentRateLimiter,
-    install_agent_routes,
-)
+from ..agent_api.common import AgentApiServices, EnrollmentRateLimiter
+from ..agent_api.routes import install_agent_routes
 from ..artifact_job_api import (
     install_artifact_job_routes,
 )
-from ..artifact_jobs import ArtifactJobService
+from ..artifact_jobs.service import ArtifactJobService
 from ..auth import (
     CursorCodec,
     TokenCodec,
@@ -42,19 +39,14 @@ from ..observation.platform import (
     PlatformObserver,
     api_only_capture,
 )
-from ..operation_api import (
-    OperationApiServices,
-    bounded_error_responses,
-)
+from ..operation_api.contracts import OperationApiServices, bounded_error_responses
 from ..operator_acceptance import (
     OperatorReceiptResolver,
 )
-from ..operator_projection_api import (
-    FleetOperatorServices,
-)
+from ..operator_projection_api.services import FleetOperatorServices
 from ..profile_application_cancel_api import install_profile_application_cancel_route
-from ..recipe_operations import RecipeOperationService
-from ..run_switch_operations import RunSwitchOperationService
+from ..recipe_operations.service import RecipeOperationService
+from ..run_switch_operations.service import RunSwitchOperationService
 from ..strict_json import ControllerAPIRoute
 from .common import (
     JobQueue,

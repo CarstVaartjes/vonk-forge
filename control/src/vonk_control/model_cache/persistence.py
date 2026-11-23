@@ -17,7 +17,6 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.http_failure import TransientReason
 
-from ..lifecycle import State
 from ..lifecycle.evidence import (
     BookkeepingReason,
     Damaged,
@@ -25,6 +24,7 @@ from ..lifecycle.evidence import (
     read_or_rebuild,
     retire_as_unknown,
 )
+from ..lifecycle.types import State
 from ..logging import redact_text
 from ..model_cache_contract import (
     ModelCacheCancellation,
@@ -42,7 +42,7 @@ from ..model_cache_contract import (
     parse_model_cache_result,
 )
 from ..model_cache_progress import cache_progress
-from ..models import ModelCacheOperation, ModelCacheSet
+from ..models.cache import ModelCacheOperation, ModelCacheSet
 from ..operations.blockers import OperationBlocker, bound_blockers, make_blocker
 from ..operations.contract import AvailabilityOperationFailure
 from ..stored.json_values import read_row_column

@@ -18,8 +18,9 @@ from vonk_control.artifact_lifecycle import (
     require_reference_open,
     reserve_removal,
 )
-from vonk_control.artifact_reference_scan import require_model_sets_open
-from vonk_control.models import ArtifactLifecycleGate, Base, ModelCacheSet
+from vonk_control.artifact_reference_scan.model_sets import require_model_sets_open
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheSet
 
 
 @pytest.fixture
@@ -338,7 +339,7 @@ def test_dead_removal_gate_reconciles_before_fresh_reference_admission(
         dead_removal_identities,
         release_dead_removal_nowait,
     )
-    from vonk_control.models import Job
+    from vonk_control.models.jobs import Job
 
     now = datetime.now(UTC)
     identity = ArtifactIdentity("runtime-image", "b" * 64)
@@ -396,7 +397,7 @@ def test_reaper_rechecks_owner_and_does_not_clear_a_restarted_removal(
         dead_removal_identities,
         release_dead_removal_nowait,
     )
-    from vonk_control.models import Job
+    from vonk_control.models.jobs import Job
 
     now = datetime.now(UTC)
     identity = ArtifactIdentity("runtime-image", "c" * 64)

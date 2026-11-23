@@ -28,16 +28,11 @@ from ..jobs.documents import (
 )
 from ..lifecycle.evidence import Residue
 from ..lifecycle.job import JobAdapter
-from ..models import (
-    AgentNode,
-    AgentNodeContact,
-    AgentOperation,
-    CatalogDocumentRevision,
-    Job,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
-)
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import RecipeInstallation, RecipeRun, RunNode
+from ..models.fleet import AgentNode, AgentNodeContact
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,

@@ -17,31 +17,22 @@ from vonk_control.availability_production.production import (
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
-from vonk_control.install_admission import (
-    InstallAdmissionService,
-)
+from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.inventory.items import runtime_value
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    CatalogDocumentRevision,
-    NodeInventorySnapshot,
-    RecipeBuild,
-    RecipeInstallation,
-)
-from vonk_control.recipe_builds import (
-    RecipeBuildResolution,
-    RecipeBuildService,
-)
-from vonk_control.recipe_operations import (
-    RecipeOperationService,
-)
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.recipe_builds.common import RecipeBuildResolution
+from vonk_control.recipe_builds.service import RecipeBuildService
+from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
-from vonk_control.run_switch_operations import RunSwitchOperationService
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runtime_image_preparation.preparation import (
     stored_runtime_image_resolver,
 )
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import read_model
 
 from .display_fixtures import reword

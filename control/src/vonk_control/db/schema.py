@@ -36,7 +36,10 @@ def _schema_differences(connection: Connection) -> list[tuple[Any, ...]]:
     from alembic.autogenerate import compare_metadata
     from alembic.migration import MigrationContext
 
-    from ..models import Base
+    from .. import (
+        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+    )
+    from ..model_primitives import Base
 
     return [
         difference
@@ -58,8 +61,12 @@ def reconcile_schema(connection: Connection) -> None:
     from alembic.operations import Operations
     from sqlalchemy import inspect
 
+    from .. import (
+        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+    )
     from ..exact_integer_adoption import adopt_exact_integer_columns
-    from ..models import REPEATED_EVIDENCE_SEQUENCE, Base
+    from ..model_primitives import Base
+    from ..models.evidence import REPEATED_EVIDENCE_SEQUENCE
 
     adopt_exact_integer_columns(connection)
     ops = Operations(MigrationContext.configure(connection))

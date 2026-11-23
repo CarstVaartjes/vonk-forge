@@ -27,7 +27,7 @@ from ..model_cache_contract import (
     ModelCacheSetState,
     ModelCacheStorageObservation,
 )
-from ..models import ModelCacheSet
+from ..models.cache import ModelCacheSet
 from ..profile_read_observation import remaining_storage_read_seconds
 from .artifacts import ArtifactSetManifest, _unique_artifacts
 from .constants import _LOGGER, _MAX_MANIFEST_BYTES, SCHEMA_VERSION

@@ -18,7 +18,9 @@ from vonk_control.fleet_events import (
     FleetEventRecorder,
     FleetEventRepository,
 )
-from vonk_control.models import Base, FleetEventCursor, FleetStreamEvent, Job
+from vonk_control.model_primitives import Base
+from vonk_control.models.jobs import Job
+from vonk_control.models.telemetry import FleetEventCursor, FleetStreamEvent
 from vonk_control.stored.json_values import write_guard_mode
 
 NOW = datetime(2026, 8, 15, 12, tzinfo=UTC)

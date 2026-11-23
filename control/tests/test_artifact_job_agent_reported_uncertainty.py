@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_control import artifact_job_states as ajs
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.service import AgentJobService
 
 from .runtime_identity_support import claim_agent
 from .test_artifact_jobs import (

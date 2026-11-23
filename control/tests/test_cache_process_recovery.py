@@ -10,12 +10,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import sessionmaker
-from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_cache_contract import (
     ModelCacheDownloadPayload,
     parse_model_cache_payload,
 )
-from vonk_control.models import Base, ModelCacheOperation
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation
 
 from .test_model_cache import _artifact
 from .test_model_cache_availability_regressions import _drain, _start
@@ -203,7 +204,7 @@ from io import BytesIO
 from email.message import Message
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache.service import ModelCacheService
 configuration = json.loads(Path(sys.argv[1]).read_text())
 engine = create_engine(configuration["database"])
 sessions = sessionmaker(engine)

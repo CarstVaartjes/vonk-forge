@@ -14,9 +14,12 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState
-from vonk_control.enrollment import EnrollmentService
+from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.image_store_collection import ImageStoreCollector
-from vonk_control.models import AgentCertificateRotation, Base, Job, RecipeBuild
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.fleet import AgentCertificateRotation
+from vonk_control.models.jobs import Job
 from vonk_control.owner_liveness import (
     ISSUANCE_WINDOW,
     OWNER_SETTLE_GRACE,

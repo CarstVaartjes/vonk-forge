@@ -19,14 +19,11 @@ from vonk_control.artifact_job_evidence import (
     dump_result_evidence,
     read_result_evidence,
 )
-from vonk_control.artifact_jobs import (
-    ArtifactJobResponse,
-    ArtifactJobService,
-    ArtifactJobView,
-    CompiledArtifactContract,
-)
+from vonk_control.artifact_jobs.contracts import ArtifactJobResponse, ArtifactJobView
+from vonk_control.artifact_jobs.service import ArtifactJobService
 from vonk_control.auth import Actor
-from vonk_control.models import ArtifactJobBlob, ArtifactJobFile
+from vonk_control.compiled_artifact_contract import CompiledArtifactContract
+from vonk_control.models.execution import ArtifactJobBlob, ArtifactJobFile
 from vonk_control.strict_json import ControllerAPIRoute
 
 from cluster_profiles.generated_control.models.artifact_job_response import (

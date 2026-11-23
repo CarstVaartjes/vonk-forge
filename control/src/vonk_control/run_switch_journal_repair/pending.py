@@ -10,15 +10,11 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from ..models import (
-    Job,
-    RunSwitchJournalRepairPending,
-)
+from ..journal_models import RunSwitchJournalRepairPending
+from ..models.jobs import Job
 from ..persisted_waits import schedule_wait
-from ..run_switch_contract import (
-    RunSwitchCancellation,
-    RunSwitchOperationResult,
-)
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_identity_contract import RunSwitchCancellation
 from ..run_switch_journal_contract import (
     RunSwitchJournalRepairPendingState,
 )

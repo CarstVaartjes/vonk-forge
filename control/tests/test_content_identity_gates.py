@@ -18,28 +18,25 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from vonk_control.agent_contacts import record_contact
-from vonk_control.models import (
-    InstallationNode,
-    NodeInventorySnapshot,
-    RecipeBuild,
-    RecipeInstallation,
-)
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import InstallationNode, RecipeInstallation
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.preparation_contract import RuntimeImageIdentity
 from vonk_control.recipe_execution_contract import installation_matches_runtime_image
-from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
-from vonk_control.run_switch_contract import (
-    RunSwitchPhase,
-    RunSwitchPlan,
+from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.requests import (
     RunSwitchPreviewRequest,
     SparkGroup,
     SparkGroupNode,
 )
-from vonk_control.run_switch_operations import (
-    RecipeLifecyclePhaseExecutor,
-    RunSwitchOperationService,
+from vonk_control.run_switch_operations.artifact_validation import (
     _validate_artifact_execution,
 )
+from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .test_build_revision_install import _prepared_successor
 from .test_recipe_builds import RecordingQueue

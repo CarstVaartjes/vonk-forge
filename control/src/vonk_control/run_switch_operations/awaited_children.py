@@ -13,8 +13,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..models import Job
-from ..run_switch_contract import RunSwitchOperationResult, RunSwitchPlan
+from ..models.jobs import Job
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.plans import RunSwitchPlan
 from .observation_helpers import _start_child_request_key
 
 

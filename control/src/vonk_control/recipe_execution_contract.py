@@ -35,7 +35,7 @@ from .strict_json import StrictJSONModel
 from .validation_detail import validation_error_detail
 
 if TYPE_CHECKING:
-    from .models import RecipeInstallation
+    from .models.execution import RecipeInstallation
 
 DateTimeString = Annotated[
     str,

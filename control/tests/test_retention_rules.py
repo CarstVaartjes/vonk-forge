@@ -31,7 +31,22 @@ from vonk_control.artifact_lifecycle import (
     reserve_removal,
 )
 from vonk_control.auth import _AGENT_IDENTITY_SCOPE_KEY, AgentIdentity
-from vonk_control.models import (
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import (
+    ArtifactLifecycleGate,
+    ModelCacheOperation,
+    ModelCacheSet,
+    ModelCacheSetArtifact,
+    RecipeLibrarySyncRun,
+)
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    RecipeRun,
+    ResourceReservation,
+    RunNode,
+)
+from vonk_control.models.fleet import (
     AgentCertificate,
     AgentEnrollment,
     AgentEnrollmentGrant,
@@ -39,22 +54,13 @@ from vonk_control.models import (
     AgentNode,
     AgentNodeContact,
     AgentNodeProfile,
-    AgentOperation,
-    ArtifactDistributionAssignment,
-    ArtifactLifecycleGate,
-    Base,
-    ControlProcessHeartbeat,
     FleetProfile,
     FleetProfileApplication,
-    InstallationNode,
-    ModelCacheOperation,
-    ModelCacheSet,
-    ModelCacheSetArtifact,
-    RecipeInstallation,
-    RecipeLibrarySyncRun,
-    RecipeRun,
-    ResourceReservation,
-    RunNode,
+)
+from vonk_control.models.jobs import ControlProcessHeartbeat
+from vonk_control.models.operations import (
+    AgentOperation,
+    ArtifactDistributionAssignment,
 )
 from vonk_control.observation.delivery import ObservationDeliveryMiddleware
 from vonk_control.terminal_history_collection import (
@@ -67,7 +73,7 @@ from vonk_control.terminal_history_collection import (
 from .test_terminal_history_collection import _job, _stopped_run
 
 if TYPE_CHECKING:
-    from vonk_control.agent_api import AgentApiServices
+    from vonk_control.agent_api.common import AgentApiServices
 
 NOW = datetime(2026, 11, 4, 12, tzinfo=UTC)
 NODE = "spk_" + "1" * 32

@@ -17,15 +17,19 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from vonk_agent_protocol import WaitReason
-from vonk_control.lifecycle import (
+from vonk_control.lifecycle.adapter import Dispatch
+from vonk_control.lifecycle.core import (
     LOST_OBSERVATION_BOUND,
     OBSERVE_BUDGET,
     STOP_BUDGET,
+    transition,
+)
+from vonk_control.lifecycle.reconciler import Reconciler
+from vonk_control.lifecycle.types import (
     TERMINAL_STATES,
     CancelRequested,
     Claimed,
     Decision,
-    Dispatch,
     Effect,
     Event,
     Execute,
@@ -36,7 +40,6 @@ from vonk_control.lifecycle import (
     Observed,
     OperatorAction,
     Outcome,
-    Reconciler,
     RecordResidue,
     Reported,
     State,
@@ -44,7 +47,6 @@ from vonk_control.lifecycle import (
     StopResult,
     Submitted,
     Tick,
-    transition,
 )
 
 NOW = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)

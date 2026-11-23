@@ -35,7 +35,7 @@ from vonk_agent_protocol.state_machines import (
 )
 
 from ..categorized_errors import InvalidValue
-from ..models import (
+from ..models.fleet import (
     AgentCertificate,
     AgentCertificateRotation,
     AgentEnrollment,

@@ -4,26 +4,24 @@ from types import SimpleNamespace
 
 import pytest
 from vonk_agent_protocol import LifecycleState, ProfileReasonCode
-from vonk_control.fleet_profile_contract import (
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileAssignmentFailure,
-    FleetProfileInput,
     FleetProfileSwitchAdapterResult,
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchChildState,
     FleetProfileSwitchPendingChild,
     FleetProfileSwitchQueueItem,
 )
-from vonk_control.fleet_profiles import (
-    RunSwitchFleetProfileAdapter,
-    _persisted_profile_progress,
-)
-from vonk_control.models import FleetProfileApplication, FleetProfileSelection
-from vonk_control.run_switch_contract import (
+from vonk_control.fleet_profiles.persistence import _persisted_profile_progress
+from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
+from vonk_control.models.fleet import FleetProfileApplication, FleetProfileSelection
+from vonk_control.run_switch_contract.operations import RunSwitchOperation
+from vonk_control.run_switch_contract.progress import (
     RunSwitchMemberProgress,
-    RunSwitchOperation,
     RunSwitchProgress,
 )
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .test_fleet_profile_continuity import _world
 from .test_fleet_profiles import NOW, _node_id, _uuid
@@ -202,7 +200,7 @@ def test_selected_cancel_observes_borrowed_agent_receipt_before_completion(monke
     """Catches clean cancellation while a borrowed exact effect remains live."""
     from datetime import timedelta
 
-    from vonk_control.agent_jobs import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
 
     sessions, service, _fake, _first, _original, second_profile = _world()
     second = service.apply(second_profile.id, request_key=_uuid(18200), actor="admin")

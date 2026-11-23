@@ -22,8 +22,10 @@ from ..agent_operation_facts import aware as _aware
 from ..auth import AgentSource
 from ..categorized_errors import InvalidValue
 from ..logging import log_event
-from ..models import AgentNode, AgentOperationAttempt, Job
-from ..models import AgentOperation as StoredOperation
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from ..operations.contract import validate_progress_update
 from ..operations.progress import (
     progress_document,

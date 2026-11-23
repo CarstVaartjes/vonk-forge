@@ -18,13 +18,9 @@ from vonk_agent_protocol import (
 )
 
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..models import (
-    AgentOperation,
-    Job,
-    RecipeInstallation,
-    RecipeRun,
-    ResourceReservation,
-)
+from ..models.execution import RecipeInstallation, RecipeRun, ResourceReservation
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from ..recipe_lifecycle_contract import (
     LifecycleNodeResult,
     RecipeOperationCancellationResult,

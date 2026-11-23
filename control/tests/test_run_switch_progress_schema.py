@@ -9,12 +9,13 @@ from uuid import uuid4
 import pytest
 from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReportedPhase
-from vonk_control.models import Job
-from vonk_control.run_switch_contract import (
-    RunSwitchApplyRequest,
-    RunSwitchOperationResult,
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
+from vonk_control.run_switch_operations.result_helpers import (
+    _persisted_result,
+    _read_progress,
 )
-from vonk_control.run_switch_operations import _persisted_result, _read_progress
 
 from .test_recipe_operations import NOW, setup_services
 from .test_run_switch_operations import (
@@ -126,7 +127,9 @@ def test_production_queue_receipts_share_the_persisted_progress_contract() -> No
     by the API; the final verification belongs to a succeeding Stop at index 2.
     This fixture does not invent the unavailable raw failed document.
     """
-    from vonk_control.fleet_profile_contract import FleetProfileSwitchAdapterResult
+    from vonk_control.fleet_profile_contract.switch_state import (
+        FleetProfileSwitchAdapterResult,
+    )
 
     result = FleetProfileSwitchAdapterResult.model_validate_json(
         (

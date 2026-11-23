@@ -16,16 +16,13 @@ from sqlalchemy import select
 from vonk_agent_protocol import ArtifactLifecycleCode, AssetAvailability, LifecycleState
 from vonk_control import model_cache_states
 from vonk_control.artifact_blob_store import ArtifactBlobStore
-from vonk_control.artifact_jobs import ArtifactJobService
+from vonk_control.artifact_jobs.service import ArtifactJobService
 from vonk_control.artifact_lifecycle import ArtifactReferenceUnverified
 from vonk_control.model_cache import removal_execution
 from vonk_control.model_cache_contract import CacheManifest
-from vonk_control.models import (
-    ArtifactJobBlob,
-    Job,
-    ModelCacheSet,
-    ModelCacheSetArtifact,
-)
+from vonk_control.models.cache import ModelCacheSet, ModelCacheSetArtifact
+from vonk_control.models.execution import ArtifactJobBlob
+from vonk_control.models.jobs import Job
 
 from .non_blocking import assert_ended_without_blocking
 from .removal_settle import advance_until_ended, release_ended_gates
@@ -199,7 +196,7 @@ def test_recipe_scan_unknown_is_accepted_and_never_blocks_fresh_preparation(
     """Catches refusing removal before durable intent or unlinking on an unknown scan."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
-    from vonk_control.models import Base
+    from vonk_control.model_primitives import Base
     from vonk_control.recipe_image_availability import (
         removal_execution as image_execution,
     )
@@ -208,7 +205,9 @@ def test_recipe_scan_unknown_is_accepted_and_never_blocks_fresh_preparation(
         RecipeCacheRemovalStatus,
         RecipeImageAvailabilityView,
     )
-    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+    from vonk_control.runtime_image_preparation.storage import (
+        FilesystemRuntimeImageStorage,
+    )
 
     from .recipe_removal_review_support import remove_after_review
     from .runtime_image_fixtures import place_test_image
@@ -477,7 +476,7 @@ def test_scope_observation_recovers_same_removal_without_inventing_objects(
     cache, tmp_path: Path
 ):
     """Catches damaged scope deleting guessed objects or poisoning a new request."""
-    from vonk_control.models import ModelCacheOperation
+    from vonk_control.models.cache import ModelCacheOperation
 
     service, sessions = cache
     accepted, _ = _queue(service, tmp_path, str(uuid.uuid4()))
@@ -534,8 +533,11 @@ def test_recipe_receipt_observation_is_request_owned(
     """Catches receipt admission veto, unverified deletion and permanently owned bytes."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
-    from vonk_control.models import ArtifactLifecycleGate, Base
-    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+    from vonk_control.model_primitives import Base
+    from vonk_control.models.cache import ArtifactLifecycleGate
+    from vonk_control.runtime_image_preparation.storage import (
+        FilesystemRuntimeImageStorage,
+    )
 
     from .runtime_image_fixtures import place_test_image
     from .test_recipe_image_availability import (
@@ -633,7 +635,7 @@ def test_exact_scope_owner_repair_is_independent_of_inventory_cursor(
     cache, tmp_path: Path, owner_damage: str
 ):
     """Catches repairing only the first global batch and retaining the exact old fence."""
-    from vonk_control.models import ArtifactLifecycleGate, ModelCacheOperation
+    from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheOperation
 
     service, sessions = cache
     accepted, _ = _queue(service, tmp_path, str(uuid.uuid4()))

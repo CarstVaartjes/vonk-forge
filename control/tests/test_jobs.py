@@ -10,8 +10,10 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control.auth import TokenCodec
 from vonk_control.jobs.queue import JobService, StaleAttempt
-from vonk_control.models import Base, Job
-from vonk_control.operation_api import JobProgress, OperationPage, job_response
+from vonk_control.model_primitives import Base
+from vonk_control.models.jobs import Job
+from vonk_control.operation_api.contracts import JobProgress, OperationPage
+from vonk_control.operation_api.responses import job_response
 from vonk_control.stored.json_values import write_guard_mode
 
 
@@ -309,7 +311,7 @@ def test_job_waiting_on_its_agent_operation_is_neither_claimed_nor_starved(
     # RunnableControlJobStarved fired. The worker never claims such a job,
     # so the starvation signal must not count it either.
     from vonk_control.metrics.registry import read_runnable_job_ages
-    from vonk_control.models import AgentOperation
+    from vonk_control.models.operations import AgentOperation
 
     engine = create_engine(f"sqlite:///{tmp_path / 'starved.sqlite'}")
     Base.metadata.create_all(engine)

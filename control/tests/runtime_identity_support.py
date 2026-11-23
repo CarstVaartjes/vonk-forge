@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.service import AgentJobService
 
 PACKAGED_RUNTIME_IDENTITY = {
     "architecture": "linux-amd64",
@@ -45,7 +45,7 @@ def inventory_items_fixture(
 
     from vonk_agent_protocol import canonical_message
     from vonk_control.inventory.items_contract import AgentInventoryItems
-    from vonk_control.models import NodeInventoryItemsSnapshot
+    from vonk_control.models.telemetry import NodeInventoryItemsSnapshot
 
     at = observed_at or datetime(2026, 8, 7, 12, tzinfo=UTC)
     items = AgentInventoryItems(
@@ -105,7 +105,7 @@ def set_inventory_fingerprint(node, fingerprint):
 
 def set_inventory_hostname(session, node_id, hostname):
     from vonk_control.inventory.items import inventory_items
-    from vonk_control.models import AgentNode
+    from vonk_control.models.fleet import AgentNode
 
     node = session.get(AgentNode, node_id)
     assert node is not None

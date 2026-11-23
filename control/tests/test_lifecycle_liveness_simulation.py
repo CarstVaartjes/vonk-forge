@@ -25,19 +25,16 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import ProfileReasonCode, RunState
-from vonk_control.fleet_profile_contract import (
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
-    FleetProfileAssignment,
 )
-from vonk_control.fleet_profiles import _persisted_profile_progress
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profiles.persistence import _persisted_profile_progress
 from vonk_control.fleet_profiles.service import FleetProfileService
-from vonk_control.models import (
-    ACTIVE_RUN_STATES,
-    AgentOperation,
-    CatalogDocumentRevision,
-    FleetProfileApplication,
-    RecipeRun,
-)
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import ACTIVE_RUN_STATES, RecipeRun
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.operations import AgentOperation
 
 from .lifecycle_simulation import invariants
 from .lifecycle_simulation.simulation import (

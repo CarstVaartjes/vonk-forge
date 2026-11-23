@@ -21,15 +21,15 @@ from pathlib import Path
 import pytest
 import vonk_control
 from sqlalchemy import select
-from vonk_control.fleet_profile_contract import (
-    FleetProfileApplicationView,
+from vonk_control.fleet_profile_contract.effects import (
     FleetProfileEffects,
     FleetProfileInstallationEffect,
     FleetProfileRunEffect,
 )
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
 from vonk_control.fleet_profiles.contracts import FleetProfileReviewStale
 from vonk_control.fleet_profiles.projection_support import _validate_remaining_effects
-from vonk_control.models import FleetProfileApplication
+from vonk_control.models.fleet import FleetProfileApplication
 
 from .lifecycle_simulation import invariants
 from .lifecycle_simulation.simulation import Simulation

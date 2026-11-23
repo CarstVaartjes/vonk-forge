@@ -16,29 +16,29 @@ from vonk_agent_protocol import (
 from vonk_control.inventory.items import runtime_value
 from vonk_control.inventory.repository import InventoryRepository
 from vonk_control.memory_reservations import memory_reservations
-from vonk_control.models import (
-    AgentNode,
-    CatalogDocumentRevision,
-    ClusterMapping,
-    Job,
-    NodeInventorySnapshot,
-    RecipeBuild,
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision, RecipeSourceBundle
+from vonk_control.models.execution import (
     RecipeInstallation,
     RecipeRun,
-    RecipeSourceBundle,
     ResourceReservation,
     RunNode,
 )
-from vonk_control.recipe_builds import (
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.recipe_builds.common import (
     RecipeBuildError,
     RecipeBuildPlan,
-    RecipeBuildService,
     _available_build_memory,
 )
+from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_execution_contract import run_plan_document
 from vonk_control.run_admission import _node_document
-from vonk_control.run_switch_contract import RunSwitchOperationResult, RunSwitchPlan
-from vonk_control.run_switch_operations import RunSwitchOperationConflict
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.errors import RunSwitchOperationConflict
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 
 from .preflight_fixtures import record_passing_preflight

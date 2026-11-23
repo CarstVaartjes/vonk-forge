@@ -8,18 +8,17 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, WaitReason
-from vonk_control.models import Base, Job
+from vonk_control.model_primitives import Base
+from vonk_control.models.jobs import Job
 from vonk_control.oci_image_store import OciImageStore, StoredImage
-from vonk_control.recipe_image_availability import (
-    BuildUnsettled,
+from vonk_control.recipe_image_availability.contracts import BuildUnsettled
+from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
 from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
-    OciLayoutImageTransport,
-    prepare_runtime_image,
-)
+from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
+from vonk_control.runtime_image_preparation.transport import OciLayoutImageTransport
 
 from .test_oci_image_store import _docker_archive, _layer
 from .test_recipe_image_availability import _add_revision, _recipe, _runtime

@@ -17,22 +17,18 @@ from vonk_agent_protocol import (
 )
 
 from .. import agent_operation_states
-from ..agent_jobs import (
-    _JsonFlagIsTrue,
-)
+from ..agent_jobs.predicates import _JsonFlagIsTrue
 from ..categorized_errors import (
     InvalidValue,
     MissingRecord,
 )
 from ..jobs import states as job_states
-from ..lifecycle import Outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..models import (
-    AgentNode,
-    AgentOperation,
-    Job,
-)
+from ..lifecycle.types import Outcome
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from ..recipe_builds.cancellation import BuildConsumerError, build_cancellation
 from ..recipe_lifecycle_contract import (
     RecipeOperationCancellationResult,

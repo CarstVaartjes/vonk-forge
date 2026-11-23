@@ -24,7 +24,8 @@ from vonk_control.library.contract import (
     ModelLibraryResponse,
     RecipeLibraryResponse,
 )
-from vonk_control.library_projection import LibraryProjection, common
+from vonk_control.library_projection import common
+from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.strict_json import serialize_json_value
 
 from .test_library_assessment import (  # noqa: F401 - the shared fixture

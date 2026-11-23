@@ -23,29 +23,22 @@ from ..artifact_lifecycle import (
     lock_removal_fences,
     retryable_artifact_database_error,
 )
-from ..artifact_reference_scan import (
-    ArtifactReferenceFinding,
-    _reason_projection,
-    model_set_reference_findings,
-)
+from ..artifact_reference_scan.model_references import model_set_reference_findings
+from ..artifact_reference_scan.types import ArtifactReferenceFinding, _reason_projection
 from ..failure_classification import disposition
-from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.evidence import Residue
+from ..lifecycle.types import Effect, Outcome, Reported
 from ..model_cache_contract import (
     ModelCacheRemovalPayload,
     ModelCacheRemovalResult,
     ModelCacheSetState,
 )
 from ..model_cache_progress import cache_phase, progress_document
-from ..models import (
-    ArtifactDistributionAssignment,
-    FleetProfileApplication,
-    Job,
-    ModelCacheOperation,
-    ModelCacheSet,
-    ModelCacheSetArtifact,
-    RecipeInstallation,
-)
+from ..models.cache import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
+from ..models.execution import RecipeInstallation
+from ..models.fleet import FleetProfileApplication
+from ..models.jobs import Job
+from ..models.operations import ArtifactDistributionAssignment
 from ..validation_detail import validation_error_detail
 from .constants import _RETRY_BASE_SECONDS, REMOVAL_BATCH_SECONDS, SCHEMA_VERSION
 from .errors import ModelCacheStorageRefused, _ArtifactWriterBusy

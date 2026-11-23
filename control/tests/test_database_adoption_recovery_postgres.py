@@ -15,9 +15,13 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool, QueuePool
-from vonk_control import db
 from vonk_control.db import startup as startup_owner
-from vonk_control.models import Base, CatalogDocumentRevision
+from vonk_control.db.connections import run_with_database_startup_retry
+from vonk_control.db.constants import _STARTUP_ADVISORY_LOCK
+from vonk_control.db.startup import initialize_database, verify_schema_is_current
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.settings import DATABASE_WAIT_BUDGETS
 
 from .test_exact_integer_storage import (
     _document,
@@ -56,7 +60,7 @@ def assert_native_server_budgets(connection: Connection) -> None:
         "(extract(epoch FROM current_setting('transaction_timeout')::interval)*1000)::bigint, "
         "(extract(epoch FROM current_setting('idle_in_transaction_session_timeout')::interval)*1000)::bigint"
     ).one()
-    budgets = db.DATABASE_WAIT_BUDGETS
+    budgets = DATABASE_WAIT_BUDGETS
     assert tuple(values) == (
         budgets.lock_timeout_ms,
         budgets.statement_timeout_ms,
@@ -100,7 +104,7 @@ def startup_database(legacy_engine: Engine) -> StartupDatabase:
     ) -> None:
         timeout = parameters.get("connect_timeout")
         assert type(timeout) is int
-        assert timeout == db.DATABASE_WAIT_BUDGETS.connect_timeout_seconds
+        assert timeout == DATABASE_WAIT_BUDGETS.connect_timeout_seconds
         connection_timeouts.append(timeout)
 
     def disposed(engine: Engine) -> None:
@@ -139,7 +143,7 @@ class Attempts:
         # Pool disposal closes the client socket; PostgreSQL observes that close
         # asynchronously, especially through the forwarding peer. Observe actual
         # server cleanup within the connection budget, without accepting leaks.
-        deadline = time.monotonic() + db.DATABASE_WAIT_BUDGETS.connect_timeout_seconds
+        deadline = time.monotonic() + DATABASE_WAIT_BUDGETS.connect_timeout_seconds
         for pid in self.pids[startup_engine] | self.migration_pids:
             while time.monotonic() < deadline:
                 with database.connect() as probe:
@@ -223,7 +227,7 @@ def watch_native_attempts() -> Iterator[Attempts]:
 def observe_retry(
     monkeypatch: pytest.MonkeyPatch, *, timeout: float, sleep: Callable[[float], None]
 ) -> None:
-    original = db.run_with_database_startup_retry
+    original = run_with_database_startup_retry
 
     def audited(operation: Callable[[], None], *, label: str = "database") -> None:
         # Only inject the existing timeout/sleep dependency seams. The actual
@@ -236,7 +240,7 @@ def observe_retry(
 
 def assert_retained_and_current(database: StartupDatabase) -> None:
     with database.engine.begin() as connection:
-        db.verify_schema_is_current(connection)
+        verify_schema_is_current(connection)
         columns = {
             column["name"]: column
             for column in inspect(connection).get_columns("catalog_document_revisions")
@@ -265,7 +269,7 @@ def test_initialize_database_same_call_releases_old_attempt_before_owner_clears(
         else:
             assert (
                 blocker.exec_driver_sql(
-                    "SELECT pg_try_advisory_lock(%s)", (db._STARTUP_ADVISORY_LOCK,)
+                    "SELECT pg_try_advisory_lock(%s)", (_STARTUP_ADVISORY_LOCK,)
                 ).scalar_one()
                 is True
             )
@@ -283,14 +287,14 @@ def test_initialize_database_same_call_releases_old_attempt_before_owner_clears(
                     assert (
                         probe.exec_driver_sql(
                             "SELECT pg_try_advisory_lock(%s)",
-                            (db._STARTUP_ADVISORY_LOCK,),
+                            (_STARTUP_ADVISORY_LOCK,),
                         ).scalar_one()
                         is True
                     )
                     assert (
                         probe.exec_driver_sql(
                             "SELECT pg_advisory_unlock(%s)",
-                            (db._STARTUP_ADVISORY_LOCK,),
+                            (_STARTUP_ADVISORY_LOCK,),
                         ).scalar_one()
                         is True
                     )
@@ -299,7 +303,7 @@ def test_initialize_database_same_call_releases_old_attempt_before_owner_clears(
             else:
                 assert (
                     blocker.exec_driver_sql(
-                        "SELECT pg_advisory_unlock(%s)", (db._STARTUP_ADVISORY_LOCK,)
+                        "SELECT pg_advisory_unlock(%s)", (_STARTUP_ADVISORY_LOCK,)
                     ).scalar_one()
                     is True
                 )
@@ -309,14 +313,14 @@ def test_initialize_database_same_call_releases_old_attempt_before_owner_clears(
         observe_retry(monkeypatch, timeout=5, sleep=release_before_backoff)
         try:
             # Exactly one public entry call must finish migration and adoption.
-            db.initialize_database(database.url, config_path=CONFIG)
+            initialize_database(database.url, config_path=CONFIG)
             assert len(waits) == 1 and len(attempts.pids) == 2
             assert attempts.disposed == set(attempts.pids)
         finally:
             blocker.rollback()
             if owner == "advisory":
                 blocker.exec_driver_sql(
-                    "SELECT pg_advisory_unlock(%s)", (db._STARTUP_ADVISORY_LOCK,)
+                    "SELECT pg_advisory_unlock(%s)", (_STARTUP_ADVISORY_LOCK,)
                 )
                 blocker.commit()
     assert_retained_and_current(database)
@@ -333,7 +337,7 @@ def test_initialize_database_busy_owner_exhausts_one_fixed_deadline_without_muta
     with database.engine.connect() as blocker, watch_native_attempts() as attempts:
         assert (
             blocker.exec_driver_sql(
-                "SELECT pg_try_advisory_lock(%s)", (db._STARTUP_ADVISORY_LOCK,)
+                "SELECT pg_try_advisory_lock(%s)", (_STARTUP_ADVISORY_LOCK,)
             ).scalar_one()
             is True
         )
@@ -348,18 +352,18 @@ def test_initialize_database_busy_owner_exhausts_one_fixed_deadline_without_muta
         started = time.monotonic()
         try:
             with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
-                db.initialize_database(database.url, config_path=CONFIG)
+                initialize_database(database.url, config_path=CONFIG)
             assert waits and sum(waits) <= 0.3
             # One fixed 0.3 s deadline; a renewed one never ends.
             assert 0.3 <= time.monotonic() - started < 10
             assert attempts.disposed == set(attempts.pids)
         finally:
             blocker.exec_driver_sql(
-                "SELECT pg_advisory_unlock(%s)", (db._STARTUP_ADVISORY_LOCK,)
+                "SELECT pg_advisory_unlock(%s)", (_STARTUP_ADVISORY_LOCK,)
             )
             blocker.commit()
     assert _schema(database.engine) == before
-    db.initialize_database(database.url, config_path=CONFIG)
+    initialize_database(database.url, config_path=CONFIG)
     assert_retained_and_current(database)
 
 
@@ -381,13 +385,13 @@ def test_initialize_database_unreviewed_schema_is_fatal_without_backoff(
     observe_retry(monkeypatch, timeout=1, sleep=forbidden_backoff)
     with watch_native_attempts() as attempts:
         with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
-            db.initialize_database(database.url, config_path=CONFIG)
+            initialize_database(database.url, config_path=CONFIG)
         assert len(attempts.pids) == 1
         attempts.assert_released(database.engine)
     assert _schema(database.engine) == before
     with database.engine.begin() as connection:
         connection.exec_driver_sql("DROP INDEX proof_unreviewed_numeric")
-    db.initialize_database(database.url, config_path=CONFIG)
+    initialize_database(database.url, config_path=CONFIG)
     assert_retained_and_current(database)
 
 
@@ -420,7 +424,7 @@ def test_initialize_database_native_schema_permission_denial_is_fatal_without_ba
     try:
         with watch_native_attempts() as attempts:
             with pytest.raises((DBAPIError, RuntimeError)) as failure:
-                db.initialize_database(denied_url, config_path=CONFIG)
+                initialize_database(denied_url, config_path=CONFIG)
             cause = (
                 failure.value
                 if isinstance(failure.value, DBAPIError)
@@ -473,7 +477,7 @@ def test_initialize_database_bad_handshake_is_bounded_and_names_the_refusal_with
     started = time.monotonic()
     try:
         with pytest.raises(OperationalError) as failure:
-            db.initialize_database(
+            initialize_database(
                 bad_url.render_as_string(hide_password=False), config_path=CONFIG
             )
         assert getattr(failure.value.orig, "sqlstate", None) is None

@@ -14,14 +14,14 @@ from vonk_control.catalog.revision_contract import (
     read_catalog_projection,
     write_catalog_projection,
 )
-from vonk_control.fleet_profile_contract import FleetProfilePreview
-from vonk_control.models import (
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import (
     CatalogDocumentRevision,
-    RecipeBuild,
     RecipeSourceBundle,
     SourceBundleArchive,
 )
-from vonk_control.recipe_builds import RecipeBuildService
+from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.source_bundles import (
     DatabaseSourceBundleStore,
     generate_source_bundle,
@@ -160,7 +160,8 @@ def test_slow_ingress_finishes_once_and_dual_previews_become_loadable(
 def test_profile_observation_cannot_turn_statement_reads_into_writes(postgres_engine):
     """Catches a new projection writer silently committing in autocommit mode."""
     from sqlalchemy.orm import sessionmaker
-    from vonk_control.models import AgentNode, AgentNodeContact, Base
+    from vonk_control.model_primitives import Base
+    from vonk_control.models.fleet import AgentNode, AgentNodeContact
     from vonk_control.profile_read_observation import profile_read
 
     Base.metadata.create_all(postgres_engine)
@@ -190,7 +191,7 @@ def test_build_resolution_is_memoized_within_a_read_but_fresh_for_the_next(
     from dataclasses import replace
 
     from vonk_control.profile_read_observation import profile_read
-    from vonk_control.recipe_builds import RecipeBuildResolution
+    from vonk_control.recipe_builds.common import RecipeBuildResolution
     from vonk_control.source_bundles import SourceBundleStore
 
     from .test_fleet_profiles_canonical import _sessions

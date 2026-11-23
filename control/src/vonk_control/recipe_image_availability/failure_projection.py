@@ -26,10 +26,8 @@ from ..jobs.documents import AvailabilityJobResult, AvailabilityUnknownEnd
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..lifecycle.image_availability import preparation_deadline
 from ..lifecycle.types import State
-from ..model_cache import ModelCacheError
-from ..models import (
-    Job,
-)
+from ..model_cache.errors import ModelCacheError
+from ..models.jobs import Job
 from ..operations.blockers import make_blocker
 from ..operations.contract import (
     AvailabilityOperationFailure,

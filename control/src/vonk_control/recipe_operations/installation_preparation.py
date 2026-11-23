@@ -27,13 +27,11 @@ from vonk_agent_protocol.compiled_execution_plan import (
 
 from ..admission_locking import admission_attempts, admission_wait_exhausted
 from ..failure_classification import error_detail
-from ..install_admission import (
-    InstallPlan,
-)
-from ..install_admission import (
+from ..install_admission.contracts import InstallPlan
+from ..install_admission.validation import (
     require_admissible as require_install_admissible,
 )
-from ..install_admission import (
+from ..install_admission.validation import (
     require_same_execution as require_same_install_execution,
 )
 from ..lifecycle.evidence import (
@@ -43,11 +41,8 @@ from ..lifecycle.evidence import (
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..models import (
-    InstallationNode,
-    Job,
-    RecipeInstallation,
-)
+from ..models.execution import InstallationNode, RecipeInstallation
+from ..models.jobs import Job
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,

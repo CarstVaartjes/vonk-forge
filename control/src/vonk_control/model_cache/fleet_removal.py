@@ -65,20 +65,17 @@ from ..lifecycle.evidence import (
 )
 from ..machine_states import RUN_LIVE
 from ..model_cache_contract import CacheManifest, CacheOperationKind
-from ..models import (
-    AgentNode,
+from ..models.cache import (
     ArtifactLifecycleGate,
-    CatalogDocumentRevision,
-    CatalogRecipeModelReference,
-    InstallationNode,
-    Job,
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
-    NodeInventorySnapshot,
-    RecipeInstallation,
-    RecipeRun,
 )
+from ..models.catalog import CatalogDocumentRevision, CatalogRecipeModelReference
+from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.telemetry import NodeInventorySnapshot
 from ..recipe_execution_contract import parse_stored_installation_plan
 from ..recipe_operations.errors import RecipeRequestInvalid
 from ..strict_json import read_stored_model

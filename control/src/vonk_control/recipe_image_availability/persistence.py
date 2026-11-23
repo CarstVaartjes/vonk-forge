@@ -24,13 +24,9 @@ from ..catalog.queries import active_head_revision
 from ..jobs import states as job_states
 from ..jobs.documents import AvailabilityJobPayload
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..model_cache import (
-    ModelCacheRemovalScope,
-)
-from ..models import (
-    CatalogDocumentRevision,
-    Job,
-)
+from ..model_cache.views import ModelCacheRemovalScope
+from ..models.catalog import CatalogDocumentRevision
+from ..models.jobs import Job
 from ..recipe_availability_intent import (
     RecipeSelectorIntent,
 )

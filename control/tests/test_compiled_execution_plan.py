@@ -41,20 +41,17 @@ from vonk_control.execution_plan_service import (
     _PlacementTarget,
 )
 from vonk_control.jobs.queue import _canonical_payload
-from vonk_control.models import (
-    CatalogDocumentRevision,
-    ClusterMappingNode,
-    RecipeBuild,
-)
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.mapping import ClusterMappingNode
 from vonk_control.recipe_runtime_specs import ResolvedRecipe
 from vonk_control.recipe_start_payloads import (
     RecipeStartPlacement,
     bind_compiled_execution_plan,
 )
-from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from vonk_control.runtime.adapters import resolve_runtime_adapter
 from vonk_control.runtime.spec_contract import RuntimeSpec
-from vonk_control.runtime_image_preparation import (
+from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImageReceipt as RuntimeImageReceiptWire,
 )
 from vonk_forge_contracts import (
@@ -62,6 +59,7 @@ from vonk_forge_contracts import (
     document_sha256,
     read_recipe,
 )
+from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 from vonk_forge_contracts.model import ModelFile, ModelReference
 
 from .canonical_recipe_fixtures import canonical_example

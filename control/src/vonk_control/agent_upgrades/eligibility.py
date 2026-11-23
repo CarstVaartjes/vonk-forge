@@ -14,7 +14,7 @@ from ..agent_upgrade_contract import (
     AgentUpgradePackage,
 )
 from ..inventory.items import runtime_value
-from ..models import AgentNode
+from ..models.fleet import AgentNode
 from ..strict_json import read_stored_model
 from .constants import _ONLINE_WINDOW
 from .errors import AgentUpgradeInvalid

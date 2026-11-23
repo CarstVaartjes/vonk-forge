@@ -32,7 +32,7 @@ from ..observation.transfer import (
     observation_openapi,
     observation_response,
 )
-from ..operation_api import (
+from ..operation_api.contracts import (
     HealthzResponse,
     ReadyzResponse,
     bounded_error_responses,

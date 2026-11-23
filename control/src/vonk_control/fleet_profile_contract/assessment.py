@@ -9,6 +9,7 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
+from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool
 from vonk_forge_contracts import EndpointAlias
 
@@ -19,16 +20,15 @@ from ..preparation_contract import (
     RolloutPreparation,
     RuntimeImageIdentity,
 )
-from ..run_switch_contract import (
+from ..run_switch_contract.evidence import (
     ConditionalPostStopMemoryCheck,
     EffectiveSettingsSelection,
-    MemoryKind,
-    PortNumber,
     ResourceDemandEvidence,
-    RunSwitchAssessment,
     RunSwitchReason,
     StopImpact,
 )
+from ..run_switch_contract.plans import RunSwitchAssessment
+from ..run_switch_contract.vocabulary import PortNumber
 from ..strict_json import StrictModel
 from .vocabulary import (
     DesiredAssignmentStateField,

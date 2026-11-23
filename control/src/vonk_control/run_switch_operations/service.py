@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     InvalidRequestReason,
 )
+from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
 from ..categorized_errors import (
     InvalidValue,
@@ -19,21 +20,16 @@ from ..cluster_mappings import (
     candidate_placements,
 )
 from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
-from ..model_cache import ModelCacheService
+from ..model_cache.service import ModelCacheService
 from ..preparation_contract import (
     RuntimeImageIdentity,
 )
-from ..recipe_operations import (
-    RecipeOperationService,
-)
+from ..recipe_operations.service import RecipeOperationService
 from ..recipe_runtime_specs import (
     recipe_topology,
 )
-from ..resource_planning import (
-    PLATFORM_MEMORY_FLOOR_BYTES,
-)
-from ..run_switch_contract import (
-    RunSwitchPlan,
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_contract.requests import (
     RunSwitchPreviewRequest,
     SparkGroup,
     SparkGroupNode,

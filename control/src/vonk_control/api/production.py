@@ -13,13 +13,14 @@ from fastapi import FastAPI, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from vonk_agent_protocol import UnknownError, UnknownOutcomeError
 from vonk_agent_protocol.capability_reply import ControllerCapability
+from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
 import vonk_control
 
-from ..agent_jobs import controller_result_consumer
+from ..agent_jobs.contracts import controller_result_consumer
 from ..agent_services import build_agent_services
 from ..artifact_blob_store import ArtifactBlobStore
-from ..artifact_jobs import ArtifactJobService
+from ..artifact_jobs.service import ArtifactJobService
 from ..auth import CursorCodec, TokenCodec
 from ..bounded_retry import REQUEST_PAUSES
 from ..browser_auth import BrowserAuthService
@@ -28,24 +29,23 @@ from ..catalog.service import CatalogService
 from ..catalog.sync import ManagedRecipeCatalogSyncService, catalog_sync_failure_reason
 from ..cluster_mappings import ClusterMappingService
 from ..compose_bundle import compose_bundle
-from ..distribution_executor import CompositeDistributionPhaseExecutor
+from ..distribution_executor.preparation import CompositeDistributionPhaseExecutor
 from ..failure_evidence import FailureEvidenceService
 from ..gateway.keys import GatewayKeyError, GatewayKeyService, keep_default_key
 from ..gateway.route_grants import recipe_key_routes
 from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
 from ..library.assessment import LibraryAssessment
-from ..library_projection import LibraryProjection
+from ..library_projection.service import LibraryProjection
 from ..logging import configure_controller_logging
 from ..metrics.registry import MetricsRegistry, read_runnable_job_ages
-from ..model_cache import ModelCacheService
+from ..model_cache.service import ModelCacheService
 from ..model_cache_api import register_model_cache_operation_provider
 from ..observation.platform import PlatformObserver
-from ..operator_projection_api import build_fleet_operator_services
-from ..recipe_builds import RecipeBuildService
+from ..operator_projection_api.wiring import build_fleet_operator_services
+from ..recipe_builds.service import RecipeBuildService
 from ..recipe_operation_worker import RecipeOperationWorker
-from ..recipe_operations import RecipeOperationService
-from ..resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
-from ..run_switch_operations import RunSwitchOperationService
+from ..recipe_operations.service import RecipeOperationService
+from ..run_switch_operations.service import RunSwitchOperationService
 from ..settings import (
     AGENT_RELEASE_API_URL,
     ARTIFACT_JOB_RETENTION_SECONDS,
@@ -240,26 +240,25 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     capabilities = CapabilityRegistry()
     from sqlalchemy import func, select
 
-    from ..agent_upgrades import AgentUpgradeService
+    from ..agent_upgrades.service import AgentUpgradeService
     from ..availability_production.production import build_recipe_image_availability
-    from ..db import build_engine, session_factory
+    from ..db.connections import build_engine, session_factory
     from ..execution_plan_service import ControllerExecutionPlanService
     from ..fleet_events import FleetEventRepository
-    from ..fleet_projection import FleetProjection
+    from ..fleet_projection.service import FleetProjection
     from ..fleet_stream import FleetStream
     from ..gateway.route_runtime import (
         AtomicRouteBundlePublisher,
         FileSupervisorAcknowledger,
     )
-    from ..install_admission import (
-        InstallAdmissionService,
-    )
+    from ..install_admission.service import InstallAdmissionService
     from ..jobs.queue import JobService
     from ..metrics.registry import OperationalMetricsCollector
-    from ..models import Job
-    from ..operation_api import durable_operation_services
+    from ..models.jobs import Job
+    from ..operation_api.durable import durable_operation_services
     from ..presence import ManagementAddressPolicy
-    from ..recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
+    from ..recipe_routes.publisher import AtomicRecipeRoutePublisher
+    from ..recipe_routes.service import RecipeRouteService
     from ..run_admission import RunAdmissionService
     from ..runtime_image_preparation.preparation import (
         make_runtime_image_receipt_preparer,
@@ -476,7 +475,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         build_artifact_jobs,
         initialize=lambda service: service.reconcile_storage(),
     )
-    from ..fleet_profiles import build_production_fleet_profile_service
+    from ..fleet_profiles.factory import build_production_fleet_profile_service
 
     fleet_profiles = build_production_fleet_profile_service(
         sessions,

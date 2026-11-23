@@ -8,14 +8,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
-from vonk_agent_protocol import AgentEvidenceCode
-from vonk_control.agent_api import InventoryRequest
-from vonk_control.api import create_app
+from vonk_agent_protocol import AgentEvidenceCode, InventoryRequest
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor
 from vonk_control.cache_removal_review import CacheRemovalReview
 from vonk_control.inventory.repository import InventoryRepository
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import AgentCertificate
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.fleet import AgentCertificate
 from vonk_control.run_admission import RunAdmissionService, require_admissible
 
 from .test_agent_api import NODE_A, Jobs, agent_headers, make_agent_system

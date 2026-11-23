@@ -18,7 +18,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import select
-from vonk_control.models import RecipeRun, ResourceReservation
+from vonk_control.models.execution import RecipeRun, ResourceReservation
 
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.sparks import Memory

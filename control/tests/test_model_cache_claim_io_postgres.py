@@ -13,7 +13,7 @@ from vonk_control.model_cache.persistence import (
     _store_operation_payload,
     _updated,
 )
-from vonk_control.models import ModelCacheOperation
+from vonk_control.models.cache import ModelCacheOperation
 
 from .test_model_cache_parallel_space_postgres import _admit, _service
 

@@ -23,11 +23,9 @@ from ..artifact_lifecycle import (
     RemovalOwnerKind,
     retryable_artifact_database_error,
 )
-from ..artifact_reference_scan import (
-    ArtifactReferenceFinding,
-    model_set_reference_findings,
-    runtime_image_reference_findings,
-)
+from ..artifact_reference_scan.image_references import runtime_image_reference_findings
+from ..artifact_reference_scan.model_references import model_set_reference_findings
+from ..artifact_reference_scan.types import ArtifactReferenceFinding
 from ..cache_removal_review import (
     ArtifactKind,
     AssetDisposition,
@@ -40,16 +38,10 @@ from ..cache_removal_review import (
     seal_cache_removal_review,
 )
 from ..content_identity import ImageContent, same_image
-from ..model_cache import (
-    ModelCacheRemovalScope,
-)
-from ..models import (
-    ArtifactLifecycleGate,
-)
+from ..model_cache.views import ModelCacheRemovalScope
+from ..models.cache import ArtifactLifecycleGate
 from ..operations.contract import AvailabilityRecoveryAction
-from ..runtime_image_preparation import (
-    RuntimeImagePreparationError,
-)
+from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
 from .contracts import (
     SCHEMA_VERSION,
     ModelCacheRemovalCoordinator,

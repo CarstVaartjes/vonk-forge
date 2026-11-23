@@ -203,7 +203,7 @@ def lifecycle_wait(
 
 
 if TYPE_CHECKING:
-    from .models import Job
+    from .models.jobs import Job
 
 
 def _job_owns_contract(owner: Job, contract: type[BaseModel]) -> bool:
@@ -236,7 +236,8 @@ def wait_due(owner: ScheduledWaitOwner) -> datetime | None:
         return aware(owner.next_action_at)
     if owner.wait_evidence is not None:
         return None
-    from .models import FleetProfileApplication, Job
+    from .models.fleet import FleetProfileApplication
+    from .models.jobs import Job
 
     paths: tuple[tuple[str, ...], ...] = ()
     document: object = None
@@ -289,22 +290,22 @@ def owner_identity(
     owner: ScheduledWaitOwner,
 ) -> tuple[BlockingOperation, WaitOwnerKind]:
     """Identify the existing owner, never infer a wait reason from its prose."""
-    from .models import (
+    from .models.cache import (
+        ArtifactLifecycleGate,
+        ModelCacheOperation,
+        RecipeLibrarySyncRun,
+    )
+    from .models.coordinator import CoordinatorFailure
+    from .models.execution import ArtifactJob, RecipeInstallation, RecipeRun
+    from .models.fleet import (
         AgentCertificate,
         AgentIssuedCertificateRevocation,
-        AgentOperation,
-        ArtifactJob,
-        ArtifactLifecycleGate,
-        CoordinatorFailure,
         FleetProfileApplication,
         FleetProfileSelection,
-        Job,
-        ModelCacheOperation,
-        RecipeInstallation,
-        RecipeLibrarySyncRun,
-        RecipeRun,
-        RoutePublicationOwner,
     )
+    from .models.jobs import Job
+    from .models.operations import AgentOperation
+    from .models.routes import RoutePublicationOwner
 
     if isinstance(owner, Job):
         previous = read_wait(owner)
@@ -433,12 +434,10 @@ def initialize_wait[T: ScheduledWaitOwner](owner: T, kind: WaitOwnerKind) -> T:
     from uuid import uuid4
 
     from .jobs import states as job_states
-    from .models import (
-        AgentOperation,
-        FleetProfileApplication,
-        Job,
-        ModelCacheOperation,
-    )
+    from .models.cache import ModelCacheOperation
+    from .models.fleet import FleetProfileApplication
+    from .models.jobs import Job
+    from .models.operations import AgentOperation
 
     identity = getattr(owner, "id", None)
     if identity is None:

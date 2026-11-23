@@ -29,24 +29,17 @@ from ..artifact_lifecycle import (
     release_dead_removal_nowait,
     retryable_artifact_database_error,
 )
-from ..artifact_reference_scan import (
-    runtime_image_reference_reasons,
-)
+from ..artifact_reference_scan.image_references import runtime_image_reference_reasons
 from ..categorized_errors import InvalidValue
 from ..failure_classification import error_code
 from ..jobs import states as job_states
 from ..logging import log_event
-from ..model_cache import (
-    ModelCacheError,
-    ModelCacheNotFound,
-)
 from ..model_cache.constants import REMOVAL_BATCH_SECONDS
+from ..model_cache.errors import ModelCacheError, ModelCacheNotFound
 from ..model_cache_contract import (
     ModelCacheRemovalResult,
 )
-from ..models import (
-    Job,
-)
+from ..models.jobs import Job
 from ..operations.contract import (
     AvailabilityOperationFailure,
     sanitize_failure_evidence,
@@ -55,9 +48,7 @@ from ..recipe_image_removal_contract import (
     RecipeCacheRemovalModelChild,
     RecipeCacheRemovalOwner,
 )
-from ..runtime_image_preparation import (
-    RuntimeImagePreparationError,
-)
+from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
 from ..stored.json_values import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .contracts import (

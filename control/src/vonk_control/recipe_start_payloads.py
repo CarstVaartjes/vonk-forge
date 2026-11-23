@@ -14,10 +14,10 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
+from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 
 from .failure_classification import error_detail
 from .harnesses.canonical import places_from_environment
-from .run_switch_contract import MemoryKind
 
 
 class RecipeStartPayloadError(InvalidRequestError, ValueError):

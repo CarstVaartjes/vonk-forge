@@ -13,8 +13,8 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.swap import GIB
-from vonk_control.models import (
-    CatalogDocumentRevision,
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
     InstallationNode,
     MeasuredRolePeak,
     RecipeInstallation,
@@ -293,7 +293,7 @@ def test_a_running_run_without_a_row_gets_it_from_its_next_sample(tmp_path) -> N
 
 
 def _run_node_events(sessions) -> list[int]:
-    from vonk_control.models import FleetStreamEvent
+    from vonk_control.models.telemetry import FleetStreamEvent
 
     with sessions() as session:
         return [
@@ -334,7 +334,7 @@ def test_an_unrenderable_run_node_event_is_a_cursor_hole_not_a_refusal(
 ) -> None:
     """Catches a rank whose stored diagnostics break the payload refusing telemetry."""
     from vonk_agent_protocol.failure_evidence import FailureLogTail
-    from vonk_control.models import (
+    from vonk_control.models.telemetry import (
         FleetEventCursor,
         FleetStreamEvent,
         NodeTelemetrySample,
@@ -401,7 +401,7 @@ def _batch(sessions, node, start, availables):
 
 
 def _stored_samples(sessions) -> int:
-    from vonk_control.models import NodeTelemetrySample
+    from vonk_control.models.telemetry import NodeTelemetrySample
 
     with sessions() as session:
         return len(session.scalars(select(NodeTelemetrySample)).all())
@@ -483,7 +483,7 @@ def _publish_measured(
 ):
     """The signed catalog's measured steady peak for the installation's one role."""
     from vonk_control.catalog.entities import CatalogEntityService
-    from vonk_control.models import CatalogDocumentRevision
+    from vonk_control.models.catalog import CatalogDocumentRevision
     from vonk_forge_contracts.qualification_status import (
         PublishedMeasuredMemory,
         PublishedRoleMemory,
@@ -578,7 +578,7 @@ def test_a_delivered_measurement_leaves_a_running_run_untouched(tmp_path) -> Non
     (the path that reads it); the running run's rows, reservations and Jobs are
     exactly as admitted.
     """
-    from vonk_control.models import Job
+    from vonk_control.models.jobs import Job
 
     sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
     _admit_run(sessions, now, node, installation)

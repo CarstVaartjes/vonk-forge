@@ -18,10 +18,12 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
-from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import build_production_fleet_profile_service
-from vonk_control.models import AgentOperation, ArtifactJob, Job
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.models.execution import ArtifactJob
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .test_artifact_job_lifecycle import _issued_job
 from .test_run_switch_operations import (

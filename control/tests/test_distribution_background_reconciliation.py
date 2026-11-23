@@ -11,12 +11,13 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState
-from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
-from vonk_control.models import AgentNode, Job
-from vonk_control.run_switch_contract import (
-    RunSwitchApplyRequest,
-    RunSwitchRuntimeImageResult,
+from vonk_control.distribution_executor.preparation import (
+    CompositeDistributionPhaseExecutor,
 )
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_contract.phase_results import RunSwitchRuntimeImageResult
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 
 from .test_run_switch_bookkeeping import _accepted
 
@@ -112,12 +113,11 @@ def test_stalled_ended_parent_cannot_monopolize_unrelated_preparation(
     from threading import Event
 
     from vonk_agent_protocol.agent_words import ProfileChildPhase
-    from vonk_control.agent_jobs import AgentJobService
-    from vonk_control.distribution import DistributionService, MemoryObjectSource
-    from vonk_control.run_switch_contract import (
-        RunSwitchOperationResult,
-        RunSwitchPhase,
-    )
+    from vonk_control.agent_jobs.service import AgentJobService
+    from vonk_control.distribution.service import DistributionService
+    from vonk_control.distribution.sources import MemoryObjectSource
+    from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+    from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 
     from .test_run_switch_operations import _runtime_receipt
 
@@ -133,7 +133,7 @@ def test_stalled_ended_parent_cannot_monopolize_unrelated_preparation(
     old_entered, fresh_entered, release = Event(), Event(), Event()
     old_key = accepted.operation.request_key
     from vonk_agent_protocol import canonical_message
-    from vonk_control.runtime_image_preparation import RuntimeImageReceipt
+    from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 
     receipt = RuntimeImageReceipt.model_validate_json(
         canonical_message(

@@ -9,9 +9,9 @@ import pytest
 from sqlalchemy.orm import Session
 
 contracts = pytest.importorskip("vonk_forge_contracts")
-from vonk_control.artifact_jobs import _active_recipe_revision
-from vonk_control.fleet_projection import _canonical_recipe
-from vonk_control.models import CatalogDocumentRevision
+from vonk_control.artifact_jobs.contracts import _active_recipe_revision
+from vonk_control.fleet_projection.common import _canonical_recipe
+from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_forge_contracts import document_sha256
 
 

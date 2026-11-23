@@ -28,14 +28,10 @@ from ..gateway.route_bundle_contract import (
 )
 from ..gateway.route_model_info import RouteModelInfoReader
 from ..interface_adapters import InterfaceAdapterError, interface_adapter
-from ..models import (
-    AgentNode,
-    CatalogDocumentRevision,
-    ClusterMapping,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
-)
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import RecipeInstallation, RecipeRun, RunNode
+from ..models.fleet import AgentNode
+from ..models.mapping import ClusterMapping
 from ..presence import ManagementAddressPolicy, PresenceError
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,

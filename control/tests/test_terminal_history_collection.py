@@ -18,18 +18,11 @@ from vonk_agent_protocol import LifecycleState, ReservationState
 from vonk_control import terminal_history_collection
 from vonk_control.catalog.revision_collection import INTERVAL
 from vonk_control.metrics.registry import MetricsRegistry, OperationalMetricsCollector
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    Base,
-    Job,
-    JobAttempt,
-    RecipeRun,
-    ResourceReservation,
-    RunNode,
-)
+from vonk_control.model_primitives import Base
+from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job, JobAttempt
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.recipe_execution_contract import StoredRunNodePlan, StoredRunPlan
 from vonk_control.terminal_history_collection import (
     BACKLOG_PAUSE,

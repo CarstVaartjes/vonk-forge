@@ -42,15 +42,14 @@ from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.distribution_executor.identity import DistributionIdentity
 from vonk_control.distribution_executor.receipts import RuntimeImagePull
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
-from vonk_control.model_cache import ArtifactSetManifest, ModelCacheService
-from vonk_control.models import (
-    Base,
-    CatalogDocumentRevision,
-    ClusterMappingNode,
-    RecipeBuild,
-)
+from vonk_control.model_cache.artifacts import ArtifactSetManifest
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.mapping import ClusterMappingNode
 from vonk_control.recipe_packages import client as recipe_packages
-from vonk_control.run_switch_contract import RunSwitchPlan
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
 from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import read_recipe

@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from vonk_control.models import AgentNode, Job
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
 from vonk_control.reservation_owners import OwnerKind, OwnerRef, owner
 from vonk_control.stall_window import Verdict, Wait, progress_deadline, progress_verdict
 

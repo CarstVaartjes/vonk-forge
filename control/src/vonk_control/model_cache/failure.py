@@ -19,14 +19,14 @@ from vonk_agent_protocol import (
 
 from ..agent_operation_facts import aware as _aware
 from ..failure_classification import disposition, is_definite
-from ..lifecycle import Reported, State
+from ..lifecycle.types import Reported, State
 from ..logging import redact_text
 from ..model_cache_contract import (
     ModelCacheMissingSourceObservation,
     ModelCacheSetState,
 )
 from ..model_cache_progress import cache_phase, progress_document
-from ..models import ModelCacheOperation, ModelCacheSet
+from ..models.cache import ModelCacheOperation, ModelCacheSet
 from ..operations.blockers import make_blocker
 from ..operations.contract import AvailabilityRecoveryAction
 from ..persisted_waits import schedule_wait, typed_wait_reason

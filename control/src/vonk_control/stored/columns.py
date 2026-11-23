@@ -75,14 +75,13 @@ from ..fleet_event_contract import (
     RecipeRunPayload,
     RunNodePayload,
 )
-from ..fleet_profile_contract import (
+from ..fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
-    FleetProfileAssignmentInput,
-    FleetProfilePreview,
-    LabelName,
-    LabelValue,
 )
+from ..fleet_profile_contract.definitions import FleetProfileAssignmentInput
+from ..fleet_profile_contract.review import FleetProfilePreview
+from ..fleet_profile_contract.vocabulary import LabelName, LabelValue
 from ..jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityJobResult,
@@ -130,10 +129,8 @@ from ..recipe_lifecycle_contract import (
     RecipeOperationStoppedResult,
 )
 from ..recipe_update_contract import RecipeUpdateDocument, RecipeUpdateFailure
-from ..run_switch_contract import (
-    RunSwitchDistributionChildResult,
-    RunSwitchOperationResult,
-)
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.phase_results import RunSwitchDistributionChildResult
 from ..run_switch_journal_contract import (
     JournalRepairPurpose,
     RunSwitchJournalRepairEndEvidence,

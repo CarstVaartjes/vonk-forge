@@ -10,7 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from vonk_agent_protocol import WaitReason
 
-from ..agent_api import AgentApiServices
+from ..agent_api.common import AgentApiServices
 from ..agent_contacts import record_observation_delivery
 from ..auth import agent_identity_from_scope
 from ..logging import log_event

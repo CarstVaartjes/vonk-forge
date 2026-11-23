@@ -271,7 +271,8 @@ def test_agent_handler_reuses_the_middleware_validation(
 
     from fastapi.testclient import TestClient
     from vonk_control.agent_api import common
-    from vonk_control.api import create_app, middleware
+    from vonk_control.api import middleware
+    from vonk_control.api.application import create_app
     from vonk_control.auth import TokenCodec
 
     lookups: list[object] = []

@@ -17,24 +17,21 @@ from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 from vonk_control import agent_operation_states as aos
 from vonk_control.admission_locking import AdmissionLockBusy
-from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
+from vonk_control.agent_jobs.contracts import StaleAgentAttempt
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.auth import TokenCodec
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
-from vonk_control.enrollment import EnrollmentService
-from vonk_control.lifecycle import State
+from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.lifecycle.agent_operation import (
     AgentOperationAdapter,
     retry_scheduled,
 )
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    Base,
-    Job,
-)
-from vonk_control.operation_api import durable_operation_services
+from vonk_control.lifecycle.types import State
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operation_api.durable import durable_operation_services
 from vonk_control.pki import IssuedCertificate
 
 from .agent_fences import fenced_attempt, fenced_operation, park_for_operator
@@ -1446,7 +1443,7 @@ _PROBE = {
 
 
 def _abandon(sessions, job_id, now) -> bool:
-    from vonk_control.agent_jobs import abandon_idempotent_job_in_session
+    from vonk_control.agent_jobs.retry import abandon_idempotent_job_in_session
 
     with sessions.begin() as session:
         session.execute(text("SET LOCAL lock_timeout = '5s'"))

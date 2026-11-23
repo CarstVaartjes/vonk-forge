@@ -5,7 +5,10 @@ import uuid
 
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.telemetry import HostResourceSample
-from vonk_control.models import NodeInventoryResourceSnapshot, NodeTelemetrySample
+from vonk_control.models.telemetry import (
+    NodeInventoryResourceSnapshot,
+    NodeTelemetrySample,
+)
 
 
 def telemetry_with_resources(

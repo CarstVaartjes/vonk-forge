@@ -6,21 +6,20 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, ProfileReasonCode, RunState
-from vonk_control.fleet_profile_contract import (
-    FleetProfileApplicationView,
+from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
+)
+from vonk_control.fleet_profile_contract.review import (
+    FleetProfileApplicationView,
     FleetProfilePreview,
 )
-from vonk_control.fleet_profiles import (
+from vonk_control.fleet_profiles.persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
 )
-from vonk_control.models import (
-    FleetProfileApplication,
-    FleetProfileSelection,
-    RecipeRun,
-)
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.fleet import FleetProfileApplication, FleetProfileSelection
 
 from .lifecycle_simulation.simulation import ROUND_SECONDS, Simulation
 from .lifecycle_simulation.world import SOLO, SOLO_B, build_world

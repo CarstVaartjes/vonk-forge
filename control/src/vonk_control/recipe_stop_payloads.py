@@ -19,12 +19,8 @@ from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStop
 
 from .categorized_errors import BookkeepingUnknown
 from .lifecycle.evidence import Residue
-from .models import (
-    CatalogDocumentRevision,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
-)
+from .models.catalog import CatalogDocumentRevision
+from .models.execution import RecipeInstallation, RecipeRun, RunNode
 from .recipe_action_plans import StopNodeImpact
 from .recipe_execution_contract import (
     RecipeExecutionContractError,

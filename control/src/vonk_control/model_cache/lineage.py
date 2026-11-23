@@ -29,7 +29,8 @@ from vonk_forge_contracts import ModelDefinition
 from vonk_forge_contracts.model import ModelReference
 
 from ..model_cache_contract import CacheManifest
-from ..models import CatalogDocumentRevision, ModelCacheSet, ModelCacheSetArtifact
+from ..models.cache import ModelCacheSet, ModelCacheSetArtifact
+from ..models.catalog import CatalogDocumentRevision
 from ..stored.json_values import read_row_column
 
 

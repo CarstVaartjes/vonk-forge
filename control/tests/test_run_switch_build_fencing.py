@@ -8,13 +8,11 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
-from vonk_control.models import (
-    AgentNode,
-    Job,
-    NodeInventorySnapshot,
-    RecipeInstallation,
-)
-from vonk_control.run_switch_contract import (
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.run_switch_contract.requests import (
     RunSwitchApplyRequest,
     RunSwitchCleanupApplyRequest,
 )

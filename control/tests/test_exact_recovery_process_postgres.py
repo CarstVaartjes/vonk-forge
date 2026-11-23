@@ -10,8 +10,10 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentResult
-from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
-from vonk_control.models import AgentOperation, AgentOperationAttempt, Job
+from vonk_control.agent_jobs.contracts import StaleAgentAttempt
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .recipe_stop_fixtures import recipe_stop_payload

@@ -320,7 +320,7 @@ def read_column(
 def read_row_column(row: object, column: str) -> Any | Residue | None:
     """:func:`read_column` for ``row.column``, with the row's own kind and id."""
 
-    from ..models import CatalogDocumentRevision
+    from ..models.catalog import CatalogDocumentRevision
 
     if isinstance(row, CatalogDocumentRevision) and column == "document":
         from ..catalog.revision_contract import cached_catalog_document
@@ -396,7 +396,10 @@ def install_write_guard(*, strict: bool | None = None) -> None:
     global _GUARD_INSTALLED
     from sqlalchemy import event
 
-    from ..models import Base
+    from .. import (
+        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+    )
+    from ..model_primitives import Base
 
     if strict is not None:
         set_write_guard_mode(strict=strict)

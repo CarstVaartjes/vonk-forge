@@ -11,10 +11,10 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor
-from vonk_control.models import AgentEnrollmentGrant
-from vonk_control.operator_projection_api import build_fleet_operator_services
+from vonk_control.models.fleet import AgentEnrollmentGrant
+from vonk_control.operator_projection_api.wiring import build_fleet_operator_services
 
 from .test_agent_api import Jobs, make_agent_system
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment

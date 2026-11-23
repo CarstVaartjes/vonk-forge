@@ -21,14 +21,14 @@ from .api_availability import AVAILABILITY_ERRORS
 from .auth import MUTATION_ROLES, Actor, CursorCodec
 from .bounded_json import require_integer, require_sequence
 from .cache_removal_review import CacheRemovalReview
-from .model_cache import (
+from .model_cache.errors import (
     ModelCacheConflict,
     ModelCacheError,
     ModelCacheNotFound,
     ModelCacheResolutionError,
-    ModelCacheService,
+    ModelCacheSelectorAmbiguous,
 )
-from .model_cache.errors import ModelCacheSelectorAmbiguous
+from .model_cache.service import ModelCacheService
 from .model_cache_contract import (
     UUID_PATTERN,
     CacheOperationKind,
@@ -40,7 +40,7 @@ from .model_cache_contract import (
     ModelCacheRemovalResult,
 )
 from .model_cache_progress import project_cache_progress
-from .operation_api import (
+from .operation_api.contracts import (
     OperationApiServices,
     OperationListPage,
     OperationProvider,
@@ -129,7 +129,7 @@ def model_cache_http_error(error: BaseException) -> HTTPException:
         raise error
     if isinstance(error, ModelCacheSelectorAmbiguous):
         from .library.api import SelectorAmbiguityHTTPError
-        from .library_projection import LibrarySelectorAmbiguous
+        from .library_projection.common import LibrarySelectorAmbiguous
 
         return SelectorAmbiguityHTTPError(
             LibrarySelectorAmbiguous("model", error.candidates),
@@ -172,7 +172,7 @@ def install_model_operator_routes(
     Replays bind the actor, request identity, action, selector, and digest.
     """
 
-    from .operation_api import _ADMIN_OPERATION_IDS
+    from .operation_api.constants import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS.update(MODEL_CACHE_OPERATION_IDS)
 

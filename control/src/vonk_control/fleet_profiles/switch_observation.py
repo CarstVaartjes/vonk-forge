@@ -19,13 +19,13 @@ from vonk_agent_protocol.agent_words import (
     ProfileSwitchChildKind,
 )
 
-from ..agent_jobs import AgentJobService
+from ..agent_jobs.service import AgentJobService
 from ..categorized_errors import MissingRecord
 from ..failure_classification import is_definite
-from ..fleet_profile_contract import (
-    FleetProfileAssignment,
+from ..fleet_profile_contract.applications import FleetProfileChildOperation
+from ..fleet_profile_contract.definitions import FleetProfileAssignment
+from ..fleet_profile_contract.switch_state import (
     FleetProfileAssignmentFailure,
-    FleetProfileChildOperation,
     FleetProfileSwitchAdapterResult,
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchChildState,
@@ -34,10 +34,11 @@ from ..fleet_profile_contract import (
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.fleet_profile import FleetProfileAdapter, cancellation_state, doc_state
-from ..models import STOPPABLE_RUN_STATES, FleetProfileApplication, RecipeRun
+from ..models.execution import STOPPABLE_RUN_STATES, RecipeRun
+from ..models.fleet import FleetProfileApplication
 from ..operations.blockers import BlockingOperation, make_blocker
 from ..persisted_waits import schedule_wait, write_wait
-from ..run_switch_contract import RunSwitchOperation
+from ..run_switch_contract.operations import RunSwitchOperation
 from .assessment_support import (
     _stored_state,
 )

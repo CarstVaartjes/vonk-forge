@@ -18,7 +18,7 @@ from ..model_cache_contract import (
     ModelCacheSetState,
     ModelCacheTransfer,
 )
-from ..models import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
+from ..models.cache import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
 from ..storage_demands import NAS_MODELS, StorageDemands
 from .artifacts import (
     ArtifactSetManifest,

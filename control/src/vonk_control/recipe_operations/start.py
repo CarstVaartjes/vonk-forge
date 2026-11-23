@@ -33,13 +33,9 @@ from ..admission_locking import (
 from ..lifecycle.evidence import (
     Residue,
 )
-from ..models import (
-    AgentNodeContact,
-    Job,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
-)
+from ..models.execution import RecipeInstallation, RecipeRun, RunNode
+from ..models.fleet import AgentNodeContact
+from ..models.jobs import Job
 from ..recipe_progress import (
     _canonical_distributed_readiness as _canonical_distributed_readiness,  # noqa: PLC0414 -- shared helper export
 )

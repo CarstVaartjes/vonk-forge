@@ -31,7 +31,7 @@ from ..model_cache_contract import (
     ModelCacheTransferArtifact,
 )
 from ..model_cache_progress import progress_document
-from ..models import ModelCacheOperation
+from ..models.cache import ModelCacheOperation
 from ..profile_read_observation import observe_storage, observing_profile
 from ..settings import DATABASE_WAIT_BUDGETS
 from ..strict_json import serialize_json_value

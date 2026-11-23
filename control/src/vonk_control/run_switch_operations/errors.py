@@ -20,7 +20,7 @@ from ..failure_classification import is_definite
 from ..recipe_runtime_specs import (
     RecipeRuntimeSpecError,
 )
-from ..runtime_image_preparation import (
+from ..runtime_image_preparation.contracts import (
     RuntimeImagePreparationRefused,
     RuntimeImagePreparationUnknown,
 )

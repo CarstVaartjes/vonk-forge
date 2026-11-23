@@ -20,23 +20,16 @@ from ..artifact_lifecycle import (
     ArtifactLifecycleError,
     require_reference_open,
 )
-from ..artifact_reference_scan import (
-    require_model_sets_open,
-)
+from ..artifact_reference_scan.model_sets import require_model_sets_open
 from ..lifecycle.evidence import (
     BookkeepingReason,
     Residue,
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..models import (
-    Job,
-)
-from ..run_switch_contract import (
-    RunSwitchAction,
-    RunSwitchPlacementAction,
-    RunSwitchPlan,
-)
+from ..models.jobs import Job
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_contract.vocabulary import RunSwitchAction, RunSwitchPlacementAction
 from ..run_switch_observation_contract import (
     RunSwitchStoredIdentity,
 )

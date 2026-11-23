@@ -45,18 +45,14 @@ from ..categorized_faults import security_reason
 from ..inventory.items import inventory_items
 from ..inventory.repository import InventorySnapshotView
 from ..memory_reservations import memory_reservations, memory_reserve_floor
-from ..models import (
-    AgentNode,
-    CatalogDocumentRevision,
-    RecipeBuild,
-    RecipeRun,
-    ResourceReservation,
-    RunNode,
-)
+from ..models.cache import RecipeBuild
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import RecipeRun, ResourceReservation, RunNode
+from ..models.fleet import AgentNode
 from ..prebuilt_images import PrebuiltDecision
 from ..profile_capacity import profile_build_memory_claims
 from ..recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
-from ..resource_planning import memory_capacity_snapshot
+from ..resource_planning.memory import memory_capacity_snapshot
 from ..runtime.adapters import (
     RuntimeAdapter,
     RuntimeAdapterError,

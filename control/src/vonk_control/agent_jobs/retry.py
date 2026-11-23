@@ -36,14 +36,15 @@ from ..agent_operation_facts import (
 from ..agent_operation_facts import aware as _aware
 from ..agent_upgrade_status import AGENT_UPGRADE_AWAITING_IDENTITY_REASONS
 from ..failure_classification import disposition, is_security_failure
-from ..lifecycle import CancelRequested, Reported
 from ..lifecycle.agent_operation import (
     AgentOperationAdapter,
     retry_scheduled,
     set_parent_state,
 )
-from ..models import AgentOperation as StoredOperation
-from ..models import AgentOperationAttempt, ArtifactDistributionAssignment, Job
+from ..lifecycle.types import CancelRequested, Reported
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt, ArtifactDistributionAssignment
 from ..recovery_policy import kind_for_failure_fields
 from .contracts import _ABANDONABLE_OPERATIONS, _ENDED_PARENT_STATES, _GRANT_LIFETIME
 from .stored import column_field, column_is_document, column_value

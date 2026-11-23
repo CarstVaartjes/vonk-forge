@@ -31,7 +31,6 @@ from ..artifact_blob_store import ArtifactBlobStore, StoredArtifactBlob
 from ..artifact_job_evidence import ArtifactJobResultEvidence, read_result_evidence
 from ..categorized_errors import InvalidValue, MissingRecord
 from ..compiled_artifact_contract import CompiledArtifactContract
-from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter, retry_scheduled
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import (
@@ -42,25 +41,26 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..lifecycle.job_ranks import order_is_owner
-from ..models import (
-    AgentOperation,
+from ..lifecycle.types import Effect, Outcome, Reported
+from ..models.execution import (
     ArtifactJob,
     ArtifactJobBlob,
     ArtifactJobFile,
-    ClusterMappingNode,
-    Job,
     RecipeInstallation,
     RecipeRun,
     RunNode,
 )
+from ..models.jobs import Job
+from ..models.mapping import ClusterMappingNode
+from ..models.operations import AgentOperation
 from ..owner_liveness import OwnerKind, OwnerRef, owner
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
     parse_stored_run_plan,
 )
-from ..recipe_operations import RecipeOperationService
 from ..recipe_operations.observation_helpers import reinstall_in_flight
+from ..recipe_operations.service import RecipeOperationService
 from ..settings import ARTIFACT_JOB_RETENTION_SECONDS
 from ..strict_json import read_stored_model
 from .contracts import (

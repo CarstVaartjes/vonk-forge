@@ -26,8 +26,8 @@ from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 from vonk_control.agent_jobs.contracts import OFF_LANE_OPERATIONS
 from vonk_control.agent_jobs.waits import refresh_queue_waits
 from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
-from vonk_control.models import AgentOperation as StoredOperation
-from vonk_control.models import Job
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
 from vonk_control.operations.blockers import BlockingOperation
 from vonk_control.persisted_waits import read_wait
 from vonk_control.wait_contract import QueueWait

@@ -25,21 +25,14 @@ from vonk_agent_protocol import (
 )
 
 from ..admission_locking import is_admission_contention
-from ..agent_jobs import (
-    AgentJobService,
-)
+from ..agent_jobs.service import AgentJobService
 from ..jobs.documents import RecipeStopParent, controller_recipe_document
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import Residue
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..models import (
-    AgentNode,
-    ArtifactJob,
-    Job,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
-)
+from ..models.execution import ArtifactJob, RecipeInstallation, RecipeRun, RunNode
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
 from ..profile_stop_authority import (
     JobRunStopScope,
     ProfileJobRunStopJob,

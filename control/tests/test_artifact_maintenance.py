@@ -7,7 +7,7 @@ import os
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from vonk_control.artifact_jobs import StorageReconciliation
+from vonk_control.artifact_jobs.contracts import StorageReconciliation
 from vonk_control.artifact_maintenance import ArtifactMaintenanceCadence
 
 

@@ -8,8 +8,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import Base, User
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import User
 from vonk_control.operator_receipt_contract import AcceptanceReceipt, ReceiptOwner
 
 from .test_model_removal_worker_postgres import _prepare_removal_target

@@ -11,7 +11,8 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, WaitReason
 from vonk_control.lifecycle.job import JobAdapter
-from vonk_control.models import Base, Job
+from vonk_control.model_primitives import Base
+from vonk_control.models.jobs import Job
 
 from tests.signed_recipe_release import signed_recipe_releases
 
@@ -182,8 +183,8 @@ def test_startup_adds_wait_columns_without_restarting_a_live_attempt(
 ) -> None:
     """Catches an upgrade discarding running work or treating NULL waits as failure."""
     from sqlalchemy import inspect
-    from vonk_control.db import reconcile_schema
-    from vonk_control.models import JobAttempt
+    from vonk_control.db.schema import reconcile_schema
+    from vonk_control.models.jobs import JobAttempt
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -228,7 +229,7 @@ def test_startup_adds_wait_columns_without_restarting_a_live_attempt(
 
 def test_wait_model_inventory_is_exhaustive() -> None:
     """Every concrete owner binds its JSON to the canonical persisted model."""
-    from vonk_control.models import Base
+    from vonk_control.model_primitives import Base
     from vonk_control.stored.json_values import binding_for
     from vonk_control.wait_contract import WaitEvidence
 
@@ -262,7 +263,8 @@ def test_every_durable_wait_owner_has_identity_and_projection() -> None:
 
     from sqlalchemy import Integer
     from vonk_agent_protocol import WaitOwnerKind, WaitReason, WaitResumeCondition
-    from vonk_control.models import Base, Job
+    from vonk_control.model_primitives import Base
+    from vonk_control.models.jobs import Job
     from vonk_control.operations.blockers import make_blocker
     from vonk_control.persisted_waits import owner_identity, read_wait, write_wait
 
@@ -349,7 +351,7 @@ def test_catalog_wait_survives_reconstruction_and_reuses_exact_observation(
     """Catches a restarted loop losing its delay or attaching it to unrelated history."""
     from vonk_agent_protocol import CatalogSyncCode
     from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
-    from vonk_control.models import RecipeLibrarySyncRun
+    from vonk_control.models.cache import RecipeLibrarySyncRun
     from vonk_control.persisted_waits import read_wait
 
     from .test_catalog_sync import _fixture

@@ -21,10 +21,10 @@ from vonk_agent_protocol import (
     RunSwitchCode,
 )
 
-from ..fleet_profile_contract import FleetProfileAssignmentInput
+from ..fleet_profile_contract.definitions import FleetProfileAssignmentInput
 from ..jobs import states as job_states
 from ..model_cache_contract import CacheManifest
-from ..models import ModelCacheSet
+from ..models.cache import ModelCacheSet
 from ..recipe_action_plans import StopPlan
 from ..storage_demands import (
     STORAGE_EVICTING,

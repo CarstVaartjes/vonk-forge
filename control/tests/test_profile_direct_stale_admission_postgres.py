@@ -7,20 +7,16 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, ProfileReasonCode
-from vonk_control.fleet_profile_contract import (
+from vonk_control.fleet_profile_contract.review import (
     FleetProfileApplicationView,
     FleetProfilePreview,
 )
-from vonk_control.fleet_profiles import (
-    FleetProfileService,
-    FleetProfileStalePlanConflict,
-    _persisted_profile_plan,
-)
-from vonk_control.models import (
-    ClusterMapping,
-    FleetProfileApplication,
-    RecipeBuild,
-)
+from vonk_control.fleet_profiles.contracts import FleetProfileStalePlanConflict
+from vonk_control.fleet_profiles.persistence import _persisted_profile_plan
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.mapping import ClusterMapping
 
 from .test_fleet_profile_review import _replace_run
 from .test_fleet_profiles import _exact_cleanup_profile

@@ -12,7 +12,7 @@ from vonk_agent_protocol import ModelCacheCode, WaitReason
 from ..bounded_retry import bounded_attempts
 from ..categorized_errors import InvalidValue
 from ..model_cache_contract import ModelCacheSetState
-from ..models import ModelCacheSet
+from ..models.cache import ModelCacheSet
 from .artifacts import ArtifactSetManifest, _optional_digest
 from .constants import _LOGGER, _RETRY_BASE_SECONDS, _REVERIFY_ACTOR, SCHEMA_VERSION
 from .errors import (

@@ -10,7 +10,7 @@ from vonk_agent_protocol import LifecycleState, ModelCacheCode
 
 from .. import model_cache_states
 from ..categorized_errors import InvalidValue
-from ..lifecycle import State
+from ..lifecycle.types import State
 from ..logging import redact_text
 from ..model_cache_contract import (
     CacheOperationKind,
@@ -19,7 +19,8 @@ from ..model_cache_contract import (
     ModelCacheOperatorAction,
     ModelCacheRemovalPayload,
 )
-from ..models import CatalogDocumentRevision, ModelCacheOperation, ModelCacheSet
+from ..models.cache import ModelCacheOperation, ModelCacheSet
+from ..models.catalog import CatalogDocumentRevision
 from ..operations.contract import AvailabilityOperationFailure
 from ..persisted_waits import read_wait
 from ..strict_json import read_stored_model, serialize_json_value

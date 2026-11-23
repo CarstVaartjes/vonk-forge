@@ -8,7 +8,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
-from ..fleet_profile_contract import FleetProfileSwitchAdapter
+from ..fleet_profile_contract.adapter import FleetProfileSwitchAdapter
 from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
 from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..model_cache_contract import CacheResolution

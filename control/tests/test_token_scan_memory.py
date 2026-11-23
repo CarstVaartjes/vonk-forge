@@ -10,7 +10,8 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.catalog.revision_collection import operation_tokens
-from vonk_control.models import Base, Job
+from vonk_control.model_primitives import Base
+from vonk_control.models.jobs import Job
 
 NOW = datetime(2026, 10, 5, 12, tzinfo=UTC)
 DOCUMENTS = 150

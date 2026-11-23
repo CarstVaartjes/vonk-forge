@@ -27,14 +27,10 @@ from ..jobs.documents import (
 )
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..lifecycle.image_availability import preparation_deadline
-from ..model_cache import (
-    ModelCacheNotFound,
-)
-from ..models import (
-    CatalogDocumentRevision,
-    Job,
-    ModelCacheOperation,
-)
+from ..model_cache.errors import ModelCacheNotFound
+from ..models.cache import ModelCacheOperation
+from ..models.catalog import CatalogDocumentRevision
+from ..models.jobs import Job
 from ..operations.blockers import make_blocker
 from ..operations.contract import (
     AvailabilityOperationFailure,

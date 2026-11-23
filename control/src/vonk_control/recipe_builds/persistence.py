@@ -25,12 +25,10 @@ from ..admission_locking import (
 from ..disk_reservations import outstanding_disk_reservation_bytes
 from ..gpu.health import gpu_health_reason
 from ..inventory.items import runtime_value
-from ..models import (
-    AgentNode,
-    CatalogDocumentRevision,
-    RecipeBuild,
-    ResourceReservation,
-)
+from ..models.cache import RecipeBuild
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import ResourceReservation
+from ..models.fleet import AgentNode
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     build_plan_document,

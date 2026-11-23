@@ -35,14 +35,14 @@ from .operator_receipt_contract import (
 if TYPE_CHECKING:
     from .agent_api.common import AgentApiServices
     from .api.common import JobQueue
-    from .artifact_jobs import ArtifactJobService
-    from .fleet_profiles import FleetProfileService
-    from .fleet_projection import FleetProjection
+    from .artifact_jobs.service import ArtifactJobService
+    from .fleet_profiles.service import FleetProfileService
+    from .fleet_projection.service import FleetProjection
     from .gateway.keys import GatewayKeyService
-    from .model_cache import ModelCacheService
+    from .model_cache.service import ModelCacheService
     from .operator_projection_api.services import FleetOperatorServices
-    from .recipe_image_availability import RecipeImageAvailabilityService
-    from .run_switch_operations import RunSwitchOperationService
+    from .recipe_image_availability.service import RecipeImageAvailabilityService
+    from .run_switch_operations.service import RunSwitchOperationService
 
 
 RECEIPT_HEADER = "X-Vonk-Receipt"
@@ -213,17 +213,15 @@ class OperatorReceiptResolver:
         arguments: AcceptanceArguments,
     ) -> AcceptanceReceipt:
         from .agent_acceptance import AGENT_POLICIES, resolve_agent_receipt
-        from .artifact_jobs import ArtifactJobResponse
+        from .artifact_jobs.contracts import ArtifactJobResponse
         from .enrollment.contract import EnrollmentGrantStatus
-        from .fleet_profile_contract import (
-            FleetProfileApplicationView,
-            FleetProfileView,
-        )
-        from .fleet_projection import FleetNodeIdentity
+        from .fleet_profile_contract.definitions import FleetProfileView
+        from .fleet_profile_contract.review import FleetProfileApplicationView
+        from .fleet_projection.common import FleetNodeIdentity
         from .gateway.keys import GatewayKeyCreated, GatewayKeyRevoked
         from .jobs.operator_receipts import read_job_operator_receipt
         from .model_cache_contract import ModelCacheOperatorResponse
-        from .operation_api import JobResumeResponse
+        from .operation_api.contracts import JobResumeResponse
         from .operator_projection_api.contracts import FleetActionResponse
         from .recipe_image_availability_api import (
             RecipeImageAvailabilityResponse,
@@ -232,7 +230,7 @@ class OperatorReceiptResolver:
         from .recipe_image_availability_view_contract import RecipeCacheRemovalStatus
         from .recipe_image_removal_contract import RecipeRemovalUnavailableView
         from .recipe_update_contract import RecipeUpdateResponse
-        from .run_switch_contract import RunSwitchOperation
+        from .run_switch_contract.operations import RunSwitchOperation
 
         if policy in AGENT_POLICIES:
             _require(isinstance(result, Response))

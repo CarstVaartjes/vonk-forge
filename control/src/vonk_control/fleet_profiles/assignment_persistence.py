@@ -15,12 +15,13 @@ from ..artifact_lifecycle import (
     lock_reference_gates,
     require_reference_open,
 )
-from ..artifact_reference_scan import require_model_sets_open
+from ..artifact_reference_scan.model_sets import require_model_sets_open
 from ..catalog.revision_contract import RecipeRevisionProjection
-from ..fleet_profile_contract import FleetProfileAssignmentInput, FleetProfilePreview
+from ..fleet_profile_contract.definitions import FleetProfileAssignmentInput
+from ..fleet_profile_contract.review import FleetProfilePreview
 from ..lifecycle.evidence import Residue
 from ..model_cache.persistence import _operation_removal
-from ..models import ModelCacheOperation
+from ..models.cache import ModelCacheOperation
 from .contracts import (
     FleetProfileAdmissionEffectBusy,
 )

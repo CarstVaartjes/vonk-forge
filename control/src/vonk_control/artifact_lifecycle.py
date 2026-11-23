@@ -31,7 +31,8 @@ from vonk_agent_protocol import (
 from . import model_cache_states
 from .categorized_errors import InvalidValue
 from .jobs import states as job_states
-from .models import ArtifactLifecycleGate, Job, ModelCacheOperation
+from .models.cache import ArtifactLifecycleGate, ModelCacheOperation
+from .models.jobs import Job
 
 ArtifactKind = Literal["model-set", "model-object", "runtime-image"]
 RemovalOwnerKind = Literal["model-cache-operation", "recipe-image-job"]

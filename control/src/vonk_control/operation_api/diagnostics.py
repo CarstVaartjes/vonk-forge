@@ -21,7 +21,9 @@ from ..bounded_json import mapping
 from ..inventory.items import runtime_value
 from ..lifecycle.agent_operation import retry_scheduled
 from ..logging import redact_text
-from ..models import AgentNode, AgentOperation, AgentOperationAttempt, Job
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..strict_json import read_stored_model, warn_unreadable_once
 from .contracts import (
     AgentUpgradeDiagnosticsResponse,

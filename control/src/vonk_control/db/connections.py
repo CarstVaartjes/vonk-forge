@@ -251,7 +251,10 @@ def wait_for_database(
     worker, not before it: while the owner is still at work startup waits
     within the same bounded deadline. Any other refusal stays fatal.
     """
-    from ..models import Base
+    from .. import (
+        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+    )
+    from ..model_primitives import Base
 
     def connect_once() -> None:
         engine = build_engine(database_url)

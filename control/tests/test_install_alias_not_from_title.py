@@ -3,8 +3,11 @@ from __future__ import annotations
 from uuid import uuid4
 
 from vonk_agent_protocol import DesiredAssignmentState
-from vonk_control.fleet_profile_contract import FleetProfileAssignment, FleetProfileNode
-from vonk_control.fleet_profiles import RunSwitchFleetProfileAdapter
+from vonk_control.fleet_profile_contract.definitions import (
+    FleetProfileAssignment,
+    FleetProfileNode,
+)
+from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
 
 
 def _assignment(

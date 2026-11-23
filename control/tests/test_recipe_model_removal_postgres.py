@@ -11,22 +11,23 @@ from uuid import uuid4
 
 from sqlalchemy import Table, func, select, text
 from sqlalchemy.orm import sessionmaker
-from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_cache_contract import (
     ModelCacheRemovalPayload,
     ModelCacheRemovalResult,
     parse_model_cache_payload,
 )
-from vonk_control.models import (
-    Base,
-    FleetProfileApplication,
-    FleetProfileSelection,
-    Job,
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import (
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
 )
-from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
+from vonk_control.models.fleet import FleetProfileApplication, FleetProfileSelection
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
+)
 from vonk_control.recipe_image_availability_view_contract import (
     RecipeCacheRemovalStatus,
 )
@@ -34,7 +35,7 @@ from vonk_control.recipe_image_removal_contract import (
     RecipeCacheRemovalOwner,
     RecipeCacheRemovalResult,
 )
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .recipe_removal_review_support import remove_after_review

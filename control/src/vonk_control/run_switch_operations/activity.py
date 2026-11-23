@@ -12,7 +12,7 @@ from vonk_agent_protocol import (
 )
 
 from ..operations.item_contract import OperationResultFacts
-from ..run_switch_contract import RunSwitchOperation
+from ..run_switch_contract.operations import RunSwitchOperation
 from ..strict_json import read_stored_model
 
 

@@ -26,7 +26,7 @@ from ..model_cache_contract import (
 )
 from ..model_cache_progress import PHASES, cache_progress
 from ..model_cache_ranges import range_partial_bytes
-from ..models import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
+from ..models.cache import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
 from ..profile_read_observation import observing_profile
 from . import constants
 from .artifacts import (

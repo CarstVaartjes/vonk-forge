@@ -12,7 +12,7 @@ import json
 from typing import cast
 
 import pytest
-from vonk_control.fleet_profiles import _effective_option_choices
+from vonk_control.fleet_profiles.projection_support import _effective_option_choices
 from vonk_forge_contracts import RecipeDefinition
 
 from cluster_profiles.control_client import ControlClientError

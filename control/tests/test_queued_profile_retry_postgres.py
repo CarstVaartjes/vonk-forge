@@ -12,17 +12,15 @@ from vonk_agent_protocol.agent_words import ProfileOperationKind
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.coordinator_failures import CoordinatorFailures
-from vonk_control.fleet_profile_contract import (
-    FleetProfileApplicationView,
-    FleetProfileInput,
-)
-from vonk_control.fleet_profiles import FleetProfileInvalid
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_profiles.contracts import FleetProfileInvalid
 from vonk_control.jobs.queue import JobService
-from vonk_control.models import (
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.fleet import (
     AgentNode,
     FleetProfileApplication,
     FleetProfileSelection,
-    RecipeBuild,
 )
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.worker.loop import Worker

@@ -11,12 +11,12 @@ from pathlib import Path
 from vonk_agent_protocol import UnknownOutcomeError
 
 from .browser_auth import bootstrap_administrator
-from .db import (
+from .db.connections import (
     build_engine,
-    initialize_database,
     run_with_database_startup_retry,
     session_factory,
 )
+from .db.startup import initialize_database
 from .runtime_init import read_runtime_secret
 from .settings import SECRETS_ROOT
 

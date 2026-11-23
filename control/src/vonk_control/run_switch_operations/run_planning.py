@@ -18,9 +18,7 @@ from ..categorized_errors import (
     MissingRecord,
 )
 from ..content_identity import differing_image_fields
-from ..models import (
-    RecipeBuild,
-)
+from ..models.cache import RecipeBuild
 from ..prebuilt_images import policy_prebuilt_reference
 from ..preparation_contract import (
     RuntimeImageIdentity,
@@ -35,23 +33,17 @@ from ..recipe_execution_contract import (
     installation_matches_runtime_image,
     parse_stored_installation_plan,
 )
-from ..recipe_operations import (
-    RecipeOperationConflict,
-)
+from ..recipe_operations.errors import RecipeOperationConflict
 from ..recipe_runtime_specs import (
     RUNTIME_INTERFACE,
 )
-from ..resource_planning import (
-    resolve_effective_settings,
-)
+from ..resource_planning.settings import resolve_effective_settings
 from ..run_admission import (
     PORT_ADMISSION_CODES,
 )
-from ..run_switch_contract import (
-    RunSwitchPlan,
-    RunSwitchPreviewRequest,
-    RunSwitchReason,
-)
+from ..run_switch_contract.evidence import RunSwitchReason
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_contract.requests import RunSwitchPreviewRequest
 from ..run_switch_observation_contract import (
     RunSwitchObservedImageIdentity,
 )

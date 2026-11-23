@@ -7,10 +7,10 @@ from uuid import uuid4
 import pytest
 from vonk_agent_protocol import DistributionCode, LifecycleState, WaitReason
 from vonk_agent_protocol.agent_words import ProfileChildPhase
-from vonk_control.run_switch_contract import (
-    RunSwitchApplyRequest,
+from vonk_control.run_switch_contract.phase_results import (
     RunSwitchDistributionEndedResult,
 )
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 
 from .non_blocking import assert_ended_without_blocking
 from .test_recipe_operations import NOW, installed_recipe, setup_services

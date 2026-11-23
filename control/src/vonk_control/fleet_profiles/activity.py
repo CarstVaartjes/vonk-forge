@@ -8,8 +8,10 @@ from typing import cast as _typing_cast
 from sqlalchemy import case
 
 from .. import fleet_profile_states
-from ..fleet_profile_contract import FleetProfileApplicationCancellationIntent
-from ..models import FleetProfileApplication
+from ..fleet_profile_contract.applications import (
+    FleetProfileApplicationCancellationIntent,
+)
+from ..models.fleet import FleetProfileApplication
 from .dependencies import _PROFILE_ACTIVITY_ACTIVE_STATES
 
 

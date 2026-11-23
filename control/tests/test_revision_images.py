@@ -18,13 +18,13 @@ import pytest
 from sqlalchemy import create_engine, event, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LifecycleState
-from vonk_control.artifact_reference_scan import runtime_image_reference_findings
-from vonk_control.models import (
-    Base,
-    FleetProfile,
-    Job,
-    RecipeBuild,
+from vonk_control.artifact_reference_scan.image_references import (
+    runtime_image_reference_findings,
 )
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.fleet import FleetProfile
+from vonk_control.models.jobs import Job
 from vonk_control.recipe_image_availability.contracts import OPERATION_KIND
 from vonk_control.revision_images import (
     revision_archives,
@@ -383,11 +383,11 @@ def test_a_saved_profile_keeps_the_image_its_recipes_successor_reuses(
 def test_saved_profile_selector_remains_editable_during_image_removal(sessions) -> None:
     """Cache availability is enforced by apply; saving logical intent never waits."""
     from vonk_control.artifact_lifecycle import ArtifactIdentity, reserve_removal
-    from vonk_control.fleet_profile_contract import (
+    from vonk_control.fleet_profile_contract.definitions import (
         FleetProfileAssignmentInput,
         FleetProfileInput,
     )
-    from vonk_control.fleet_profiles import FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
 
     from .test_fleet_profiles import _seed
 
@@ -395,7 +395,7 @@ def test_saved_profile_selector_remains_editable_during_image_removal(sessions) 
         recipe_id, revision_id = _seed(sessions)
         _build(session, revision_id, archive=ARCHIVE_SHA)
     with sessions() as session:
-        from vonk_control.models import CatalogDocument
+        from vonk_control.models.catalog import CatalogDocument
 
         recipe = session.get(CatalogDocument, recipe_id)
         assert recipe is not None

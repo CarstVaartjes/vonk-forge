@@ -15,15 +15,15 @@ from vonk_agent_protocol.capability_reply import ControllerCapability
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
+from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
 from ..capabilities import CapabilityRegistry
 from ..coordinator_failures import CoordinatorFailures
 from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
-from ..resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 
 if TYPE_CHECKING:
     from ..catalog.sync import ManagedRecipeCatalogSyncService
-    from ..enrollment import EnrollmentService
+    from ..enrollment.service import EnrollmentService
 from .loop import Worker
 
 
@@ -75,33 +75,30 @@ def assemble_production_worker(
 
     from ..agent_jobs.persistence import _OrderStore
     from ..agent_jobs.retirement import operator_resume_candidates_in_session
-    from ..agent_upgrades import AgentUpgradeService
+    from ..agent_upgrades.service import AgentUpgradeService
     from ..artifact_blob_store import ArtifactBlobStore
-    from ..artifact_jobs import ArtifactJobService
+    from ..artifact_jobs.service import ArtifactJobService
     from ..artifact_maintenance import ArtifactMaintenanceCadence
     from ..attempt_residues import AttemptResidueReconciler
     from ..catalog.revision_collection import CatalogRevisionCollector
     from ..cluster_mappings import ClusterMappingService
-    from ..distributed_recovery import DistributedRecoveryCoordinator
-    from ..distribution import (
-        DistributionService,
-        build_distribution_service_from_components,
-    )
-    from ..distribution_executor import CompositeDistributionPhaseExecutor
+    from ..distributed_recovery.coordinator import DistributedRecoveryCoordinator
+    from ..distribution.service import DistributionService
+    from ..distribution.wiring import build_distribution_service_from_components
+    from ..distribution_executor.preparation import CompositeDistributionPhaseExecutor
     from ..due_waits import AdvanceWait, DueWaitBackstop, RowKey
-    from ..fleet_profiles import build_production_fleet_profile_service
-    from ..install_admission import (
-        InstallAdmissionService,
-    )
+    from ..fleet_profiles.factory import build_production_fleet_profile_service
+    from ..install_admission.service import InstallAdmissionService
     from ..lifecycle.agent_operation import AgentOperationAdapter
     from ..lifecycle.artifact_job import ArtifactJobAdapter
-    from ..recipe_builds import RecipeBuildService
+    from ..recipe_builds.service import RecipeBuildService
     from ..recipe_operation_worker import RecipeOperationWorker
-    from ..recipe_operations import RecipeOperationService
-    from ..recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
+    from ..recipe_operations.service import RecipeOperationService
+    from ..recipe_routes.publisher import AtomicRecipeRoutePublisher
+    from ..recipe_routes.service import RecipeRouteService
     from ..run_admission import RunAdmissionService
-    from ..run_switch_operations import RunSwitchOperationService
-    from ..runtime_image_preparation import FilesystemRuntimeImageStorage
+    from ..run_switch_operations.service import RunSwitchOperationService
+    from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
     from ..source_bundles import DatabaseSourceBundleStore
     from ..storage_demands import StorageDemands
     from ..telemetry.maintenance import (
@@ -109,7 +106,7 @@ def assemble_production_worker(
         TelemetryMaintenanceCadence,
     )
     from ..terminal_history_collection import TerminalHistoryCollector
-    from ..unused_storage_collection import UnusedStorageCollector
+    from ..unused_storage_collection.service import UnusedStorageCollector
     from ..wait_redrive import wait_sources
 
     registry = capabilities or CapabilityRegistry(clock=clock)

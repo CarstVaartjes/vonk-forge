@@ -28,10 +28,10 @@ from ..gateway.litellm import LiteLlmGeneration, ServedModelInfo
 from ..gateway.route_runtime import RECIPE_ROUTE_AUTHORITY_ID, ActivationMarker
 from ..jobs.documents import DistributedRecoveryMarker
 from ..logging import log_event
-from ..models import (
-    Job,
+from ..models.execution import RecipeRun
+from ..models.jobs import Job
+from ..models.routes import (
     RecipeRouteAuthority,
-    RecipeRun,
     RoutePublication,
     RoutePublicationOwner,
 )

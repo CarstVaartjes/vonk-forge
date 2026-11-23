@@ -7,6 +7,9 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import UnknownOutcomeError, WaitReason
 
+from . import (
+    models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+)
 from .model_primitives import Base
 from .stored.json_values import validate_row_write
 

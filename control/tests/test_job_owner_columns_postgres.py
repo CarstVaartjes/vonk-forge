@@ -11,8 +11,8 @@ import uuid
 
 import pytest
 from sqlalchemy import text
-from vonk_control.db import reconcile_schema
-from vonk_control.models import Base
+from vonk_control.db.schema import reconcile_schema
+from vonk_control.model_primitives import Base
 
 pytestmark = pytest.mark.postgres
 

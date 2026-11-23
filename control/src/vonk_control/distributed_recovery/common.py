@@ -30,7 +30,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
-from ..agent_jobs import release_owned_reservations_in_session
+from ..agent_jobs.retirement import release_owned_reservations_in_session
 from ..categorized_errors import UnsettledOutcome
 from ..distributed_lifecycle import DistributedRecoveryInvalid
 from ..gateway.litellm import LiteLlmGeneration, ServedModelInfo
@@ -41,17 +41,17 @@ from ..jobs.documents import (
     RecoveryStartItem,
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..models import (
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import (
     STOPPABLE_NOT_RUNNING_RUN_STATES,
     STOPPABLE_RUN_STATES,
-    AgentNode,
-    AgentOperation,
-    CatalogDocumentRevision,
-    Job,
     RecipeRun,
     ResourceReservation,
     RunNode,
 )
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from ..operations.blockers import BlockingOperation, make_blocker
 from ..persisted_waits import read_wait, schedule_wait, write_wait
 from ..recipe_execution_contract import (

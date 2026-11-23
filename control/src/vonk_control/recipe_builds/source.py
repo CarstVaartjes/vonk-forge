@@ -22,7 +22,9 @@ from ..categorized_errors import BookkeepingUnknown
 from ..content_identity import reusable_build
 from ..inventory.items import runtime_value
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..models import AgentNode, CatalogDocumentRevision, RecipeBuild
+from ..models.cache import RecipeBuild
+from ..models.catalog import CatalogDocumentRevision
+from ..models.fleet import AgentNode
 from ..operator_receipt_contract import ReceiptOwner
 from ..profile_read_observation import observing_profile
 from ..recipe_execution_contract import (

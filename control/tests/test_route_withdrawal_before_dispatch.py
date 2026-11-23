@@ -18,21 +18,24 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, ProjectionCode, RouteState, RunState
-from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
+from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
 from vonk_control.gateway.route_runtime import (
     ActivationMarker,
     AtomicRouteBundlePublisher,
 )
-from vonk_control.models import AgentNode, AgentOperation, Job, RecipeRun, RunNode
+from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
 from vonk_control.offline_stops import deferred_stop_nodes
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
-from vonk_control.recipe_operations import RecipeOperationService
-from vonk_control.recipe_routes import (
+from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
+from vonk_control.recipe_routes.service import RecipeRouteService
+from vonk_control.recipe_routes.shared import (
     STOP_DISPATCH_GRACE,
     STOP_WITHDRAWAL_PENDING,
-    AtomicRecipeRoutePublisher,
-    RecipeRouteService,
 )
 
 from .node_contacts import contact_row

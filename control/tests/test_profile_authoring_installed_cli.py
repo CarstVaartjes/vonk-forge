@@ -13,25 +13,22 @@ from fastapi.testclient import TestClient
 from sqlalchemy import insert, select, update
 from vonk_agent_protocol import DesiredAssignmentState, LifecycleState, RunSwitchCode
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
-from vonk_control.api import create_app
-from vonk_control.fleet_profile_contract import (
+from vonk_control.api.application import create_app
+from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignmentInput,
     FleetProfileDefinition,
     FleetProfileInput,
-    FleetProfilePreview,
     FleetProfileView,
 )
-from vonk_control.fleet_profiles import FleetProfileService
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.jobs.queue import JobService
-from vonk_control.library_projection import LibraryProjection
-from vonk_control.models import (
-    Base,
-    CatalogDocumentHead,
-    CatalogDocumentRevision,
-    FleetProfileApplication,
-    ModelCacheSet,
-    NodeInventorySnapshot,
-)
+from vonk_control.library_projection.service import LibraryProjection
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheSet
+from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.telemetry import NodeInventorySnapshot
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 

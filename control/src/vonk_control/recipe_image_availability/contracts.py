@@ -51,20 +51,18 @@ from ..categorized_faults import security_reason
 from ..failure_classification import disposition, error_code, is_security_failure
 from ..jobs import states as job_states
 from ..jobs.documents import AvailabilityRuntime
-from ..model_cache import (
-    ModelCacheRemovalScope,
-)
+from ..model_cache.views import ModelCacheRemovalScope
 from ..model_cache_contract import (
     ModelCacheOperationProgress,
 )
-from ..models import Job
+from ..models.jobs import Job
 from ..operations.blockers import OperationBlocker
 from ..operations.contract import AvailabilityOperationFailure
 from ..persisted_waits import wait_due
 from ..recipe_image_removal_contract import (
     RECIPE_CACHE_REMOVE_KIND,
 )
-from ..runtime_image_preparation import (
+from ..runtime_image_preparation.contracts import (
     RuntimeImagePreparationUnknown,
     RuntimeImageStorage,
 )

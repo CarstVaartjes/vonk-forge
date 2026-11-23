@@ -13,7 +13,7 @@ from ..cache_removal_review import (
     CacheRemovalAsset,
 )
 from ..model_cache_ranges import range_partial_bytes
-from ..models import ModelCacheSet
+from ..models.cache import ModelCacheSet
 from . import constants
 from .artifacts import _unique_artifacts
 from .constants import _PARALLEL_RANGE_WORKERS

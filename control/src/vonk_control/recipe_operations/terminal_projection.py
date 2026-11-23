@@ -20,7 +20,7 @@ from vonk_agent_protocol import (
 from ..distributed_lifecycle import (
     DistributedLifecycleError,
 )
-from ..distributed_recovery import (
+from ..distributed_recovery.common import (
     ended_run_state,
     enforce_recovery_deadline,
     recovery_start_plan,
@@ -36,14 +36,10 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..models import (
-    AgentOperation,
-    CatalogDocumentRevision,
-    Job,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
-)
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import RecipeInstallation, RecipeRun, RunNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from ..persisted_waits import schedule_wait
 from ..profile_stop_authority import (
     ProfileJobRunStopJob,

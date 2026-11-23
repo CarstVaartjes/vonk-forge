@@ -20,7 +20,7 @@ from ..distribution_assignment import NodeDistributionAssignment
 from ..model_cache_contract import ModelCacheDownloadResult
 from ..operations.blockers import MAX_BLOCKERS, OperationBlocker
 from ..run_switch_identity_contract import NodeId, UuidId
-from ..runtime_image_preparation import RuntimeImageReceipt
+from ..runtime_image_preparation.contracts import RuntimeImageReceipt
 from ..strict_json import StrictModel
 from .progress import (
     ArtifactVerificationEvidence,

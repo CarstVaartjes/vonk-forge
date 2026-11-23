@@ -43,13 +43,10 @@ from . import agent_operation_states
 from . import artifact_job_states as ajs
 from .bounded_json import BoundedJSONError, require_integer, sequence
 from .logging import redact_text
-from .models import (
-    AgentOperation,
-    AgentOperationAttempt,
-    FleetProfileApplication,
-    Job,
-    ModelCacheOperation,
-)
+from .models.cache import ModelCacheOperation
+from .models.fleet import FleetProfileApplication
+from .models.jobs import Job
+from .models.operations import AgentOperation, AgentOperationAttempt
 from .operations.blockers import OperationBlocker, read_blockers
 from .operations.contract import OperationEvidenceDownload
 from .operations.item_contract import (
@@ -747,7 +744,7 @@ class FailureEvidenceService:
                 )
             application = session.get(FleetProfileApplication, operation_id)
             if application is not None and application.state in FAILED_ATTEMPT_STATES:
-                from .fleet_profiles import FleetProfileService
+                from .fleet_profiles.service import FleetProfileService
 
                 projected = operation_item(
                     FleetProfileService._operation_item(application)

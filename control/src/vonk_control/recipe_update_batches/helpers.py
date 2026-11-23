@@ -7,9 +7,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from ..recipe_image_availability import (
-    RecipeImageAvailabilityUnknown,
-)
+from ..recipe_image_availability.contracts import RecipeImageAvailabilityUnknown
 from ..recipe_update_contract import (
     RecipeUpdateBinding,
     RecipeUpdateDocument,

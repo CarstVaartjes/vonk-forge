@@ -9,19 +9,15 @@ from vonk_agent_protocol import (
     SecurityRefusalError,
 )
 from vonk_agent_protocol.agent_words import ProfileChildPhase
-from vonk_control.distribution import (
-    DistributionService,
-    FilesystemObjectSource,
-    MemoryObjectSource,
-    ModelCacheObjectSource,
-)
-from vonk_control.distribution_executor import DurableDistributionPhaseExecutor
-from vonk_control.run_switch_contract import (
-    RunSwitchBuildEvidence,
-    RunSwitchOperationResult,
-    RunSwitchPlan,
-    RunSwitchRuntimeImageResult,
-)
+from vonk_control.distribution.filesystem import FilesystemObjectSource
+from vonk_control.distribution.model_cache import ModelCacheObjectSource
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.sources import MemoryObjectSource
+from vonk_control.distribution_executor.durable import DurableDistributionPhaseExecutor
+from vonk_control.run_switch_contract.evidence import RunSwitchBuildEvidence
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import RunSwitchRuntimeImageResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
 
 from .test_distribution import _assignment
 

@@ -10,9 +10,10 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, ModelCacheCode
-from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache.persistence import _store_operation_payload
-from vonk_control.models import Base, ModelCacheOperation
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.storage_demands import NAS_MODELS, StorageDemands
 
 from .test_model_cache import _artifact, _download
@@ -25,7 +26,7 @@ def _service(postgres_engine, tmp_path: Path, monkeypatch, free: list[int]):
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     monkeypatch.setattr(
-        "vonk_control.model_cache.shutil.disk_usage",
+        "shutil.disk_usage",
         lambda _: _Usage(10**12, 10**12 - free[0], free[0]),
     )
     service = ModelCacheService(

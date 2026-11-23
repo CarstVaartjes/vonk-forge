@@ -22,27 +22,20 @@ from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReportedPh
 
 from ..inventory.repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
 from ..lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
-from ..models import (
-    CatalogDocumentRevision,
-    RecipeBuild,
-    RecipeRun,
-    RunNode,
-)
+from ..models.cache import RecipeBuild
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import RecipeRun, RunNode
 from ..offline_stops import pending_run_stop_nodes
 from ..owner_liveness import live_build_job
-from ..recipe_builds import RecipeBuildAdmissionBusy, RecipeBuildPlan
+from ..recipe_builds.common import RecipeBuildAdmissionBusy, RecipeBuildPlan
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     build_plan_document,
     parse_stored_build_plan,
 )
-from ..recipe_operations import (
-    RecipeOperationConflict,
-)
-from ..run_switch_contract import (
-    RunSwitchOperationResult,
-    RunSwitchPlan,
-)
+from ..recipe_operations.errors import RecipeOperationConflict
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.plans import RunSwitchPlan
 from ..stored.states import CatalogRevisionState, RecipeBuildState
 from ..strict_json import (
     read_stored_model,

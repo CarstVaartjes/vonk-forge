@@ -13,7 +13,7 @@ from vonk_control.model_cache_contract import (
     ModelCacheRemovalPayload,
     parse_model_cache_payload,
 )
-from vonk_control.models import (
+from vonk_control.models.cache import (
     ArtifactLifecycleGate,
     ModelCacheOperation,
     ModelCacheSet,

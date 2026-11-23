@@ -13,10 +13,8 @@ from vonk_agent_protocol import (
     SecurityRefusalReason,
 )
 
-from ..runtime_image_preparation import (
-    IMAGE_CACHE_DIRECTORY,
-    FilesystemRuntimeImageStorage,
-)
+from ..oci_image_store import IMAGE_CACHE_DIRECTORY
+from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from .types import (
     DistributionError,
     DistributionRefused,

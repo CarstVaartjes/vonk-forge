@@ -13,11 +13,9 @@ from vonk_control.admission_locking import (
     node_admission_key,
     patient_admission,
 )
-from vonk_control.models import (
-    FleetProfileApplication,
-    NodeInventorySnapshot,
-    ResourceReservation,
-)
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.profile_claim_restore import (
     ProfileClaimCapacityShort,
     restore_released_profile_claims,
@@ -242,9 +240,9 @@ def _backing_off_load(postgres_engine, pool, *, hold):
     """A load whose child is live but whose claims were released when it backed
     off; ``hold`` is memory another workload took meanwhile (None: none)."""
     from vonk_agent_protocol import LifecycleState
-    from vonk_control.fleet_profile_contract import FleetProfileInput
-    from vonk_control.fleet_profiles import FleetProfileService
-    from vonk_control.models import Base
+    from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.model_primitives import Base
 
     from .test_fleet_profiles import NOW as START
     from .test_fleet_profiles import _node_id, _seed, _uuid

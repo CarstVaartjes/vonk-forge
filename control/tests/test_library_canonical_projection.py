@@ -22,23 +22,19 @@ from vonk_control.catalog.service import CatalogService
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.library.api import install_library_routes
 from vonk_control.library.contract import _MAX_PAGE_RECIPES, ModelLibraryResponse
-from vonk_control.library_projection import LibraryProjection
+from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.model_cache_contract import ModelCacheOperationProgress
-from vonk_control.models import (
-    AgentNode,
-    Base,
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet, RecipeBuild
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
-    ClusterMapping,
-    ModelCacheOperation,
-    ModelCacheSet,
-    RecipeBuild,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
 )
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import ControllerAPIRoute, serialize_json_value
 from vonk_forge_contracts import (
     ModelDefinition,
@@ -1539,8 +1535,8 @@ def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
     from vonk_control.catalog.api import _managed_sync
     from vonk_control.catalog.service import CatalogService
     from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
-    from vonk_control.library_projection import LibraryProjection
-    from vonk_control.models import Base
+    from vonk_control.library_projection.service import LibraryProjection
+    from vonk_control.model_primitives import Base
     from vonk_control.source_bundles import SourceBundleStore
 
     import tests

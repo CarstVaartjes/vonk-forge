@@ -25,7 +25,7 @@ from vonk_agent_protocol import (
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_job_evidence import (
     OUTPUT_CONTRACT_RULES,
     OutputContractBreach,

@@ -26,23 +26,19 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
-from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_jobs.waits import refresh_queue_waits
 from vonk_control.auth import TokenCodec
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    Base,
-    Job,
-)
-from vonk_control.operation_api import (
-    durable_operation_services,
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operation_api.durable import durable_operation_services
+from vonk_control.operation_api.responses import (
+    _job_operation_response,
     operation_detail_response,
 )
-from vonk_control.operation_api.responses import _job_operation_response
 from vonk_control.operations.blockers import ProgressAlarmCode
 from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 

@@ -16,13 +16,9 @@ from vonk_agent_protocol import (
     RunSwitchCode,
 )
 
-from ..models import (
-    STOPPABLE_RUN_STATES,
-    CatalogDocumentRevision,
-    RecipeBuild,
-    RecipeRun,
-    RunNode,
-)
+from ..models.cache import RecipeBuild
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import STOPPABLE_RUN_STATES, RecipeRun, RunNode
 from ..preparation_contract import (
     ControllerAssetState,
     ModelArtifactPreparation,
@@ -32,19 +28,17 @@ from ..preparation_contract import (
     TargetAssetState,
     controller_assets_ready,
 )
-from ..recipe_operations import (
-    RecipeOperationConflict,
-)
+from ..recipe_operations.errors import RecipeOperationConflict
 from ..recipe_runtime_specs import (
     RUNTIME_INTERFACE,
 )
-from ..run_switch_contract import (
+from ..run_switch_contract.evidence import (
     RunSwitchReason,
     RuntimeImageStorageImpact,
     SparkFit,
-    SparkGroup,
     StopImpact,
 )
+from ..run_switch_contract.requests import SparkGroup
 from .identity_helpers import (
     _is_hex_digest,
     _is_oci_digest,

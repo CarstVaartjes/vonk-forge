@@ -18,7 +18,7 @@ from vonk_agent_protocol.failure_evidence import LOG_TAIL_BYTES, FailureDiagnost
 from vonk_agent_protocol.optional_evidence import EvidenceDrop
 from vonk_agent_protocol.reason_codes import AgentEvidenceCode
 from vonk_control import agent_operation_states as aos
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.failure_evidence import (
     _OMISSION_MARKER,
     FailedAttempt,
@@ -31,15 +31,11 @@ from vonk_control.failure_evidence import (
     sanitize_diagnostics,
 )
 from vonk_control.failure_evidence_api import install_failure_evidence_routes
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    ArtifactJob,
-    Base,
-    Job,
-)
+from vonk_control.model_primitives import Base
+from vonk_control.models.execution import ArtifactJob
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.operations.item_contract import OperationResultFacts, operation_item
 
 from .agent_fences import fenced_attempt
@@ -523,9 +519,9 @@ def test_evidence_download_is_authenticated_exact_attempt_and_stable(service):
 
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_composed_controller_exposes_exact_download_on_operation_projection(service):
-    from vonk_control.api import create_app
+    from vonk_control.api.application import create_app
     from vonk_control.auth import Actor, TokenCodec
-    from vonk_control.operation_api import (
+    from vonk_control.operation_api.contracts import (
         OperationApiServices,
         OperationListPage,
         OperationPage,
@@ -1275,7 +1271,7 @@ def test_a_failed_run_switch_carries_the_stderr_of_its_phase_childs_spark_work(
     searched, so the download of a run-switch whose llama-server could not load
     its shared library showed empty stderr and ``agent-observations-unavailable``.
     """
-    from vonk_control.run_switch_contract import RunSwitchOperationResult
+    from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 
     loader = (
         "/app/llama-server: error while loading shared libraries: "

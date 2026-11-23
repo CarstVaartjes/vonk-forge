@@ -39,38 +39,34 @@ from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distribution_executor.receipts import _ChildView
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.failure_classification import is_security_failure
-from vonk_control.install_admission import (
+from vonk_control.install_admission.contracts import (
     AdmissionReason,
     InstallAdmissionBusy,
+)
+from vonk_control.install_admission.identity import (
     installation_plan_digest_from_stored_document,
 )
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.model_cache import (
-    ArtifactSetManifest,
-    ArtifactSpec,
-    ModelCacheService,
-)
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    CatalogDocumentRevision,
-    ClusterMapping,
-    ClusterMappingNode,
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision, RecipeSourceBundle
+from vonk_control.models.execution import (
     InstallationNode,
-    Job,
-    NodeInventorySnapshot,
-    RecipeBuild,
     RecipeInstallation,
     RecipeRun,
-    RecipeSourceBundle,
     ResourceReservation,
     RunNode,
 )
-from vonk_control.operation_api import OperationQuery
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.operation_api.contracts import OperationQuery
 from vonk_control.operations.blockers import PHASE_RETRY_CODE
 from vonk_control.operations.contract import (
     OperationFailureEvidence,
@@ -78,16 +74,14 @@ from vonk_control.operations.contract import (
 )
 from vonk_control.operations.item_contract import OperationItem, operation_item
 from vonk_control.preparation_contract import RuntimeImageIdentity
-from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.recipe_builds.cancellation import (
     lock_build_dependency,
 )
-from vonk_control.recipe_operations import (
-    RecipeBuildService,
-    RecipeOperationConflict,
-    RecipeOperationService,
-    RecipeOperationView,
-)
+from vonk_control.recipe_builds.common import RecipeBuildPlan
+from vonk_control.recipe_builds.service import RecipeBuildService
+from vonk_control.recipe_operations.errors import RecipeOperationConflict
+from vonk_control.recipe_operations.interfaces import RecipeOperationView
+from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recipe_runtime_specs import (
     RUNTIME_INTERFACE,
     compile_runtime_spec,
@@ -95,53 +89,57 @@ from vonk_control.recipe_runtime_specs import (
     split_option_choices,
 )
 from vonk_control.run_admission import RunAdmissionBusy
-from vonk_control.run_switch_contract import (
-    InvocationMetadata,
-    RunSwitchApplyRequest,
-    RunSwitchAssessment,
-    RunSwitchCleanupApplyRequest,
-    RunSwitchCleanupPreviewRequest,
+from vonk_control.run_switch_contract.evidence import RunSwitchPhase, RunSwitchReason
+from vonk_control.run_switch_contract.operations import (
+    RunSwitchOperation,
+    RunSwitchOperationResult,
+)
+from vonk_control.run_switch_contract.phase_results import (
     RunSwitchCleanupVerifyResult,
     RunSwitchContainerBuildResult,
     RunSwitchDistributionChildResult,
     RunSwitchFinalVerifyResult,
-    RunSwitchOperation,
-    RunSwitchOperationResult,
-    RunSwitchPhase,
     RunSwitchPhaseResult,
-    RunSwitchPlan,
-    RunSwitchPreviewRequest,
-    RunSwitchProfileStopScope,
-    RunSwitchReason,
     RunSwitchRuntimeInstallResult,
     RunSwitchStartResult,
     RunSwitchTargetTransferEvidenceResult,
     RunSwitchUninstallResult,
+)
+from vonk_control.run_switch_contract.plans import RunSwitchAssessment, RunSwitchPlan
+from vonk_control.run_switch_contract.requests import (
+    InvocationMetadata,
+    RunSwitchApplyRequest,
+    RunSwitchCleanupApplyRequest,
+    RunSwitchCleanupPreviewRequest,
+    RunSwitchPreviewRequest,
+    RunSwitchProfileStopScope,
     SparkGroup,
     SparkGroupNode,
 )
-from vonk_control.run_switch_operations import (
-    ArtifactInspection,
-    PhaseExecution,
-    RecipeLifecyclePhaseExecutor,
+from vonk_control.run_switch_operations.errors import (
     RunSwitchIssuedWorkloadPending,
     RunSwitchOperationConflict,
-    RunSwitchOperationProvider,
-    RunSwitchOperationService,
+)
+from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
+from vonk_control.run_switch_operations.identity_helpers import _node_missing_bytes
+from vonk_control.run_switch_operations.image_receipts import (
     _build_receipt_in_session,
-    _failure_code_of,
-    _node_missing_bytes,
-    _phase_result,
     _planned_transfer_bytes,
     effective_build_receipt,
 )
+from vonk_control.run_switch_operations.interfaces import (
+    ArtifactInspection,
+    PhaseExecution,
+)
+from vonk_control.run_switch_operations.observation_helpers import _failure_code_of
+from vonk_control.run_switch_operations.provider import RunSwitchOperationProvider
+from vonk_control.run_switch_operations.result_helpers import _phase_result
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime.adapters import resolve_runtime_adapter
 from vonk_control.runtime.preflight import latest_result
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
-    PulledImageEvidence,
-    prepare_runtime_image,
-)
+from vonk_control.runtime_image_preparation.contracts import PulledImageEvidence
+from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
@@ -1607,15 +1605,17 @@ def test_profile_admits_unpublished_cache_observation(tmp_path, monkeypatch, mis
     from vonk_agent_protocol import WaitReason
     from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReasonSeverity
     from vonk_control.categorized_errors import BookkeepingUnknown
-    from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
-    from vonk_control.fleet_profile_contract import (
+    from vonk_control.distribution_executor.preparation import (
+        CompositeDistributionPhaseExecutor,
+    )
+    from vonk_control.fleet_profile_contract.definitions import (
         FleetProfileAssignmentInput,
         FleetProfileInput,
     )
-    from vonk_control.fleet_profiles import (
-        FleetProfileService,
+    from vonk_control.fleet_profiles.run_switch_adapter import (
         RunSwitchFleetProfileAdapter,
     )
+    from vonk_control.fleet_profiles.service import FleetProfileService
     from vonk_control.profile_read_observation import profile_read
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(tmp_path)
@@ -2645,7 +2645,7 @@ def test_preflight_refresh_after_repeated_cold_compiles_ends_and_admits_fresh(
     tmp_path: Path,
 ) -> None:
     """A host that changes during every compile ends the refresh; fresh intent runs."""
-    from vonk_control.run_switch_operations import _run_switch_payload
+    from vonk_control.run_switch_operations.planning_helpers import _run_switch_payload
 
     from .non_blocking import assert_ended_without_blocking
 
@@ -5095,12 +5095,12 @@ def test_activity_provider_preserves_group_and_canonical_nested_progress(
 def test_activity_provider_integrates_with_global_cursor_and_detail_projection(
     tmp_path: Path,
 ) -> None:
-    from vonk_control.operation_api import (
-        OperationProvider,
+    from vonk_control.operation_api.contracts import OperationProvider
+    from vonk_control.operation_api.providers import (
         get_operation_from_providers,
         merge_operation_providers,
-        operation_detail_response,
     )
+    from vonk_control.operation_api.responses import operation_detail_response
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path
@@ -5165,11 +5165,9 @@ def test_activity_provider_integrates_with_global_cursor_and_detail_projection(
 def test_activity_provider_keeps_valid_items_when_one_plan_is_unreadable(
     tmp_path: Path,
 ) -> None:
-    from vonk_control.operation_api import (
-        OperationProvider,
-        merge_operation_providers,
-        operation_detail_response,
-    )
+    from vonk_control.operation_api.contracts import OperationProvider
+    from vonk_control.operation_api.providers import merge_operation_providers
+    from vonk_control.operation_api.responses import operation_detail_response
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path
@@ -5249,7 +5247,7 @@ def test_activity_provider_keeps_valid_items_when_one_plan_is_unreadable(
 def test_measured_operation_keeps_unknown_totals_and_failure_readable(
     tmp_path: Path, failed: bool
 ) -> None:
-    from vonk_control.operation_api import operation_detail_response
+    from vonk_control.operation_api.responses import operation_detail_response
 
     switch = _cold_compile_switch(tmp_path)
     _host_changes_during_compile(switch)  # held for a refresh: totals unknown
@@ -5371,7 +5369,7 @@ def test_terminal_checkpoint_after_retry_clears_failure_and_rejects_missing_evid
     assert completed.result.retryable is False
     assert completed.result.failed_phase is None
     assert completed.status_reason is None
-    from vonk_control.run_switch_contract import RunSwitchOperation
+    from vonk_control.run_switch_contract.operations import RunSwitchOperation
 
     with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
         RunSwitchOperation.model_validate(completed.model_dump() | {"result": None})
@@ -6624,7 +6622,7 @@ def test_capacity_backoff_and_checkpoint_retry_share_one_attempt_counter(
     reason starts its own backoff again, and phase progress clears it.
     """
 
-    from vonk_control.run_switch_operations import _read_progress
+    from vonk_control.run_switch_operations.result_helpers import _read_progress
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     installation = installed_recipe(
@@ -7469,12 +7467,14 @@ def test_dual_profile_disk_review_does_not_decode_unrelated_catalog_documents(
 
     from sqlalchemy import create_engine
     from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-    from vonk_control.fleet_profile_contract import (
+    from vonk_control.fleet_profile_contract.definitions import (
         FleetProfileAssignmentInput,
         FleetProfileInput,
     )
-    from vonk_control.fleet_profiles import build_production_fleet_profile_service
-    from vonk_control.models import CatalogDocument
+    from vonk_control.fleet_profiles.factory import (
+        build_production_fleet_profile_service,
+    )
+    from vonk_control.models.catalog import CatalogDocument
     from vonk_forge_contracts import document_sha256, read_recipe
 
     decoded = Counter()
@@ -8490,11 +8490,11 @@ def test_a_live_probe_keeps_the_dependency_window_waiting(tmp_path):
     """
     from datetime import timedelta
 
-    from vonk_control.run_switch_operations import _read_progress
     from vonk_control.run_switch_operations.observation_window import (
         DEPENDENCY_WINDOW,
         checkpoint_verdict,
     )
+    from vonk_control.run_switch_operations.result_helpers import _read_progress
     from vonk_control.stall_window import Verdict
 
     switch = _probing_switch(tmp_path)
@@ -8517,9 +8517,9 @@ def test_a_failed_run_switch_ends_its_unclaimed_probe_and_transfer(tmp_path, fie
     """
     from dataclasses import replace
 
-    from vonk_control.lifecycle import State
     from vonk_control.lifecycle.run_switch import RunSwitchAdapter
-    from vonk_control.run_switch_operations import _read_progress
+    from vonk_control.lifecycle.types import State
+    from vonk_control.run_switch_operations.result_helpers import _read_progress
 
     from .test_agent_jobs import distribution_payload
 

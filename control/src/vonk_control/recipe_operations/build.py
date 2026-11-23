@@ -31,9 +31,7 @@ from ..admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
-from ..agent_jobs import (
-    _JsonFlagIsTrue,
-)
+from ..agent_jobs.predicates import _JsonFlagIsTrue
 from ..jobs import states as job_states
 from ..jobs.documents import RecipeBuildParent, controller_recipe_document
 from ..lifecycle.evidence import (
@@ -41,23 +39,18 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..lifecycle.image_availability import PrebuiltImageAdapter
-from ..models import (
-    AgentNode,
-    CatalogDocumentRevision,
-    Job,
-    RecipeBuild,
-)
+from ..models.cache import RecipeBuild
+from ..models.catalog import CatalogDocumentRevision
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
 from ..owner_liveness import OwnerKind, issued_for, live_build_job
 from ..prebuilt_images import policy_prebuilt_reference
-from ..recipe_builds import (
-    RecipeBuildAdmissionBusy,
-    RecipeBuildPlan,
-)
 from ..recipe_builds.cancellation import (
     RecipeBuildIntent,
     build_cancellation,
     read_build_intent,
 )
+from ..recipe_builds.common import RecipeBuildAdmissionBusy, RecipeBuildPlan
 from ..recipe_lifecycle_contract import (
     RecipeOperationCancellationResult,
 )

@@ -14,16 +14,20 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.reason_codes import RecipeImageCode
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.jobs.queue import JobService
-from vonk_control.models import Base, CatalogDocument, Job
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocument
+from vonk_control.models.jobs import Job
 from vonk_control.recipe_availability_intent import RecipeRetryIntent
-from vonk_control.recipe_image_availability import (
+from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityError,
+)
+from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition
 
 from .display_fixtures import reworded
@@ -98,7 +102,7 @@ def test_installed_retry_preserves_frozen_intent_after_catalog_change_and_lost_r
     with sessions.begin() as session:
         row = session.get(Job, original.id)
         assert row is not None
-        from vonk_control.lifecycle import Effect, Observed
+        from vonk_control.lifecycle.types import Effect, Observed
 
         service._lifecycle._drive(row, Observed(Effect.UNKNOWN), now)
     failed = service.get(original.id)

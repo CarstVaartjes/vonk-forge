@@ -15,7 +15,7 @@ from vonk_agent_protocol import ErrorCategory, UnknownError, WaitReason
 from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdentityState
 
 from .auth import AgentIdentity, AgentSource, AuthError
-from .models import AgentCertificate, AgentNode, AgentNodeContact
+from .models.fleet import AgentCertificate, AgentNode, AgentNodeContact
 
 type _Network = ipaddress.IPv4Network | ipaddress.IPv6Network
 type _Address = ipaddress.IPv4Address | ipaddress.IPv6Address

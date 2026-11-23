@@ -31,28 +31,26 @@ from ..memory_reservations import (
     MEMORY_RESERVATION_KINDS,
     reviewed_run_memory_reservations,
 )
-from ..models import (
-    Job,
-    NodeInventorySnapshot,
-)
+from ..models.jobs import Job
+from ..models.telemetry import NodeInventorySnapshot
 from ..operations.blockers import SwapShortfallEvidence
-from ..resource_planning import (
-    ResourceReason,
-    memory_reservation_kinds,
-    resolve_effective_settings,
-)
-from ..run_switch_contract import (
+from ..resource_planning.memory_kinds import memory_reservation_kinds
+from ..resource_planning.settings import resolve_effective_settings
+from ..resource_planning.types import ResourceReason
+from ..run_switch_contract.evidence import (
     ConditionalPostStopMemoryCheck,
     EffectiveParallelism,
     EffectiveSettingsSelection,
     FreshnessEvidence,
-    RunSwitchOperationResult,
-    RunSwitchPlan,
     RunSwitchReason,
-    RunSwitchReasonScope,
-    RunSwitchReasonSeverity,
     SparkFit,
     StopImpact,
+)
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_contract.vocabulary import (
+    RunSwitchReasonScope,
+    RunSwitchReasonSeverity,
 )
 from ..stored.json_values import read_row_column
 from .constants import (

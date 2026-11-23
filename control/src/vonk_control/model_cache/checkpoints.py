@@ -17,10 +17,10 @@ from vonk_agent_protocol import (
 
 from .. import model_cache_states
 from ..agent_operation_facts import aware as _aware
-from ..lifecycle import Outcome, Reported, State
+from ..lifecycle.types import Outcome, Reported, State
 from ..model_cache_contract import ModelCacheSetState, ModelCacheTransferArtifact
 from ..model_cache_progress import cache_phase, progress_document
-from ..models import ModelCacheOperation, ModelCacheSet
+from ..models.cache import ModelCacheOperation, ModelCacheSet
 from ..operations.progress import STALE_AFTER_SECONDS, STALL_AFTER_SECONDS
 from ..profile_read_observation import observe_storage
 from .artifacts import ArtifactSetManifest, ArtifactSpec

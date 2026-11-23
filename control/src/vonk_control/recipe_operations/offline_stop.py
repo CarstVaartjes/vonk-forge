@@ -32,13 +32,10 @@ from ..agent_contacts import last_seen
 from ..jobs.documents import RecipeStopParent
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
 from ..logging import redact_text
-from ..models import (
-    AgentNode,
-    AgentOperation,
-    Job,
-    RecipeRun,
-    RunNode,
-)
+from ..models.execution import RecipeRun, RunNode
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from ..offline_stops import deferred_stop_nodes
 from ..owner_liveness import OwnerKind
 from ..persisted_waits import schedule_wait

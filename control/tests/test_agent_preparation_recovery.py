@@ -6,9 +6,10 @@ from datetime import UTC, timedelta
 
 import pytest
 from vonk_agent_protocol import FailureStage, OutcomeKind, WaitReason
-from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_jobs.retry import JOB_PRE_LAUNCH_STAGES
-from vonk_control.lifecycle import LOST_OBSERVATION_BOUND, OBSERVE_BUDGET, State
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.lifecycle.core import LOST_OBSERVATION_BOUND, OBSERVE_BUDGET
+from vonk_control.lifecycle.types import State
 
 from .agent_fences import fenced_attempt
 from .runtime_identity_support import claim_agent

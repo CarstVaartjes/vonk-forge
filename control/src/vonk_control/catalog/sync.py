@@ -33,7 +33,8 @@ from vonk_forge_contracts import CatalogVocabulary, RecipeDisplay
 
 from ..admission_locking import ConstraintReplan, ConstraintReplay, admitting
 from ..capabilities import CapabilityUnavailableError
-from ..models import CatalogDocumentRevision, RecipeLibrarySyncRun
+from ..models.cache import RecipeLibrarySyncRun
+from ..models.catalog import CatalogDocumentRevision
 from ..owner_liveness import OwnerKind, OwnerRef, owner
 from ..persisted_waits import read_wait, schedule_wait, typed_wait_reason
 from ..recipe_library_types import (

@@ -30,10 +30,12 @@ from ..agent_operation_facts import (
 )
 from ..evidence_repeats import note_repeat
 from ..inventory.items import record_preflight
-from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.agent_operation import cancel_requested_at
-from ..models import AgentNode, AgentOperationAttempt, Job
-from ..models import AgentOperation as StoredOperation
+from ..lifecycle.types import Effect, Outcome, Reported
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from .retry import job_attempt_did_not_launch, result_disposition
 
 

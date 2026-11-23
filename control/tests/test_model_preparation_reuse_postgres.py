@@ -9,13 +9,11 @@ from pathlib import Path
 from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import (
-    Base,
-    CatalogDocument,
-    ModelCacheOperation,
-    User,
-)
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.models.catalog import CatalogDocument
+from vonk_control.models.fleet import User
 from vonk_forge_contracts import document_sha256
 
 from .test_cache_removal_cancellation_postgres import (

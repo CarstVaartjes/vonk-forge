@@ -15,7 +15,8 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState
 from vonk_control.lifecycle.core import RECOVERY
-from vonk_control.models import FleetProfileApplication, Job
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
 
 from .test_fleet_profile_recovery_current import (
     _crash_rounds,

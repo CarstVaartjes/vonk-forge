@@ -18,9 +18,12 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 
 from .. import fleet_profile_states
-from ..fleet_profile_contract import FleetProfileApplicationView, FleetProfilePreview
+from ..fleet_profile_contract.review import (
+    FleetProfileApplicationView,
+    FleetProfilePreview,
+)
 from ..lifecycle.evidence import Residue
-from ..models import FleetProfileApplication
+from ..models.fleet import FleetProfileApplication
 from ..operations.blockers import OperationBlocker, make_blocker
 from ..profile_claim_restore import restore_released_profile_claims
 from ..stall_window import latest_progress

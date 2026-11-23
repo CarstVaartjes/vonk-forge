@@ -21,9 +21,7 @@ from vonk_forge_contracts import EndpointAlias
 
 from ..model_cache_contract import CachedResourceEstimate
 from ..recipe_update_notice import RecipeUpdateNotice
-from ..run_switch_contract import (
-    SparkGroupNode,
-)
+from ..run_switch_contract.requests import SparkGroupNode
 from ..strict_json import StrictModel
 from ..wait_contract import QueueWait
 from .vocabulary import (

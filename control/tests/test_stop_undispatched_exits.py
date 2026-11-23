@@ -24,7 +24,7 @@ from vonk_control.recipe_operations.interfaces import (
 )
 from vonk_control.recipe_operations.job_run_stop import JobRunStopMixin
 from vonk_control.recipe_operations.stop import StopMixin
-from vonk_control.recipe_routes import RecipeRouteError
+from vonk_control.recipe_routes.shared import RecipeRouteError
 from vonk_control.run_admission import RunAdmissionBusy
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)

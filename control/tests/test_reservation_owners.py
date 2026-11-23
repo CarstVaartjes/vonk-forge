@@ -22,13 +22,13 @@ from vonk_control.disk_reservations import (
     outstanding_disk_charges,
 )
 from vonk_control.inventory.repository import MAX_INVENTORY_FUTURE_SKEW
-from vonk_control.models import (
-    FleetProfileApplication,
-    Job,
+from vonk_control.models.execution import (
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
 )
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
 from vonk_control.reservation_owners import (
     ADOPTION_WINDOW,
     OWNER_SETTLE_GRACE,

@@ -42,15 +42,9 @@ from ..machine_states import (
     RunStateField,
 )
 from ..metrics.contract import PrometheusAttention
-from ..models import (
-    CatalogDocument,
-    CatalogDocumentRevision,
-    ClusterMapping,
-    InstallationNode,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
-)
+from ..models.catalog import CatalogDocument, CatalogDocumentRevision
+from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun, RunNode
+from ..models.mapping import ClusterMapping
 from ..recipe_update_notice import RecipeUpdateNotice
 from ..stored.states import CatalogRevisionState
 from ..strict_json import StrictModel

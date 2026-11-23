@@ -25,9 +25,9 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import CursorError, TokenCodec
-from vonk_control.library_projection import LibraryProjection
-from vonk_control.models import (
-    Base,
+from vonk_control.library_projection.service import LibraryProjection
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
@@ -330,7 +330,7 @@ def test_fits_fleet_sort_key_puts_working_recipes_first_then_newest():
     from types import SimpleNamespace
     from typing import Any
 
-    from vonk_control.library_projection import LibraryProjection
+    from vonk_control.library_projection.service import LibraryProjection
 
     def item(name: str, minute: int, status: str) -> Any:
         return SimpleNamespace(

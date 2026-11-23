@@ -21,14 +21,15 @@ from ..content_identity import (
     cache_resolution_answers_revision,
     catalog_selector_membership,
 )
-from ..fleet_profile_contract import (
+from ..fleet_profile_contract.definitions import (
     FleetProfileAssignment,
     FleetProfileAssignmentInput,
     FleetProfileNode,
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..model_cache_contract import CacheResolution
-from ..models import CatalogDocument, CatalogDocumentRevision, FleetProfile
+from ..models.catalog import CatalogDocument, CatalogDocumentRevision
+from ..models.fleet import FleetProfile
 from ..profile_read_observation import observe_storage
 from ..recipe_runtime_specs import recipe_topology
 from ..stored.states import CatalogRevisionState

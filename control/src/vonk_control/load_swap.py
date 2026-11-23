@@ -18,13 +18,13 @@ from vonk_agent_protocol import RunState
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.swap import GIB
 
-from .models import RecipeRun, RunNode
+from .models.execution import RecipeRun, RunNode
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     StoredRunPlan,
     parse_stored_run_plan,
 )
-from .resource_planning import SwapCapacity, SwapHolder
+from .resource_planning.types import SwapCapacity, SwapHolder
 from .swap import selected_swap
 
 _LOADING = (RunState.PLANNED, RunState.STARTING)

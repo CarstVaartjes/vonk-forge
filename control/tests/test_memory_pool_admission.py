@@ -5,27 +5,21 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import ReservationState, RunAdmissionCode, RunSwitchCode
-from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.models import (
-    ClusterMapping,
-    Job,
-    NodeInventorySnapshot,
-    RecipeBuild,
-    RecipeRun,
-    ResourceReservation,
-    RunNode,
-)
-from vonk_control.recipe_builds import RecipeBuildService
+from vonk_control.install_admission.service import InstallAdmissionService
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_execution_contract import parse_stored_build_plan
-from vonk_control.recipe_operations import (
-    RecipeOperationService,
-)
-from vonk_control.resource_planning import (
+from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.resource_planning.capacity import plan_capacity
+from vonk_control.resource_planning.memory import memory_capacity_snapshot
+from vonk_control.resource_planning.types import (
     MemoryReservationTotals,
     PlannedStopRelease,
     ResourceDemand,
-    memory_capacity_snapshot,
-    plan_capacity,
 )
 from vonk_control.run_admission import (
     RunAdmissionService,

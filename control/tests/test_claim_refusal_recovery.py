@@ -4,12 +4,13 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.api import create_app
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.jobs.queue import JobService
-from vonk_control.models import AgentOperation, Job
-from vonk_control.operation_api import JobDetailResponse
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.operation_api.contracts import JobDetailResponse
 
 from .agent_fences import fenced_operation
 from .recipe_stop_fixtures import recipe_stop_payload

@@ -45,7 +45,7 @@ def raw_json_body(model: type[BaseModel]):
 def schema_application(*, browser_auth: bool = True) -> FastAPI:
     from sqlalchemy.orm import sessionmaker
 
-    from .api import create_app
+    from .api.application import create_app
     from .auth import TokenCodec
     from .browser_auth import BrowserAuthService
     from .jobs.queue import JobService

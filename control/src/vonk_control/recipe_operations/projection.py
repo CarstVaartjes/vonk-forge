@@ -35,10 +35,7 @@ from ..agent_operation_facts import aware
 from ..distributed_lifecycle import (
     DistributedLifecycleError,
 )
-from ..distributed_recovery import (
-    enforce_recovery_deadline,
-)
-from ..lifecycle import Outcome
+from ..distributed_recovery.common import enforce_recovery_deadline
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.evidence import (
     BookkeepingReason,
@@ -47,15 +44,11 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..lifecycle.recipe_operation import RecipeOperationAdapter, cancel_flagged
-from ..models import (
-    AgentOperation,
-    InstallationNode,
-    Job,
-    RecipeBuild,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
-)
+from ..lifecycle.types import Outcome
+from ..models.cache import RecipeBuild
+from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun, RunNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from ..offline_stops import deferred_stop_nodes
 from ..persisted_waits import schedule_wait
 from ..recipe_builds.cancellation import build_cancellation
@@ -100,7 +93,7 @@ from .rank_authority import _run_observes_per_generation
 from .results import _RANK_FAILED, _node_result, _recorded_result, _validated_result
 
 if TYPE_CHECKING:
-    from ..agent_jobs import AgentJobService
+    from ..agent_jobs.service import AgentJobService
     from .service import RecipeOperationService
 
 

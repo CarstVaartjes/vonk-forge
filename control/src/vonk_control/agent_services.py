@@ -9,9 +9,9 @@ from typing import Any
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.capability_reply import ControllerCapability
 
-from .agent_api import AgentApiServices
+from .agent_api.common import AgentApiServices
 from .capabilities import CapabilityRegistry
-from .enrollment import EnrollmentService
+from .enrollment.service import EnrollmentService
 from .settings import (
     AGENT_CA_PROVISIONER_NAME,
     Settings,
@@ -51,9 +51,9 @@ def build_agent_services(
     capabilities: CapabilityRegistry | None = None,
 ) -> AgentApiServices:
     """Construct the fail-closed production agent runtime from one provider."""
-    from .agent_jobs import AgentJobService
-    from .enrollment import EnrollmentService
+    from .agent_jobs.service import AgentJobService
     from .enrollment.bootstrap import EnrollmentBootstrapConfig
+    from .enrollment.service import EnrollmentService
     from .host_helper_authority import (
         HostHelperGrantIssuer,
         HostRuntimeAuthorityService,
@@ -62,10 +62,8 @@ def build_agent_services(
 
     registry = capabilities or CapabilityRegistry()
     if distribution is None and model_cache is not None:
-        from .distribution import (
-            DistributionService,
-            build_distribution_service_from_components,
-        )
+        from .distribution.service import DistributionService
+        from .distribution.wiring import build_distribution_service_from_components
 
         distribution = registry.guard(
             ControllerCapability.DISTRIBUTION,

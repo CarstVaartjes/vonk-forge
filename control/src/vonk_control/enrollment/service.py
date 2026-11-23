@@ -22,16 +22,15 @@ from vonk_agent_protocol.state_machines import (
 from ..agent_contacts import retire_contact
 from ..coordinator_failures import _RETRY_CAP_SECONDS
 from ..logging import log_event, redact_text
-from ..models import (
+from ..models.fleet import (
     AgentCertificate,
     AgentCertificateRotation,
     AgentEnrollment,
     AgentIssuedCertificateRevocation,
     AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    Job,
 )
+from ..models.jobs import Job
+from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..owner_liveness import OwnerKind, OwnerRef, owner
 from ..persisted_waits import read_wait, schedule_wait
 from ..pki import IssuedCertificate

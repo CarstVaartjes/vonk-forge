@@ -13,8 +13,8 @@ import httpx2
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..categorized_errors import InvalidValue
-from ..lifecycle import Reconciler
 from ..lifecycle.model_cache import ModelCacheAdapter, ModelCacheStore
+from ..lifecycle.reconciler import Reconciler
 from ..model_cache_streams import StreamGovernor
 from ..recipe_operations.service import RecipeOperationService
 from ..settings import FREE_SPACE_FOR_COLOCATED_SERVICES_FRACTION

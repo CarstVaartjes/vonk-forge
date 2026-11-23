@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ReservationState
 
-from .models import ResourceReservation
+from .models.execution import ResourceReservation
 from .owner_liveness import (
     ADOPTION_WINDOW,
     OWNER_SETTLE_GRACE,

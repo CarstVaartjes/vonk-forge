@@ -10,21 +10,19 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import SupersedeCode
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import (
-    FleetProfileAdmissionEffectBusy,
-    FleetProfileService,
-)
-from vonk_control.models import (
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.contracts import FleetProfileAdmissionEffectBusy
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import (
     AgentNode,
     AgentNodeContact,
-    Base,
-    CatalogDocumentRevision,
     FleetProfileApplication,
     FleetProfileSelection,
-    Job,
     User,
 )
+from vonk_control.models.jobs import Job
 from vonk_control.profile_port_promises import PortPromiseTaken
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_forge_contracts import RecipeDefinition, document_sha256
@@ -843,7 +841,7 @@ def test_dual_spark_loss_during_load_exposes_recovery_admission_and_heals(
     from vonk_agent_protocol import LifecycleState, WaitReason
     from vonk_agent_protocol.agent_words import ProfileReasonSeverity
     from vonk_agent_protocol.state_machines import NodeIdentityState
-    from vonk_control.fleet_profile_contract import FleetProfileReason
+    from vonk_control.fleet_profile_contract.assessment import FleetProfileReason
 
     from .test_fleet_profiles import _seed_dual_solo_without_runtime_state
 

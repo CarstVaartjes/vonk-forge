@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.inventory import MAX_REPORTED_INSTALLATIONS
 
 from .machine_states import rank_installed
-from .models import InstallationNode, RecipeInstallation, RecipeRun
+from .models.execution import InstallationNode, RecipeInstallation, RecipeRun
 
 #: The helper proved the runtime image gone from its Spark. An unreadable
 #: inspection (``runtime_image_inspect_failed``) proves nothing and never demotes.

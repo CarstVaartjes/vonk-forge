@@ -1,6 +1,6 @@
 """Shared acceptance helper for recipe removal tests."""
 
-from vonk_control.recipe_image_availability import (
+from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
 

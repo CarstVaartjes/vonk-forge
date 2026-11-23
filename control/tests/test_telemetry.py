@@ -12,13 +12,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_CAPACITY_BYTES
-from vonk_control.models import (
-    AgentNode,
-    Base,
+from vonk_control.model_primitives import Base
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.telemetry import (
     NodeEngineSample,
     NodeTelemetryLatest,
     NodeTelemetrySample,
-    RecipeRun,
 )
 from vonk_control.telemetry.samples import (
     ENGINE_LIVE_WINDOW,
@@ -211,7 +211,7 @@ def test_resource_store_rejects_invalid_measurement_without_partial_sample(
 ) -> None:
     repository, sessions, _, _ = telemetry
     from vonk_agent_protocol.telemetry import HostResourceSample
-    from vonk_control.models import NodeInventoryResourceSnapshot
+    from vonk_control.models.telemetry import NodeInventoryResourceSnapshot
     from vonk_control.stored.json_values import write_guard_mode
 
     repository.record_batch(NODE_A, (sample(sequence=1),))
@@ -425,7 +425,7 @@ def test_sample_and_latest_writes_are_one_transaction(telemetry) -> None:
 def test_gpu_failure_round_trips_and_next_sample_recovers(telemetry):
     # Catches losing the typed collection reason between wire, store and fleet.
     from vonk_agent_protocol.telemetry import GpuUnavailableReason, TelemetrySample
-    from vonk_control.fleet_projection import telemetry_point
+    from vonk_control.fleet_projection.common import telemetry_point
 
     repository, _, _, _ = telemetry
     wire = TelemetrySample(
@@ -480,7 +480,7 @@ def _vector() -> dict:
 
 
 def test_gpu_power_uptime_and_process_memory_are_stored_and_served(telemetry) -> None:
-    from vonk_control.fleet_projection import telemetry_point
+    from vonk_control.fleet_projection.common import telemetry_point
 
     repository, _sessions, _engine, _clock = telemetry
     vector = _vector()
@@ -523,7 +523,7 @@ def _vector_v2() -> dict:
 def test_host_readings_are_stored_and_served_and_engines_are_not_on_the_point(
     telemetry,
 ) -> None:
-    from vonk_control.fleet_projection import telemetry_point
+    from vonk_control.fleet_projection.common import telemetry_point
 
     repository, sessions, _engine, _clock = telemetry
     vector = _vector_v2()["sample"]

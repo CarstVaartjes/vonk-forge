@@ -20,31 +20,28 @@ from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileEffectStat
 from .. import model_cache_states
 from ..content_identity import same_image
 from ..logging import redact_text
-from ..model_cache import CacheOperationView, ModelCacheNotFound
+from ..model_cache.errors import ModelCacheNotFound
+from ..model_cache.views import CacheOperationView
 from ..model_cache_contract import (
     ModelCacheDownloadPreviewResponse,
     ModelCacheDownloadResult,
 )
-from ..models import (
-    CatalogDocumentRevision,
-    RecipeBuild,
-)
+from ..models.cache import RecipeBuild
+from ..models.catalog import CatalogDocumentRevision
 from ..profile_read_observation import profile_read
-from ..run_switch_contract import (
-    RunSwitchChildProgress,
+from ..run_switch_contract.evidence import RunSwitchPhase
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.phase_results import (
     RunSwitchModelDownloadPendingResult,
     RunSwitchModelDownloadResult,
-    RunSwitchOperationResult,
-    RunSwitchPhase,
-    RunSwitchPlan,
     RunSwitchRuntimeImageResult,
 )
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_contract.progress import RunSwitchChildProgress
 from ..run_switch_observation_contract import RuntimeImageBuildInput
-from ..run_switch_operations import PhaseExecution
+from ..run_switch_operations.interfaces import PhaseExecution
 from ..run_switch_operations.publish import _persist_run_switch_runtime_image_reference
-from ..runtime_image_preparation import (
-    RuntimeImageReceipt,
-)
+from ..runtime_image_preparation.contracts import RuntimeImageReceipt
 from ..stored.states import CatalogRevisionState, RecipeBuildState
 from ..strict_json import read_stored_model
 from ..worker.memory_contract import WorkerMemoryComponent

@@ -20,22 +20,23 @@ from vonk_agent_protocol import (
     LifecycleState,
 )
 from vonk_agent_protocol.contracts import AgentFailureResult, AgentUpgradePayload
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.agent_upgrades import AgentUpgradeService
-from vonk_control.lifecycle import (
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.agent_upgrades.service import AgentUpgradeService
+from vonk_control.lifecycle.agent_upgrade import (
+    UNSUPPORTED_DISPATCH,
+    AgentUpgradeAdapter,
+)
+from vonk_control.lifecycle.core import transition
+from vonk_control.lifecycle.types import (
     CancelRequested,
     Effect,
     Outcome,
     Reported,
     State,
     Tick,
-    transition,
 )
-from vonk_control.lifecycle.agent_upgrade import (
-    UNSUPPORTED_DISPATCH,
-    AgentUpgradeAdapter,
-)
-from vonk_control.models import AgentOperation, Job, JobAttempt
+from vonk_control.models.jobs import Job, JobAttempt
+from vonk_control.models.operations import AgentOperation
 
 from .test_agent_upgrades import (  # noqa: F401  (published_source is autouse)
     NODE_A,

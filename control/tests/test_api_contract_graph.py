@@ -7,10 +7,11 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 
 from sqlalchemy.orm import sessionmaker
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
-from vonk_control.distribution import DistributionService, MemoryObjectSource
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.jobs.queue import JobService
 
 from .test_agent_api import NODE_A, agent_headers

@@ -27,17 +27,11 @@ from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 
 from .categorized_errors import InvalidType
-from .models import (
-    AgentOperation,
-    ArtifactJob,
-    CatalogDocumentRevision,
-    ClusterMapping,
-    ClusterMappingNode,
-    Job,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
-)
+from .models.catalog import CatalogDocumentRevision
+from .models.execution import ArtifactJob, RecipeInstallation, RecipeRun, RunNode
+from .models.jobs import Job
+from .models.mapping import ClusterMapping, ClusterMappingNode
+from .models.operations import AgentOperation
 from .own_cleanup import own_runtime_target
 from .recipe_execution_contract import (
     RecipeExecutionContractError,

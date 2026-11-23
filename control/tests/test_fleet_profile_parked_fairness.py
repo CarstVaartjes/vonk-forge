@@ -5,12 +5,12 @@ from datetime import timedelta
 from sqlalchemy import Engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState
-from vonk_control.fleet_profile_contract import FleetProfileChildOperation
-from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.models import (
+from vonk_control.fleet_profile_contract.applications import FleetProfileChildOperation
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import (
     AgentNode,
     AgentNodeContact,
-    Base,
     FleetProfileApplication,
 )
 

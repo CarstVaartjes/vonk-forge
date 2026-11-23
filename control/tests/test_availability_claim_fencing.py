@@ -11,15 +11,19 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState
 from vonk_control.jobs.documents import AvailabilityModelChild
-from vonk_control.models import Base, Job, User
-from vonk_control.recipe_image_availability import RecipeImageAvailabilityClaim
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import User
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability.contracts import (
+    RecipeImageAvailabilityClaim,
+)
+from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImageReceipt,
     RuntimeImageReferenceIntent,
-    prepare_runtime_image,
     read_runtime_image_reference_intent,
 )
+from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .test_recipe_image_availability import (
     Transport,

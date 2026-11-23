@@ -30,10 +30,8 @@ from ..jobs.documents import (
     AvailabilityUnknownEnd,
 )
 from ..lifecycle.image_availability import PREPARATION_STALL_WINDOW
-from ..models import (
-    CatalogDocumentRevision,
-    Job,
-)
+from ..models.catalog import CatalogDocumentRevision
+from ..models.jobs import Job
 from ..operations.blockers import make_blocker
 from ..operations.contract import (
     AvailabilityOperationFailure,

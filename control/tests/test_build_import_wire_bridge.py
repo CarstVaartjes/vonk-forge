@@ -12,18 +12,14 @@ from vonk_agent_protocol import (
     RecipeBuildEvidence,
     RecipeBuildRequest,
 )
-from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    RecipeBuild,
-    ResourceReservation,
-)
-from vonk_control.recipe_builds import RecipeBuildService
-from vonk_control.recipe_operations import (
-    RecipeOperationService,
-    record_build_evidence,
-)
+from vonk_control.install_admission.service import InstallAdmissionService
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_builds.service import RecipeBuildService
+from vonk_control.recipe_operations.observation_helpers import record_build_evidence
+from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
 
 from tests.wire_probes import prebuilt_probe

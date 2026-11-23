@@ -22,20 +22,21 @@ from vonk_control.artifact_lifecycle import ArtifactReferenceUnsettled
 from vonk_control.failure_classification import disposition
 from vonk_control.jobs.documents import AvailabilityJobPayload
 from vonk_control.lifecycle.image_availability import preparation_deadline
-from vonk_control.models import Base, Job
+from vonk_control.model_primitives import Base
+from vonk_control.models.jobs import Job
 from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
-from vonk_control.recipe_image_availability import (
-    RecipeImageAvailabilityService,
-    image_preparation,
-)
+from vonk_control.recipe_image_availability import image_preparation
 from vonk_control.recipe_image_availability.contracts import availability_disposition
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
+)
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import serialize_json_value
-from vonk_control.unused_storage_collection import UnusedStorageCollector
 from vonk_control.unused_storage_collection.common import InstallationRemoval, _Kept
+from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
 from .test_recipe_image_availability import (
     ARCHIVE_SHA,

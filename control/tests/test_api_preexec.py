@@ -10,7 +10,8 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.browser_auth import (
     BrowserAuthService,
 )
-from vonk_control.models import Base, User
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import User
 
 
 @pytest.mark.parametrize("euid", [0, 10001])

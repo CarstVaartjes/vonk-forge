@@ -14,22 +14,18 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.package_source import AgentPackageSource
 from vonk_control import agent_operation_states as aos
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.agent_upgrades import AgentUpgradeService
-from vonk_control.api import create_app
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.agent_upgrades.service import AgentUpgradeService
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.fleet_projection import FleetProjection
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.jobs.queue import JobService
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentNodeContact,
-    AgentOperation,
-    Base,
-    Job,
-)
-from vonk_control.operation_api import durable_operation_services
-from vonk_control.operator_projection_api import FleetOperatorServices
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentCertificate, AgentNode, AgentNodeContact
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.operation_api.durable import durable_operation_services
+from vonk_control.operator_projection_api.services import FleetOperatorServices
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_agent_upgrades import NODE_A, NODE_B, OLD_IDENTITY, PACKAGE_MODEL, SOURCE

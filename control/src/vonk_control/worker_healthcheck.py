@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 
-from .models import ControlProcessHeartbeat
+from .models.jobs import ControlProcessHeartbeat
 
 #: How recent the worker's readiness heartbeat must be to count as live.
 WORKER_READINESS_WINDOW_SECONDS = 30
@@ -47,7 +47,7 @@ def verify_worker_ready(
 
 
 def main() -> None:
-    from .db import build_engine, session_factory
+    from .db.connections import build_engine, session_factory
     from .settings import Settings
     from .worker.liveness import current_worker_instance_id
 

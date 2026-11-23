@@ -25,36 +25,36 @@ from vonk_agent_protocol.agent_words import (
 from vonk_forge_contracts import RecipeDefinition
 
 from ..categorized_errors import BookkeepingUnknown, MissingRecord
-from ..fleet_profile_contract import (
-    FleetProfileAction,
+from ..fleet_profile_contract.applications import FleetProfileIntendedConfiguration
+from ..fleet_profile_contract.assessment import (
     FleetProfileAdmissionDecision,
-    FleetProfileAssignment,
     FleetProfileAssignmentAssessment,
-    FleetProfileAssignmentInput,
     FleetProfileAssignmentPreparation,
     FleetProfileAssignmentPreview,
-    FleetProfileDefinition,
-    FleetProfileIntendedConfiguration,
     FleetProfilePlanStep,
     FleetProfilePlanSummary,
     FleetProfilePreparationDecision,
-    FleetProfilePreview,
     FleetProfileReason,
-    FleetProfileReviewedDecision,
     FleetProfileScopePreview,
 )
-from ..lifecycle.evidence import Residue
-from ..models import (
-    AgentNode,
-    CatalogDocumentRevision,
-    FleetProfile,
-    FleetProfileApplication,
+from ..fleet_profile_contract.definitions import (
+    FleetProfileAssignment,
+    FleetProfileAssignmentInput,
+    FleetProfileDefinition,
 )
+from ..fleet_profile_contract.review import (
+    FleetProfilePreview,
+    FleetProfileReviewedDecision,
+)
+from ..fleet_profile_contract.vocabulary import FleetProfileAction
+from ..lifecycle.evidence import Residue
+from ..models.catalog import CatalogDocumentRevision
+from ..models.fleet import AgentNode, FleetProfile, FleetProfileApplication
 from ..preparation_contract import RolloutPreparation, RuntimeImageIdentity
 from ..profile_capacity import plan_kept_runs, sibling_runs
 from ..profile_read_observation import profile_read
 from ..recipe_runtime_specs import recipe_topology
-from ..run_switch_contract import RunSwitchAssessment
+from ..run_switch_contract.plans import RunSwitchAssessment
 from .assessment_support import (
     _assignments_needing_preparation,
 )

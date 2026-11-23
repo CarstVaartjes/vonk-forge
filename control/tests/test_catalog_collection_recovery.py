@@ -12,18 +12,14 @@ from sqlalchemy.engine import Engine
 from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.agent_words import ProfileSwitchChildKind
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import FleetProfileService
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.jobs.documents import RecipeStopParent
-from vonk_control.models import (
-    Base,
-    FleetProfileApplication,
-    FleetProfileSelection,
-    Job,
-    RecipeRun,
-    RecipeSourceBundle,
-    SourceBundleArchive,
-)
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import RecipeSourceBundle, SourceBundleArchive
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.fleet import FleetProfileApplication, FleetProfileSelection
+from vonk_control.models.jobs import Job
 
 from .test_catalog_revision_collection import (
     NODE,

@@ -8,18 +8,12 @@ from vonk_agent_protocol import (
     SecurityRefusalReason,
 )
 
-from ..agent_upgrades import AgentUpgradeConflict
+from ..agent_upgrades.errors import AgentUpgradeConflict
 from ..api_availability import AVAILABILITY_ERRORS
 from ..auth import MUTATION_ROLES, Actor, CursorError
-from ..enrollment import (
-    EnrollmentDenied,
-    RemoteRevocationUncertain,
-)
-from ..fleet_projection import (
-    FleetNode,
-    FleetSnapshot,
-)
-from ..library_projection import LibrarySelectorAmbiguous
+from ..enrollment.types import EnrollmentDenied, RemoteRevocationUncertain
+from ..fleet_projection.common import FleetNode, FleetSnapshot
+from ..library_projection.common import LibrarySelectorAmbiguous
 from ..logging import redact_text
 from ..request_fault import RequestFault
 

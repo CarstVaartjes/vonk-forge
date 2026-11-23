@@ -23,8 +23,10 @@ from ..lifecycle.agent_operation import (
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.job_ranks import job_run_verdict
 from ..logging import redact_text
-from ..models import AgentNode, AgentOperationAttempt, Job
-from ..models import AgentOperation as StoredOperation
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from ..offline_stops import is_deferred_stop
 from .contracts import _ABANDONABLE_OPERATIONS
 from .evidence import _is_refusal_reason

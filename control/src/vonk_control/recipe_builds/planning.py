@@ -22,7 +22,8 @@ from ..catalog.revision_contract import RecipeRevisionProjection
 from ..disk_reservations import outstanding_disk_reservation_bytes
 from ..gpu.health import gpu_health_reason
 from ..inventory.items import runtime_value
-from ..models import AgentNode, CatalogDocumentRevision
+from ..models.catalog import CatalogDocumentRevision
+from ..models.fleet import AgentNode
 from ..prebuilt_images import (
     PREBUILT_KEY_MISMATCH,
     PREBUILT_NOT_PINNED,

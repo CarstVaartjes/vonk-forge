@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.fleet_projection import FleetProjection
-from vonk_control.models import Base
+from vonk_control.fleet_projection.service import FleetProjection
+from vonk_control.model_primitives import Base
 
 from cluster_profiles import observation_transfer_reader
 from cluster_profiles.control_client import (

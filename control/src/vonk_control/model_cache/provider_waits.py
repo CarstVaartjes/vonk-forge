@@ -22,7 +22,7 @@ from ..model_cache_contract import (
     ModelCacheDownloadPayload,
     ModelCacheOperationPayload,
 )
-from ..models import ModelCacheOperation
+from ..models.cache import ModelCacheOperation
 from .catalog_helpers import _datetime
 from .errors import ProviderNotAsked
 

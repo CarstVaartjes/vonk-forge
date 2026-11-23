@@ -95,30 +95,28 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import ModelDefinition
 
-from ..agent_jobs import release_owned_reservations_in_session
+from ..agent_jobs.retirement import release_owned_reservations_in_session
 from ..logging import log_event
 from ..model_cache_contract import CacheManifest, CacheOperationKind
-from ..models import (
-    AgentOperation,
-    ArtifactJob,
+from ..models.cache import ModelCacheOperation, ModelCacheSet, RecipeBuild
+from ..models.catalog import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
-    ClusterMapping,
-    ClusterMappingNode,
-    FleetProfileApplication,
-    FleetProfileSelection,
-    InstallationNode,
-    Job,
-    ModelCacheOperation,
-    ModelCacheSet,
-    RecipeBuild,
-    RecipeInstallation,
-    RecipeRun,
     RecipeSourceBundle,
-    RunNode,
     SourceBundleArchive,
 )
+from ..models.execution import (
+    ArtifactJob,
+    InstallationNode,
+    RecipeInstallation,
+    RecipeRun,
+    RunNode,
+)
+from ..models.fleet import FleetProfileApplication, FleetProfileSelection
+from ..models.jobs import Job
+from ..models.mapping import ClusterMapping, ClusterMappingNode
+from ..models.operations import AgentOperation
 from ..owner_liveness import builds_in_flight
 from ..revision_images import revision_images
 from ..run_states import ENDED_RUN_STATES

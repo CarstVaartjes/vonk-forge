@@ -27,15 +27,15 @@ from vonk_agent_protocol.agent_words import (
 from .. import fleet_profile_states
 from ..auth import MUTATION_ROLES
 from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract import (
-    FleetProfileApplicationProgress,
+from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
+from ..fleet_profile_contract.review import (
     FleetProfileApplicationView,
     FleetProfilePreview,
 )
 from ..jobs import states as job_states
 from ..lifecycle.evidence import Residue
 from ..logging import redact_text
-from ..models import FleetProfile, FleetProfileApplication, User
+from ..models.fleet import FleetProfile, FleetProfileApplication, User
 from ..operations.contract import OperationFailureEvidence
 from ..operations.item_contract import (
     OperationItem,
@@ -69,7 +69,7 @@ if TYPE_CHECKING:
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..operation_api import OperationProviderProtocol
+    from ..operation_api.contracts import OperationProviderProtocol
 
 
 class FleetProfileService:
@@ -79,12 +79,12 @@ class FleetProfileService:
 
         # Keep this import local so the profile domain remains usable by the
         # profile routes when the optional Activity projection is unavailable.
-        from ..operation_api import (
+        from ..operation_api.contracts import (
             OperationListPage,
             OperationProvider,
             OperationQuery,
-            _activity_keyset_filter,
         )
+        from ..operation_api.providers import _activity_keyset_filter
 
         def list_operations(query: OperationQuery) -> OperationListPage:
             after = query.after

@@ -25,38 +25,36 @@ import pytest
 from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError
 from vonk_agent_protocol import ArtifactLifecycleCode, LifecycleState, canonical_message
-from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
+from vonk_control.distribution_executor.preparation import (
+    CompositeDistributionPhaseExecutor,
+)
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import (
-    CatalogDocumentRevision,
-    Job,
-    RecipeBuild,
-)
-from vonk_control.run_switch_contract import (
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_contract.requests import (
     RunSwitchApplyRequest,
     SparkGroup,
     SparkGroupNode,
 )
-from vonk_control.run_switch_operations import (
-    PhaseExecution,
-    RunSwitchOperationService,
-    RunSwitchRetryLater,
-    _lock_phase_owner,
-    _phase_request_key,
-    _phase_result,
-)
+from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
+from vonk_control.run_switch_operations.interfaces import PhaseExecution
+from vonk_control.run_switch_operations.observation_helpers import _phase_request_key
+from vonk_control.run_switch_operations.ownership import _lock_phase_owner
+from vonk_control.run_switch_operations.result_helpers import _phase_result
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime.adapters import resolve_runtime_adapter
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
+from vonk_control.runtime_image_preparation.contracts import (
     PulledImageEvidence,
     RuntimeImagePreparationError,
     RuntimeImagePreparationUnknown,
     RuntimeImageReceipt,
-    prepare_runtime_image,
 )
+from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .runtime_image_fixtures import place_test_image
 from .test_lifecycle_preflight import _finish

@@ -8,8 +8,8 @@ from sqlalchemy import select
 from vonk_control import model_cache_states
 from vonk_control.agent_operation_facts import aware
 from vonk_control.artifact_lifecycle import dead_removal_identities
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import ModelCacheOperation
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.cache import ModelCacheOperation
 
 
 def advance_until_ended(

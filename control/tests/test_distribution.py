@@ -9,15 +9,11 @@ from vonk_agent_protocol import (
     DistributionCode,
     DistributionObject,
 )
-from vonk_control.distribution import (
-    CompositeObjectSource,
-    DistributionError,
-    DistributionService,
-    DistributionUnknown,
-    FilesystemObjectSource,
-    MemoryObjectSource,
-    ModelCacheObjectSource,
-)
+from vonk_control.distribution.filesystem import FilesystemObjectSource
+from vonk_control.distribution.model_cache import ModelCacheObjectSource
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.sources import CompositeObjectSource, MemoryObjectSource
+from vonk_control.distribution.types import DistributionError, DistributionUnknown
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 
 from .test_agent_api import NODE_A, NODE_B, agent_headers
@@ -570,7 +566,7 @@ def test_denied_nas_source_cannot_fall_back_then_recovers_after_access_restored(
 
 def test_secondary_source_refusal_is_not_masked_by_primary_cache_miss():
     from vonk_agent_protocol import SecurityRefusalReason
-    from vonk_control.distribution import DistributionRefused
+    from vonk_control.distribution.types import DistributionRefused
 
     class DeniedSource(MemoryObjectSource):
         def open_object(self, digest, expected_bytes):

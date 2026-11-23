@@ -14,10 +14,8 @@ from vonk_forge_contracts import RecipeDefinition
 from ..resource_planning_contract import (
     ResourceRecipeProjection,
 )
-from ..run_switch_contract import (
-    EffectiveSettingsSelection,
-    RunSwitchChangeEffect,
-)
+from ..run_switch_contract.evidence import EffectiveSettingsSelection
+from ..run_switch_contract.vocabulary import RunSwitchChangeEffect
 from .identity import _canonical, _digest
 from .reasons import _reason
 from .types import (

@@ -28,13 +28,11 @@ from ..admission_locking import ConstraintReplan, patient_admission
 from ..categorized_errors import MissingRecord
 from ..evidence_repeats import load_subject, note_repeat, note_success
 from ..failure_classification import disposition, error_detail
-from ..fleet_profile_contract import (
-    FleetProfileApplicationProgress,
-    FleetProfileApplicationView,
-)
+from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
+from ..fleet_profile_contract.review import FleetProfileApplicationView
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.fleet_profile import FleetProfileAdapter
-from ..models import FleetProfileApplication
+from ..models.fleet import FleetProfileApplication
 from ..operations.blockers import OperationBlocker, bound_blockers, make_blocker
 from ..persisted_waits import schedule_wait
 from .assessment_support import (

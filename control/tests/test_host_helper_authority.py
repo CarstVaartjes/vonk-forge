@@ -48,22 +48,18 @@ from vonk_control.host_runtime_plan_authority import (
     RuntimePlanUnsatisfiable,
     derive_runtime_plan_binding,
 )
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.models.execution import (
     ArtifactJob,
-    Base,
-    CatalogDocument,
-    CatalogDocumentRevision,
-    ClusterMapping,
-    ClusterMappingNode,
-    Job,
     RecipeInstallation,
     RecipeRun,
     RunNode,
 )
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.recipe_execution_contract import (
     StoredInstallationPlan,
     StoredInstallNodePlan,
@@ -1771,7 +1767,7 @@ def test_live_grant_waits_for_lease_renewal_then_succeeds(
     from vonk_control.agent_api.authority import (
         issue_host_runtime_grant as request_grant,
     )
-    from vonk_control.agent_jobs import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
 
     service = runtime_service(engine=postgres_engine, cancel_requested=cancel_requested)
     now = NOW + timedelta(seconds=55)

@@ -24,7 +24,8 @@ from vonk_agent_protocol import (
 
 from . import fleet_profile_states
 from .admission_locking import ConstraintReplan
-from .models import FleetProfileApplication, ResourceReservation
+from .models.execution import ResourceReservation
+from .models.fleet import FleetProfileApplication
 from .owner_liveness import profile_claim_consumable
 
 #: The unique index behind "one live promise per Spark port".

@@ -43,27 +43,23 @@ from .fleet_profile_capacity_repair import (
 from .fleet_profile_capacity_repair import (
     memory_claim_id as _memory_claim_id,
 )
-from .fleet_profile_contract import (
-    FLEET_PROFILE_ENDED_STATES,
-    FleetProfileApplicationProgress,
-    FleetProfileAssignment,
-    FleetProfileEffects,
-    FleetProfilePreview,
-    FleetProfileResourceRequirement,
-)
+from .fleet_profile_contract.applications import FleetProfileApplicationProgress
+from .fleet_profile_contract.assessment import FleetProfileResourceRequirement
+from .fleet_profile_contract.definitions import FleetProfileAssignment
+from .fleet_profile_contract.effects import FleetProfileEffects
+from .fleet_profile_contract.review import FleetProfilePreview
+from .fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
 from .jobs import states as job_states
-from .models import (
-    AgentNode,
-    FleetProfileApplication,
-    Job,
-    RecipeBuild,
-    RecipeRun,
-    ResourceReservation,
-)
+from .models.cache import RecipeBuild
+from .models.execution import RecipeRun, ResourceReservation
+from .models.fleet import AgentNode, FleetProfileApplication
+from .models.jobs import Job
 from .preparation_contract import RuntimeImageIdentity
 from .profile_port_promises import clear_port_promises
-from .resource_planning import memory_reservation_kind
-from .run_switch_contract import RunSwitchOperationResult, RunSwitchPlan, StopImpact
+from .resource_planning.memory_kinds import memory_reservation_kind
+from .run_switch_contract.evidence import StopImpact
+from .run_switch_contract.operations import RunSwitchOperationResult
+from .run_switch_contract.plans import RunSwitchPlan
 
 
 def reservation_visible(
@@ -679,8 +675,8 @@ def sibling_profile_runs(
     A plan that cannot be read is a wait, never an empty set: an empty set would
     plan to stop the siblings.
     """
-    from .fleet_profiles import FleetProfileService
     from .fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
+    from .fleet_profiles.service import FleetProfileService
 
     application = session.get(FleetProfileApplication, application_id)
     if application is None:
@@ -906,7 +902,8 @@ def accepted_profile_runtime_image(
     """
     # Keep intent/reference validation with its existing owner. Import at the
     # call boundary because profile orchestration also consumes capacity helpers.
-    from .fleet_profiles import FleetProfileConflict, FleetProfileService
+    from .fleet_profiles.contracts import FleetProfileConflict
+    from .fleet_profiles.service import FleetProfileService
     from .lifecycle.evidence import Residue
 
     application = session.get(FleetProfileApplication, application_id)

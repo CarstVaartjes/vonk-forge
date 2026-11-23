@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_control.models import FleetProfileApplication
+from vonk_control.models.fleet import FleetProfileApplication
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 

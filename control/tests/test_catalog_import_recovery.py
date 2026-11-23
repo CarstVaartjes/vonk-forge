@@ -19,14 +19,13 @@ from vonk_control.catalog.revision_contract import (
     read_catalog_projection,
 )
 from vonk_control.catalog.service import CatalogService, RecipeRevisionView
-from vonk_control.models import (
-    Base,
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
-    RecipeInstallation,
-    RecipeRun,
 )
+from vonk_control.models.execution import RecipeInstallation, RecipeRun
 from vonk_forge_contracts import RecipeApi, RecipeDefinition, document_sha256
 
 from .display_fixtures import reword

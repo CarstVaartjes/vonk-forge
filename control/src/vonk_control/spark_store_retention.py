@@ -16,17 +16,13 @@ from .fleet_model_removal_contract import (
     STORE_RETENTION_MAX_AGE,
     FleetRemovalDisposition,
 )
-from .fleet_profile_contract import FleetProfileApplicationProgress
+from .fleet_profile_contract.applications import FleetProfileApplicationProgress
 from .lifecycle.evidence import Residue
 from .logging import log_event
 from .model_cache.persistence import _operation_removal
 from .model_cache_contract import CacheOperationKind
-from .models import (
-    ArtifactLifecycleGate,
-    FleetProfileApplication,
-    ModelCacheOperation,
-    RecipeBuild,
-)
+from .models.cache import ArtifactLifecycleGate, ModelCacheOperation, RecipeBuild
+from .models.fleet import FleetProfileApplication
 from .strict_json import read_stored_model
 from .unused_storage_collection.evidence import _Evidence
 from .unused_storage_collection.protected_objects import protected_model_objects

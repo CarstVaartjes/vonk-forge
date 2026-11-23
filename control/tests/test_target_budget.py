@@ -58,22 +58,20 @@ from vonk_control.artifact_reference_scan.image_references import (
     runtime_image_reference_findings,
 )
 from vonk_control.auth import Actor
-from vonk_control.fleet_projection import FleetProjection
-from vonk_control.models import (
-    CatalogDocumentRevision,
-    ClusterMapping,
-    ClusterMappingNode,
-    InstallationNode,
-    RecipeBuild,
-    RecipeInstallation,
-)
+from vonk_control.fleet_projection.service import FleetProjection
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import InstallationNode, RecipeInstallation
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
 from vonk_control.observed_run_memory import observed_role_peaks
 from vonk_control.operator_projection_api.routes import (
     install_operator_projection_routes,
 )
 from vonk_control.recipe_execution_contract import parse_stored_installation_plan
-from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
+)
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.spark_store_retention import store_retention_request
 from vonk_control.unused_storage_collection.common import spark_eviction_capacity
 from vonk_forge_contracts import read_recipe

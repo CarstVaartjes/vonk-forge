@@ -12,11 +12,9 @@ from vonk_agent_protocol import InvalidRequestReason
 from .. import fleet_profile_states
 from ..admission_locking import AdmissionRowLock, lock_admission_rows
 from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract import (
-    FLEET_PROFILE_ENDED_STATES,
-    FleetProfileDeletion,
-)
-from ..models import (
+from ..fleet_profile_contract.definitions import FleetProfileDeletion
+from ..fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
+from ..models.fleet import (
     FleetProfile,
     FleetProfileApplication,
     FleetProfileRecipe,

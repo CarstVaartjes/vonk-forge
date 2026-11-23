@@ -31,15 +31,15 @@ from .content_identity import RecipeExecution, runs_identically
 from .dialect_insert import dialect_insert
 from .fleet_events import FleetEventRecorder, FleetEventRepository
 from .memory_reservations import MEMORY_RESERVATION_KINDS
-from .models import (
-    CatalogDocumentRevision,
+from .models.catalog import CatalogDocumentRevision
+from .models.execution import (
     MeasuredRolePeak,
-    NodeInventoryResourceSnapshot,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
     RunNode,
 )
+from .models.telemetry import NodeInventoryResourceSnapshot
 from .recipe_execution_contract import parse_stored_run_plan
 from .settings import PROFILE_STALL_WINDOW_SECONDS
 

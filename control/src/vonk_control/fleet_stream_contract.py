@@ -26,7 +26,7 @@ from .fleet_event_contract import (
     RecipeRunPayload,
     RunNodePayload,
 )
-from .fleet_projection import TelemetryPoint
+from .fleet_projection.common import TelemetryPoint
 from .strict_json import StrictJSONModel
 
 

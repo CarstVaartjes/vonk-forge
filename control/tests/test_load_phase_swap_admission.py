@@ -22,16 +22,16 @@ from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.swap import GIB, SWAP_POLICY, usable_swap_bytes
 from vonk_control.fleet_profiles.dependencies import ENDING_BLOCKER_CODES
 from vonk_control.inventory.repository import InventoryRepository, NodeInventoryReport
-from vonk_control.models import (
-    CatalogDocumentRevision,
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
     InstallationNode,
     MeasuredRolePeak,
-    NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
     RunNode,
 )
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.recipe_execution_contract import parse_stored_run_plan
 from vonk_control.run_admission import (
     RETRYABLE_PLAN_BLOCKERS,
@@ -840,13 +840,13 @@ def test_p_the_wait_a_profile_load_stores_keeps_the_swap_evidence(
     Two copies of the severity mapping rebuilt the blocker from ``code`` and
     ``detail`` only; the typed numbers were lost on the way to the wait.
     """
-    from vonk_control.fleet_profile_contract import (
+    from vonk_control.fleet_profile_contract.assessment import (
         FleetProfileAssignmentAssessment,
-        FleetProfilePreview,
     )
+    from vonk_control.fleet_profile_contract.review import FleetProfilePreview
     from vonk_control.fleet_profiles.assessment_support import _preview_blockers
     from vonk_control.operations.blockers import dump_blockers, read_blockers
-    from vonk_control.run_switch_contract import RunSwitchAssessment
+    from vonk_control.run_switch_contract.plans import RunSwitchAssessment
 
     _, _, _, _, plan = _switch_world(
         tmp_path, postgres_engine, rise=35 * GIB, total_gib=16, used=0
@@ -881,7 +881,7 @@ def test_p_the_wait_a_profile_load_stores_keeps_the_swap_evidence(
 
 
 def _held(sessions, now):
-    from vonk_control.fleet_projection import FleetProjection
+    from vonk_control.fleet_projection.service import FleetProjection
 
     (spark,) = FleetProjection(sessions, clock=lambda: now).read().nodes
     return {run.run_id: run.load_swap_held_bytes for run in spark.loaded}
@@ -923,8 +923,10 @@ def test_q_a_loading_rank_shows_the_swap_it_holds_until_it_runs(
 
 def test_r_an_admission_reason_without_a_shortfall_stores_no_swap_key() -> None:
     """Catches ``"swap": null`` entering the stored plan and its json.dumps digest."""
-    from vonk_control.install_admission import AdmissionReason
-    from vonk_control.install_admission.contracts import reason_documents
+    from vonk_control.install_admission.contracts import (
+        AdmissionReason,
+        reason_documents,
+    )
 
     assert reason_documents([AdmissionReason("c", "d")]) == [
         {"code": "c", "detail": "d"}

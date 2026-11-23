@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 from vonk_forge_contracts import ModelDisplay
 
-from .models import CatalogDocument, CatalogDocumentRevision
+from .models.catalog import CatalogDocument, CatalogDocumentRevision
 
 
 @dataclass(frozen=True, slots=True)

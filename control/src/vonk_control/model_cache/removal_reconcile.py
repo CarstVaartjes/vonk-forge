@@ -25,8 +25,8 @@ from ..artifact_lifecycle import (
     supersede_removal_nowait,
 )
 from ..categorized_errors import InvalidValue
-from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.evidence import Residue
+from ..lifecycle.types import Effect, Outcome, Reported
 from ..logging import log_event, redact_text
 from ..model_cache_contract import (
     ModelCacheDownloadPayload,
@@ -36,7 +36,8 @@ from ..model_cache_contract import (
     ModelCacheRetry,
 )
 from ..model_cache_progress import cache_phase, progress_document
-from ..models import ArtifactLifecycleGate, Job, ModelCacheOperation, ModelCacheSet
+from ..models.cache import ArtifactLifecycleGate, ModelCacheOperation, ModelCacheSet
+from ..models.jobs import Job
 from ..operations.contract import AvailabilityOperationFailure
 from .artifacts import _is_digest
 from .catalog_helpers import _iso

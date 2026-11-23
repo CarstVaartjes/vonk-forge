@@ -26,8 +26,8 @@ from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )
-from vonk_control.library_projection import LibraryProjection
-from vonk_control.models import Base
+from vonk_control.library_projection.service import LibraryProjection
+from vonk_control.model_primitives import Base
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot
 from vonk_forge_contracts.qualification_status import (
     PublishedQualificationStatusView,
@@ -201,7 +201,7 @@ def test_sync_records_the_published_measured_memory_for_admission_only():
     """
     from sqlalchemy import select
     from vonk_control.catalog.revision_contract import published_steady_peaks
-    from vonk_control.models import CatalogDocumentRevision
+    from vonk_control.models.catalog import CatalogDocumentRevision
     from vonk_forge_contracts.qualification_status import (
         PublishedMeasuredMemory,
         PublishedRoleMemory,

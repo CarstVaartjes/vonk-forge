@@ -24,13 +24,10 @@ from vonk_control.lifecycle_preflight import (
     LifecyclePreflight,
     LifecyclePreflightCheckpoint,
 )
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    CatalogDocumentRevision,
-    Job,
-)
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.operations.blockers import (
     BlockingOperation,
     ProgressAlarmCode,
@@ -335,7 +332,7 @@ def test_dispatched_preflight_claim_can_receive_its_signed_helper_grant(tmp_path
         host_helper_grant_signing_bytes,
     )
     from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
-    from vonk_control.agent_jobs import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
     from vonk_control.host_helper_authority import (
         HostHelperGrantIssuer,
         HostRuntimeAuthorityService,
@@ -662,7 +659,7 @@ def test_completed_probe_is_consumed_even_when_controller_resumes_after_deadline
 def test_high_level_gate_finishes_probe_before_dispatching_expensive_transfer(
     tmp_path, probe_completed
 ):
-    from vonk_control.run_switch_contract import RunSwitchApplyRequest
+    from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 
     from .test_recipe_operations import installed_recipe
     from .test_run_switch_operations import (
@@ -757,7 +754,7 @@ def test_spark_clock_ten_minutes_ahead_does_not_expire_received_probe(tmp_path):
 
 def test_checkpoint_rederivation_keeps_existing_children_after_upgrade(tmp_path):
     """An obsolete derived checkpoint must not erase issued work or replay it."""
-    from vonk_control.run_switch_contract import RunSwitchOperationResult
+    from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 
     sessions, queue, clock, node_id, service, arguments = _setup(tmp_path)
     pending, error = service.ensure(**arguments, previous=None)
@@ -882,9 +879,9 @@ def test_pending_probe_beside_a_compiling_build_shows_its_own_wait(
     """
     from dataclasses import replace
 
-    from vonk_control.lifecycle import State
     from vonk_control.lifecycle.run_switch import RunSwitchAdapter
-    from vonk_control.run_switch_contract import RunSwitchOperationResult
+    from vonk_control.lifecycle.types import State
+    from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 
     sessions, _queue, clock, _, service, arguments = _setup(tmp_path, node_count=2)
     with sessions() as session:

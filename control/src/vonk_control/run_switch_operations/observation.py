@@ -22,10 +22,8 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..logging import log_event, redact_text
-from ..model_cache import ModelCacheService
-from ..models import (
-    Job,
-)
+from ..model_cache.service import ModelCacheService
+from ..models.jobs import Job
 from ..operations.blockers import bound_blockers
 from ..stored.json_values import read_row_column
 from .constants import _LOGGER, _OPERATION_KINDS
@@ -111,7 +109,7 @@ class ObservationMixin:
         recovery_deadline_at = func.replace(
             Job.result["recovery_deadline_at"].as_string(), "Z", "+00:00"
         )
-        from ..models import RunSwitchJournalRepairPending
+        from ..journal_models import RunSwitchJournalRepairPending
 
         with service._sessions() as session:
             active = (
@@ -293,7 +291,7 @@ class ObservationMixin:
         """
         service = typing_cast("RunSwitchOperationService", self)
 
-        from ..run_switch_journal_repair import is_zero_transfer_journal_fault
+        from ..run_switch_journal_repair.discovery import is_zero_transfer_journal_fault
 
         with service._sessions() as session:
             snapshot = session.get(Job, operation_id)

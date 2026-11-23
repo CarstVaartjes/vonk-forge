@@ -31,17 +31,12 @@ from ..disk_reservations import (
 )
 from ..inventory.items_contract import InventorySnapshotKind
 from ..machine_states import reservation_live
-from ..models import (
-    AgentNode,
-    CatalogDocumentRevision,
-    ClusterMapping,
-    ClusterMappingNode,
-    InstallationNode,
-    NodeSnapshot,
-    RecipeBuild,
-    RecipeInstallation,
-    ResourceReservation,
-)
+from ..models.cache import RecipeBuild
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import InstallationNode, RecipeInstallation, ResourceReservation
+from ..models.fleet import AgentNode
+from ..models.mapping import ClusterMapping, ClusterMappingNode
+from ..models.telemetry import NodeSnapshot
 from ..profile_capacity import inherited_profile_disk
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,

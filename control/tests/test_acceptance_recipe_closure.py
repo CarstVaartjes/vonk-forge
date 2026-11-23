@@ -16,7 +16,7 @@ def test_canary_load_and_cleanup_submit_their_own_request_key() -> None:
             """
 import json
 import runpy
-from vonk_control.fleet_profile_contract import FleetProfileLoadRequest
+from vonk_control.fleet_profile_contract.review import FleetProfileLoadRequest
 
 Lifecycle = runpy.run_path("tests/acceptance/test_spark_lifecycle.py")["SparkLifecycle"]
 requests = []

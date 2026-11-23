@@ -15,7 +15,8 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as AgentOperationKind
 from vonk_agent_protocol import LifecycleState
 
-from ..models import AgentOperation, RecipeRun
+from ..models.execution import RecipeRun
+from ..models.operations import AgentOperation
 
 _KIND_PHRASES: dict[str, str] = {
     AgentOperationKind.RUNTIME_PREFLIGHT: "Runtime check",

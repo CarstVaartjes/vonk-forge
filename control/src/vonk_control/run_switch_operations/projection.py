@@ -11,14 +11,10 @@ from vonk_agent_protocol import (
 )
 
 from ..jobs import states as job_states
-from ..models import (
-    Job,
-)
+from ..models.jobs import Job
 from ..operations.blockers import make_blocker
 from ..persisted_waits import read_wait, wait_due
-from ..run_switch_contract import (
-    RunSwitchOperation,
-)
+from ..run_switch_contract.operations import RunSwitchOperation
 from ..run_switch_progress import (
     _progress_view as _progress_view,  # noqa: PLC0414 -- shared helper export
 )
@@ -71,7 +67,7 @@ class ProjectionMixin:
         if (wait := read_wait(job)) is not None:
             blockers = list(wait.blockers)
         repair_due: datetime | None = None
-        from ..run_switch_journal_repair import (
+        from ..run_switch_journal_repair.discovery import (
             REPAIR_WAIT,
             is_zero_transfer_journal_fault,
         )
@@ -86,7 +82,7 @@ class ProjectionMixin:
             }
             and is_zero_transfer_journal_fault(job)
         ):
-            from ..models import RunSwitchJournalRepairPending
+            from ..journal_models import RunSwitchJournalRepairPending
             from ..run_switch_journal_contract import RunSwitchJournalRepairPendingState
 
             view_session = object_session(job)

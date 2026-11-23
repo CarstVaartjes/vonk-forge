@@ -37,7 +37,6 @@ from ..bounded_retry import bounded_attempts
 from ..categorized_errors import MissingRecord
 from ..compiled_artifact_contract import CompiledArtifactContract
 from ..installed_bytes import demote_ranks_on_lost_image
-from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.artifact_job import (
     ArtifactJobAdapter,
@@ -46,7 +45,10 @@ from ..lifecycle.artifact_job import (
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.job_ranks import owner_order
-from ..models import AgentOperation, ArtifactJob, ArtifactJobFile, Job
+from ..lifecycle.types import Effect, Outcome, Reported
+from ..models.execution import ArtifactJob, ArtifactJobFile
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from .contracts import (
     ArtifactJobInvalid,
     ArtifactJobUnavailableError,

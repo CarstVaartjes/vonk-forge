@@ -10,14 +10,11 @@ from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.cache_removal_review import CacheAssetDisposition, CacheRemovalReview
 from vonk_control.fleet_model_removal_contract import FleetRemovalReason
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import (
-    AgentNode,
-    Base,
-    ModelCacheSet,
-    NodeInventorySnapshot,
-    User,
-)
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheSet
+from vonk_control.models.fleet import AgentNode, User
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_forge_contracts import RecipeDefinition
 
 from .test_catalog_revision_collection import NODE, Catalog
@@ -161,7 +158,7 @@ def test_unreadable_installation_is_unknown_and_next_review_recovers(
     from uuid import uuid4
 
     from vonk_control.lifecycle.evidence import BookkeepingReason
-    from vonk_control.models import RecipeInstallation
+    from vonk_control.models.execution import RecipeInstallation
 
     from .test_recipe_operations import NOW, installed_recipe, setup_services
 

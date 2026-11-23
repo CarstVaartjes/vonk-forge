@@ -37,11 +37,8 @@ from ..jobs.documents import (
     AvailabilityRuntime,
 )
 from ..lifecycle.evidence import Residue
-from ..models import (
-    CatalogDocument,
-    CatalogDocumentRevision,
-    Job,
-)
+from ..models.catalog import CatalogDocument, CatalogDocumentRevision
+from ..models.jobs import Job
 from ..operations.blockers import IdentityConflict, OperationBlocker, make_blocker
 from ..recipe_availability_intent import (
     RecipeRevisionIntent,
@@ -79,7 +76,7 @@ REQUEST_OBSERVATION_BUDGET_SECONDS = 0.25
 
 
 if TYPE_CHECKING:
-    from ..recipe_update_batches import RecipeUpdateClaim
+    from ..recipe_update_batches.helpers import RecipeUpdateClaim
     from .service import RecipeImageAvailabilityService
 
 

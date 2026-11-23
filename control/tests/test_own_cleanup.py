@@ -32,25 +32,23 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
 )
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    CatalogDocumentRevision,
-    Job,
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
 )
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.own_cleanup import CLEANUP_ACTIONS, CLEANUP_KINDS, EFFECT_ACTIONS
 from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
-from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.recipe_operations.service import RecipeOperationService
 
 from .agent_fences import fenced_operation
 from .agent_grant_requests import own_stop_grant_request, stop_grant_request

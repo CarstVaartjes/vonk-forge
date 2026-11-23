@@ -24,7 +24,9 @@ from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )
-from vonk_control.models import AgentCertificate, Job, RecipeRun, RunNode
+from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.models.fleet import AgentCertificate
+from vonk_control.models.jobs import Job
 
 from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 

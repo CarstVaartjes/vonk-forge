@@ -31,22 +31,20 @@ from vonk_control.availability_production.production import (
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
-from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import (
-    AgentNode,
-    AgentNodeContact,
-    AgentOperation,
-    Base,
-    CatalogDocumentRevision,
-    Job,
-    RecipeBuild,
-    ResourceReservation,
-)
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import AgentNode, AgentNodeContact
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
 from vonk_control.oci_image_store import (
+    IMAGE_CACHE_DIRECTORY,
     STORE_BUSY,
     OciImageStore,
     StoredImage,
@@ -56,19 +54,16 @@ from vonk_control.prebuilt_images import (
     PrebuiltImageImporter,
     write_library_image_plan,
 )
-from vonk_control.recipe_builds import RecipeBuildService, RecipeBuildUnknown
+from vonk_control.recipe_builds.common import RecipeBuildUnknown
+from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot
-from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
-from vonk_control.run_switch_contract import SparkGroup, SparkGroupNode, StopImpact
-from vonk_control.run_switch_operations import (
-    ArtifactInspection,
-    RunSwitchOperationService,
-)
-from vonk_control.runtime_image_preparation import (
-    IMAGE_CACHE_DIRECTORY,
-    FilesystemRuntimeImageStorage,
-)
+from vonk_control.run_switch_contract.evidence import StopImpact
+from vonk_control.run_switch_contract.requests import SparkGroup, SparkGroupNode
+from vonk_control.run_switch_operations.interfaces import ArtifactInspection
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import RecipeDefinition
 

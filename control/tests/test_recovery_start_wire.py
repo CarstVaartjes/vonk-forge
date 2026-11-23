@@ -11,19 +11,12 @@ from vonk_agent_protocol import (
     RecipeStartPayload,
     canonical_message,
 )
-from vonk_control.distributed_recovery import (
-    DistributedRecoveryCoordinator,
-    _accepted_start_authority,
-)
+from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
+from vonk_control.distributed_recovery.singleton import _accepted_start_authority
 from vonk_control.lifecycle.evidence import Residue
-from vonk_control.models import (
-    AgentOperation as StoredAgentOperation,
-)
-from vonk_control.models import (
-    Job,
-    RecipeInstallation,
-    RecipeRun,
-)
+from vonk_control.models.execution import RecipeInstallation, RecipeRun
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredAgentOperation
 from vonk_control.recipe_execution_contract import parse_stored_run_plan
 
 from .test_recipe_operations import (

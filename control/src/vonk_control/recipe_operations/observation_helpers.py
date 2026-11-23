@@ -42,17 +42,17 @@ from ..lifecycle.evidence import (
     Residue,
     retire_as_unknown,
 )
-from ..models import (
+from ..models.cache import RecipeBuild
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import (
     STOPPABLE_NOT_RUNNING_RUN_STATES,
     STOPPABLE_RUN_STATES,
-    AgentOperation,
-    CatalogDocumentRevision,
-    Job,
-    RecipeBuild,
     RecipeInstallation,
     RecipeRun,
     RunNode,
 )
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from ..owner_liveness import OwnerKind
 from ..profile_stop_authority import (
     ProfileJobRunStopJob,

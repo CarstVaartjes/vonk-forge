@@ -19,14 +19,14 @@ from vonk_control.artifact_lifecycle import (
     ArtifactLifecycleError,
     ArtifactLifecycleGate,
 )
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import (
-    Base,
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import (
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
-    RecipeInstallation,
 )
+from vonk_control.models.execution import RecipeInstallation
 from vonk_control.storage_demands import NAS_MODELS, StorageDemands
 from vonk_control.unused_storage_collection.common import _Kept
 

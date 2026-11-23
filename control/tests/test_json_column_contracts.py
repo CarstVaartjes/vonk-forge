@@ -23,7 +23,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from vonk_control.db.connections import build_engine
 from vonk_control.lifecycle.evidence import Residue
-from vonk_control.models import Base
+from vonk_control.model_primitives import Base
 from vonk_control.stored import json_values as stored_json
 from vonk_control.stored.json_values import (
     ExternalPassthrough,
@@ -148,7 +148,7 @@ def test_the_strict_write_guard_refuses_a_document_no_contract_describes() -> No
     Base.metadata.create_all(engine)
     from datetime import UTC, datetime
 
-    from vonk_control.models import Job
+    from vonk_control.models.jobs import Job
 
     now = datetime(2026, 9, 1, tzinfo=UTC)
     row = Job(
@@ -235,11 +235,11 @@ def test_journal_columns_return_models_and_keep_damaged_reads_non_blocking(docum
 
     from sqlalchemy import text
     from sqlalchemy.exc import StatementError
-    from vonk_control.models import (
-        Job,
+    from vonk_control.journal_models import (
         RunSwitchJournalRepair,
         RunSwitchJournalRepairPending,
     )
+    from vonk_control.models.jobs import Job
     from vonk_control.run_switch_journal_contract import (
         RunSwitchJournalRepairEndEvidence,
         RunSwitchJournalRepairPendingState,

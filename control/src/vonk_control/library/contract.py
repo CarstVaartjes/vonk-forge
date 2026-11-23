@@ -47,7 +47,8 @@ from ..model_cache_contract import (
     ModelStorageObservation,
 )
 from ..operations.blockers import MAX_BLOCKERS, OperationBlocker
-from ..run_switch_contract import RunSwitchReason, SparkFit, SparkGroup
+from ..run_switch_contract.evidence import RunSwitchReason, SparkFit
+from ..run_switch_contract.requests import SparkGroup
 from ..strict_json import StrictModel
 
 _UUID_PATTERN = (

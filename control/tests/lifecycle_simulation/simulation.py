@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import NoReturn
 
 from sqlalchemy import select
-from vonk_control.models import RecipeRun, RunNode
+from vonk_control.models.execution import RecipeRun, RunNode
 
 from . import actions
 from .invariants import ENDED, Monitor, Violation, typed_refusal

@@ -16,16 +16,12 @@ from ..artifact_lifecycle import (
     ArtifactReferenceUnverified,
 )
 from ..machine_states import DISTRIBUTION_HELD
-from ..models import (
-    ArtifactDistributionAssignment,
-    CatalogDocumentRevision,
-    FleetProfile,
-    FleetProfileApplication,
-    Job,
-    RecipeBuild,
-    RecipeInstallation,
-    RecipeRun,
-)
+from ..models.cache import RecipeBuild
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import RecipeInstallation, RecipeRun
+from ..models.fleet import FleetProfile, FleetProfileApplication
+from ..models.jobs import Job
+from ..models.operations import ArtifactDistributionAssignment
 from ..reference_facts import profiles_naming
 from ..revision_images import (
     revision_archives,
@@ -273,7 +269,7 @@ def runtime_image_reference_findings(
                 )
             )
 
-    from ..recipe_image_availability import OPERATION_KIND
+    from ..recipe_image_availability.contracts import OPERATION_KIND
 
     operations_active = (
         Job.kind == OPERATION_KIND,

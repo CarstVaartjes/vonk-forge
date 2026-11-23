@@ -34,42 +34,38 @@ from ..categorized_errors import InvalidValue
 from ..inventory.items import runtime_value
 from ..jobs import states as job_states
 from ..jobs.documents import AvailabilityJobPayload, AvailabilityRuntime
-from ..models import (
-    AgentNode,
-    AgentOperation,
-    CatalogDocumentRevision,
-    Job,
-    RecipeBuild,
-)
+from ..models.cache import RecipeBuild
+from ..models.catalog import CatalogDocumentRevision
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from ..operations.blockers import make_blocker
 from ..prebuilt_images import PrebuiltDecision
 from ..recipe_availability_intent import RecipeBuildDependency
-from ..recipe_builds import (
+from ..recipe_builds.cancellation import BuildConsumerError, lock_build_dependency
+from ..recipe_builds.common import (
     RecipeBuildAdmissionBusy,
     RecipeBuildResolution,
     RecipeSourcePolicyError,
-)
-from ..recipe_builds.cancellation import BuildConsumerError, lock_build_dependency
-from ..recipe_image_availability import (
-    SOURCE_POLICY_REFUSED_CODE,
-    BuildUnsettled,
-    RecipeImageAvailabilityClaim,
-    RecipeImageAvailabilityError,
-    RecipeImageAvailabilityRefused,
-    RecipeImageAvailabilityService,
 )
 from ..recipe_image_availability.build_observation import (
     accepted_build_request as _accepted_build_request,
 )
 from ..recipe_image_availability.build_observation import reconcile_abandoned_builds
-from ..recipe_operations import RecipeOperationConflict
+from ..recipe_image_availability.contracts import (
+    SOURCE_POLICY_REFUSED_CODE,
+    BuildUnsettled,
+    RecipeImageAvailabilityClaim,
+    RecipeImageAvailabilityError,
+    RecipeImageAvailabilityRefused,
+)
+from ..recipe_image_availability.service import RecipeImageAvailabilityService
+from ..recipe_operations.errors import RecipeOperationConflict
 from ..recipe_runtime_specs import (
     resolve_recipe_entities,
 )
-from ..runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
-    OciLayoutImageTransport,
-)
+from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
+from ..runtime_image_preparation.transport import OciLayoutImageTransport
 from ..stored.states import CatalogRevisionState
 from ..strict_json import read_stored_model
 from .build_observation import (

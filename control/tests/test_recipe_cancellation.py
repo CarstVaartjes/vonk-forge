@@ -5,7 +5,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState
-from vonk_control.models import AgentOperation, Job
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
 
 from .test_recipe_operations import setup_services
 
@@ -54,8 +55,8 @@ def test_cancel_waits_for_a_live_order_and_the_order_ends_it(tmp_path) -> None:
     An order backing off for its retry is live: the cancel is recorded on the
     parent, the order's own lifecycle ends it, and the parent then ends.
     """
-    from vonk_control.agent_jobs import AgentJobService
     from vonk_control.agent_jobs.persistence import _OrderStore
+    from vonk_control.agent_jobs.service import AgentJobService
     from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
 
     from .test_recipe_operations import NOW

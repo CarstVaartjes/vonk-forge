@@ -17,7 +17,7 @@ from ..library.contract import UuidId
 from ..profile_stop_authority import JobRunStopScope, ProfileJobRunStopAuthorization
 from ..recipe_builds.cancellation import RecipeBuildIntent
 from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
-from ..run_switch_contract import RunSwitchReconciliationAuthority
+from ..run_switch_contract.requests import RunSwitchReconciliationAuthority
 from ..strict_json import StrictJSONModel
 
 

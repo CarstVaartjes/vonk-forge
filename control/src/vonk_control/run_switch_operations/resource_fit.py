@@ -28,7 +28,7 @@ from ..disk_reservations import (
     outstanding_disk_charges,
 )
 from ..gpu.health import gpu_health_reason
-from ..install_admission import (
+from ..install_admission.contracts import (
     AGENT_UPGRADE_REQUIRED_DETAIL,
     IMAGE_PULL_CAPABILITY,
 )
@@ -40,11 +40,9 @@ from ..load_swap import swap_capacity
 from ..memory_reservations import (
     memory_reservations,
 )
-from ..models import (
-    AgentNode,
-    CatalogDocumentRevision,
-    ResourceReservation,
-)
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import ResourceReservation
+from ..models.fleet import AgentNode
 from ..observed_run_memory import observed_role_peaks, recent_best_available
 from ..profile_capacity import (
     reservation_visible,
@@ -53,31 +51,28 @@ from ..recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     recipe_topology,
 )
-from ..resource_planning import (
-    ResourceDemand,
-    installation_disk_requirement,
-    memory_capacity_snapshot,
-    memory_requirement,
-    plan_capacity,
-    stop_can_clear_swap,
-)
+from ..resource_planning.capacity import plan_capacity, stop_can_clear_swap
+from ..resource_planning.memory import memory_capacity_snapshot, memory_requirement
+from ..resource_planning.types import ResourceDemand, installation_disk_requirement
 from ..run_admission import (
     allocate_service_port,
     run_port_blockers,
     run_port_demand,
 )
-from ..run_switch_contract import (
+from ..run_switch_contract.evidence import (
     FreshnessEvidence,
-    MemoryUsageUncertainty,
     ResourceDemandEvidence,
-    RunMemoryResidualRange,
     RunSwitchReason,
     SparkFit,
     SparkFitNode,
+)
+from ..run_switch_contract.requests import (
+    MemoryUsageUncertainty,
+    RunMemoryResidualRange,
     SparkGroup,
 )
 from ..spark_disk import spark_free_bytes
-from ..unused_storage_collection import spark_eviction_capacity
+from ..unused_storage_collection.common import spark_eviction_capacity
 from .constants import _SWAP_BEYOND_STOP_COMPONENT, _SWAP_COMPONENT
 from .planning_helpers import (
     PlanInventory,

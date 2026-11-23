@@ -136,7 +136,7 @@ def install_catalog_routes(
     service: CatalogService | None,
     managed_sync: ManagedRecipeCatalogSync | None = None,
 ) -> None:
-    from ..operation_api import _ADMIN_OPERATION_IDS
+    from ..operation_api.constants import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS.update(CATALOG_OPERATION_IDS)
     authenticated = actor_dependency

@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
-from vonk_control.agent_api import MAX_RECIPE_IMAGE_BYTES
+from vonk_control.agent_api.common import MAX_RECIPE_IMAGE_BYTES
 from vonk_control.api.common import (
     _ARTIFACT_INPUT_UPLOAD,
     _ARTIFACT_OUTPUT_UPLOAD,

@@ -18,22 +18,23 @@ import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_control.artifact_reference_scan import model_set_reference_findings
+from vonk_control.artifact_reference_scan.model_references import (
+    model_set_reference_findings,
+)
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.service import CatalogService
-from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache.resolution import resolve_recipe_set
-from vonk_control.models import (
-    Base,
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheSet, ModelCacheSetArtifact
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
-    FleetProfile,
-    ModelCacheSet,
-    ModelCacheSetArtifact,
-    RecipeInstallation,
 )
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.models.fleet import FleetProfile
 from vonk_control.recipe_execution_contract import parse_stored_installation_plan
 from vonk_forge_contracts import (
     ModelDefinition,

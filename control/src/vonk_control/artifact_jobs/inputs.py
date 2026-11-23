@@ -14,7 +14,7 @@ from ..bounded_retry import bounded_attempts
 from ..categorized_errors import MissingRecord
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import Residue
-from ..models import ArtifactJob, ArtifactJobFile
+from ..models.execution import ArtifactJob, ArtifactJobFile
 from .contracts import (
     ArtifactJobInvalid,
     ArtifactJobUnavailableError,

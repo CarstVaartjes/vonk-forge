@@ -30,9 +30,10 @@ from vonk_agent_protocol import (
     OutcomeKind,
     RecipeStopResult,
 )
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.fleet_profiles import RunSwitchFleetProfileAdapter
-from vonk_control.models import AgentOperation, Job
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .profile_stop_readmission_support import start_on_released_gang

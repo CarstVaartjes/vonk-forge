@@ -12,18 +12,15 @@ from sqlalchemy import Engine, Table, select, text
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
 from vonk_control.catalog.entities import CatalogEntityService
-from vonk_control.model_cache import (
-    CacheOperationView,
-    ModelCacheService,
-)
-from vonk_control.models import (
-    Base,
-    FleetProfileApplication,
-    FleetProfileSelection,
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_cache.views import CacheOperationView
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import (
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
 )
+from vonk_control.models.fleet import FleetProfileApplication, FleetProfileSelection
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from .display_fixtures import create_draft

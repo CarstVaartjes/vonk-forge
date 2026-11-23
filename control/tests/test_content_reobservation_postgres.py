@@ -36,9 +36,12 @@ from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
     RuntimePreflightResult,
 )
-from vonk_control.agent_jobs import AgentJobService, StaleAgentFence
+from vonk_control.agent_jobs.contracts import StaleAgentFence
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
-from vonk_control.models import AgentNode, AgentOperation, AgentOperationAttempt, Job
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
 from . import test_agent_jobs_postgres as fixtures
 from .node_contacts import contact_row

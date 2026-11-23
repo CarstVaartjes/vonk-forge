@@ -14,7 +14,10 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_control.jobs.documents import RecipeBuildParent
-from vonk_control.models import AgentOperation, Job, RecipeBuild, ResourceReservation
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
 from vonk_control.owner_liveness import OwnerKind
 from vonk_control.recipe_execution_contract import parse_stored_build_plan
 
@@ -158,14 +161,14 @@ def test_retry_reacquires_disk_before_dispatch_and_resumes_when_space_returns(
     )
     from vonk_agent_protocol.contracts import AgentFailureResult
     from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
-    from vonk_control.agent_jobs import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
     from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
     from vonk_control.inventory.repository import (
         InventoryRepository,
         NodeInventoryReport,
     )
     from vonk_control.lifecycle_preflight import LifecyclePreflight
-    from vonk_control.models import AgentCertificate
+    from vonk_control.models.fleet import AgentCertificate
 
     from .test_build_cancellation_recovery import _services
     from .test_runtime_preflight import result as preflight_result

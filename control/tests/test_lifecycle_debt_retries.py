@@ -23,10 +23,12 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 from vonk_control import agent_jobs, install_admission, run_admission
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.install_admission import InstallAdmissionBusy, InstallAdmissionService
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.recipe_operations import RecipeOperationService, result_consumption
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.install_admission.contracts import InstallAdmissionBusy
+from vonk_control.install_admission.service import InstallAdmissionService
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.recipe_operations import result_consumption
+from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionBusy, RunAdmissionService
 
 
@@ -161,10 +163,8 @@ def test_node_result_retries_the_same_evidence(monkeypatch):
 
 
 def test_cleanup_preview_reobserves_unknown_authority(monkeypatch):
-    from vonk_control.run_switch_operations import (
-        RunSwitchOperationService,
-        stop_planning,
-    )
+    from vonk_control.run_switch_operations import stop_planning
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     service = object.__new__(RunSwitchOperationService)
     calls = []
@@ -247,9 +247,10 @@ def test_recipe_request_retries_raw_admission_contention(method, once, monkeypat
 
 def test_unknown_builder_evidence_is_waiting_and_reobserved(monkeypatch):
     """Catches unknown builder evidence preventing the next exact preparation."""
-    from vonk_control.models import CatalogDocumentRevision, RecipeBuild
-    from vonk_control.recipe_builds import RecipeBuildPlan
-    from vonk_control.run_switch_operations import RunSwitchOperationService
+    from vonk_control.models.cache import RecipeBuild
+    from vonk_control.models.catalog import CatalogDocumentRevision
+    from vonk_control.recipe_builds.common import RecipeBuildPlan
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     from .test_recipe_image_availability import _recipe, _recipe_projection
 
@@ -314,8 +315,8 @@ def test_accepted_plan_refresh_records_unknown_cause_and_resumes(tmp_path, monke
     from datetime import timedelta
 
     from sqlalchemy import select
-    from vonk_control.models import Job
-    from vonk_control.run_switch_contract import RunSwitchApplyRequest
+    from vonk_control.models.jobs import Job
+    from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 
     from .test_recipe_operations import setup_services
     from .test_run_switch_operations import (
@@ -400,14 +401,14 @@ def test_recipe_unknown_after_commit_replays_without_duplicate_effects(
 ):
     """A lost committed response must not reserve or dispatch the workload twice."""
     from sqlalchemy import select
-    from vonk_control.models import (
-        AgentNode,
-        AgentOperation,
-        Job,
+    from vonk_control.models.execution import (
         RecipeInstallation,
         RecipeRun,
         ResourceReservation,
     )
+    from vonk_control.models.fleet import AgentNode
+    from vonk_control.models.jobs import Job
+    from vonk_control.models.operations import AgentOperation
 
     from .test_artifact_jobs import _configure_artifact_recipe
     from .test_recipe_operations import installed_recipe, setup_services
@@ -498,11 +499,9 @@ def test_run_switch_cancel_reports_exhausted_contention_then_can_progress(
     from uuid import uuid4
 
     from vonk_agent_protocol import LifecycleState, RecipeBuildCode
-    from vonk_control.run_switch_contract import RunSwitchApplyRequest
-    from vonk_control.run_switch_operations import (
-        RunSwitchRetryLater,
-        cancellation_retry,
-    )
+    from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
+    from vonk_control.run_switch_operations import cancellation_retry
+    from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
 
     from .test_run_switch_lifecycle import _Harness
     from .test_run_switch_operations import RecordingArtifactExecutor, _request

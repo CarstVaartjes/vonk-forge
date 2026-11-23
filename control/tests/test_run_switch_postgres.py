@@ -19,24 +19,20 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.state_machines import RouteState
 from vonk_control.logging import configure_controller_logging
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    Job,
-    NodeInventorySnapshot,
-    RecipeRun,
-    ResourceReservation,
-    RunNode,
-)
+from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
-from vonk_control.run_switch_contract import (
-    ArtifactVerificationEvidence,
+from vonk_control.run_switch_contract.phase_results import RunSwitchFinalVerifyResult
+from vonk_control.run_switch_contract.progress import ArtifactVerificationEvidence
+from vonk_control.run_switch_contract.requests import (
     RunSwitchApplyRequest,
-    RunSwitchFinalVerifyResult,
     SparkGroup,
     SparkGroupNode,
 )
-from vonk_control.run_switch_operations import _stored_job_plan
+from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
 
 from .agent_fences import fenced_operation
 from .non_blocking import assert_ended_without_blocking
@@ -619,8 +615,8 @@ def test_preflight_delayed_passes_and_completion_wake_reach_transfer(
     The Spark clock leads the Controller by ten minutes throughout.
     """
     from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
-    from vonk_control.agent_jobs import AgentJobService
-    from vonk_control.run_switch_operations import RunSwitchOperationService
+    from vonk_control.agent_jobs.service import AgentJobService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
     from vonk_control.runtime.preflight import latest_result, request_digest
 
     from .runtime_identity_support import claim_agent
@@ -714,9 +710,11 @@ def test_production_result_handler_only_schedules_worker(
     """Production's synchronous Composite executor must never run inside POST /result."""
     from fastapi.testclient import TestClient
     from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
-    from vonk_control.agent_api import AgentApiServices
+    from vonk_control.agent_api.common import AgentApiServices
     from vonk_control.api import production
-    from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
+    from vonk_control.distribution_executor.preparation import (
+        CompositeDistributionPhaseExecutor,
+    )
     from vonk_control.settings import Settings
 
     from .runtime_identity_support import claim_agent

@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import ReservationState, RunState
 from vonk_agent_protocol.inventory import MemoryPool
 
-from .models import RecipeBuild, RecipeRun, ResourceReservation, RunNode
+from .models.cache import RecipeBuild
+from .models.execution import RecipeRun, ResourceReservation, RunNode
 from .owner_liveness import OwnerKind, OwnerRef, build_may_run
 from .profile_capacity import (
     profile_build_memory_claims,
@@ -18,13 +19,13 @@ from .profile_capacity import (
     reservation_visible,
 )
 from .recipe_execution_contract import parse_stored_run_plan
-from .resource_planning import (
+from .resource_planning.memory_kinds import memory_reservation_kinds
+from .resource_planning.types import (
     MemoryClaimHolder,
     MemoryReservationTotals,
     UnknownRunMemoryResidual,
-    memory_reservation_kinds,
 )
-from .run_switch_contract import StopImpact
+from .run_switch_contract.evidence import StopImpact
 from .stored.states import RecipeBuildState
 
 MEMORY_RESERVATION_KINDS = ("host-memory", "gpu-memory", "unified-memory")

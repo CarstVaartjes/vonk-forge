@@ -18,13 +18,13 @@ import jsonschema
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.fleet_projection import FleetProjection
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.jobs.queue import JobService
 from vonk_control.library.api import install_library_routes
-from vonk_control.operation_api import durable_operation_services
+from vonk_control.operation_api.durable import durable_operation_services
 
 from cluster_profiles import cli
 from cluster_profiles.cli_json_contract import (
@@ -149,7 +149,7 @@ def _world(tmp_path: Path) -> tuple[ControlClient, TestClient, dict]:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
-    from vonk_control.models import Base
+    from vonk_control.model_primitives import Base
 
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",

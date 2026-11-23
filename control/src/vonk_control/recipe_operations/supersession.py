@@ -11,18 +11,15 @@ from sqlalchemy import select
 from vonk_agent_protocol import InvalidRequestReason, SupersedeCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
-from ..lifecycle import CancelRequested
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
 )
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..models import (
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-)
+from ..lifecycle.types import CancelRequested
+from ..models.fleet import AgentNode
+from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..recipe_progress import (
     _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
 )

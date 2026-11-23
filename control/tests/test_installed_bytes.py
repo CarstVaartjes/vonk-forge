@@ -16,7 +16,8 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_control.installed_bytes import refresh_installed_bytes
-from vonk_control.models import Base, InstallationNode
+from vonk_control.model_primitives import Base
+from vonk_control.models.execution import InstallationNode
 
 from .test_catalog_revision_collection import NODE, Catalog
 
@@ -86,7 +87,7 @@ def test_postgres_missing_installation_inventory_allows_reinstall_without_releas
         InventoryRepository,
         NodeInventoryReport,
     )
-    from vonk_control.models import RecipeInstallation, RecipeRun
+    from vonk_control.models.execution import RecipeInstallation, RecipeRun
 
     from .test_catalog_revision_collection import NOW
 

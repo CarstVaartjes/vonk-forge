@@ -30,7 +30,7 @@ from ..library.contract import (
 )
 from ..model_cache.resolution import ResolutionMixin
 from ..model_cache.source_helpers import _model_selector
-from ..models import CatalogDocumentRevision
+from ..models.catalog import CatalogDocumentRevision
 from ..operator_receipt_contract import ReceiptOwner
 from ..request_fault import RequestFault
 from ..stored.states import CatalogRevisionState

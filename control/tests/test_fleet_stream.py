@@ -16,10 +16,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.telemetry import HostResourceSample
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
-from vonk_control.db import session_factory
+from vonk_control.db.connections import session_factory
 from vonk_control.fleet_event_contract import (
     AgentOperationPayload,
     FleetEventPayload,
@@ -37,7 +37,8 @@ from vonk_control.fleet_events import (
     FleetEventRepository,
     FleetReplayBatch,
 )
-from vonk_control.fleet_projection import FleetProjection, FleetSnapshot
+from vonk_control.fleet_projection.common import FleetSnapshot
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.fleet_stream import FleetStream, _event_frame, parse_last_event_id
 from vonk_control.fleet_stream_contract import (
     FleetChangeEvent,
@@ -45,13 +46,12 @@ from vonk_control.fleet_stream_contract import (
     FleetTelemetryEvent,
     JobChange,
 )
-from vonk_control.models import (
-    AgentNode,
-    Base,
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentNode, User
+from vonk_control.models.telemetry import (
     FleetEventCursor,
     FleetStreamEvent,
     NodeTelemetrySample,
-    User,
 )
 from vonk_control.passwords import hash_password
 from vonk_control.telemetry.samples import (
@@ -386,7 +386,7 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
         "id": "6",
         "event": "node-telemetry",
     }
-    from vonk_control.fleet_projection import TelemetryPoint
+    from vonk_control.fleet_projection.common import TelemetryPoint
 
     assert isinstance(telemetry_data, dict)
     assert telemetry_data["event_cursor"] == 6

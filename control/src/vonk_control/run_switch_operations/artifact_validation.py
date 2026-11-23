@@ -15,11 +15,9 @@ from ..content_identity import ImageContent, differing_image_fields
 from ..preparation_contract import (
     RuntimeImageIdentity,
 )
-from ..run_switch_contract import (
-    RunSwitchPhase,
-    RunSwitchPlan,
-    RunSwitchVerifyResult,
-)
+from ..run_switch_contract.evidence import RunSwitchPhase
+from ..run_switch_contract.phase_results import RunSwitchVerifyResult
+from ..run_switch_contract.plans import RunSwitchPlan
 from ..run_switch_observation_contract import (
     RunSwitchArtifactGuardEvidence,
     RunSwitchObservedImageIdentity,

@@ -20,10 +20,14 @@ from pathlib import Path
 
 import pytest
 from vonk_agent_protocol import WaitReason
-from vonk_control import artifact_blob_store, runtime_image_preparation
+from vonk_control import artifact_blob_store
 from vonk_control.artifact_blob_store import ArtifactBlobStore, ArtifactBlobStoreError
 from vonk_control.gateway import route_runtime
 from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
+from vonk_control.runtime_image_preparation.contracts import (
+    RuntimeImagePreparationError,
+)
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 pytestmark = pytest.mark.lane
 
@@ -117,7 +121,7 @@ def test_runtime_image_publication_lock_is_bounded_and_released_on_process_death
 ) -> None:
     """Image publication cannot park a worker and kernel death frees its fence."""
 
-    storage = runtime_image_preparation.FilesystemRuntimeImageStorage(tmp_path)
+    storage = FilesystemRuntimeImageStorage(tmp_path)
     archive_sha256 = "a" * 64
     lock_root = storage.root / ".publication-locks"
     lock_root.mkdir(parents=True)
@@ -126,7 +130,7 @@ def test_runtime_image_publication_lock_is_bounded_and_released_on_process_death
     try:
         with (
             pytest.raises(
-                runtime_image_preparation.RuntimeImagePreparationError,
+                RuntimeImagePreparationError,
             ),
             storage.publication_lock(archive_sha256),
         ):

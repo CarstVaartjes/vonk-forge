@@ -32,19 +32,18 @@ from vonk_agent_protocol.state_machines import (
     EnrollmentRecordState,
     NodeIdentityState,
 )
-from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
+from vonk_control.agent_jobs.contracts import StaleAgentAttempt
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.auth import AgentIdentity, AgentSource
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
-from vonk_control.enrollment import (
-    EnrollmentDenied,
-    EnrollmentGrant,
-    EnrollmentService,
-)
 from vonk_control.enrollment.contract import (
     EnrollmentGrantStatus,
     EnrollmentObservationOutcome,
 )
-from vonk_control.models import (
+from vonk_control.enrollment.service import EnrollmentService
+from vonk_control.enrollment.types import EnrollmentDenied, EnrollmentGrant
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import (
     AgentCertificate,
     AgentCertificateRotation,
     AgentEnrollment,
@@ -52,11 +51,9 @@ from vonk_control.models import (
     AgentIssuedCertificateRevocation,
     AgentNode,
     AgentNodeProfile,
-    AgentOperation,
-    AgentOperationAttempt,
-    Base,
-    Job,
 )
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.pki import IssuedCertificate
 
 from .agent_fences import fenced_operation

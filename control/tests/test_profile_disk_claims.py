@@ -6,15 +6,12 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState
-from vonk_control.models import (
-    ClusterMapping,
-    FleetProfileApplication,
-    Job,
-    NodeInventorySnapshot,
-    RecipeBuild,
-    RecipeInstallation,
-    ResourceReservation,
-)
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import RecipeInstallation, ResourceReservation
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.models.telemetry import NodeInventorySnapshot
 
 from .test_profile_capacity_admission import _capacity_profile
 from .test_profile_installed_execution import _drive_to_job
@@ -247,7 +244,9 @@ def test_profile_disk_handoff_preserves_materialized_install_headroom(
     is excluded only for its own child. A competing install must still fail.
     """
     from vonk_control.inventory.repository import MAX_INVENTORY_FUTURE_SKEW
-    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+    from vonk_control.runtime_image_preparation.storage import (
+        FilesystemRuntimeImageStorage,
+    )
 
     from .test_disk_reservations import _record_disk
     from .test_fleet_profile_recovery_identity import _complete_rebuild
@@ -340,8 +339,8 @@ def test_install_admission_reschedules_contended_dependencies_without_partial_cl
 ):
     """Contention before the reservation query is still a retryable admission wait."""
     from sqlalchemy import text
-    from vonk_control.install_admission import InstallAdmissionBusy
-    from vonk_control.models import AgentNode
+    from vonk_control.install_admission.contracts import InstallAdmissionBusy
+    from vonk_control.models.fleet import AgentNode
 
     sessions, _profiles, planner, _profile, _api, _headers, _, nodes = (
         _capacity_profile(tmp_path, postgres_engine)

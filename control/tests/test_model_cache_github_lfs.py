@@ -23,7 +23,7 @@ from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import LifecycleState, ModelCacheCode
 from vonk_agent_protocol.http_failure import TransientReason
 from vonk_control.lifecycle.model_cache import RECOVERY_BUDGET
-from vonk_control.model_cache import ModelCacheService, github_lfs
+from vonk_control.model_cache import github_lfs
 from vonk_control.model_cache.artifacts import ArtifactSpec
 from vonk_control.model_cache.constants import _SOURCE_GONE_ATTEMPTS, ProviderKind
 from vonk_control.model_cache.errors import (
@@ -31,8 +31,10 @@ from vonk_control.model_cache.errors import (
     ModelCacheStorageUnknown,
 )
 from vonk_control.model_cache.provider_contracts import _GitHubLfsBatch
+from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_cache_contract import ModelCacheDownloadPayload
-from vonk_control.models import Base, ModelCacheOperation
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.operations.contract import AvailabilityRecoveryAction
 
 from .github_lfs_fake import (

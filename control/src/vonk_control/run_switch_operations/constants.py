@@ -17,10 +17,8 @@ from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPha
 from vonk_forge_contracts.recipe import Scalar
 
 from ..jobs import states as job_states
-from ..models import (
-    CatalogDocumentRevision,
-)
-from ..run_switch_contract import (
+from ..models.catalog import CatalogDocumentRevision
+from ..run_switch_contract.vocabulary import (
     RunSwitchBuildEvidenceState,
     RunSwitchChangeEffect,
     RunSwitchContainerBuildState,

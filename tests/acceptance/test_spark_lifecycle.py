@@ -1047,7 +1047,7 @@ def _validate_canary_cleanup_preview(
 ) -> None:
     """Require the exact admitted delegated-cleanup intent."""
 
-    from vonk_control.fleet_profile_contract import FleetProfilePreview
+    from vonk_control.fleet_profile_contract.review import FleetProfilePreview
 
     try:
         typed = FleetProfilePreview.model_validate_json(_canonical(preview))
@@ -1073,7 +1073,7 @@ def _installations_removed(
     installations; each one needs its own receipts.
     """
 
-    from vonk_control.run_switch_contract import (
+    from vonk_control.run_switch_contract.phase_results import (
         RunSwitchCleanupVerifyResult,
         RunSwitchUninstallResult,
     )
@@ -1105,11 +1105,11 @@ def _validate_canary_cleanup_application(
 ) -> None:
     """Require terminal cleanup receipts from the profile application."""
 
-    from vonk_control.fleet_profile_contract import (
-        FleetProfileApplicationView,
+    from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+    from vonk_control.fleet_profile_contract.switch_state import (
         FleetProfileSwitchChildResult,
     )
-    from vonk_control.run_switch_contract import RunSwitchStopResult
+    from vonk_control.run_switch_contract.phase_results import RunSwitchStopResult
 
     try:
         typed = FleetProfileApplicationView.model_validate_json(_canonical(application))
@@ -4201,7 +4201,7 @@ class SparkLifecycle:
     def _load_canary_profile(
         self, preview: dict[str, object], *, request_key: str
     ) -> object:
-        from vonk_control.fleet_profile_contract import FleetProfileLoadRequest
+        from vonk_control.fleet_profile_contract.review import FleetProfileLoadRequest
 
         assert self.control is not None
         request = FleetProfileLoadRequest.model_validate_json(
@@ -4382,7 +4382,9 @@ class SparkLifecycle:
         control_src = REPOSITORY_ROOT / "control/src"
         if os.fspath(control_src) not in sys.path:
             sys.path.insert(0, os.fspath(control_src))
-        from vonk_control.fleet_profile_contract import FleetProfileApplicationView
+        from vonk_control.fleet_profile_contract.review import (
+            FleetProfileApplicationView,
+        )
 
         try:
             typed = FleetProfileApplicationView.model_validate_json(
@@ -4634,7 +4636,7 @@ class SparkLifecycle:
         control_src = REPOSITORY_ROOT / "control/src"
         if os.fspath(control_src) not in sys.path:
             sys.path.insert(0, os.fspath(control_src))
-        from vonk_control.fleet_projection import FleetSnapshot
+        from vonk_control.fleet_projection.common import FleetSnapshot
 
         _, payload = self.control.request("GET", "/api/fleet")
         try:
@@ -4672,7 +4674,9 @@ class SparkLifecycle:
         from vonk_agent_protocol.agent_words import ProfileReportedPhase
         from vonk_agent_protocol.state_machines import RouteState
         from vonk_control.fleet_projection.common import FleetSnapshot, RunPresence
-        from vonk_control.run_switch_contract import RunSwitchFinalVerifyResult
+        from vonk_control.run_switch_contract.phase_results import (
+            RunSwitchFinalVerifyResult,
+        )
 
         deadline = time.monotonic() + _CANARY_ROUTE_SECONDS
         while time.monotonic() < deadline:

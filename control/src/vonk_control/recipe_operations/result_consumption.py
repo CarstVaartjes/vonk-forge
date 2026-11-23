@@ -33,22 +33,17 @@ from ..admission_locking import (
 )
 from ..installed_bytes import demote_ranks_on_lost_image
 from ..jobs.documents import RecipeBuildCleanupParent
-from ..lifecycle import Outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
 )
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..models import (
-    AgentOperation,
-    InstallationNode,
-    Job,
-    RecipeBuild,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
-)
+from ..lifecycle.types import Outcome
+from ..models.cache import RecipeBuild
+from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun, RunNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from ..recipe_builds.cancellation import build_cancellation
 from ..recipe_execution_contract import parse_stored_run_plan
 from ..recipe_lifecycle_contract import (
@@ -179,7 +174,7 @@ class ResultConsumptionMixin:
         ):
             from ..cancelled_runtime import cancellation_stop_current
             from ..lifecycle.artifact_job import ArtifactJobAdapter
-            from ..models import ArtifactJob
+            from ..models.execution import ArtifactJob
 
             artifact = session.get(ArtifactJob, _parent_identity(job, "owner_id"))
             if (

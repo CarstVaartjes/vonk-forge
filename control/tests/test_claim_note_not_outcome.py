@@ -19,8 +19,10 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol import AgentOperation as WireOperation
-from vonk_control.agent_jobs import _REFUSAL_PREFIXES, AgentJobService
-from vonk_control.models import AgentOperation, Job
+from vonk_control.agent_jobs.contracts import _REFUSAL_PREFIXES
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
 from vonk_control.run_switch_operations.result_helpers import _child_progress_payload
 
 from .runtime_identity_support import claim_agent

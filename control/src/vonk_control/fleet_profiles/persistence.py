@@ -12,15 +12,15 @@ from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_agent_protocol.agent_words import ProfileAction, ProfileProjectionKind
 from vonk_forge_contracts import RecipeDefinition
 
-from ..fleet_profile_contract import (
-    FLEET_PROFILE_ENDED_STATES,
+from ..fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
-    FleetProfileAssignment,
-    FleetProfileEffects,
-    FleetProfilePreview,
-    FleetProfileScopePreview,
 )
+from ..fleet_profile_contract.assessment import FleetProfileScopePreview
+from ..fleet_profile_contract.definitions import FleetProfileAssignment
+from ..fleet_profile_contract.effects import FleetProfileEffects
+from ..fleet_profile_contract.review import FleetProfilePreview
+from ..fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
 from ..jobs import states as job_states
 from ..jobs.documents import DistributionJobPayload, RunSwitchJobPayload, _RecipeParent
 from ..lifecycle.evidence import (
@@ -30,13 +30,10 @@ from ..lifecycle.evidence import (
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..models import (
-    AgentNode,
-    CatalogDocumentRevision,
-    FleetProfileApplication,
-    Job,
-    RecipeRun,
-)
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import RecipeRun
+from ..models.fleet import AgentNode, FleetProfileApplication
+from ..models.jobs import Job
 from ..run_route_name import carries_alias
 from ..stored.json_values import read_row_column
 from ..strict_json import read_stored_document, stored_document_detail

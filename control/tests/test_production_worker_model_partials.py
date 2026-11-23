@@ -8,11 +8,11 @@ from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.jobs.queue import JobService
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import Base
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.worker.assembly import assemble_production_worker
 

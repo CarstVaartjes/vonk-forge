@@ -12,13 +12,13 @@ from vonk_agent_protocol import (
 )
 
 from ..categorized_errors import InvalidValue, MissingRecord
-from ..models import Job
-from ..operation_api import (
+from ..models.jobs import Job
+from ..operation_api.contracts import (
     OperationListPage,
     OperationProvider,
     OperationQuery,
-    _activity_keyset_filter,
 )
+from ..operation_api.providers import _activity_keyset_filter
 from ..operations.contract import AvailabilityOperationFailure
 from ..operations.item_contract import OperationItem, OperationOwnerReference
 from ..recipe_update_contract import (
@@ -45,7 +45,7 @@ class ActivityMixin:
 
     def _activity_item(self, job: Job) -> OperationItem:
         service = cast("RecipeUpdateBatches", self)
-        from ..recipe_image_availability import RecipeImageAvailabilityError
+        from ..recipe_image_availability.contracts import RecipeImageAvailabilityError
 
         owner = OperationOwnerReference(
             kind="job", id=job.id, request_id=job.request_id

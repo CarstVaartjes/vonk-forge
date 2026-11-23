@@ -73,7 +73,7 @@ from ..model_cache_contract import (
     ModelCacheOperationPayload,
     StoredCacheClocks,
 )
-from ..models import ModelCacheOperation
+from ..models.cache import ModelCacheOperation
 from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait
 from ..stall_window import stall_deadline
 from ..strict_json import serialize_json_value

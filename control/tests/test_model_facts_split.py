@@ -35,13 +35,12 @@ from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )
-from vonk_control.models import (
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
-    MeasuredRolePeak,
-    RecipeRun,
 )
+from vonk_control.models.execution import MeasuredRolePeak, RecipeRun
 from vonk_control.observed_run_memory import observed_role_peaks
 from vonk_forge_contracts import (
     ModelDefinition,

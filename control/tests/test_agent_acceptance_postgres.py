@@ -17,15 +17,12 @@ from vonk_agent_protocol import AgentClaim, AgentProgress, AgentResult, AgentRes
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.inventory import InventoryRequest
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.api import create_app
-from vonk_control.models import (
-    AgentCertificate,
-    AgentOperationAttempt,
-    NodeInventorySnapshot,
-    NodeTelemetrySample,
-    RunNode,
-)
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.api.application import create_app
+from vonk_control.models.execution import RunNode
+from vonk_control.models.fleet import AgentCertificate
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.models.telemetry import NodeInventorySnapshot, NodeTelemetrySample
 from vonk_control.operator_receipt_contract import AcceptanceReceipt, ReceiptCode
 
 from .test_agent_api import (
@@ -394,7 +391,7 @@ def test_image_upload_commits_binding_after_publication_and_recovers(
 ):
     """Catches a successful PUT with bytes published but no committed build identity."""
     from vonk_agent_protocol.agent_words import ProgressPhase
-    from vonk_control.models import RecipeBuild
+    from vonk_control.models.cache import RecipeBuild
 
     from .stored_documents_support import valid_policy_report
     from .test_catalog_revision_collection import Catalog
@@ -462,7 +459,8 @@ def test_lost_login_response_requires_fresh_authentication(tmp_path, postgres_en
     from sqlalchemy.orm import sessionmaker
     from vonk_control.auth import TokenCodec
     from vonk_control.browser_auth import BrowserAuthService
-    from vonk_control.models import Base, LoginSession, User
+    from vonk_control.model_primitives import Base
+    from vonk_control.models.fleet import LoginSession, User
 
     from .test_auth_api import ADMIN_PASSWORD, ADMIN_VERIFIER, NOW, ORIGIN
 
@@ -511,7 +509,7 @@ def test_inventory_receipt_binds_measurements_and_stale_replay_cannot_rewind_siz
     tmp_path, postgres_engine
 ):
     """Catches snapshot/size dual commits and accepting changed bytes under the same report identity."""
-    from vonk_control.models import InstallationNode
+    from vonk_control.models.execution import InstallationNode
 
     from .test_catalog_revision_collection import Catalog
 
@@ -566,11 +564,11 @@ def test_artifact_output_commit_fault_and_lost_response_reuse_attachment(
     tmp_path, postgres_engine, monkeypatch
 ):
     """Catches acknowledging a published blob before its exact job/file attachment commits."""
-    from vonk_control.agent_api import AgentApiServices
+    from vonk_control.agent_api.common import AgentApiServices
     from vonk_control.artifact_blob_store import ArtifactBlobStore
-    from vonk_control.artifact_jobs import ArtifactJobService
+    from vonk_control.artifact_jobs.service import ArtifactJobService
     from vonk_control.auth import TokenCodec
-    from vonk_control.models import ArtifactJobFile
+    from vonk_control.models.execution import ArtifactJobFile
     from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
     from vonk_control.source_bundles import SourceBundleStore
 

@@ -32,13 +32,13 @@ from vonk_agent_protocol.agent_words import (
     ProfileReasonSeverity,
     ProgressPhase,
 )
-from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
-from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.models import (
-    FleetProfileApplication,
-    NodeInventorySnapshot,
-    ResourceReservation,
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
 )
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.observation.platform import PlatformObserver
 from vonk_control.operations.blockers import (
     BlockingOperation,

@@ -18,30 +18,21 @@ from vonk_agent_protocol import (
     validate_result_for_operation,
 )
 
-from ..agent_jobs import (
-    _JsonFlagIsTrue,
-)
+from ..agent_jobs.predicates import _JsonFlagIsTrue
 from ..jobs import states as job_states
 from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
 )
 from ..logging import redact_text
-from ..models import (
-    AgentOperation,
-    AgentOperationAttempt,
-    Job,
-    RecipeInstallation,
-    RecipeRun,
-    ResourceReservation,
-)
+from ..models.execution import RecipeInstallation, RecipeRun, ResourceReservation
+from ..models.jobs import Job
+from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..persisted_waits import schedule_wait
 from ..recipe_progress import (
     _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
 )
-from ..recipe_routes import (
-    RecipeRouteError,
-)
+from ..recipe_routes.shared import RecipeRouteError
 from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value
 from .errors import RecipeOperationConflict

@@ -16,13 +16,10 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.inventory import ModelStoreObject
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import (
-    CatalogDocumentRevision,
-    FleetProfile,
-    InstallationNode,
-    RecipeInstallation,
-)
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import InstallationNode, RecipeInstallation
+from vonk_control.models.fleet import FleetProfile
 from vonk_control.reference_facts import profiles_naming
 
 from .test_fleet_model_removal_postgres import inventory

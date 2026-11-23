@@ -17,8 +17,8 @@ from vonk_agent_protocol import (
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.models import AgentOperation
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.models.operations import AgentOperation
 
 from tests.wire_probes import prebuilt_probe
 

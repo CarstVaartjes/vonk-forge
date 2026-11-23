@@ -29,7 +29,9 @@ from .failure_classification import is_security_failure
 from .inventory.items import inventory_items
 from .inventory.items_contract import PreflightInventoryItem
 from .lifecycle.job import JobAdapter
-from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job
+from .models.fleet import AgentNode
+from .models.jobs import Job
+from .models.operations import AgentOperation, AgentOperationAttempt
 from .operations.blockers import (
     MAX_BLOCKERS,
     BlockingOperation,
@@ -109,7 +111,7 @@ def end_unclaimed_probes(
     hold the Spark's claim lane for nobody. A claimed probe reports its own end.
     """
     # agent_jobs builds on the lifecycle core; import its writer at use.
-    from .agent_jobs import abandon_idempotent_job_in_session
+    from .agent_jobs.retry import abandon_idempotent_job_in_session
 
     for child_id in checkpoint.pending_jobs.values():
         abandon_idempotent_job_in_session(

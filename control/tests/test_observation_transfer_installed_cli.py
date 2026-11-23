@@ -10,10 +10,11 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-from vonk_control.models import Base, ControlProcessHeartbeat
+from vonk_control.model_primitives import Base
+from vonk_control.models.jobs import ControlProcessHeartbeat
 from vonk_control.observation.platform import PlatformObservation, PlatformObserver
 from vonk_control.strict_json import serialize_json_value
 

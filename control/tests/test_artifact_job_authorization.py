@@ -4,7 +4,7 @@ import hashlib
 
 import pytest
 from fastapi.testclient import TestClient
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 
 from .test_agent_api import Jobs

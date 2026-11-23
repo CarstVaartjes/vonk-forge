@@ -20,9 +20,7 @@ from vonk_agent_protocol import (
 from ..categorized_errors import InvalidValue, MissingRecord
 from ..jobs.documents import AvailabilityJobPayload, AvailabilityRetry
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..models import (
-    Job,
-)
+from ..models.jobs import Job
 from ..recipe_availability_intent import (
     RecipeAvailabilityIntent,
     RecipeRetryIntent,

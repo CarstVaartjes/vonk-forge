@@ -25,8 +25,8 @@ from .types import (
 )
 
 if TYPE_CHECKING:
-    from ..model_cache import ModelCacheService
     from ..model_cache.artifacts import ArtifactSetManifest
+    from ..model_cache.service import ModelCacheService
 
 
 def verified_model_receipts(

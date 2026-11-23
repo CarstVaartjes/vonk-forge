@@ -16,7 +16,7 @@ from vonk_agent_protocol.http_failure import TransientReason
 
 from .. import model_cache_states
 from ..admission_locking import admitting
-from ..lifecycle import Effect, Outcome, Reported
+from ..lifecycle.types import Effect, Outcome, Reported
 from ..model_cache_contract import (
     ModelCacheAccessRecheck,
     ModelCacheDownloadResult,
@@ -24,7 +24,7 @@ from ..model_cache_contract import (
     ModelCacheTransfer,
 )
 from ..model_cache_progress import cache_phase, progress_document
-from ..models import ModelCacheOperation
+from ..models.cache import ModelCacheOperation
 from ..strict_json import serialize_json_value
 from .artifacts import (
     ArtifactSetManifest,

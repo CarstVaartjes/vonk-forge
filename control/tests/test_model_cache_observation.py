@@ -20,20 +20,21 @@ from vonk_agent_protocol import LifecycleState, RunSwitchCode, WaitReason
 from vonk_agent_protocol.agent_words import ProfileDocumentState
 from vonk_control import profile_read_observation
 from vonk_control.categorized_errors import BookkeepingUnknown
-from vonk_control.model_cache import ArtifactSetManifest, ModelCacheService, observation
+from vonk_control.model_cache import observation
+from vonk_control.model_cache.artifacts import ArtifactSetManifest
+from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_cache_contract import (
     CacheManifest,
     CacheOperationKind,
     ModelCacheSetState,
 )
-from vonk_control.models import (
-    Base,
-    CatalogDocument,
-    CatalogDocumentRevision,
-    ModelCacheSet,
-)
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheSet
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.profile_read_observation import profile_read
-from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
+from vonk_control.run_switch_operations.artifact_inspection import (
+    DatabaseRunSwitchArtifactInspector,
+)
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .pass_budget_clocks import completing_wait, expiring_wait

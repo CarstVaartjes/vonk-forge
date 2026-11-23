@@ -12,12 +12,12 @@ from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.reason_codes import ProjectionCode
 from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control.fleet_events import FleetEventRepository
-from vonk_control.fleet_projection import FleetProjection
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.fleet_stream import FleetStream
 from vonk_control.fleet_stream_contract import FleetRefreshEvent
-from vonk_control.models import (
-    AgentNode,
-    Base,
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.telemetry import (
     FleetEventCursor,
     FleetStreamEvent,
     NodeInventoryResourceSnapshot,
@@ -343,7 +343,7 @@ def test_inventory_history_keeps_a_day_and_always_each_nodes_newest_row(
         InventoryRepository,
         NodeInventoryReport,
     )
-    from vonk_control.models import NodeInventorySnapshot
+    from vonk_control.models.telemetry import NodeInventorySnapshot
 
     def record(node_id: str, observed_at: datetime) -> None:
         InventoryRepository(sessions, clock=lambda: observed_at).record(

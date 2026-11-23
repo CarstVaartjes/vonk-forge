@@ -26,12 +26,12 @@ from vonk_agent_protocol.recipe_operations import (
 )
 
 from ..distribution_assignment import NodeDistributionAssignment
-from ..models import (
-    AgentNode,
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import (
     AgentOperation,
     AgentOperationAttempt,
     ArtifactDistributionAssignment,
-    Job,
 )
 
 if TYPE_CHECKING:

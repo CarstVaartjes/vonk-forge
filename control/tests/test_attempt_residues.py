@@ -26,18 +26,18 @@ from vonk_control.attempt_residues import (
     LeftoverRemoval,
     incomplete_installation_ids,
 )
-from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import build_production_fleet_profile_service
-from vonk_control.models import (
-    ArtifactDistributionAssignment,
-    CatalogDocumentRevision,
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
     InstallationNode,
-    Job,
-    NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
 )
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import ArtifactDistributionAssignment
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.owner_liveness import (
     OwnerKind,
     installations_named_by_live_jobs,
@@ -45,10 +45,10 @@ from vonk_control.owner_liveness import (
 )
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
-from vonk_control.recipe_routes import RecipeRouteService
+from vonk_control.recipe_routes.service import RecipeRouteService
 from vonk_control.reservation_owners import ADOPTION_WINDOW
-from vonk_control.run_switch_contract import RunSwitchCleanupApplyRequest
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.run_switch_contract.requests import RunSwitchCleanupApplyRequest
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .profile_due_fixtures import next_profile_due
 from .test_profile_build_process_recovery import _complete_agent_work
@@ -595,7 +595,7 @@ def test_a_record_an_active_attempt_owns_is_left_alone(tmp_path: Path) -> None:
 def test_reconcile_discards_a_plan_that_never_reached_a_node(tmp_path: Path) -> None:
     """``recipe installation reconcile`` handles a planned installation too."""
 
-    from vonk_control.run_switch_contract import (
+    from vonk_control.run_switch_contract.requests import (
         RunSwitchCleanupApplyRequest,
         RunSwitchCleanupPreviewRequest,
     )
@@ -721,8 +721,8 @@ def _uninstalls(load, installation_id: str) -> list[Job]:
 def test_unknown_residue_cleanup_backs_off_then_resumes(tmp_path, kind):
     """Catches retrying busy ownership on every tick or never revisiting it."""
     from sqlalchemy import create_engine
-    from vonk_control.install_admission import InstallAdmissionBusy
-    from vonk_control.models import Base
+    from vonk_control.install_admission.contracts import InstallAdmissionBusy
+    from vonk_control.model_primitives import Base
 
     from .test_catalog_revision_collection import Catalog
 

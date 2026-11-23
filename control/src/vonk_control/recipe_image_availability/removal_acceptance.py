@@ -28,15 +28,10 @@ from ..cache_removal_review import (
 )
 from ..jobs import states as job_states
 from ..jobs.documents import AvailabilityJobPayload
-from ..model_cache import (
-    ModelCacheConflict,
-)
-from ..models import (
-    ArtifactLifecycleGate,
-    CatalogDocumentRevision,
-    Job,
-    ModelCacheOperation,
-)
+from ..model_cache.errors import ModelCacheConflict
+from ..models.cache import ArtifactLifecycleGate, ModelCacheOperation
+from ..models.catalog import CatalogDocumentRevision
+from ..models.jobs import Job
 from ..recipe_image_availability_view_contract import (
     RecipeCacheRemovalStatus,
 )
@@ -47,9 +42,7 @@ from ..recipe_image_removal_contract import (
     RecipeCacheRemovalOwner,
     RecipeCacheRemovalPlan,
 )
-from ..runtime_image_preparation import (
-    RuntimeImagePreparationError,
-)
+from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
 from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value
 from .contracts import (

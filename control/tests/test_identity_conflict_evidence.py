@@ -7,16 +7,20 @@ from pathlib import Path
 import pytest
 from vonk_agent_protocol import LifecycleState, RecipeImageCode
 from vonk_control.failure_evidence import FailureEvidenceService
-from vonk_control.install_admission import InstallAdmissionBusy
-from vonk_control.models import CatalogDocumentRevision, Job, RecipeBuild
+from vonk_control.install_admission.contracts import InstallAdmissionBusy
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.jobs import Job
 from vonk_control.operations.blockers import IdentityConflict
-from vonk_control.recipe_image_availability import (
+from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityInvalid,
+)
+from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
 from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
 from vonk_control.run_switch_progress import RECOVERY_STALL_WINDOW
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .test_recipe_operations import _CanonicalImageTransport, read_recipe
 from .test_run_switch_operations import _cold_compile_switch

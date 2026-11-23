@@ -15,14 +15,15 @@ from vonk_agent_protocol.host_helper import (
     HostRuntimeRequest,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
-from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import build_production_fleet_profile_service
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )
-from vonk_control.models import AgentOperation, Job
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .runtime_identity_support import claim_agent
 from .test_artifact_job_lifecycle import _issued_job

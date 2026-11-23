@@ -10,31 +10,31 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import CompiledExecutionPlan, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.install_admission import (
-    InstallAdmissionService,
+from vonk_control.install_admission.identity import (
+    _primary_model_sha256,
     installation_plan_digest_from_stored_document,
 )
-from vonk_control.install_admission.identity import _primary_model_sha256
+from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    Base,
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
-    ClusterMapping,
-    ClusterMappingNode,
+)
+from vonk_control.models.execution import (
     InstallationNode,
-    NodeInventorySnapshot,
-    RecipeBuild,
     RecipeInstallation,
     ResourceReservation,
 )
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.recipe_execution_contract import parse_stored_installation_plan
 from vonk_control.recipe_runtime_specs import ResolvedRecipe
 from vonk_forge_contracts import (
@@ -552,8 +552,11 @@ def test_install_admission_blocks_malformed_mapping_parameters(tmp_path) -> None
 def test_unconfirmed_plan_evidence_is_a_wait_not_a_blocked_plan(tmp_path) -> None:
     """A receipt that cannot be read now is observed again, never a verdict."""
 
-    from vonk_control.install_admission import InstallAdmissionBusy, require_admissible
-    from vonk_control.runtime_image_preparation import RuntimeImagePreparationUnknown
+    from vonk_control.install_admission.contracts import InstallAdmissionBusy
+    from vonk_control.install_admission.validation import require_admissible
+    from vonk_control.runtime_image_preparation.contracts import (
+        RuntimeImagePreparationUnknown,
+    )
 
     sessions, now, _node, mapping_id, build = setup(tmp_path)
 
@@ -572,7 +575,8 @@ def test_unconfirmed_plan_evidence_is_a_wait_not_a_blocked_plan(tmp_path) -> Non
 
 
 def test_deterministic_compile_error_is_a_verdict_with_its_text(tmp_path) -> None:
-    from vonk_control.install_admission import InstallPlanStale, require_admissible
+    from vonk_control.install_admission.contracts import InstallPlanStale
+    from vonk_control.install_admission.validation import require_admissible
 
     sessions, now, _node, mapping_id, build = setup(tmp_path)
 
@@ -596,7 +600,8 @@ def test_deterministic_compile_error_is_a_verdict_with_its_text(tmp_path) -> Non
 
 
 def test_an_unexpected_provider_error_waits(tmp_path) -> None:
-    from vonk_control.install_admission import InstallAdmissionBusy, require_admissible
+    from vonk_control.install_admission.contracts import InstallAdmissionBusy
+    from vonk_control.install_admission.validation import require_admissible
 
     sessions, now, _node, mapping_id, build = setup(tmp_path)
 
@@ -1054,7 +1059,7 @@ def test_a_host_change_waits_then_accepts_the_same_request(tmp_path) -> None:
     re-present the same plan.  Catches both an age window (716 s alone must
     not refuse) and a host change that admits on the old receipt.
     """
-    from vonk_control.install_admission import InstallPreflightExpired
+    from vonk_control.install_admission.contracts import InstallPreflightExpired
 
     sessions, now, node, mapping, build = setup(tmp_path, free=200)
     service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)

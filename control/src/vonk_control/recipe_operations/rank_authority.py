@@ -27,14 +27,10 @@ from ..lifecycle.evidence import (
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..models import (
-    CatalogDocumentRevision,
-    ClusterMapping,
-    ClusterMappingNode,
-    Job,
-    RecipeInstallation,
-    RecipeRun,
-)
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import RecipeInstallation, RecipeRun
+from ..models.jobs import Job
+from ..models.mapping import ClusterMapping, ClusterMappingNode
 from ..profile_stop_authority import (
     ProfileJobRunStopJob,
 )

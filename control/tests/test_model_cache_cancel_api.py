@@ -12,7 +12,7 @@ from vonk_control.cache_removal_review import (
     CacheRemovalReviewContent,
     seal_cache_removal_review,
 )
-from vonk_control.model_cache import CacheOperationView
+from vonk_control.model_cache.views import CacheOperationView
 from vonk_control.model_cache_api import install_model_operator_routes
 from vonk_control.model_cache_contract import (
     ModelCacheCancellation,

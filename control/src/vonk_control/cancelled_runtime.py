@@ -22,12 +22,15 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from .agent_jobs.stored import column_field, column_value
 from .artifact_job_evidence import read_result_evidence
 from .jobs.documents import RecipeStopParent
-from .models import AgentNode, AgentOperation, ArtifactJob, Job
+from .models.execution import ArtifactJob
+from .models.fleet import AgentNode
+from .models.jobs import Job
+from .models.operations import AgentOperation
 from .recipe_stop_payloads import stop_payload_from_job_run
 from .stored.json_values import read_row_column
 
 if TYPE_CHECKING:
-    from .recipe_operations import RecipeOperationService
+    from .recipe_operations.service import RecipeOperationService
 
 
 def cancellation_stop_key(job_id: str, cancel_id: str) -> str:
@@ -170,7 +173,7 @@ def reconcile_cancelled_runtime(
                         tuple[tuple[AgentOperation, RecipeStopPayload], ...], str
                     ] = source,
                 ) -> None:
-                    from .recipe_operations import RecipeRequestInvalid
+                    from .recipe_operations.errors import RecipeRequestInvalid
 
                     current = cancelled_runtime_source(locked, job_id)
                     if current is None or (

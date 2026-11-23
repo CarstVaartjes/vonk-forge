@@ -23,7 +23,8 @@ from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )
-from vonk_control.models import Base, CatalogDocumentRevision
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot
 from vonk_forge_contracts import RecipeApi
 

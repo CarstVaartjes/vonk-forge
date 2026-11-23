@@ -23,15 +23,15 @@ from ..lifecycle.evidence import (
     Residue,
     retire_as_unknown,
 )
-from ..models import (
-    AgentNode,
+from ..models.execution import (
     InstallationNode,
-    Job,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
     RunNode,
 )
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
 from ..recipe_action_plans import (
     StopNodeImpact,
     StopPlan,

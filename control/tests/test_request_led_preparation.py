@@ -8,7 +8,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from vonk_control import fleet_profiles as fp
+from vonk_control.fleet_profiles.assessment_support import (
+    _assignments_needing_preparation,
+)
+from vonk_control.fleet_profiles.dependencies import _PREPARATION_RESOLVABLE_CODES
 
 ROOT = Path(__file__).resolve().parents[2]
 #: Wording that sends an operator to do what the Controller prepares itself.
@@ -34,7 +37,7 @@ def test_no_blocker_text_tells_an_operator_to_prepare_an_asset() -> None:
     assert offenders == []
 
 
-@pytest.mark.parametrize("code", sorted(fp._PREPARATION_RESOLVABLE_CODES, key=str))
+@pytest.mark.parametrize("code", sorted(_PREPARATION_RESOLVABLE_CODES, key=str))
 def test_every_preparation_blocker_requests_the_preparation(code: str) -> None:
     assignment = SimpleNamespace(
         assignment_id="a1", actions=("switch",), reasons=(), recipe_revision_id="r1"
@@ -43,7 +46,7 @@ def test_every_preparation_blocker_requests_the_preparation(code: str) -> None:
     by_assessment = SimpleNamespace(
         assignment_id="a1", assessment=SimpleNamespace(blockers=[reason])
     )
-    needing: Any = fp._assignments_needing_preparation
+    needing: Any = _assignments_needing_preparation
     assert needing([assignment], {"a1"}, [], [by_assessment]) == [assignment]
     assert needing([assignment], set(), [reason], []) == [assignment]
 
@@ -80,8 +83,8 @@ def test_ended_preparation_does_not_block_a_fresh_application(tmp_path) -> None:
 
 def test_pending_profile_references_are_read_from_the_canonical_stored_plan() -> None:
     """A queued load retains its resolved revision after real plan serialization."""
-    from vonk_control.fleet_profiles import FleetProfileService
-    from vonk_control.unused_storage_collection import _applied_revision_ids
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.unused_storage_collection.references import _applied_revision_ids
 
     from .test_fleet_profiles import NOW, _database, _input, _seed, _uuid
 

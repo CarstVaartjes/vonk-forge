@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from sqlalchemy.orm import Session
 from vonk_agent_protocol.swap import SwapIntent, default_swap
 
-from .models import FleetProfileSelection
+from .models.fleet import FleetProfileSelection
 
 
 def selected_swaps(session: Session, node_ids: Sequence[str]) -> dict[str, SwapIntent]:

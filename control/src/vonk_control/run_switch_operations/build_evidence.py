@@ -11,12 +11,9 @@ from vonk_agent_protocol import (
 
 from ..disk_reservations import runtime_images_named_on_nodes
 from ..inventory.items import inventory_items
-from ..models import (
-    AgentNode,
-    CatalogDocumentRevision,
-    RecipeBuild,
-    RecipeSourceBundle,
-)
+from ..models.cache import RecipeBuild
+from ..models.catalog import CatalogDocumentRevision, RecipeSourceBundle
+from ..models.fleet import AgentNode
 from ..preparation_contract import (
     RuntimeImageIdentity,
 )
@@ -24,14 +21,14 @@ from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_plan,
 )
-from ..run_switch_contract import (
+from ..run_switch_contract.evidence import (
     BuildCompatibilityEvidence,
     BuildSourceEvidence,
     RunSwitchBuildEvidence,
     RunSwitchReason,
     RuntimeImageStorageImpact,
-    SparkGroup,
 )
+from ..run_switch_contract.requests import SparkGroup
 from .constants import _BUILD_EVIDENCE_STATE_ADAPTER
 from .identity_helpers import _is_hex_digest, _normalise_architecture
 from .planning_helpers import _as_reason, _digest

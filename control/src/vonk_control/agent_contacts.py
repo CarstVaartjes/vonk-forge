@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.util import identity_key
 
 from .dialect_insert import dialect_insert
-from .models import AgentNode, AgentNodeContact
+from .models.fleet import AgentNode, AgentNodeContact
 from .repeated_evidence_contract import RepeatedEvidence
 
 

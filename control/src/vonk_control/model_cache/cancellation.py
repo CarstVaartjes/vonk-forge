@@ -12,8 +12,8 @@ from vonk_agent_protocol import LifecycleState, ModelCacheCode
 
 from .. import model_cache_states
 from ..agent_operation_facts import aware as _aware
-from ..lifecycle import CancelRequested, State, Tick
 from ..lifecycle.evidence import Residue
+from ..lifecycle.types import CancelRequested, State, Tick
 from ..model_cache_contract import (
     CacheOperationKind,
     ModelCacheCancellation,
@@ -21,7 +21,7 @@ from ..model_cache_contract import (
     ModelCacheOperationPayload,
 )
 from ..model_cache_progress import cache_phase, progress_document
-from ..models import ModelCacheOperation
+from ..models.cache import ModelCacheOperation
 from .artifacts import ArtifactSetManifest, _unique_artifacts
 from .catalog_helpers import _iso
 from .errors import ModelCacheConflictInvalid
@@ -161,8 +161,8 @@ class CancellationMixin:
                 settled += int(cache._try_settle_cancellation(operation_id))
         if requested_id is None:
             return settled + cache._reconciler.reconcile().changed
-        from ..lifecycle import Reconciler
         from ..lifecycle.model_cache import ModelCacheStore
+        from ..lifecycle.reconciler import Reconciler
 
         reconciler = Reconciler(
             ModelCacheStore(cache._session, cache._lifecycle, cache, requested_id),

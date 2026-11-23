@@ -9,16 +9,14 @@ from typing import cast as _typing_cast
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import LifecycleState, UnknownOutcomeError, canonical_message
 
-from ..agent_jobs import AgentJobService
-from ..fleet_profile_contract import (
-    FleetProfileApplicationProgress,
-    FleetProfilePreview,
-)
+from ..agent_jobs.service import AgentJobService
+from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
+from ..fleet_profile_contract.review import FleetProfilePreview
 from ..lifecycle.evidence import Residue
 from ..lifecycle.fleet_profile import cancellation_state, doc_state
 from ..lifecycle.types import Effect as _LifecycleEffect
 from ..lifecycle.types import State as _LifecycleState
-from ..models import FleetProfileApplication
+from ..models.fleet import FleetProfileApplication
 from ..persisted_waits import schedule_wait
 from ..strict_json import read_stored_model
 from .contracts import (

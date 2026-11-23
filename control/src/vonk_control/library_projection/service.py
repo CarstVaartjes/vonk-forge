@@ -33,7 +33,7 @@ from ..model_cache_contract import (
     ModelCacheOperationState,
     ModelCacheUsage,
 )
-from ..models import CatalogDocumentRevision
+from ..models.catalog import CatalogDocumentRevision
 from ..wait_contract import QueueWait
 from .catalog import (
     _catalog_documents,

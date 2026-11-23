@@ -18,7 +18,6 @@ from vonk_agent_protocol import (
 
 from .. import agent_operation_states as aos
 from ..jobs import states as job_states
-from ..lifecycle import Outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import (
@@ -27,13 +26,10 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..models import (
-    AgentOperation,
-    AgentOperationAttempt,
-    ArtifactJob,
-    Job,
-    RunNode,
-)
+from ..lifecycle.types import Outcome
+from ..models.execution import ArtifactJob, RunNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..offline_stops import deferred_stop_nodes
 from ..profile_stop_authority import (
     JobRunStopScope,

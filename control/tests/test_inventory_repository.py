@@ -10,7 +10,9 @@ from vonk_control.inventory.repository import (
     NodeInventoryReport,
     newest_snapshot_ids,
 )
-from vonk_control.models import AgentNode, Base, NodeInventorySnapshot
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.stored.json_values import write_guard_mode
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture

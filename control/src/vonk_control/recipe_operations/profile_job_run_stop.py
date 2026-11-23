@@ -26,16 +26,13 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
 
 from .. import agent_operation_states, artifact_job_states
-from ..agent_jobs import (
-    superseded_cancellation_deadline,
-)
+from ..agent_jobs.retry import superseded_cancellation_deadline
 from ..agent_operation_facts import attempt_is_live
 from ..artifact_job_evidence import ArtifactJobResultEvidence
 from ..categorized_errors import (
     InvalidValue,
 )
 from ..jobs.documents import RunSwitchJobPayload, controller_recipe_document
-from ..lifecycle import CancelRequested, Effect, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import (
@@ -43,15 +40,11 @@ from ..lifecycle.evidence import (
     Residue,
     retire_as_unknown,
 )
-from ..models import (
-    AgentOperation,
-    ArtifactJob,
-    FleetProfileApplication,
-    Job,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
-)
+from ..lifecycle.types import CancelRequested, Effect, Outcome, Reported
+from ..models.execution import ArtifactJob, RecipeInstallation, RecipeRun, RunNode
+from ..models.fleet import FleetProfileApplication
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from ..profile_stop_authority import (
     ProfileJobRunStopAuthorization,
     ProfileJobRunStopJob,
@@ -67,7 +60,7 @@ from ..recipe_progress import (
 from ..recipe_stop_payloads import (
     stop_payload_from_job_run,
 )
-from ..run_switch_contract import RunSwitchOperationResult
+from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..stored.json_values import read_row_column
 from ..strict_json import read_stored_model
 from .errors import (
@@ -282,7 +275,7 @@ class ProfileJobRunStopMixin:
         the run is refused as a security edge, never stopped.
         """
         service = typing_cast("RecipeOperationService", self)
-        from ..fleet_profiles import _persisted_profile_progress
+        from ..fleet_profiles.persistence import _persisted_profile_progress
 
         application = session.get(FleetProfileApplication, profile_application_id)
         try:

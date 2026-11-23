@@ -20,9 +20,7 @@ from ..artifact_lifecycle import (
     ArtifactIdentity,
     RemovalOwnerKind,
 )
-from ..artifact_reference_scan import (
-    ArtifactReferenceFinding,
-)
+from ..artifact_reference_scan.types import ArtifactReferenceFinding
 from ..cache_removal_review import (
     CacheRemovalAsset,
     CacheRemovalBlocker,
@@ -30,7 +28,7 @@ from ..cache_removal_review import (
     CacheRemovalReview,
 )
 from ..categorized_errors import InvalidValue
-from ..install_admission import InstallPlan
+from ..install_admission.contracts import InstallPlan
 from ..jobs import states as job_states
 from ..jobs.documents import (
     AvailabilityJobPayload,
@@ -38,15 +36,10 @@ from ..jobs.documents import (
     AvailabilityRuntime,
 )
 from ..lifecycle.image_availability import ImageAvailabilityAdapter
-from ..model_cache import (
-    ModelCacheRemovalScope,
-)
-from ..models import (
-    CatalogDocumentRevision,
-    Job,
-    ModelCacheOperation,
-    RecipeBuild,
-)
+from ..model_cache.views import ModelCacheRemovalScope
+from ..models.cache import ModelCacheOperation, RecipeBuild
+from ..models.catalog import CatalogDocumentRevision
+from ..models.jobs import Job
 from ..operations.blockers import OperationBlocker
 from ..recipe_availability_intent import (
     RecipeAvailabilityIntent,
@@ -70,7 +63,7 @@ from ..recipe_image_removal_contract import (
 )
 from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
 from ..recipe_update_contract import RecipeUpdateResponse
-from ..runtime_image_preparation import (
+from ..runtime_image_preparation.contracts import (
     OCIImageTransport,
     RuntimeImageReceipt,
     RuntimeImageReferenceIntent,
@@ -104,7 +97,7 @@ from .contracts import (
 )
 
 if TYPE_CHECKING:
-    from ..recipe_update_batches import RecipeUpdateClaim
+    from ..recipe_update_batches.helpers import RecipeUpdateClaim
 
 
 class RecipeImageAvailabilityService:
@@ -142,7 +135,7 @@ class RecipeImageAvailabilityService:
         self._identity_locks: dict[str, threading.Lock] = {}
         self._identity_locks_guard = threading.Lock()
         self._removal_lock = threading.RLock()
-        from ..recipe_update_batches import RecipeUpdateBatches
+        from ..recipe_update_batches.service import RecipeUpdateBatches
 
         self._updates = RecipeUpdateBatches(self, sessions)
 

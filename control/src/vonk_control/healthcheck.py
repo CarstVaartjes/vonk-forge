@@ -8,7 +8,7 @@ from typing import Protocol, Self
 
 from pydantic import ValidationError
 
-from .operation_api import ReadyzResponse
+from .operation_api.contracts import ReadyzResponse
 
 _READINESS_URL = "http://127.0.0.1:8000/api/readyz"
 _MAXIMUM_RESPONSE_BYTES = 256

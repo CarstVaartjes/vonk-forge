@@ -15,9 +15,7 @@ from vonk_agent_protocol import (
 
 from ..jobs import states as job_states
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..models import (
-    AgentOperation,
-)
+from ..models.operations import AgentOperation
 from ..recipe_lifecycle_contract import (
     RecipeLifecycleResult,
 )

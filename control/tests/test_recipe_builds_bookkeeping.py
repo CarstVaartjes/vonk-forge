@@ -7,8 +7,8 @@ import logging
 from pathlib import Path
 from types import SimpleNamespace
 
-from vonk_control.recipe_builds import RecipeBuildService
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.recipe_builds.service import RecipeBuildService
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .test_recipe_builds import _write_controller_build_receipt, setup
 

@@ -23,6 +23,9 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
+from . import (
+    models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+)
 from .bounded_retry import REQUEST_PAUSES, bounded_attempts
 from .model_primitives import Base
 from .settings import DATABASE_WAIT_BUDGETS

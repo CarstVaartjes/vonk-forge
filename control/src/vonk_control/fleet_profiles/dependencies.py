@@ -25,9 +25,9 @@ from vonk_agent_protocol.agent_words import (
 )
 
 from .. import fleet_profile_states
-from ..fleet_profile_contract import (
+from ..child_phases import FleetProfileChildPhase
+from ..fleet_profile_contract.vocabulary import (
     FleetProfileAssignmentState,
-    FleetProfileChildPhase,
     FleetProfileInstallationPolicy,
     FleetProfileOperationState,
 )

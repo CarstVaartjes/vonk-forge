@@ -13,17 +13,15 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.jobs.queue import JobService
-from vonk_control.library_projection import LibraryProjection
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import (
-    Base,
-    CatalogDocumentRevision,
-    ModelCacheOperation,
-)
+from vonk_control.library_projection.service import LibraryProjection
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_forge_contracts import ModelDefinition
 
 from .display_fixtures import create_draft

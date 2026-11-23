@@ -198,7 +198,7 @@ def test_receipts_are_retained_per_digest_for_the_current_host(tmp_path):
     """Catches retention by age (a receipt for another digest pruned after
     300 s) and retention without a bound (receipts from an old host kept)."""
     from vonk_control.inventory.items import record_preflight
-    from vonk_control.models import AgentNode
+    from vonk_control.models.fleet import AgentNode
     from vonk_control.runtime.preflight import latest_result
 
     from .test_lifecycle_preflight import _setup

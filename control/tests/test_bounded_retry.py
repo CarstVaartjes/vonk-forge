@@ -7,17 +7,15 @@ import pytest
 from sqlalchemy.exc import OperationalError
 from vonk_control.admission_locking import AdmissionLockBusy, admission_wait_exhausted
 from vonk_control.bounded_retry import REQUEST_PAUSES, bounded_attempts
-from vonk_control.install_admission import InstallAdmissionBusy
+from vonk_control.install_admission.contracts import InstallAdmissionBusy
 from vonk_control.lifecycle.evidence import (
     Damaged,
     Residue,
     read_or_rebuild,
 )
+from vonk_control.recipe_builds.cancellation import build_cancellation
 from vonk_control.recipe_operations import (
-    RecipeBuildOwnershipBusy,
-    RecipeOperationService,
     build,
-    build_cancellation,
     install,
     job_activation,
     result_consumption,
@@ -25,6 +23,8 @@ from vonk_control.recipe_operations import (
     stop,
     uninstall,
 )
+from vonk_control.recipe_operations.errors import RecipeBuildOwnershipBusy
+from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionBusy
 
 

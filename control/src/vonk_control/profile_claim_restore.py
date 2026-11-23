@@ -22,6 +22,7 @@ from typing import get_args
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ReservationState
+from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 
 from . import fleet_profile_states
 from .admission_locking import (
@@ -34,14 +35,13 @@ from .admission_locking import (
 )
 from .disk_reservations import outstanding_disk_charges
 from .memory_reservations import MEMORY_RESERVATION_KINDS, memory_reservations
-from .models import FleetProfileApplication, ResourceReservation
-from .resource_planning import (
-    ResourceDemand,
-    memory_capacity_snapshot,
-    memory_reservation_kind,
-    plan_capacity,
-)
-from .run_switch_contract import FreshnessEvidence, MemoryKind
+from .models.execution import ResourceReservation
+from .models.fleet import FleetProfileApplication
+from .resource_planning.capacity import plan_capacity
+from .resource_planning.memory import memory_capacity_snapshot
+from .resource_planning.memory_kinds import memory_reservation_kind
+from .resource_planning.types import ResourceDemand
+from .run_switch_contract.evidence import FreshnessEvidence
 from .run_switch_operations.planning_helpers import PlanInventory
 from .spark_disk import spark_free_bytes
 

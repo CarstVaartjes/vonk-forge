@@ -23,7 +23,8 @@ from ..agent_upgrade_contract import (
 from ..identity_insert import insert_identity
 from ..inventory.items import runtime_value
 from ..lifecycle.agent_upgrade import AgentUpgradeAdapter
-from ..models import AgentNode, Job
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
 
 if TYPE_CHECKING:
     from .service import AgentUpgradeService

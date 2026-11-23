@@ -15,10 +15,11 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.fleet_projection import FleetProjection, FleetSnapshot
-from vonk_control.models import Base
+from vonk_control.fleet_projection.common import FleetSnapshot
+from vonk_control.fleet_projection.service import FleetProjection
+from vonk_control.model_primitives import Base
 from vonk_control.strict_json import serialize_json_value
 
 from control.tests.observation_transfer_peer import fleet_authority

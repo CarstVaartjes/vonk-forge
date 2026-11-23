@@ -28,11 +28,12 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_control.agent_api.authority import issue_host_runtime_grant
-from vonk_control.agent_jobs import AgentJobService, StaleAgentFence
+from vonk_control.agent_jobs.contracts import StaleAgentFence
 from vonk_control.agent_jobs.retry import superseded_cancellation_deadline
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from vonk_control.artifact_blob_store import ArtifactBlobStore
-from vonk_control.artifact_jobs import ArtifactJobService
+from vonk_control.artifact_jobs.service import ArtifactJobService
 from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,
     HostHelperGrantIssuer,
@@ -40,7 +41,9 @@ from vonk_control.host_helper_authority import (
     HostRuntimeGrantUnsatisfiable,
 )
 from vonk_control.inventory.items import inventory_items
-from vonk_control.models import AgentNode, Job, RecipeRun
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
 from vonk_control.stored.json_values import read_row_column
 
 from .agent_grant_requests import job_run_grant_request

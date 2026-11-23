@@ -75,7 +75,8 @@ def install_auth_routes(
     tokens: TokenCodec,
     now: Callable[[], int],
 ) -> None:
-    from .operation_api import _ADMIN_OPERATION_IDS, bounded_error_responses
+    from .operation_api.constants import _ADMIN_OPERATION_IDS
+    from .operation_api.contracts import bounded_error_responses
 
     _ADMIN_OPERATION_IDS.update(
         {

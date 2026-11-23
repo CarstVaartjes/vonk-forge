@@ -28,21 +28,21 @@ from vonk_control.catalog.revision_contract import (
     write_catalog_projection,
 )
 from vonk_control.library.contract import LibraryLocalState, LibraryRecipeProjection
-from vonk_control.library_projection import LibraryProjection
 from vonk_control.library_projection.common import compose_recipe_state
+from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.model_cache import model_artifact_cache
-from vonk_control.models import (
-    AgentNode,
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet, RecipeBuild
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
-    ClusterMapping,
-    ModelCacheOperation,
-    ModelCacheSet,
-    RecipeBuild,
-    RecipeInstallation,
 )
-from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.run_switch_operations.artifact_inspection import (
+    DatabaseRunSwitchArtifactInspector,
+)
 from vonk_control.stored.json_values import write_guard_mode
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 

@@ -24,12 +24,8 @@ from vonk_agent_protocol.swap import GIB, SwapIntent, swap_satisfied
 from ..agent_contacts import last_seen as last_seen_at
 from ..gpu.health import gpu_health_reason
 from ..inventory.items import inventory_items
-from ..models import (
-    AgentCertificate,
-    AgentNode,
-    AgentNodeProfile,
-    NodeInventorySnapshot,
-)
+from ..models.fleet import AgentCertificate, AgentNode, AgentNodeProfile
+from ..models.telemetry import NodeInventorySnapshot
 from ..nas_route_notice import nas_route_notice
 from ..nas_transfer_rate import NasTransferNotice, nas_transfer_detail
 from ..recipe_update_notice import RECIPE_UPDATE_AVAILABLE

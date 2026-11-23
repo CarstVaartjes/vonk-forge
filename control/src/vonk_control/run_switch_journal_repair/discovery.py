@@ -13,16 +13,10 @@ from vonk_agent_protocol import JournalRepairCode
 
 from ..admission_locking import AdmissionRowLock, lock_admission_rows
 from ..lifecycle.evidence import Residue
-from ..models import (
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    FleetProfileApplication,
-    Job,
-)
-from ..run_switch_contract import (
-    RunSwitchOperationResult,
-)
+from ..models.fleet import AgentNode, FleetProfileApplication
+from ..models.jobs import Job
+from ..models.operations import AgentOperation, AgentOperationAttempt
+from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..strict_json import serialize_json_value
 
 REPAIR_WAIT = JournalRepairCode.EVIDENCE_UNAVAILABLE
@@ -202,7 +196,7 @@ def _lock_discovery(session: Session, captured: _Discovery) -> None:
 
 
 def _plan_digest(job: Job) -> str:
-    from ..run_switch_operations import _run_switch_payload
+    from ..run_switch_operations.planning_helpers import _run_switch_payload
 
     parent = _run_switch_payload(job)
     if parent is None:

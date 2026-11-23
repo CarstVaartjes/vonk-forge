@@ -9,7 +9,7 @@ from sqlalchemy import select
 from vonk_agent_protocol import DesiredAssignmentState, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_contacts import record_contact
-from vonk_control.fleet_profile_contract import (
+from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
 )
@@ -19,19 +19,13 @@ from vonk_control.inventory.repository import (
     NodeInventoryReport,
 )
 from vonk_control.memory_reservations import memory_reservations
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentNodeContact,
-    AgentOperation,
-    CatalogDocumentRevision,
-    ClusterMapping,
-    Job,
-    RecipeBuild,
-    RecipeRun,
-    ResourceReservation,
-    RunNode,
-)
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
+from vonk_control.models.fleet import AgentCertificate, AgentNode, AgentNodeContact
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.models.operations import AgentOperation
 
 from .profile_due_fixtures import next_profile_due
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture

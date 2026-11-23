@@ -23,7 +23,8 @@ from ..jobs import states as job_states
 from ..jobs.documents import DistributedRecoveryMarker
 from ..lifecycle.evidence import BookkeepingReason, Residue
 from ..logging import log_event
-from ..models import STOPPABLE_RUN_STATES, Job, RecipeRun, RunNode
+from ..models.execution import STOPPABLE_RUN_STATES, RecipeRun, RunNode
+from ..models.jobs import Job
 from ..persisted_waits import read_wait, schedule_wait
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,

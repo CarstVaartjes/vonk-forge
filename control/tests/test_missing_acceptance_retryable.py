@@ -20,12 +20,12 @@ from vonk_agent_protocol import (
     OperatorActionName,
     ProgressPhase,
 )
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, AgentIdentity, TokenCodec
 from vonk_control.categorized_errors import MissingRecord
 from vonk_control.gateway.keys import GatewayKeyRevoked
 from vonk_control.jobs.queue import JobService
-from vonk_control.models import Base
+from vonk_control.model_primitives import Base
 from vonk_control.operator_acceptance import (
     AcceptanceArguments,
     OperatorReceiptResolver,
@@ -35,14 +35,14 @@ from vonk_control.recipe_availability_intent import (
     RecipeRevisionIntent,
     RecipeSelectorIntent,
 )
-from vonk_control.recipe_image_availability import (
-    OPERATION_KIND,
-    RecipeImageAvailabilityView,
-    requests,
-)
+from vonk_control.recipe_image_availability import requests
 from vonk_control.recipe_image_availability.contracts import (
+    OPERATION_KIND,
     RecipeImageAvailabilityUnknown,
     RecipeImageCode,
+)
+from vonk_control.recipe_image_availability_view_contract import (
+    RecipeImageAvailabilityView,
 )
 
 from .test_fleet_profile_api import _headers

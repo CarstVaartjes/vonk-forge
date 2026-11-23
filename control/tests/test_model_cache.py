@@ -14,7 +14,6 @@ from types import SimpleNamespace
 
 import httpx2
 import pytest
-import vonk_control.model_cache as model_cache_module
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -26,24 +25,19 @@ from vonk_control.auth import Actor, TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence, text
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.coordinator_failures import CoordinatorFailures
-from vonk_control.distribution import (
-    ModelCacheObjectSource,
-)
+from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.jobs.queue import JobService
-from vonk_control.model_cache import (
-    _CHUNK_BYTES,
-    ArtifactSetManifest,
-    ArtifactSpec,
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
+from vonk_control.model_cache.constants import _CHUNK_BYTES, _SOURCE_GONE_ATTEMPTS
+from vonk_control.model_cache.errors import (
     ModelCacheConflict,
+    ModelCacheNotFoundInvalid,
     ModelCacheResolutionError,
-    ModelCacheService,
+    ModelCacheSelectorAmbiguous,
     ModelCacheStorageError,
     _retry_after_seconds,
 )
-from vonk_control.model_cache.errors import (
-    ModelCacheNotFoundInvalid,
-    ModelCacheSelectorAmbiguous,
-)
+from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_cache_api import (
     ModelCacheOperationProvider,
     install_model_operator_routes,
@@ -54,21 +48,25 @@ from vonk_control.model_cache_contract import (
     ModelCacheDownloadResult,
     ModelCacheRemovalResult,
 )
-from vonk_control.models import (
-    AgentNode,
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import (
     ArtifactLifecycleGate,
-    Base,
-    CatalogDocument,
-    CatalogDocumentHead,
-    CatalogDocumentRevision,
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
     RecipeBuild,
 )
+from vonk_control.models.catalog import (
+    CatalogDocument,
+    CatalogDocumentHead,
+    CatalogDocumentRevision,
+)
+from vonk_control.models.fleet import AgentNode
 from vonk_control.operations.item_contract import operation_item
 from vonk_control.recovery_policy import RecoveryPolicy
-from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
+from vonk_control.run_switch_operations.artifact_inspection import (
+    DatabaseRunSwitchArtifactInspector,
+)
 from vonk_control.worker.loop import Worker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 from vonk_forge_contracts.model import ModelReference
@@ -1860,13 +1858,19 @@ def test_download_mutation_is_queued_until_the_controller_worker_runs(
 def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     cache, tmp_path: Path
 ) -> None:
-    from vonk_control import operation_api
+    from vonk_control.operation_api.contracts import (
+        OperationListPage,
+        OperationProvider,
+    )
+    from vonk_control.operation_api.contracts import (
+        OperationQuery as operation_api_OperationQuery,
+    )
     from vonk_control.operations import contract as operation_contract
 
     service, _sessions = cache
     cursor_codec = TokenCodec(b"c" * 32).cursor_codec()
     provider = model_cache_operation_provider(service, cursors=cursor_codec)
-    assert isinstance(provider, operation_api.OperationProvider)
+    assert isinstance(provider, OperationProvider)
     operation_ids: list[str] = []
     for index in range(2):
         model = str(index + 1) * 64
@@ -1887,12 +1891,12 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
         assert operation.attempt == 1
         operation_ids.append(operation.id)
 
-    query = operation_api.OperationQuery(limit=1, after=None, state=None, node_id=None)
+    query = operation_api_OperationQuery(limit=1, after=None, state=None, node_id=None)
     standalone = model_cache_operation_provider(service).list_operations(query)
     assert standalone.next_cursor is not None
     assert len(standalone.items) == 1
     first_page = provider.list_operations(query)
-    assert isinstance(first_page, operation_api.OperationListPage)
+    assert isinstance(first_page, OperationListPage)
     assert first_page.total == 2
     assert len(first_page.items) == 1
     first = operation_item(first_page.items[0]).model_dump(mode="json")
@@ -1918,7 +1922,7 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
         str(decoded_cursor[1]),
     )
     second_page = provider.list_operations(
-        operation_api.OperationQuery(limit=1, after=after, state=None, node_id=None)
+        operation_api_OperationQuery(limit=1, after=after, state=None, node_id=None)
     )
     assert second_page.total == 2
     assert len(second_page.items) == 1
@@ -1926,7 +1930,7 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     assert second_page.next_cursor is None
 
     queued_page = provider.list_operations(
-        operation_api.OperationQuery(
+        operation_api_OperationQuery(
             limit=100, after=None, state="queued", node_id=None
         )
     )
@@ -1934,7 +1938,7 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     assert {operation_item(item).id for item in queued_page.items} == set(operation_ids)
 
     node_page = provider.list_operations(
-        operation_api.OperationQuery(
+        operation_api_OperationQuery(
             limit=100,
             after=None,
             state=None,
@@ -1952,7 +1956,7 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
 
     assert service.run_pending(limit=2) == 2
     succeeded_page = provider.list_operations(
-        operation_api.OperationQuery(
+        operation_api_OperationQuery(
             limit=100, after=None, state="succeeded", node_id=None
         )
     )
@@ -1967,7 +1971,7 @@ def test_malformed_pagination_observation_is_partial_and_recovers(
     cache, monkeypatch, clears
 ) -> None:
     """The public provider observes at most three times and retains readable rows."""
-    from vonk_control.operation_api import OperationQuery
+    from vonk_control.operation_api.contracts import OperationQuery
 
     service, _sessions = cache
     provider = ModelCacheOperationProvider(
@@ -2338,7 +2342,7 @@ def test_same_pin_repair_verifies_before_atomic_replace_and_preserves_old_bytes(
             raise OSError("simulated atomic publish failure")
         return replace(source_path, target_path)
 
-    monkeypatch.setattr("vonk_control.model_cache.os.replace", fail_final_replace)
+    monkeypatch.setattr("os.replace", fail_final_replace)
     service.run_pending()
     swap_failed = service.get_operation(failed.id)
     assert swap_failed.state == "queued"
@@ -2683,7 +2687,7 @@ def test_atomic_repair_keeps_path_and_open_reader_available(
             assert reader.read() == data
             replacements.append(destination)
 
-        monkeypatch.setattr("vonk_control.model_cache.os.replace", replace)
+        monkeypatch.setattr("os.replace", replace)
         repair = service.start_repair(
             actor="test",
             request_key="00000000-0000-4000-8000-000000001004",
@@ -2770,9 +2774,7 @@ def test_repair_capacity_admission_preserves_verified_object(
     )
     digest = downloaded.artifact_set_sha256
     usage = namedtuple("usage", "total used free")
-    monkeypatch.setattr(
-        "vonk_control.model_cache.shutil.disk_usage", lambda _: usage(100, 100, 0)
-    )
+    monkeypatch.setattr("shutil.disk_usage", lambda _: usage(100, 100, 0))
     # No capacity is a wait, not a refusal (top-10 #8): the repair is queued
     # behind a retryable blocker and nothing is touched until the space exists.
     queued = service.start_repair(
@@ -2791,7 +2793,7 @@ def test_repair_capacity_admission_preserves_verified_object(
     # Still no space: the core reschedules it instead of starting the transfer.
     assert service._claim_operations(limit=1, respect_backoff=False) == []
     monkeypatch.setattr(
-        "vonk_control.model_cache.shutil.disk_usage",
+        "shutil.disk_usage",
         lambda _: usage(10**12, 0, 10**12),
     )
     assert service._claim_operations(limit=1, respect_backoff=False) == [
@@ -3131,16 +3133,16 @@ def test_fragmented_http_download_bounds_checkpoints(
     payload = bytes(range(256)) * ((4 * _CHUNK_BYTES) // 256)
     fragment = 16 * 1024
     assert len(payload) // fragment > 20
-    import vonk_control.model_cache as model_cache_mod
+    import os
 
     fsyncs = {"count": 0}
-    real_fsync = model_cache_mod.os.fsync
+    real_fsync = os.fsync
 
     def counted_fsync(fd):
         fsyncs["count"] += 1
         return real_fsync(fd)
 
-    monkeypatch.setattr(model_cache_mod.os, "fsync", counted_fsync)
+    monkeypatch.setattr(os, "fsync", counted_fsync)
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(
@@ -4325,7 +4327,7 @@ def test_a_server_error_never_becomes_source_gone(cache, tmp_path: Path) -> None
         )
         # Transport retries and lifecycle retries share this request. Even
         # repeated 503s never count as evidence that the source disappeared.
-        for _ in range(model_cache_module._SOURCE_GONE_ATTEMPTS + 3):
+        for _ in range(_SOURCE_GONE_ATTEMPTS + 3):
             service.run_pending()
             operation = service.get_operation(operation.id)
             if operation.state == LifecycleState.SUCCEEDED.value:
@@ -4461,11 +4463,11 @@ def test_missing_source_observations_follow_exact_file_and_survive_restart(
             fixture_sources=True,
             clock=lambda: NOW,
         )
-        for _ in range(model_cache_module._SOURCE_GONE_ATTEMPTS - 2):
+        for _ in range(_SOURCE_GONE_ATTEMPTS - 2):
             service.run_pending()
             assert service.get_operation(operation.id).state == "queued"
         service.run_pending()
-        assert served["/second.bin"] == model_cache_module._SOURCE_GONE_ATTEMPTS
+        assert served["/second.bin"] == _SOURCE_GONE_ATTEMPTS
         gone = service.get_operation(operation.id)
         assert gone.state == "failed"
         assert gone.failure is not None

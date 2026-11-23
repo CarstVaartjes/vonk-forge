@@ -16,9 +16,9 @@ from vonk_agent_protocol.state_machines import (
     CertificateRotationState,
     EnrollmentRecordState,
 )
-from vonk_control.enrollment import EnrollmentDenied
 from vonk_control.enrollment.contract import EnrollmentGrant
-from vonk_control.models import (
+from vonk_control.enrollment.types import EnrollmentDenied
+from vonk_control.models.fleet import (
     AgentCertificate,
     AgentCertificateRotation,
     AgentEnrollment,
@@ -391,7 +391,7 @@ def test_damage_during_ca_observation_repairs_both_committed_projections(
 
 def test_busy_ca_observation_heals_on_the_next_attempt(service):
     """Catches a busy CA journal stranding an accepted enrollment."""
-    from vonk_control.enrollment import EnrollmentService
+    from vonk_control.enrollment.service import EnrollmentService
     from vonk_control.step_ca import StepCAIssuancePending
 
     from .ca_material import NOW
@@ -425,7 +425,7 @@ def test_controller_restart_after_ca_outage_serves_renewal_and_fresh_rotation(
 ):
     """Catches a standing renewal gate after an unavailable CA and lost process."""
     from vonk_agent_protocol import UnknownError
-    from vonk_control.enrollment import EnrollmentService
+    from vonk_control.enrollment.service import EnrollmentService
 
     enrollment, sessions, clock, authority = service
     source = enroll(enrollment)
@@ -458,8 +458,8 @@ def test_authenticated_renewal_route_recovers_across_controller_replacement(
 ):
     """Catches persistent HTTP rejection rather than merely provider recovery."""
     from vonk_agent_protocol.enrollment import IssuedCertificateResponse
-    from vonk_control.api import create_app
-    from vonk_control.enrollment import EnrollmentService
+    from vonk_control.api.application import create_app
+    from vonk_control.enrollment.service import EnrollmentService
 
     from .test_agent_api import (
         NODE_A,

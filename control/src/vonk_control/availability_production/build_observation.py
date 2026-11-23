@@ -23,21 +23,16 @@ from vonk_forge_contracts import RecipeDefinition
 from ..failure_classification import disposition, is_security_failure
 from ..failure_evidence import safe_text
 from ..jobs import states as job_states
-from ..models import (
-    AgentOperation,
-    AgentOperationAttempt,
-    RecipeBuild,
-)
+from ..models.cache import RecipeBuild
+from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..operations.blockers import OperationBlocker, make_blocker
 from ..prebuilt_images import PrebuiltDecision
-from ..recipe_builds import (
-    _valid_succeeded_receipt,
-)
+from ..recipe_builds.common import _valid_succeeded_receipt
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_policy,
 )
-from ..recipe_image_availability import (
+from ..recipe_image_availability.contracts import (
     BuildUnsettled,
     RecipeImageAvailabilityError,
 )
@@ -47,9 +42,7 @@ from ..recipe_runtime_specs import (
 )
 from ..recovery_policy import kind_for_failure_fields
 from ..runtime.spec_contract import SpecRuntime
-from ..runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
-)
+from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from ..strict_json import read_stored_model
 
 

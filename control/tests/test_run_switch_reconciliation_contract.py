@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
-from vonk_control.run_switch_contract import (
+from vonk_control.run_switch_contract.requests import (
     RunSwitchReconciliationAuthority,
     RunSwitchReconciliationTarget,
 )

@@ -20,21 +20,15 @@ from ..content_identity import (
     catalog_reference_membership,
     runs_identically,
 )
-from ..fleet_profile_contract import FleetProfilePreview, NodeId
+from ..fleet_profile_contract.review import FleetProfilePreview
+from ..fleet_profile_contract.vocabulary import NodeId
 from ..inventory.repository import newest_snapshot_ids
-from ..models import (
-    AgentNode,
-    CatalogDocumentRevision,
-    FleetProfile,
-    FleetProfileApplication,
-    InstallationNode,
-    Job,
-    ModelCacheOperation,
-    ModelCacheSet,
-    NodeInventorySnapshot,
-    RecipeInstallation,
-    RecipeRun,
-)
+from ..models.cache import ModelCacheOperation, ModelCacheSet
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun
+from ..models.fleet import AgentNode, FleetProfile, FleetProfileApplication
+from ..models.jobs import Job
+from ..models.telemetry import NodeInventorySnapshot
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,

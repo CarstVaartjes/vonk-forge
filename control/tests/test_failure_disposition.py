@@ -31,7 +31,8 @@ from vonk_agent_protocol import (
 )
 from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.failure_classification import disposition, is_definite
-from vonk_control.lifecycle import (
+from vonk_control.lifecycle.core import transition
+from vonk_control.lifecycle.types import (
     Claimed,
     Effect,
     Execute,
@@ -40,7 +41,6 @@ from vonk_control.lifecycle import (
     Reported,
     State,
     Tick,
-    transition,
 )
 from vonk_control.model_cache.errors import (
     ModelCacheConflictInvalid,
@@ -574,7 +574,7 @@ def test_stale_writer_across_worker_passes_waits_then_publishes(
     """Catches a mapper conflict becoming terminal after six publication passes."""
     from sqlalchemy.orm.exc import StaleDataError
     from vonk_agent_protocol import RouteState
-    from vonk_control.models import RecipeRun
+    from vonk_control.models.execution import RecipeRun
     from vonk_control.recipe_operation_worker import RecipeOperationWorker
     from vonk_control.recovery_policy import ROUTE_RECOVERY
 

@@ -18,7 +18,7 @@ from vonk_control.capabilities import CapabilityRegistry, RecoveringService
 from vonk_control.capability_contract import CapabilityAvailability
 from vonk_control.gateway import route_runtime
 from vonk_control.observation.platform import PlatformObservation
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.settings import Settings
 
 
@@ -48,7 +48,7 @@ def test_production_constructor_fault_and_repair(
 ):
     # Catches eager startup construction, stale unavailable state, and reads
     # that secretly construct/retry a failed capability.
-    from vonk_control.models import Base
+    from vonk_control.model_primitives import Base
 
     Base.metadata.create_all(postgres_engine)
     now = [datetime.now(UTC)]

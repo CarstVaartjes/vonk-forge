@@ -9,20 +9,19 @@ from typing import Any, cast
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_maintenance import ArtifactMaintenanceCadence
-from vonk_control.fleet_profiles import (
-    FleetProfileService,
-    RunSwitchFleetProfileAdapter,
-)
+from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.jobs.queue import JobService
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import Base
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
-from vonk_control.recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
+from vonk_control.recipe_routes.service import RecipeRouteService
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.telemetry import maintenance as telemetry_maintenance
 from vonk_control.worker.assembly import assemble_production_worker
 from vonk_control.worker.loop import Worker
@@ -352,7 +351,9 @@ def test_unusable_image_cache_root_leaves_the_other_lanes_running_and_heals(
     )
     from vonk_control.capabilities import CapabilityRegistry
     from vonk_control.capability_contract import CapabilityAvailability
-    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+    from vonk_control.runtime_image_preparation.storage import (
+        FilesystemRuntimeImageStorage,
+    )
 
     now = [datetime(2026, 8, 6, tzinfo=UTC)]
     clock = lambda: now[0]

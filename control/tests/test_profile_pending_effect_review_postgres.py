@@ -22,25 +22,18 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 from vonk_control import agent_operation_states
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.fleet_profile_contract import FleetProfileInput, FleetProfilePreview
-from vonk_control.fleet_profiles import (
-    _persisted_profile_plan,
-    build_production_fleet_profile_service,
-)
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.fleet_profiles.persistence import _persisted_profile_plan
 from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.lifecycle.evidence import Residue
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    FleetProfileApplication,
-    Job,
-    RecipeRun,
-    ResourceReservation,
-    RunNode,
-)
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
+from vonk_control.models.fleet import AgentNode, FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.stored.json_values import write_guard_mode
 
 from .agent_fences import fenced_attempt, fenced_operation

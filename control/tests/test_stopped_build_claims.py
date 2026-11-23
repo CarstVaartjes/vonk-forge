@@ -22,7 +22,8 @@ from vonk_control.inventory.repository import (
     NodeInventoryReport,
 )
 from vonk_control.memory_reservations import memory_reservations
-from vonk_control.models import Job, ResourceReservation
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.jobs import Job
 from vonk_control.owner_liveness import OwnerKind
 from vonk_control.reservation_owners import OWNER_SETTLE_GRACE, reservation_owner
 

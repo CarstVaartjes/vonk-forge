@@ -30,26 +30,25 @@ from sqlalchemy import create_engine, event, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.inventory import ModelStoreObject
-from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_cache_contract import CacheManifest
-from vonk_control.models import (
+from vonk_control.models.cache import ModelCacheSet, ModelCacheSetArtifact, RecipeBuild
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
-    ClusterMapping,
-    ClusterMappingNode,
-    FleetProfile,
+)
+from vonk_control.models.execution import (
     InstallationNode,
-    Job,
     MeasuredRolePeak,
-    ModelCacheSet,
-    ModelCacheSetArtifact,
-    RecipeBuild,
     RecipeInstallation,
 )
+from vonk_control.models.fleet import FleetProfile
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
 from vonk_control.recipe_execution_contract import parse_stored_installation_plan
-from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .test_fleet_model_removal_postgres import inventory

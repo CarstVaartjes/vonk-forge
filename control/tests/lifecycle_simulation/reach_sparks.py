@@ -28,13 +28,10 @@ from dataclasses import dataclass, field
 
 from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
-from vonk_control.agent_jobs import (
-    CLAIM_LEASE_SECONDS,
-    StaleAgentAttempt,
-    _failure_result,
-)
+from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS, StaleAgentAttempt
+from vonk_control.agent_jobs.evidence import _failure_result
 from vonk_control.inventory.items import inventory_items
-from vonk_control.models import AgentNode
+from vonk_control.models.fleet import AgentNode
 from vonk_control.recipe_operations.observation_helpers import (
     prepare_exact_recipe_run_observation_nodes,
 )

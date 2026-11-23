@@ -12,25 +12,23 @@ from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState
 from vonk_control.fleet_profiles import queue_application as profile_module
 from vonk_control.jobs.documents import AvailabilityRuntime
-from vonk_control.models import (
-    AgentNode,
-    FleetProfileApplication,
-    Job,
-    NodeInventorySnapshot,
-    RecipeBuild,
-    User,
-)
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.fleet import AgentNode, FleetProfileApplication, User
+from vonk_control.models.jobs import Job
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.recipe_availability_intent import RecipeBuildDependency
 from vonk_control.recipe_builds.cancellation import (
     BuildConsumerError,
     lock_build_dependency,
 )
-from vonk_control.recipe_image_availability import (
+from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityError,
-    RecipeImageAvailabilityService,
     RecipeImageAvailabilityUnknown,
 )
-from vonk_control.recipe_operations import RecipeOperationConflict
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
+)
+from vonk_control.recipe_operations.errors import RecipeOperationConflict
 from vonk_control.recipe_runtime_specs import RUNTIME_INTERFACE
 from vonk_forge_contracts import RecipeDefinition
 

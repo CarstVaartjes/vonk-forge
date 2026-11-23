@@ -22,8 +22,8 @@ from ..agent_operation_facts import aware as _aware
 from ..artifact_lifecycle import ArtifactIdentity, has_pending_removal
 from ..bounded_json import require_integer
 from ..categorized_errors import InvalidValue
-from ..lifecycle import Effect, Lifecycle, Outcome, Reported, State, Tick
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from ..lifecycle.types import Effect, Lifecycle, Outcome, Reported, State, Tick
 from ..model_cache_contract import (
     CacheOperationKind,
     ModelCacheDownloadPayload,
@@ -31,7 +31,7 @@ from ..model_cache_contract import (
     ModelCacheSetState,
     ModelCacheTransfer,
 )
-from ..models import ModelCacheOperation, ModelCacheSet
+from ..models.cache import ModelCacheOperation, ModelCacheSet
 from .artifacts import ArtifactSetManifest, _unique_artifacts
 from .catalog_helpers import _iso
 from .constants import (

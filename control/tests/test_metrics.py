@@ -4,12 +4,11 @@ from importlib.resources import files
 from typing import Any, Literal
 
 from fastapi.testclient import TestClient
-from vonk_agent_protocol import NodeOfflineReason
-from vonk_control.api import create_app
+from vonk_agent_protocol import CertificateState, NodeOfflineReason
+from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
-from vonk_control.fleet_projection import (
+from vonk_control.fleet_projection.common import (
     CapacityReservations,
-    CertificateState,
     FleetNode,
     FleetSnapshot,
     InventoryState,
@@ -18,7 +17,7 @@ from vonk_control.fleet_projection import (
     TelemetryState,
 )
 from vonk_control.metrics.registry import MetricsRegistry, runnable_job_ages
-from vonk_control.models import NodeEngineSample
+from vonk_control.models.telemetry import NodeEngineSample
 from vonk_control.telemetry.samples import LiveEngineReading
 
 NODE = "spk_00000000000000000000000000000001"

@@ -7,7 +7,7 @@ from unittest.mock import Mock
 
 import pytest
 from sqlalchemy.orm import Session
-from vonk_control.artifact_reference_scan import require_model_sets_open
+from vonk_control.artifact_reference_scan.model_sets import require_model_sets_open
 from vonk_control.categorized_errors import InvalidValue
 
 

@@ -28,12 +28,9 @@ from ..content_identity import (
     catalog_selector_membership,
 )
 from ..model_cache_contract import CacheManifest
-from ..models import (
-    CatalogDocumentRevision,
-    FleetProfile,
-    ModelCacheSet,
-    ModelCacheSetArtifact,
-)
+from ..models.cache import ModelCacheSet, ModelCacheSetArtifact
+from ..models.catalog import CatalogDocumentRevision
+from ..models.fleet import FleetProfile
 from .types import ArtifactReferenceFinding, _finding
 
 

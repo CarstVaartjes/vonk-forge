@@ -21,13 +21,9 @@ from ..artifact_lifecycle import (
     lock_removal_fences,
     retryable_artifact_database_error,
 )
-from ..artifact_reference_scan import (
-    runtime_image_reference_reasons,
-)
+from ..artifact_reference_scan.image_references import runtime_image_reference_reasons
 from ..jobs import states as job_states
-from ..models import (
-    Job,
-)
+from ..models.jobs import Job
 from ..recipe_image_removal_contract import (
     RecipeCacheRemovalOwner,
     RecipeCacheRemovalResult,

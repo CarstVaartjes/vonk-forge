@@ -20,12 +20,12 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.http_failure import TransientReason
 
-from ..distribution import DistributionError, DistributionUnknown
+from ..distribution.types import DistributionError, DistributionUnknown
 from ..download_contract import download_responses, upload_request_body
 from ..http_errors import temporary_http_answer
-from ..models import RecipeBuild
+from ..models.cache import RecipeBuild
+from ..oci_image_store import IMAGE_CACHE_DIRECTORY
 from ..operator_acceptance import ReceiptPolicy, operator_acceptance
-from ..runtime_image_preparation import IMAGE_CACHE_DIRECTORY
 from ..stored.states import RecipeBuildState
 from ..strict_json import _retry_later_response
 from .common import (

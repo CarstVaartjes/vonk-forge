@@ -29,72 +29,67 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping
-from vonk_control.distribution import (
-    DistributionService,
-    MemoryObjectSource,
-    RecipeBuildObjectSource,
-    build_distribution_service_from_components,
-)
+from vonk_control.distribution.filesystem import RecipeBuildObjectSource
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.sources import MemoryObjectSource
+from vonk_control.distribution.wiring import build_distribution_service_from_components
 from vonk_control.distribution_assignment import NodeDistributionAssignment
-from vonk_control.distribution_executor import (
-    CompositeDistributionPhaseExecutor,
-    DurableDistributionPhaseExecutor,
-    RuntimeImagePull,
-    _phase_receipt,
-)
 from vonk_control.distribution_executor import children as executor_module
 from vonk_control.distribution_executor import durable as durable_executor_module
+from vonk_control.distribution_executor.durable import DurableDistributionPhaseExecutor
+from vonk_control.distribution_executor.preparation import (
+    CompositeDistributionPhaseExecutor,
+)
+from vonk_control.distribution_executor.receipts import RuntimeImagePull, _phase_receipt
 from vonk_control.jobs.documents import (
     DistributionJobPayload,
     DistributionTransferProgress,
 )
-from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_cache_api import model_cache_operation_provider
 from vonk_control.model_cache_contract import (
     ModelCacheCounters,
     ModelCacheDownloadResult,
 )
 from vonk_control.model_cache_progress import cache_progress, progress_document
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    Base,
-    CatalogDocument,
-    CatalogDocumentRevision,
-    Job,
-    RecipeBuild,
-)
-from vonk_control.operation_api import merge_operation_providers
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operation_api.providers import merge_operation_providers
 from vonk_control.operations.item_contract import OperationRow, operation_item
-from vonk_control.run_switch_contract import (
+from vonk_control.run_switch_contract.evidence import (
     ArtifactStorageImpact,
+    RunSwitchPhase,
+)
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import (
     RunSwitchDistributionChildResult,
     RunSwitchModelDownloadResult,
-    RunSwitchOperationResult,
-    RunSwitchPhase,
-    RunSwitchPlan,
-    RunSwitchPreviewRequest,
     RunSwitchRuntimeImageResult,
     RunSwitchRuntimePlanResult,
     RunSwitchTargetTransferEvidenceResult,
     RunSwitchTargetTransferResult,
     RunSwitchVerifyResult,
+)
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.requests import (
+    RunSwitchPreviewRequest,
     SparkGroup,
     SparkGroupNode,
 )
-from vonk_control.run_switch_operations import (
-    RunSwitchOperationConflict,
-    RunSwitchOperationService,
+from vonk_control.run_switch_operations.artifact_validation import (
     _validate_artifact_execution,
 )
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
-    RuntimeImageReceipt,
-)
+from vonk_control.run_switch_operations.errors import RunSwitchOperationConflict
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import read_stored_model
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
@@ -1083,7 +1078,7 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(
 
         def get_operation(self, operation_id):
             if operation_id != cache_view.id:
-                from vonk_control.model_cache import ModelCacheNotFound
+                from vonk_control.model_cache.errors import ModelCacheNotFound
 
                 raise ModelCacheNotFound("model_cache.operation_missing", "missing")
             return cache_view

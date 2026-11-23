@@ -146,7 +146,7 @@ def latest_result(
 ) -> PreflightInventoryItem | None:
     """Read the canonical reusable item; attempt results remain operation history."""
     from ..inventory.items import inventory_items
-    from ..models import AgentNode
+    from ..models.fleet import AgentNode
 
     items = inventory_items(session.get(AgentNode, node_id))
     results = [

@@ -5,9 +5,12 @@ from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 from sqlalchemy import event, select
-from vonk_control.install_admission import InstallAdmissionBusy
-from vonk_control.models import AgentNode, Job, RecipeBuild, RecipeInstallation
-from vonk_control.recipe_builds import RecipeBuildService
+from vonk_control.install_admission.contracts import InstallAdmissionBusy
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_builds.service import RecipeBuildService
 
 from .test_recipe_builds import setup as setup_build
 from .test_recipe_operations import setup_services
@@ -181,7 +184,7 @@ def test_install_admission_ignores_a_row_lock_on_a_released_reservation(
 
     from sqlalchemy.orm import Session
     from vonk_agent_protocol import ReservationState
-    from vonk_control.models import ResourceReservation
+    from vonk_control.models.execution import ResourceReservation
 
     sessions, operations, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine, model_artifact=True

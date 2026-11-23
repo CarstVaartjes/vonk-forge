@@ -17,19 +17,19 @@ from ..jobs.documents import (
     DistributionTransferProgress,
 )
 from ..lifecycle.job import JobAdapter
-from ..models import (
-    AgentOperation,
-    Job,
-)
-from ..run_switch_contract import (
-    RunSwitchChildProgress,
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
+from ..run_switch_contract.evidence import RunSwitchPhase
+from ..run_switch_contract.phase_results import (
     RunSwitchDistributionChildResult,
-    RunSwitchMemberReceipt,
-    RunSwitchPhase,
-    RunSwitchPlan,
     RunSwitchTargetTransferResult,
 )
-from ..run_switch_operations import PhaseExecution
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_contract.progress import (
+    RunSwitchChildProgress,
+    RunSwitchMemberReceipt,
+)
+from ..run_switch_operations.interfaces import PhaseExecution
 from ..strict_json import read_stored_model
 from .receipts import _child_receipt, _phase_receipt
 from .verification import DistributionVerification

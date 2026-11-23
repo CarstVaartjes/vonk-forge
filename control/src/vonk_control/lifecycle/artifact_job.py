@@ -79,14 +79,10 @@ from ..artifact_job_evidence import (
     read_result_evidence,
 )
 from ..categorized_errors import InvalidValue
-from ..models import (
-    STOPPABLE_RUN_STATES,
-    AgentOperationAttempt,
-    ArtifactJob,
-    Job,
-    RecipeRun,
-)
-from ..models import AgentOperation as StoredOperation
+from ..models.execution import STOPPABLE_RUN_STATES, ArtifactJob, RecipeRun
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from ..persisted_waits import lifecycle_wait
 from ..settings import DATABASE_WAIT_BUDGETS
 from ..stall_window import stall_deadline

@@ -38,40 +38,31 @@ from vonk_agent_protocol.contracts import ArtifactDistributionResult, canonical_
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control import agent_operation_states as aos
-from vonk_control.agent_jobs import (
-    AgentJobService,
-    StaleAgentAttempt,
-    _claim_predicate,
-    authorize_operator_resume_in_session,
-)
+from vonk_control.agent_jobs.contracts import StaleAgentAttempt
+from vonk_control.agent_jobs.predicates import _claim_predicate
+from vonk_control.agent_jobs.retirement import authorize_operator_resume_in_session
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_operation_facts import START_STALL_WINDOW, job_start_deadline
-from vonk_control.distribution import (
-    DistributionService,
-    MemoryObjectSource,
-)
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.distribution_assignment import NodeDistributionAssignment
-from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.inventory.items import (
     inventory_items,
     runtime_value,
 )
-from vonk_control.lifecycle import Outcome, Reported
 from vonk_control.lifecycle.agent_operation import (
     AgentOperationAdapter,
     retry_scheduled,
 )
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    Base,
-    Job,
-    RecipeBuild,
-    RecipeRun,
-    ResourceReservation,
-)
-from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.lifecycle.types import Outcome, Reported
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import RecipeRun, ResourceReservation
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recipe_start_payloads import (
     RecipeStartPlacement,
     bind_compiled_execution_plan,
@@ -3057,7 +3048,7 @@ def test_a_retried_distribution_is_issued_a_fresh_grant(service) -> None:
     # The first claim renewed the grant. Expire that retained grant while the
     # accepted recovery budget remains open, as a shorter ingress lease can.
     with sessions.begin() as session:
-        from vonk_control.models import ArtifactDistributionAssignment
+        from vonk_control.models.operations import ArtifactDistributionAssignment
 
         assignment = session.scalar(select(ArtifactDistributionAssignment))
         assert assignment is not None
@@ -4525,7 +4516,7 @@ def test_gone_target_ends_without_retaining_queue_ownership(service, issued):
 
 def test_retiring_bookkeeping_preserves_a_working_route(service):
     """An unobserved retired order is never evidence to withdraw a serving run."""
-    from vonk_control.agent_jobs import _release_retired_owner_in_session
+    from vonk_control.agent_jobs.retirement import _release_retired_owner_in_session
 
     _jobs, sessions, clock = service
     owner = parent(sessions, clock)

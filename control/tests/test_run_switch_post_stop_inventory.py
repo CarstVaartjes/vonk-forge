@@ -11,13 +11,15 @@ from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import Job, NodeInventorySnapshot, RecipeRun
-from vonk_control.run_switch_contract import (
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.jobs import Job
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.run_switch_contract.requests import (
     RunSwitchApplyRequest,
     SparkGroup,
     SparkGroupNode,
 )
-from vonk_control.run_switch_operations import RecipeLifecyclePhaseExecutor
+from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
 
 from .test_profile_port_claims import _ready_profile
 from .test_recipe_operations import started_recipe

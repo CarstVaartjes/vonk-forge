@@ -10,9 +10,11 @@ from pathlib import Path
 
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import ArtifactLifecycleGate, Base, Job, ModelCacheOperation
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheOperation
+from vonk_control.models.jobs import Job
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .recipe_removal_review_support import remove_after_review
 from .removal_settle import release_ended_gates

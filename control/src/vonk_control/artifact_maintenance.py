@@ -14,7 +14,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from .artifact_jobs import StorageReconciliation
+from .artifact_jobs.contracts import StorageReconciliation
 from .logging import log_event
 
 _LOGGER = logging.getLogger(__name__)

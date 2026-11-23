@@ -9,7 +9,8 @@ from vonk_agent_protocol import UnknownOutcomeError, WaitReason, canonical_messa
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 
-from ..models import AgentNode, NodeInventoryItemsSnapshot
+from ..models.fleet import AgentNode
+from ..models.telemetry import NodeInventoryItemsSnapshot
 from .items_contract import AgentInventoryItems, PreflightInventoryItem
 
 
