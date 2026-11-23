@@ -7,8 +7,8 @@ from fastapi.testclient import TestClient
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 
+from .agent_api_support import Jobs
 from .recipe_operations_support import NOW
-from .test_agent_api import Jobs
 from .test_artifact_job_installed_cli import _artifact_api
 from .test_artifact_jobs import artifact_create_request
 

@@ -25,7 +25,7 @@ from vonk_control.models.operations import AgentOperationAttempt
 from vonk_control.models.telemetry import NodeInventorySnapshot, NodeTelemetrySample
 from vonk_control.operator_receipt_contract import AcceptanceReceipt, ReceiptCode
 
-from .test_agent_api import (
+from .agent_api_support import (
     NODE_A,
     NODE_C,
     PACKAGED_RUNTIME_IDENTITY,

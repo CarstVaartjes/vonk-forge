@@ -93,10 +93,10 @@ from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImag
 from vonk_control.strict_json import read_stored_model
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .agent_api_support import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 from .recipe_operations_support import NOW, setup_services
 from .run_switch_operations_support import _runtime_receipt
 from .runtime_image_fixtures import place_test_image
-from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 from .test_agent_jobs import distribution_payload
 
 

@@ -65,7 +65,7 @@ from .recipe_operations_support import (
 class _UnusedJobs:
     """Structural ``JobQueue`` for agent routes that never touch a Controller Job.
 
-    ``test_agent_api.Jobs`` predates the ``list_page`` member of the protocol,
+    ``agent_api_support.Jobs`` predates the ``list_page`` member of the protocol,
     so this suite supplies its own conforming stub instead of editing another
     suite's double.
     """

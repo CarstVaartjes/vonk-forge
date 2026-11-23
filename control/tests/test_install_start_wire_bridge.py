@@ -23,9 +23,9 @@ from vonk_control.models.operations import AgentOperation
 
 from tests.wire_probes import prebuilt_probe
 
+from .agent_api_support import NODE_A, agent_headers
+from .agent_api_support import agent_system as _agent_system
 from .recipe_operations_support import NOW, installed_recipe, setup_services
-from .test_agent_api import NODE_A, agent_headers
-from .test_agent_api import agent_system as _agent_system
 from .test_distribution import _assignment
 
 agent_system = _agent_system

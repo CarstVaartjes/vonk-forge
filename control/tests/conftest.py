@@ -24,6 +24,9 @@ from vonk_control.model_primitives import Base
 from vonk_control.stored.json_values import install_write_guard
 
 from . import metadata_type_snapshot
+from .agent_api_support import (  # noqa: F401 - pytest fixtures
+    agent_system,
+)
 from .api_response_witness import (
     pytest_addoption as _api_response_addoption,
 )

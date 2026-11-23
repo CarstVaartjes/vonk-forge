@@ -28,7 +28,7 @@ from vonk_control.models.fleet import AgentNode, AgentNodeContact
 from vonk_control.recovery_policy import RECOVERY
 from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
-from .test_agent_api import (
+from .agent_api_support import (
     NODE_A,
     STOP_PAYLOAD,
     agent_headers,
