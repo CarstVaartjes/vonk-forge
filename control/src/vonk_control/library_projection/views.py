@@ -12,9 +12,9 @@ from sqlalchemy import select
 
 from ..auth import cursor_key
 from ..catalog.queries import active_head_revision
+from ..identifiers import _UUID_PATTERN
 from ..library.contract import (
     _MAX_PAGE_RECIPES,
-    _UUID_PATTERN,
     LibraryFilterValues,
     LibraryModelProjection,
     LibraryRecipeAuthoringDetail,
@@ -36,6 +36,7 @@ from ..request_fault import RequestFault
 from ..stored.states import CatalogRevisionState
 from .common import (
     _LIBRARY_ORDER,
+    LibrarySelectorAmbiguous,
     _canonical_model,
     _canonical_recipe,
     _canonical_recipe_summary,
@@ -564,8 +565,6 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
     if not exact:
         raise KeyError(selector)
     if len(exact) > 1:
-        from .common import LibrarySelectorAmbiguous
-
         raise LibrarySelectorAmbiguous(
             selector, [f"{row.publisher}/{row.slug}" for row in exact]
         )

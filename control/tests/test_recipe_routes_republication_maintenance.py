@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
 from vonk_agent_protocol.state_machines import (

@@ -10,10 +10,10 @@ import pytest
 from sqlalchemy import create_engine, delete, event, func, inspect, select, text
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.telemetry import TelemetrySample
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.auth import TokenCodec
 from vonk_control.db.connections import session_factory
 from vonk_control.fleet_event_contract import (

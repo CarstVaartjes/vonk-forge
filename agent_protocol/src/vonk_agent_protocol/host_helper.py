@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     Field,
@@ -12,46 +12,35 @@ from pydantic import (
     model_validator,
 )
 
-from .contracts import (
+from .document_limits import (
     MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
-    AgentProtocolError,
-    canonical_message,
+    MAX_HOST_RUNTIME_REQUEST_BYTES,
 )
 from .gpu_clock import GpuClockIntent
 from .package_upgrade import PackageRollbackAuthority
+from .recipe_jobs import RecipeJobRunRequest
+from .recipe_operations import (
+    RecipeReconciliationIdentity,
+    RecipeStartPayload,
+    RecipeStopPayload,
+)
 from .run_inspect_target import ContainerRunTarget, RunInspectTarget
 from .swap import SwapIntent
-from .wire_model import MAX_RUN_GENERATION, WireModel
-
-if TYPE_CHECKING:
-    from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
-    from vonk_agent_protocol.recipe_operations import (
-        RecipeStartPayload,
-        RecipeStopPayload,
-    )
+from .wire_model import (
+    MAX_RUN_GENERATION,
+    AgentProtocolError,
+    Uuid4Text,
+    WireModel,
+    canonical_message,
+)
 
 HOST_HELPER_AUTHORITY = "vonk.host-maintenance-helper"
 HOST_HELPER_GRANT_DOMAIN = b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\x00"
 MAX_HOST_HELPER_GRANT_SECONDS = 300
-# A complete runtime request carries its typed plan plus one frame's worth of
-# projected argv and envelope. The signed helper frame itself carries only the
-# grant and request digest, never the request document.
-MAX_HELPER_FRAME_BYTES = 1024 * 1024
-MAX_HOST_RUNTIME_REQUEST_BYTES = (
-    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES + MAX_HELPER_FRAME_BYTES
-)
-HOST_RUNTIME_REQUEST_ENVELOPE_BYTES = 16 * 1024
-MAX_HOST_RUNTIME_ARGUMENT_BYTES = (
-    MAX_HELPER_FRAME_BYTES - HOST_RUNTIME_REQUEST_ENVELOPE_BYTES
-)
-MAX_ARGV_BYTES = MAX_HOST_RUNTIME_ARGUMENT_BYTES
-
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 Signature = Annotated[str, Field(pattern=r"^[0-9a-f]{128}$")]
 NodeId = Annotated[str, Field(pattern=r"^spk_[0-9a-f]{32}$")]
-UUID4_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-Uuid4Text = Annotated[str, Field(pattern=UUID4_PATTERN)]
 ContainerRuntimeActionName = Literal[
     "runtime-preflight",
     "image-pull",
@@ -61,13 +50,6 @@ ContainerRuntimeActionName = Literal[
     "stop",
     "installation-cleanup",
 ]
-
-
-class RecipeReconciliationIdentity(WireModel):
-    """The install a reconciliation removes, carried through the cleanup grant."""
-
-    installation_id: Uuid4Text
-    plan_digest: Digest
 
 
 class HostRuntimeRequest(WireModel):
@@ -89,13 +71,13 @@ class HostRuntimeRequest(WireModel):
     inspect_target: RunInspectTarget | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
-    start_plan: "RecipeStartPayload | None" = Field(  # noqa: UP037
+    start_plan: RecipeStartPayload | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
-    job_plan: "RecipeJobRunRequest | None" = Field(  # noqa: UP037
+    job_plan: RecipeJobRunRequest | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
-    stop_plan: "RecipeStopPayload | None" = Field(  # noqa: UP037
+    stop_plan: RecipeStopPayload | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
     run_generation: (

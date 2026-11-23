@@ -58,6 +58,7 @@ from .contracts import (
 )
 from .dependencies import _INSTALLATION_POLICY_ADAPTER, _LOGGER, _STORAGE_CODES
 from .persistence import (
+    _intended_profile,
     _next_profile_acceptance_time,
     _owns_pending_admission,
     _persisted_profile_progress,
@@ -86,7 +87,7 @@ class FleetProfileService:
     ) -> FleetProfileApplicationView:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         progress = _persisted_profile_progress(row)
-        intended = self._intended_profile(row, session=session)
+        intended = _intended_profile(row, session=session)
         if (
             row.profile_id != profile_id
             or row.actor != actor

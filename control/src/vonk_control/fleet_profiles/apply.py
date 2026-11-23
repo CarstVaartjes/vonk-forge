@@ -12,12 +12,12 @@ from sqlalchemy.exc import OperationalError
 from vonk_agent_protocol.agent_words import (
     ProfileOperationKind,
 )
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
 )
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..admission_locking import (
     AdmissionLockBusy,
@@ -44,6 +44,7 @@ from .assessment_support import (
     _profile_preview_is_waitable,
     _storage_wait_of,
 )
+from .continuing_effects import _application_is_current_selection
 from .contracts import (
     FleetProfileAdmissionBusy,
     FleetProfileAdmissionEffectBusy,
@@ -122,9 +123,7 @@ class FleetProfileService:
                     )
                 if row.selection_generation is not None:
                     progress = _persisted_profile_progress(row)
-                    if not self._application_is_current_selection(
-                        session, row, progress
-                    ):
+                    if not _application_is_current_selection(session, row, progress):
                         raise _FleetProfileSupersededIntentConflict(
                             "Selected Fleet profile was replaced before admission resumed"
                         )

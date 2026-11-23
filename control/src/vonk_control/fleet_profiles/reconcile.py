@@ -14,7 +14,6 @@ from vonk_agent_protocol.agent_words import (
     ProfileChildSource,
     ProfileReasonSeverity,
 )
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     WaitOwnerKind,
@@ -23,6 +22,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..failure_classification import error_code, is_definite, is_security_failure
 from ..fleet_profile_contract.applications import (
@@ -50,6 +50,12 @@ from ..reservation_owners import release_dead_owner_reservations
 from ..run_switch_contract.phase_results import RunSwitchStopResult
 from ..strict_json import read_stored_model
 from . import states as fleet_profile_states
+from .assignment_assessment import _assignment_state
+from .continuing_effects import (
+    _adopted_application_scope,
+    _application_is_current_selection,
+    _superseding_intent,
+)
 from .contracts import (
     FleetProfileChildPlanBlocked,
     FleetProfileConflict,
@@ -63,6 +69,7 @@ from .dependencies import (
 )
 from .error_summary import _normalized_failure_text
 from .persistence import (
+    _intended_profile,
     _persisted_profile_plan,
     _persisted_profile_progress,
     _stored_progress,
@@ -151,7 +158,7 @@ class FleetProfileService:
                     )
                     if row is not None and self._lifecycle.retry_pending(row):
                         progress = _persisted_profile_progress(row)
-                        if self._superseding_intent(session, row, progress):
+                        if _superseding_intent(session, row, progress):
                             self._lifecycle.supersede(
                                 row,
                                 str(error),
@@ -238,7 +245,7 @@ class FleetProfileService:
                 return True
             progress = stored
             if progress.intended_profile is not None:
-                intended = self._intended_profile(row, session=session)
+                intended = _intended_profile(row, session=session)
                 if isinstance(intended, Residue):
                     self._defer_on_residue(row, progress, intended, now)
                     return True
@@ -259,14 +266,14 @@ class FleetProfileService:
                 # Defensive parity with the SQL exclusion above. Never let a
                 # malformed query or dialect quirk monopolize ordinary work.
                 return cancellation_observed
-            if not self._application_is_current_selection(
+            if not _application_is_current_selection(
                 session, row, progress
-            ) and not self._superseding_intent(session, row, progress):
+            ) and not _superseding_intent(session, row, progress):
                 self._defer_exact_step(
                     row, progress, "Selected intent observation is unavailable", now
                 )
                 return True
-            if not self._application_is_current_selection(session, row, progress):
+            if not _application_is_current_selection(session, row, progress):
                 self._lifecycle.supersede(
                     row,
                     "Profile order was replaced by a newer fleet profile load; "
@@ -277,7 +284,7 @@ class FleetProfileService:
                     session=session,
                 )
                 return True
-            if self._superseding_intent(session, row, progress):
+            if _superseding_intent(session, row, progress):
                 self._lifecycle.supersede(
                     row,
                     "Profile order was replaced by a changed profile or later "
@@ -532,7 +539,7 @@ class FleetProfileService:
                         if item.id in effect.assignment_ids
                     ]
                     owner_pending |= owner.state != LifecycleState.SUCCEEDED or any(
-                        self._assignment_state(
+                        _assignment_state(
                             session,
                             item,
                             expected_image=expected_images.get(item.id),
@@ -572,7 +579,7 @@ class FleetProfileService:
                     row.status_reason = "Waiting for exact continuing assignments to finish under the selected profile"
                     row.updated_at = now
                     return True
-                continuing_scope = self._adopted_application_scope(session, row)
+                continuing_scope = _adopted_application_scope(session, row)
                 self._lifecycle.succeed(row, now, reason=None, session=session)
                 progress = read_stored_model(
                     FleetProfileApplicationProgress,
@@ -665,7 +672,7 @@ class FleetProfileService:
                         error, FleetProfilePermissionDenied | UnknownOutcomeError
                     ):
                         failed_progress = _persisted_profile_progress(failed)
-                        if self._superseding_intent(session, failed, failed_progress):
+                        if _superseding_intent(session, failed, failed_progress):
                             self._lifecycle.supersede(
                                 failed,
                                 "A newer accepted intent owns the effects",

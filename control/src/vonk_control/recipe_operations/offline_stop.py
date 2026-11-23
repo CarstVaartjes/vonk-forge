@@ -11,8 +11,7 @@ from sqlalchemy import or_, select, true
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import (
     InvalidRequestError,
@@ -21,6 +20,8 @@ from vonk_agent_protocol.outcome import (
 )
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.state_machines import RunState
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.fleet_profiles.stop_contract import OfflineStopIntent
 
 from ..admission_locking import (
     AdmissionLockBusy,
@@ -29,9 +30,8 @@ from ..admission_locking import (
     node_admission_key,
 )
 from ..agent_contacts import last_seen
-from ..fleet_profiles.stop_authority import (
-    ProfileJobRunStopJob,
-)
+from ..cancelled_runtime import reconcile_cancelled_runtime
+from ..fleet_profiles.stop_contract import ProfileJobRunStopJob
 from ..jobs.documents import RecipeStopParent
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
 from ..logging import redact_text
@@ -42,7 +42,7 @@ from ..models.operations import AgentOperation
 from ..offline_stops import deferred_stop_nodes
 from ..owner_liveness import OwnerKind
 from ..persisted_waits import schedule_wait
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import serialize_json_value
 from .intent import _bound_workload_intent
 from .interfaces import _TERMINAL_JOB_STATES, UndispatchedStopView
@@ -66,7 +66,6 @@ class OfflineStopMixin:
         """Give one due Stop the external publication turn for this worker pass."""
         service = typing_cast("RecipeOperationService", self)
         now = service._clock()
-        from ..cancelled_runtime import reconcile_cancelled_runtime
 
         cancelled_progressed = (
             reconcile_cancelled_runtime(service) if job_id is None else False
@@ -190,7 +189,6 @@ class OfflineStopMixin:
         attempt-fencing path. No request, slot or fleet queue waits for contact.
         """
         service = typing_cast("RecipeOperationService", self)
-        from vonk_control.fleet_profiles.stop_authority import OfflineStopIntent
 
         now = service._clock()
         with service._sessions() as session:

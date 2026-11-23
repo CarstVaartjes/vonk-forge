@@ -7,13 +7,12 @@ import pytest
 
 from vonk_agent_protocol.contracts import (
     AgentClaim,
-    AgentProtocolError,
     AgentResult,
-    canonical_message,
     validate_result_for_operation,
     validate_schema_message,
 )
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
+from vonk_agent_protocol.wire_model import AgentProtocolError, canonical_message
 
 VECTORS = Path(__file__).parents[1] / "src/vonk_agent_protocol/vectors"
 

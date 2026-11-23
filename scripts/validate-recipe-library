@@ -486,7 +486,7 @@ def _validate_recipe_option_policy(
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
     from vonk_control.harnesses.canonical import validate_runtime_policy
-    from vonk_control.harnesses.common import HarnessCompileError
+    from vonk_control.harnesses.errors import HarnessCompileError
 
     for option in recipe.options:
         for choice in option.choices:

@@ -14,7 +14,7 @@ from vonk_forge_contracts import RecipeDefinition
 from tests.artifact_jobs_support import _mapping, running_artifact_service
 from tests.recipe_operations_support import NOW
 from tests.test_platform_observation import Jobs
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.api.application import create_app
 from vonk_control.artifact_jobs.api import ArtifactJobCreate
 from vonk_control.artifact_jobs.contracts import ArtifactJobListResponse

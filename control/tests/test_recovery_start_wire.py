@@ -6,11 +6,12 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import AgentOperation, canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.recipe_operations import (
     RecipeOperationRequest,
     RecipeStartPayload,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
 from vonk_control.distributed_recovery.singleton import _accepted_start_authority
 from vonk_control.lifecycle.evidence import Residue

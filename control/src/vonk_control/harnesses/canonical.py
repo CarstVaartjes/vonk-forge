@@ -22,7 +22,7 @@ from vonk_forge_contracts.resolver import (
     validate_recipe_models,
 )
 
-from vonk_agent_protocol.host_helper import MAX_ARGV_BYTES
+from vonk_agent_protocol.document_limits import MAX_ARGV_BYTES
 from vonk_agent_protocol.telemetry import EngineFormat
 
 from ..platform_ports import rebind_port_argument, serving_port
@@ -42,8 +42,9 @@ from .canonical_metadata import (
     CANONICAL_HARNESSES,
     canonical_harness,
 )
-from .common import HarnessCompileError, validate_projection
+from .common import validate_projection
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection
+from .errors import HarnessCompileError
 
 _BUILTINS = frozenset(metadata.slug for metadata in CANONICAL_HARNESSES)
 _JOB_INTERFACES = frozenset(

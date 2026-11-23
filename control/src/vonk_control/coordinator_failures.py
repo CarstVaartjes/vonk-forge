@@ -7,7 +7,6 @@ from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     FailureCode,
     InvalidRequestReason,
@@ -16,6 +15,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitResumeCondition,
 )
 from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .agent_operation_facts import aware
 from .coordinator_contract import CoordinatorFailureEvidence

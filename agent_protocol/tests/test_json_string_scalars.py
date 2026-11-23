@@ -22,7 +22,8 @@ import pytest
 from pydantic import BaseModel
 
 import vonk_agent_protocol
-from vonk_agent_protocol.contracts import AgentFailureResult, AgentResult
+from vonk_agent_protocol.agent_operations import AgentFailureResult
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.failure_evidence import FAILURE_LOG_POLICY, FailureDiagnostics
 from vonk_agent_protocol.optional_evidence import EvidenceDrop
 from vonk_agent_protocol.page_cache import PageCacheDropProblem, PageCacheDropReport

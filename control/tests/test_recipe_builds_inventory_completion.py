@@ -12,9 +12,9 @@ from sqlalchemy import Table, select
 from vonk_forge_contracts import RecipeDefinition
 
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import SecurityRefusalError
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,
 )

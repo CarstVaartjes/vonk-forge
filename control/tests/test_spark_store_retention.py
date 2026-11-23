@@ -10,8 +10,8 @@ from sqlalchemy import select, update
 from vonk_forge_contracts import document_sha256, read_model
 from vonk_forge_contracts.model import ModelReference
 
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.agent_words import ProfileDocumentState
-from vonk_agent_protocol.contracts import AgentOperation
 from vonk_agent_protocol.inventory import InventoryVerdict
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.resources import StorageDemandCode

@@ -7,8 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
+)
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
@@ -17,6 +18,7 @@ from vonk_agent_protocol.host_helper import (
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.stored import column_value
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.distribution.service import DistributionService

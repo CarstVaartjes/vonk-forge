@@ -17,12 +17,11 @@ from pydantic import (
 )
 from vonk_forge_contracts.model import ModelReference
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleEffect, LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheBlockerCode
 from vonk_agent_protocol.state_machines import ModelCacheOperatorStatus
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 
 from ..cursor_contract import MAX_CURSOR_LENGTH
 from ..machine_states import ModelFileStateField

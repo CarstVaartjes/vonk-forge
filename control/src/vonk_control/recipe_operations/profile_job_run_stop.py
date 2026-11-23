@@ -11,9 +11,8 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -24,6 +23,7 @@ from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.state_machines import RouteState, RunState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states
 from ..agent_jobs.retry import superseded_cancellation_deadline
@@ -33,14 +33,17 @@ from ..artifact_jobs.evidence import ArtifactJobResultEvidence
 from ..categorized_errors import (
     InvalidValue,
 )
+from ..fleet_profiles.persistence import _persisted_profile_progress
 from ..fleet_profiles.stop_authority import (
+    issued_order_link,
+    validate_profile_jobrun_stop_target,
+    validate_profile_stop_owner,
+)
+from ..fleet_profiles.stop_contract import (
     ProfileJobRunStopAuthorization,
     ProfileJobRunStopJob,
     ProfileJobRunStopTarget,
     ProfileStopAuthorityError,
-    issued_order_link,
-    validate_profile_jobrun_stop_target,
-    validate_profile_stop_owner,
 )
 from ..jobs.documents import RunSwitchJobPayload, controller_recipe_document
 from ..lifecycle.agent_operation import AgentOperationAdapter
@@ -56,7 +59,7 @@ from ..models.fleet import FleetProfileApplication
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
 from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import read_stored_model
 from .errors import (
     RecipeArtifactJobCancellationPending,
@@ -276,7 +279,6 @@ class ProfileJobRunStopMixin:
         the run is refused as a security edge, never stopped.
         """
         service = typing_cast("RecipeOperationService", self)
-        from ..fleet_profiles.persistence import _persisted_profile_progress
 
         application = session.get(FleetProfileApplication, profile_application_id)
         try:

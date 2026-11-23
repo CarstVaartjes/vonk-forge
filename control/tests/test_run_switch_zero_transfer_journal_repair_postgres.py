@@ -18,10 +18,10 @@ from psycopg.errors import LockNotAvailable
 from sqlalchemy import delete, event, inspect, select, update
 from sqlalchemy.engine import ExceptionContext
 
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import JournalRepairCode
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control import terminal_history_collection
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.db.startup import initialize_database
@@ -47,7 +47,6 @@ from vonk_control.run_switch_contract.journal import (
     RunSwitchJournalRepairPendingState,
 )
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
-from vonk_control.run_switch_journal_repair import pending as repair_pending
 from vonk_control.run_switch_journal_repair import repair as repair_owner
 from vonk_control.run_switch_journal_repair.discovery import journal_document
 from vonk_control.run_switch_journal_repair.observation import (
@@ -55,6 +54,7 @@ from vonk_control.run_switch_journal_repair.observation import (
 )
 from vonk_control.run_switch_journal_repair.pending import REPAIR_BUDGET
 from vonk_control.run_switch_operations import advance as advance_owner
+from vonk_control.run_switch_operations import cancellation_retry
 from vonk_control.run_switch_operations.image_receipts import _planned_transfer_parts
 from vonk_control.run_switch_operations.planning_helpers import (
     _run_switch_payload,
@@ -709,7 +709,7 @@ def test_fault_cancel_preserves_issued_child_until_late_exact_fenced_receipts(
             60,
         )
     else:
-        original_record = repair_pending.record_repair_cancellation
+        original_record = cancellation_retry.record_repair_cancellation
 
         def repair_before_record(*args):
             assert (
@@ -719,7 +719,7 @@ def test_fault_cancel_preserves_issued_child_until_late_exact_fenced_receipts(
             original_record(*args)
 
         monkeypatch.setattr(
-            repair_pending, "record_repair_cancellation", repair_before_record
+            cancellation_retry, "record_repair_cancellation", repair_before_record
         )
     cancellation = planner.cancel(
         switch_id,

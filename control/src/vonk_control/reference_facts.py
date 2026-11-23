@@ -14,55 +14,13 @@ Readers ask the facts only; they never read assignments or plans to answer these
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import Collection
 
-from pydantic import TypeAdapter
-from sqlalchemy import delete, insert, select
-from sqlalchemy.engine import Connection
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .content_identity import catalog_selector_membership
-from .fleet_profile_contract.vocabulary import RecipeSelector
 from .models.fleet import FleetProfile, FleetProfileRecipe
-
-
-def profile_recipes(assignments: object) -> frozenset[tuple[str, str]]:
-    """The (publisher, slug) of every recipe these saved assignments name.
-
-    Assignments are validated where a profile is saved; a value that is not a
-    list of assignments with a valid recipe selector is refused here too.
-    """
-
-    if not isinstance(assignments, list):
-        raise TypeError("saved profile assignments must be a list")
-    selector = TypeAdapter(RecipeSelector)
-    found: set[tuple[str, str]] = set()
-    for assignment in assignments:
-        if not isinstance(assignment, Mapping):
-            raise TypeError("saved profile assignment must be an object")
-        publisher, _, slug = selector.validate_python(
-            assignment.get("recipe_selector"), strict=True
-        ).partition("/")
-        found.add((publisher, slug))
-    return frozenset(found)
-
-
-def write_profile_recipes(
-    connection: Connection, profile_id: str, assignments: object
-) -> None:
-    """Replace one profile's projection with what its assignments name."""
-    recipes = profile_recipes(assignments)
-    connection.execute(
-        delete(FleetProfileRecipe).where(FleetProfileRecipe.profile_id == profile_id)
-    )
-    if recipes:
-        connection.execute(
-            insert(FleetProfileRecipe),
-            [
-                {"profile_id": profile_id, "publisher": publisher, "slug": slug}
-                for publisher, slug in sorted(recipes)
-            ],
-        )
 
 
 def profiles_naming(

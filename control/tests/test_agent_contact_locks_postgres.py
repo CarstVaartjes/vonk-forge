@@ -22,14 +22,12 @@ from sqlalchemy import event, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.contracts import (
-    AgentResult,
-    RecipeStartResult,
-    canonical_message,
-)
+from vonk_agent_protocol.agent_operations import RecipeStartResult
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,

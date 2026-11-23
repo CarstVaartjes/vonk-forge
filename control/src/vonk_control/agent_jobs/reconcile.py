@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import or_, select
 
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
@@ -22,6 +22,8 @@ from ..admission_locking import (
 )
 from ..agent_operation_facts import attempt_holds_order as _attempt_holds_order
 from ..agent_operation_facts import aware as _aware
+from ..agent_operation_facts import fencing_intent
+from ..cancelled_runtime import cancellation_stop_current
 from ..failure_classification import disposition, error_detail, wait_reason
 from ..lifecycle.agent_operation import AgentOperationAdapter, lapsed_running_orders
 from ..lifecycle.artifact_job import ArtifactJobAdapter
@@ -34,7 +36,6 @@ from ..models.operations import AgentOperation as StoredOperation
 from ..models.operations import AgentOperationAttempt
 from ..own_cleanup import CLEANUP_KINDS
 from ..recovery_policy import WAIT_STEP
-from .contracts import fencing_intent
 from .endings import end_unobserved_order
 from .observation_receipts import (
     OBSERVATION_KINDS,
@@ -115,8 +116,6 @@ def _sweep_lapsed_attempts(
     when its Spark never claims anything again.  Only an attempt that still
     holds a lease or an open launch budget is left alone.
     """
-
-    from ..cancelled_runtime import cancellation_stop_current
 
     now = self._clock()
     self._order_sweep_retry_at = {

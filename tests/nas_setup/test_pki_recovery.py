@@ -19,7 +19,7 @@ from vonk_agent_protocol.installer_setup import (
     NasInternalValue,
     NasSecretPrompt,
 )
-from vonk_nas_setup import pki, publication
+from vonk_nas_setup import publication, setup
 from vonk_nas_setup.environment import parse_environment, render_environment
 from vonk_nas_setup.pki import renew_controller_leaf, validate_pki_material
 from vonk_nas_setup.prompts import PromptIo
@@ -195,7 +195,7 @@ def test_failed_pki_renewal_keeps_previous_bundle_and_rerun_publishes(
         raise ValueError("PKI renewal failed")
 
     with monkeypatch.context() as patch:
-        patch.setattr(pki, "renew_controller_leaf", broken_renewal)
+        patch.setattr(setup, "renew_controller_leaf", broken_renewal)
         with pytest.raises(ValueError, match="PKI"):
             prepare(newer, tmp_path, PromptIo(io.StringIO("")), upgrade=True)
     assert {name: (bundle / name).read_bytes() for name in before} == before

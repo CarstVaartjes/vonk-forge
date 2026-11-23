@@ -10,12 +10,12 @@ from typing import cast as typing_cast
 
 from sqlalchemy import or_, select, true
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states
 from ..agent_jobs.predicates import _JsonFlagIsTrue
@@ -31,7 +31,7 @@ from ..models.fleet import AgentNode
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
 from ..recipe_builds.cancellation import BuildConsumerError, build_cancellation
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import serialize_json_value
 from .constants import _WORKLOAD_INTENT_KINDS
 from .errors import RecipeOperationConflict, RecipeRequestInvalid

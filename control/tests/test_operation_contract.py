@@ -10,12 +10,12 @@ from sqlalchemy import Table, create_engine, event, insert
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import (
     OperationCheckpoint,
     OperationMemberProgress,
     OperationProgress,
+    canonical_message,
     normalize_operation_progress,
 )
 from vonk_control.bounded_json import require_mapping, require_sequence, text

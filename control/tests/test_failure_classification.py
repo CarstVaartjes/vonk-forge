@@ -10,7 +10,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError, SQLAlch
 from sqlalchemy.exc import TimeoutError as PoolTimeout
 from sqlalchemy.orm.exc import StaleDataError
 
-from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     SecurityRefusalReason,

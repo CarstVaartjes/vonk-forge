@@ -15,8 +15,8 @@ from sqlalchemy import Table, create_engine, event, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.telemetry import HostResourceSample
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService

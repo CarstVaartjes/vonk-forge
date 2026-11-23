@@ -10,12 +10,9 @@ from pathlib import Path
 
 import pytest
 
+from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentFailureResult
 from vonk_agent_protocol.agent_words import FailureStage
-from vonk_agent_protocol.contracts import (
-    AgentFailureKind,
-    AgentFailureResult,
-    AgentResult,
-)
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     FailureCode,
@@ -25,9 +22,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeFailed
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
-from vonk_control.agent_jobs.retry import JOB_PRE_LAUNCH_STAGES
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.agent_operation_facts import attempt_is_live
+from vonk_control.agent_operation_facts import JOB_PRE_LAUNCH_STAGES, attempt_is_live
 from vonk_control.lifecycle.core import LOST_OBSERVATION_BOUND, OBSERVE_BUDGET
 from vonk_control.lifecycle.types import State
 from vonk_control.recovery_policy import RecoveryPolicy
@@ -295,7 +291,7 @@ def test_a_reports_stage_decides_a_job_reissue_in_one_place() -> None:
         and isinstance(node.args[0], ast.Constant)
         and node.args[0].value == "stage"
     )
-    assert readers == ["agent_jobs/retry.py"]
+    assert readers == ["agent_operation_facts.py"]
 
 
 def test_every_wait_the_agent_reports_before_a_job_launches_is_reissued() -> None:

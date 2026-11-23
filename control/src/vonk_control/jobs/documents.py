@@ -46,7 +46,7 @@ from vonk_agent_protocol.state_machines import RouteState
 from vonk_agent_protocol.wire_model import OperationProgress
 
 from ..distribution_assignment import NodeDistributionAssignment
-from ..fleet_profiles.stop_authority import (
+from ..fleet_profiles.stop_contract import (
     JobRunStopScope,
     OfflineStopIntent,
     ProfileStopOwnerBinding,
@@ -55,7 +55,6 @@ from ..lifecycle.evidence import BookkeepingReason
 from ..mapping_parameters import EngineArgumentValue
 from ..operations.blockers import OperationBlocker
 from ..operations.contract import AvailabilityOperationFailure
-from ..recipe_builds.cancellation import RecipeBuildIntent
 from ..recipe_image_availability.availability_contract import (
     RecipeImageAvailabilityArtifact,
     RecipeImageAvailabilityState,
@@ -499,3 +498,10 @@ class DistributionJobPayload(DistributionJobIdentity):
 
 class EmptyJobResult(_Document):
     """A kind that records its outcome elsewhere stores no result document."""
+
+
+class RecipeBuildIntent(StrictJSONModel):
+    """The accepted producer's intent, independent of its current consumers."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    kind: Literal["independent", "dependency"]

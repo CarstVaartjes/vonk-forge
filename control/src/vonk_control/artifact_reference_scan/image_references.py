@@ -7,9 +7,9 @@ from collections.abc import Iterable, Mapping
 from sqlalchemy import select
 from sqlalchemy.orm import Session, load_only
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..artifact_jobs.lifecycle import (
     ArtifactReferenceUnverified,
@@ -21,6 +21,7 @@ from ..models.execution import RecipeInstallation, RecipeRun
 from ..models.fleet import FleetProfile, FleetProfileApplication
 from ..models.jobs import Job
 from ..models.operations import ArtifactDistributionAssignment
+from ..recipe_image_availability.contracts import OPERATION_KIND
 from ..reference_facts import profiles_naming
 from ..revision_images import (
     revision_archives,
@@ -267,8 +268,6 @@ def runtime_image_reference_findings(
                     + ("" if readable else " (installation plan unreadable)"),
                 )
             )
-
-    from ..recipe_image_availability.contracts import OPERATION_KIND
 
     operations_active = (
         Job.kind == OPERATION_KIND,

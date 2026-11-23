@@ -20,17 +20,17 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from vonk_agent_protocol.agent_operations import ArtifactDistributionResult
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import (
-    AgentResult,
-    ArtifactDistributionPayload,
-    ArtifactDistributionResult,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentResult, ArtifactDistributionPayload
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, LifecycleState
-from vonk_agent_protocol.wire_model import OperationMemberProgress, OperationProgress
+from vonk_agent_protocol.wire_model import (
+    OperationMemberProgress,
+    OperationProgress,
+    canonical_message,
+)
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping
@@ -40,7 +40,7 @@ from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.distribution.wiring import build_distribution_service_from_components
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.distribution_executor import children as executor_module
-from vonk_control.distribution_executor import durable as durable_executor_module
+from vonk_control.distribution_executor import receipts as receipts_module
 from vonk_control.distribution_executor.durable import DurableDistributionPhaseExecutor
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
@@ -2054,7 +2054,7 @@ def test_child_persistence_retains_in_place_default_members(
     initial,
 ):
     """Both child writers must retain mutations nested in their typed receipt."""
-    writer_module = executor_module if initial else durable_executor_module
+    writer_module = executor_module if initial else receipts_module
     original = writer_module._child_receipt
     member = OperationMemberProgress(member_id=NODE_A, phase=ProgressPhase.TRANSFER)
     writes = []

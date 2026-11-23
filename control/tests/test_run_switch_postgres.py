@@ -14,12 +14,12 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import event, select
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_agent_protocol.state_machines import RouteState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_api.common import AgentApiServices
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.api import production

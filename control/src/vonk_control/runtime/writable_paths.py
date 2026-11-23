@@ -15,6 +15,8 @@ from pathlib import PurePosixPath
 
 from vonk_agent_protocol.telemetry import EngineFormat
 
+from ..harnesses.errors import HarnessCompileError
+
 
 @dataclass(frozen=True, slots=True)
 class RuntimeWritablePath:
@@ -524,9 +526,6 @@ def document(
 
 
 def _compile_error(message: str) -> ValueError:
-    # Import lazily because the harness package imports this module.
-    from ..harnesses.common import HarnessCompileError
-
     return HarnessCompileError(message)
 
 

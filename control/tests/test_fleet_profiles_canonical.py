@@ -45,12 +45,14 @@ from vonk_control.fleet_profile_contract.definitions import (
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
 from vonk_control.fleet_profiles import read_observation as observation
 from vonk_control.fleet_profiles import read_observation as profile_read_observation
+from vonk_control.fleet_profiles.assignment_assessment import _assignment_state
 from vonk_control.fleet_profiles.contracts import FleetProfileConflict
 from vonk_control.fleet_profiles.projection_support import _profile_document
 from vonk_control.fleet_profiles.read_observation import (
     observe_storage,
     profile_read,
 )
+from vonk_control.fleet_profiles.saved_profiles import _definition
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.model_cache.contract import (
     CachedModelResolution,
@@ -1272,13 +1274,11 @@ def test_a_run_made_with_other_option_choices_is_not_the_assignments_state() -> 
         )
         session.flush()
         # The mapping was made for "standard": not this assignment's.
-        assert service._assignment_state(session, assignment).current_state == (
-            "not-placed"
-        )
+        assert _assignment_state(session, assignment).current_state == ("not-placed")
         matching = assignment.model_copy(
             update={"option_choices": {"verification": "standard"}}
         )
-        assert service._assignment_state(session, matching).current_state == "placed"
+        assert _assignment_state(session, matching).current_state == "placed"
 
 
 @pytest.mark.parametrize(
@@ -1459,7 +1459,7 @@ def test_save_observer_timeout_is_atomic_and_reconnects_to_committed_content(
         stored = session.get(FleetProfile, before.id)
         assert stored is not None
         assert stored.revision == before.revision + (not projection_fails)
-        assert service._definition(stored) == (
+        assert _definition(stored) == (
             before.definition
             if projection_fails
             else FleetProfileDefinition.model_validate(

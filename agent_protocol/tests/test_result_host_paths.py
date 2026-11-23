@@ -19,13 +19,11 @@ from typing import Any
 
 import pytest
 
-from vonk_agent_protocol.contracts import (
-    AgentFailureResult,
-    AgentProtocolError,
-    AgentResult,
-)
+from vonk_agent_protocol.agent_operations import AgentFailureResult
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.optional_evidence import HOST_PATH_MARKER, redact_host_paths
 from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
+from vonk_agent_protocol.wire_model import AgentProtocolError
 
 VECTORS = Path(__file__).parents[1] / "src/vonk_agent_protocol/vectors"
 

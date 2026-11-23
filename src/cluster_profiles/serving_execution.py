@@ -18,6 +18,11 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 from vonk_forge_contracts.recipe import RecipeMultipartServingRequest
+from vonk_forge_contracts.systemone import (
+    SystemOneRequest,
+    SystemOneResponse,
+    validate_decision_result,
+)
 
 from cluster_profiles.cli_states_generated import SUCCEEDED
 
@@ -149,13 +154,6 @@ def evaluate_http_response(
             raise ServingObservationUnknown("health check projection is unavailable")
         return {"response_shape": "health", "status": observation.status}
     if kind == "openai.systemone":
-        from pydantic import ValidationError
-        from vonk_forge_contracts.systemone import (
-            SystemOneRequest,
-            SystemOneResponse,
-            validate_decision_result,
-        )
-
         if "decision.probabilities" not in assertions:
             raise ServingObservationUnknown("decision assertion is unavailable")
         try:

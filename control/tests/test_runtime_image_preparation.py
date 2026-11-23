@@ -13,7 +13,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
-from vonk_control.catalog.entities import recipe_document_projection
+from vonk_control.catalog.revision_contract import recipe_document_projection
 from vonk_control.execution_plan_service import _runtime_image_receipt
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild

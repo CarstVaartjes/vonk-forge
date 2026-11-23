@@ -26,14 +26,14 @@ from pydantic import (
     model_validator,
 )
 
-from .contracts import AgentProtocolError
-from .host_helper import MAX_ARGV_BYTES
+from .document_limits import MAX_ARGV_BYTES
 from .job_limits import (
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
     MAX_INPUT_TOTAL_BYTES,
     MAX_TIMEOUT_SECONDS,
 )
+from .wire_model import AgentProtocolError
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]

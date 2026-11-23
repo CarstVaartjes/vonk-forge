@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from concurrent.futures import Future
 from threading import RLock
 from typing import TYPE_CHECKING, cast
@@ -19,10 +20,13 @@ from ..run_switch_operations.observation_window import checkpoint_verdict
 from ..run_switch_operations.planning_helpers import _run_switch_payload
 from ..run_switch_operations.result_helpers import _parse_persisted_result
 from ..stall_window import Verdict
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 
 if TYPE_CHECKING:
     from .preparation import CompositeDistributionPhaseExecutor
+
+# The warnings this mixin writes belong to the preparation executor it is part of.
+_LOGGER = logging.getLogger("vonk_control.distribution_executor.preparation")
 
 
 class BackgroundPreparations:
@@ -47,8 +51,6 @@ class BackgroundPreparations:
         its future here cannot permit an obsolete result to publish. Other
         preparations have separate executor slots and parent-owned deadlines.
         """
-        from .preparation import _LOGGER
-
         executor = cast("CompositeDistributionPhaseExecutor", self)
         with self._runtime_image_lock:
             pending = tuple(executor._runtime_image_futures.items())

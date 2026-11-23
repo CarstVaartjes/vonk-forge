@@ -13,8 +13,8 @@ import pytest
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.capability_reply import ControllerCapability
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.state_machines import RunState
 from vonk_control.capabilities import CapabilityRegistry
@@ -55,9 +55,12 @@ from vonk_control.storage_demands import (
     spark_scope,
 )
 from vonk_control.unused_storage_collection import pressure as unused_storage_pressure
-from vonk_control.unused_storage_collection.common import ACTOR, spark_eviction_capacity
+from vonk_control.unused_storage_collection.common import ACTOR
 from vonk_control.unused_storage_collection.evidence import _Evidence
-from vonk_control.unused_storage_collection.service import UnusedStorageCollector
+from vonk_control.unused_storage_collection.service import (
+    UnusedStorageCollector,
+    spark_eviction_capacity,
+)
 
 from .model_cache_support import _artifact, _download
 from .recipe_operations_support import started_recipe

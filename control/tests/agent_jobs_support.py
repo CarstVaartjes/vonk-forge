@@ -14,17 +14,16 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
-from vonk_agent_protocol.contracts import (
-    AgentResult,
-    ArtifactDistributionPayload,
-    canonical_message,
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
 )
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import AgentResult, ArtifactDistributionPayload
 from vonk_agent_protocol.recipe_operations import (
     RecipeOperationRequest,
     RecipeStopResult,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentCertificate, AgentNode

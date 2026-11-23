@@ -25,6 +25,7 @@ from ..auth import (
     CursorCodec,
     TokenCodec,
 )
+from ..auth_api import install_auth_routes
 from ..browser_auth import BrowserAuthService
 from ..capabilities import RecoveringService
 from ..catalog.api import install_catalog_routes
@@ -47,13 +48,13 @@ from ..observation.platform import (
 )
 from ..operation_api.contracts import OperationApiServices, bounded_error_responses
 from ..operator_acceptance import (
+    ControllerAPIRoute,
     OperatorReceiptResolver,
 )
 from ..operator_projection_api.services import FleetOperatorServices
 from ..recipe_image_availability.api import install_recipe_operator_routes
 from ..recipe_operations.service import RecipeOperationService
 from ..run_switch_operations.service import RunSwitchOperationService
-from ..strict_json import ControllerAPIRoute
 from .common import (
     JobQueue,
 )
@@ -148,8 +149,6 @@ def create_app(
     authenticated_actor = Depends(actor)
 
     if browser_auth is not None:
-        from ..auth_api import install_auth_routes
-
         install_auth_routes(
             app,
             browser_auth,

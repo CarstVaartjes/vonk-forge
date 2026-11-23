@@ -30,8 +30,7 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from .build_import import RecipeBuildCleanupEvidence, RecipeBuildEvidence
-from .contracts import (
+from .agent_operations import (
     AgentFailureKind,
     AgentFailureResult,
     AgentInstallResult,
@@ -39,6 +38,7 @@ from .contracts import (
     ArtifactDistributionResult,
     RecipeStartResult,
 )
+from .build_import import RecipeBuildCleanupEvidence, RecipeBuildEvidence
 from .failure_evidence import FailureDiagnostics
 from .lifecycle_vocabulary import (
     AgentResultState,
@@ -194,7 +194,7 @@ def outcome_body(
 
     This is the shape the Controller persists and every downstream reader
     already understands (an operation's success model, an
-    :class:`~vonk_agent_protocol.contracts.AgentFailureResult`, or a job receipt), so a
+    :class:`~vonk_agent_protocol.agent_operations.AgentFailureResult`, or a job receipt), so a
     typed report changes nothing a stored row exposes.
     """
 

@@ -12,8 +12,7 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -21,6 +20,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..admission_locking import (
     AdmissionLockBusy,
@@ -34,7 +34,11 @@ from ..admission_locking import (
 )
 from ..agent_jobs.predicates import _JsonFlagIsTrue
 from ..jobs import states as job_states
-from ..jobs.documents import RecipeBuildParent, controller_recipe_document
+from ..jobs.documents import (
+    RecipeBuildIntent,
+    RecipeBuildParent,
+    controller_recipe_document,
+)
 from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
@@ -46,14 +50,10 @@ from ..models.fleet import AgentNode
 from ..models.jobs import Job
 from ..owner_liveness import OwnerKind, issued_for, live_build_job
 from ..prebuilt_images import policy_prebuilt_reference
-from ..recipe_builds.cancellation import (
-    RecipeBuildIntent,
-    build_cancellation,
-    read_build_intent,
-)
+from ..recipe_builds.cancellation import build_cancellation, read_build_intent
 from ..recipe_builds.common import RecipeBuildAdmissionBusy, RecipeBuildPlan
 from ..source_policy import SourcePolicyReport
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..stored.states import RecipeBuildState
 from ..strict_json import serialize_json_value
 from .errors import RecipeRequestInvalid, RecipeRetryLater

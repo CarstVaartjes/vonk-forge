@@ -15,19 +15,15 @@ from sqlalchemy import event, func, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import (
-    AgentClaim,
-    AgentProgress,
-    AgentResult,
-    canonical_message,
-)
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.contracts import AgentClaim, AgentProgress, AgentResult
 from vonk_agent_protocol.inventory import InventoryRequest
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
-from vonk_control import agent_acceptance
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control import operator_acceptance
 from vonk_control.agent_api.common import AgentApiServices
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.api.application import create_app
@@ -706,14 +702,14 @@ def test_unknown_receipt_read_after_commit_preserves_owner_and_retry(
     client, services, _, clock = make_agent_system(tmp_path, engine=postgres_engine)
     headers = agent_headers(NODE_A, "serial-a")
     body = _inventory(clock)
-    original = agent_acceptance.resolve_agent_receipt
+    original = operator_acceptance.resolve_agent_receipt
 
     def unknown_owner(*args, **kwargs):
         raise UnknownOutcomeError(
             "injected owner observation loss", reason=WaitReason.OBSERVATION_UNAVAILABLE
         )
 
-    monkeypatch.setattr(agent_acceptance, "resolve_agent_receipt", unknown_owner)
+    monkeypatch.setattr(operator_acceptance, "resolve_agent_receipt", unknown_owner)
     failed = client.post("/agent/inventory", json=body, headers=headers)
     assert failed.status_code == 503
     assert failed.headers["x-vonk-error-code"] == ReceiptCode.UNAVAILABLE
@@ -723,7 +719,7 @@ def test_unknown_receipt_read_after_commit_preserves_owner_and_retry(
         assert (
             session.scalar(select(func.count()).select_from(NodeInventorySnapshot)) == 1
         )
-    monkeypatch.setattr(agent_acceptance, "resolve_agent_receipt", original)
+    monkeypatch.setattr(operator_acceptance, "resolve_agent_receipt", original)
     _reference(client.post("/agent/inventory", json=body, headers=headers))
     with services.sessions() as session:
         assert (

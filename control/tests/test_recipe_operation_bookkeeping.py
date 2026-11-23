@@ -20,13 +20,14 @@ from pathlib import Path
 import pytest
 from sqlalchemy import delete, select
 
+from vonk_agent_protocol.agent_operations import RecipeStartResult
 from vonk_agent_protocol.build_import import RecipeBuildCleanupEvidence
-from vonk_agent_protocol.contracts import RecipeStartResult, canonical_message
 from vonk_agent_protocol.host_helper import ContainerRuntimeAction
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload, RecipeStopResult
 from vonk_agent_protocol.state_machines import ReservationState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import recipe_operations
 from vonk_control.bounded_json import require_mapping
 from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
@@ -63,7 +64,10 @@ from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationProgressResult,
     RecipeOperationResult,
 )
-from vonk_control.recipe_operations.observation_helpers import record_build_evidence
+from vonk_control.recipe_operations.observation_helpers import (
+    _run_is_one_shot,
+    record_build_evidence,
+)
 from vonk_control.recipe_operations.progress import (
     _primary_model_identity,
     _recipe_model_identities,
@@ -73,7 +77,6 @@ from vonk_control.recipe_operations.progress import (
 )
 from vonk_control.recipe_operations.rank_authority import (
     _run_accepted_ranks,
-    _run_is_one_shot,
     _run_observes_per_generation,
 )
 from vonk_control.recipe_operations.results import _recorded_result

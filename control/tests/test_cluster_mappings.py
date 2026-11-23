@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.cluster_mappings import (
     ClusterMappingError,
     ClusterMappingService,

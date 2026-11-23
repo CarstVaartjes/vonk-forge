@@ -59,8 +59,8 @@ from sqlalchemy import Select, or_, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
+from vonk_agent_protocol.agent_operations import AgentFailureResult
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     FailureCode,
     InvalidRequestReason,
@@ -72,7 +72,8 @@ from vonk_agent_protocol.reason_codes.evidence import RunDegradedReason
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 
 from .. import agent_operation_states as aos
-from ..agent_operation_facts import aware
+from ..agent_jobs.supersession import _cancel_order
+from ..agent_operation_facts import aware, job_attempt_did_not_launch
 from ..artifact_jobs import states as ajs
 from ..artifact_jobs.evidence import (
     ArtifactJobResultEvidence,
@@ -87,7 +88,7 @@ from ..models.operations import AgentOperationAttempt
 from ..persisted_waits import lifecycle_wait
 from ..settings import DATABASE_WAIT_BUDGETS
 from ..stall_window import stall_deadline
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .adapter import Dispatch
 from .agent_operation import (
     JOB_RUN_OPERATION,
@@ -949,9 +950,6 @@ class ArtifactJobAdapter:
         if (owner_ended or settled) and any(
             order.state in aos.LIVE for order in orders
         ):
-            # imported here: agent_jobs reads this package's lifecycle.
-            from ..agent_jobs.supersession import _cancel_order
-
             _cancel_order(
                 AgentOperationAdapter(session),
                 parent,
@@ -991,9 +989,6 @@ class ArtifactJobAdapter:
             receipt = None if attempt is None else _RECEIPT_STATES.get(attempt.state)
             if receipt is Effect.STOPPED:
                 return Effect.STOPPED
-            # imported here: agent_jobs reads this package's lifecycle.
-            from ..agent_jobs.retry import job_attempt_did_not_launch
-
             # An attempt that reported it stopped before launch left nothing
             # for the cancel to stop (a damaged report proves nothing).
             report = None if attempt is None else read_row_column(attempt, "result")

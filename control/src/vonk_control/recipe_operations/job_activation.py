@@ -9,7 +9,6 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -20,6 +19,7 @@ from vonk_agent_protocol.outcome import (
     UnknownOutcomeError,
 )
 from vonk_agent_protocol.state_machines import RouteState, RunState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..admission_locking import (
     ConstraintReplay,
@@ -37,7 +37,7 @@ from ..run_admission import (
 from ..run_admission import (
     require_same_execution as require_same_run_execution,
 )
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import serialize_json_value
 from .errors import (
     RecipeRequestInvalid,

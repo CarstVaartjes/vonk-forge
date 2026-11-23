@@ -8,7 +8,7 @@ from datetime import datetime
 from sqlalchemy import ColumnElement, select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentFailureResult
+from vonk_agent_protocol.agent_operations import AgentFailureResult
 from vonk_agent_protocol.inventory import MAX_REPORTED_INSTALLATIONS, InstallationBytes
 from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
 from vonk_agent_protocol.state_machines import InstallationNodeState, InstallationState

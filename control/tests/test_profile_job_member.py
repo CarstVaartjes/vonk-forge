@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 
 from cluster_profiles.fleet_qualification_campaign_cli.contracts import Lane, Row
 from cluster_profiles.fleet_qualification_campaign_cli.profiles import _serving_run
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.recipe_jobs import (
@@ -33,6 +33,7 @@ from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
 from vonk_agent_protocol.state_machines import ReservationState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs import states as ajs
 from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore

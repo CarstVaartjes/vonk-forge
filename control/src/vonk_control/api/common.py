@@ -14,7 +14,6 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import FileResponse, StreamingResponse
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.error_response import (
     BoundedErrorResponse,
     ErrorContextResponse,
@@ -25,6 +24,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
 from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 from vonk_agent_protocol.reason_codes.catalog import CatalogCode
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..auth import agent_identity_from_scope
 from ..auth_api import LoginRequestInvalid

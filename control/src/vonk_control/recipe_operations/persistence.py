@@ -14,8 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, object_session
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -27,6 +26,7 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeStartPayload,
 )
 from vonk_agent_protocol.state_machines import ReservationState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states
 from ..admission_locking import (
@@ -63,7 +63,7 @@ from ..own_cleanup import CLEANUP_KINDS
 from ..run_admission import (
     RunAdmissionBusy,
 )
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import read_stored_model
 from ..workload_intent import allocate_workload_intent
 from .constants import _MANIFEST_BOUND_KINDS, _WORKLOAD_INTENT_KINDS
@@ -76,11 +76,11 @@ from .lifecycle_contract import (
 )
 from .observation_helpers import _RECIPE_PARENT_READERS
 from .progress import (
+    _RECIPE_WIRE_PAYLOAD_MODELS,
     _parent_identity,
     _project_recipe_operation_progress,
     _recorded_parent,
 )
-from .rank_authority import _RECIPE_WIRE_PAYLOAD_MODELS
 from .results import _recorded_result
 
 if TYPE_CHECKING:

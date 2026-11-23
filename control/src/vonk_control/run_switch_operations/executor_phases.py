@@ -5,12 +5,13 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from functools import partial
 from typing import (
     TYPE_CHECKING,
 )
 from typing import cast as typing_cast
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.outcome import InvalidRequestError
 from vonk_agent_protocol.reason_codes.admission import InstallDegradedReason
@@ -511,7 +512,6 @@ class ExecutorPhasesMixin:
                     plan.alias,
                     profile_application_id=profile_application_id,
                 )
-                from functools import partial
 
                 start = (
                     service._lifecycle.activate_job_run

@@ -10,12 +10,11 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.build_import import (
     RecipeBuildCleanupEvidence,
     RecipeBuildCleanupRequest,
 )
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     WaitOwnerKind,
@@ -29,15 +28,18 @@ from vonk_agent_protocol.state_machines import (
     RouteState,
     RunState,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states
 from ..admission_locking import (
     admission_attempts,
     admission_wait_exhausted,
 )
+from ..cancelled_runtime import cancellation_stop_current
 from ..installed_bytes import demote_ranks_on_lost_image
 from ..jobs.documents import RecipeBuildCleanupParent
 from ..lifecycle.agent_operation import AgentOperationAdapter
+from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
@@ -45,11 +47,17 @@ from ..lifecycle.evidence import (
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
 from ..lifecycle.types import Outcome
 from ..models.cache import RecipeBuild
-from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun, RunNode
+from ..models.execution import (
+    ArtifactJob,
+    InstallationNode,
+    RecipeInstallation,
+    RecipeRun,
+    RunNode,
+)
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
 from ..recipe_builds.cancellation import build_cancellation
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .constants import _WORKLOAD_INTENT_KINDS
 from .errors import RecipeRequestInvalid, RecipeRetryLater
@@ -169,10 +177,6 @@ class ResultConsumptionMixin:
             job.kind == WireAgentOperation.RECIPE_STOP
             and _parent_identity(job, "owner_kind") == WaitOwnerKind.ARTIFACT_JOB
         ):
-            from ..cancelled_runtime import cancellation_stop_current
-            from ..lifecycle.artifact_job import ArtifactJobAdapter
-            from ..models.execution import ArtifactJob
-
             artifact = session.get(ArtifactJob, _parent_identity(job, "owner_id"))
             if (
                 artifact is not None

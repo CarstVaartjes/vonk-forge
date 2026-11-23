@@ -48,6 +48,7 @@ from ..recipe_operations.availability_intent import (
 )
 from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
 from ..recipe_update_batches.contract import RecipeUpdateResponse
+from ..recipe_update_batches.service import RecipeUpdateBatches
 from ..runtime_image_preparation.contracts import (
     OCIImageTransport,
     RuntimeImageReceipt,
@@ -134,7 +135,6 @@ class RecipeImageAvailabilityService:
         self._identity_locks: dict[str, threading.Lock] = {}
         self._identity_locks_guard = threading.Lock()
         self._removal_lock = threading.RLock()
-        from ..recipe_update_batches.service import RecipeUpdateBatches
 
         self._updates = RecipeUpdateBatches(self, sessions)
 

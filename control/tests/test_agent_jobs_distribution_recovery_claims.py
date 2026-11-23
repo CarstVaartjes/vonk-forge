@@ -14,15 +14,13 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
-from vonk_agent_protocol.contracts import (
-    AgentProgress,
-    AgentResult,
-    ArtifactDistributionResult,
-    canonical_message,
-    canonical_payload,
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
 )
+from vonk_agent_protocol.agent_operations import ArtifactDistributionResult
+from vonk_agent_protocol.contracts import AgentProgress, AgentResult, canonical_payload
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.predicates import _claim_predicate
 from vonk_control.agent_jobs.service import AgentJobService

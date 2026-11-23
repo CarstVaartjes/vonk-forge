@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import AgentOperation as Operation
+from vonk_agent_protocol.agent_operations import AgentOperation as Operation
 from vonk_agent_protocol.state_machines import InstallationState, RunState
 from vonk_control.models.execution import RecipeInstallation
 from vonk_control.models.operations import AgentOperation

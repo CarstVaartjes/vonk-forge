@@ -6,9 +6,9 @@ from pydantic import AwareDatetime, Field
 
 from .agent_words import HostHelperResponseStatus
 from .failure_evidence import FailureLogTail
-from .host_helper import Digest, Uuid4Text
+from .host_helper import Digest
 from .reason_codes.helpers import HelperErrorCode
-from .wire_model import MAX_RUN_GENERATION, WireModel
+from .wire_model import MAX_RUN_GENERATION, Uuid4Text, WireModel
 
 
 class HostHelperProcessLogs(WireModel):

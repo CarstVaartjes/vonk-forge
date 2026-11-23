@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.jobs import Job

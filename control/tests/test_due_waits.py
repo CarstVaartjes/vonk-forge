@@ -26,7 +26,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import sessionmaker
 
 from tests.signed_recipe_release import signed_recipe_releases
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     WaitOwnerKind,
@@ -57,7 +57,7 @@ from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationResult,
 )
 from vonk_control.step_ca import StepCAUnavailable
-from vonk_control.stored.json_values import read_row_column
+from vonk_control.stored.rows import read_row_column
 from vonk_control.wait_contract import WaitEvidence
 from vonk_control.wait_redrive import WAIT_MODELS, wait_sources
 from vonk_control.worker.assembly import assemble_production_worker

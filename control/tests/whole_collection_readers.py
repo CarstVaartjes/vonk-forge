@@ -19,7 +19,7 @@ from .request_path_scans import TABLES, is_background, is_narrowed
 
 _STORAGE = "control/src/vonk_control/unused_storage_collection/"
 # Files that only a collector pass runs. The directory also holds request entry
-# points (``common.spark_eviction_capacity``, ``service.relief_for_spark``), so
+# points (``service.spark_eviction_capacity``, ``service.relief_for_spark``), so
 # it is not exempt as a whole.
 COLLECTOR_MODULES = (
     "control/src/vonk_control/catalog/revision_collection.py",

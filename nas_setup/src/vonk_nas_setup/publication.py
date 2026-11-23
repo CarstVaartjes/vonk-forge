@@ -26,6 +26,7 @@ from .filesystem import (
     sync_directory,
     write_member,
 )
+from .pki import validate_pki_material
 from .secrets import (
     generated,
     load_members,
@@ -70,8 +71,6 @@ def validate_members(
                 f"publication database URL {request.file} does not match its password"
             )
     if payload.step_ca_controller:
-        from .pki import validate_pki_material
-
         validate_pki_material(
             payload.step_ca_controller,
             environment,

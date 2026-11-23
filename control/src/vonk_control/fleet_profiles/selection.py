@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from time import monotonic
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
@@ -24,11 +23,9 @@ from ..admission_locking import (
     node_admission_key,
 )
 from ..auth import MUTATION_ROLES, Actor
-from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
 from ..lifecycle.evidence import Damaged, Residue, read_or_rebuild
 from ..models.fleet import FleetProfileApplication, FleetProfileSelection, User
 from ..persisted_waits import read_wait
-from ..settings import DATABASE_WAIT_BUDGETS
 from .capacity import release_unassigned_profile_claims
 from .contracts import (
     FleetProfileAdmissionBusy,
@@ -40,8 +37,8 @@ from .contracts import (
     _SelectedProfileSnapshot,
 )
 from .persistence import (
+    _intended_profile,
     _persisted_profile_plan,
-    _persisted_profile_progress,
 )
 from .projection_support import (
     _aware,
@@ -87,7 +84,7 @@ class FleetProfileService:
             if application.selection_generation != selection.generation:
                 return Damaged("selected profile generation is inconsistent")
             try:
-                intended = self._intended_profile(application, session=session)
+                intended = _intended_profile(application, session=session)
             except FleetProfileConflict as error:
                 # The reviewed intent's integrity check refused it.
                 return Damaged(str(error))
@@ -121,88 +118,18 @@ class FleetProfileService:
         )
 
     @staticmethod
-    def _application_is_current_selection(
-        session: Session,
-        application: FleetProfileApplication,
-        progress: FleetProfileApplicationProgress | None = None,
-    ) -> bool:
-        from .service import FleetProfileService
-
-        if progress is None:
-            progress = _persisted_profile_progress(application)
-        if FleetProfileService._adopted_application_scope(session, application):
-            return True
-        generation = application.selection_generation
-        selection = session.get(FleetProfileSelection, 1)
-        if selection is None:
-            return False
-        accepted_intent = progress.intended_profile
-        if accepted_intent is None:
-            return False
-        seen: set[str] = set()
-        current = application
-        current_progress = progress
-        deadline = monotonic() + DATABASE_WAIT_BUDGETS.statement_timeout_ms / 1000
-        while monotonic() < deadline:
-            if current.id in seen:
-                return False
-            seen.add(current.id)
-            current_intent = current_progress.intended_profile
-            if current_intent is None or current_intent != accepted_intent:
-                return False
-            generation = current.selection_generation
-            if generation is not None:
-                return bool(
-                    selection.generation == generation
-                    and selection.application_id == current.id
-                    and selection.profile_id == current.profile_id
-                    and current.profile_id == application.profile_id
-                )
-            retry_parent_id = current_progress.retry_of_application_id
-            if retry_parent_id is None:
-                return False
-            current = session.get(FleetProfileApplication, retry_parent_id)
-            if current is None:
-                return False
-            try:
-                current_progress = _persisted_profile_progress(current)
-            except FleetProfileConflict:
-                return False
-        return False
-
-    @staticmethod
     def _authorize(
         session: Session,
         actor: str,
         *,
         mutation: bool = True,
     ) -> None:
-        from .service import FleetProfileService
 
         user = session.scalar(select(User).where(User.subject == actor))
-        if not FleetProfileService._user_has_profile_authority(user, mutation=mutation):
+        if not _user_has_profile_authority(user, mutation=mutation):
             raise FleetProfilePermissionDenied(
                 "Current profile authority is unavailable"
             )
-
-    @staticmethod
-    def _user_has_profile_authority(user: User | None, *, mutation: bool) -> bool:
-        """Check current authority at the user-request boundary."""
-        if (
-            user is None
-            or user.disabled_at is not None
-            or (
-                mutation
-                and user.role
-                not in MUTATION_ROLES[("POST", "/api/profile/{number}/load")]
-            )
-        ):
-            return False
-        try:
-            Actor(user.subject, user.role)
-        except ValueError:
-            return False
-        return True
 
     def _release_claims(
         self, session: Session, application: FleetProfileApplication
@@ -269,3 +196,21 @@ class FleetProfileService:
             raise FleetProfilePortPromiseConflict(str(error)) from error
         except (ConstraintReplay, ConstraintDefect) as error:
             raise FleetProfileAdmissionDefect(str(error)) from error
+
+
+def _user_has_profile_authority(user: User | None, *, mutation: bool) -> bool:
+    """Check current authority at the user-request boundary."""
+    if (
+        user is None
+        or user.disabled_at is not None
+        or (
+            mutation
+            and user.role not in MUTATION_ROLES[("POST", "/api/profile/{number}/load")]
+        )
+    ):
+        return False
+    try:
+        Actor(user.subject, user.role)
+    except ValueError:
+        return False
+    return True

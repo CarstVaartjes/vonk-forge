@@ -17,11 +17,10 @@ from hypothesis import strategies as st
 from sqlalchemy import event, select
 
 from cluster_profiles.cli_render.dispatch import render_payload
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.agent_words import (
     AgentClientDecision,
 )
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.error_response import BoundedErrorResponse
 from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
 from vonk_agent_protocol.inventory import (
@@ -34,6 +33,7 @@ from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 from vonk_agent_protocol.state_machines import RouteState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_api import common
 from vonk_control.agent_api.common import (
     _ENROLLMENT_TOKEN,

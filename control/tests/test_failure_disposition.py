@@ -21,8 +21,8 @@ from sqlalchemy.orm.exc import StaleDataError
 from cluster_profiles import cli_states_generated as cli_words
 from cluster_profiles.control_client.common import observation_disposition
 from cluster_profiles.control_client.errors import ControlHTTPError
+from vonk_agent_protocol.agent_operations import AgentFailureKind
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import AgentFailureKind
 from vonk_agent_protocol.disposition import (
     FAILURE_KIND_DISPOSITION,
     HTTP_STATUS_DISPOSITIONS,

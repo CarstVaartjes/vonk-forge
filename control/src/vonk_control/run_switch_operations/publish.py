@@ -40,10 +40,11 @@ from ..runtime_image_preparation.contracts import RuntimeImagePreparationUnknown
 from ..runtime_image_preparation.contracts import (
     RuntimeImageReceipt as RuntimeImageReceiptDocument,
 )
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import (
     read_stored_model,
 )
+from .contracts import ScopeIntentStatus
 from .errors import (
     RunSwitchOperationConflict,
     _RuntimeImageIdentityUnknown,
@@ -52,9 +53,13 @@ from .errors import (
 from .identity_helpers import _stated_bytes, _string_or_none
 from .image_receipts import _require_profile_runtime_image
 from .ownership import _lock_phase_owner
-from .planning_helpers import _now, _run_switch_payload, _stored_job_plan
+from .planning_helpers import (
+    _now,
+    _run_switch_payload,
+    _scope_intent_status,
+    _stored_job_plan,
+)
 from .result_helpers import _bound_workload_intent, _progress_damaged, _read_progress
-from .retry_holds import RetryHoldsMixin
 
 
 def _persist_run_switch_runtime_image_reference(
@@ -239,7 +244,7 @@ def _persist_run_switch_runtime_image_reference(
             or current.phase_index != phase.index
             or current.item_index != item_index
             or current.child_operation_id is not None
-            or RetryHoldsMixin._scope_intent_status(session, job) != "current"
+            or _scope_intent_status(session, job) != ScopeIntentStatus.CURRENT
         ):
             raise _RuntimeImageOwnerChanged(
                 "RunSwitch phase was cancelled or superseded"

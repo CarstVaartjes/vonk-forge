@@ -26,8 +26,6 @@ from ..models.fleet import AgentNode
 from ..prebuilt_images import (
     PREBUILT_KEY_MISMATCH,
     PREBUILT_NOT_PINNED,
-    PREBUILT_USED,
-    PrebuiltDecision,
     executable_build_key,
 )
 from ..recipe_operations.execution_contract import (
@@ -46,6 +44,8 @@ from .common import (
     _BUILD_OBSERVATION_DELAYS,
     _LOGGER,
     BUILD_ARTIFACT_FORMAT,
+    PREBUILT_USED,
+    PrebuiltDecision,
     RecipeBuildError,
     RecipeBuildPlan,
     RecipeBuildResolution,

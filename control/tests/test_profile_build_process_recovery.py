@@ -21,8 +21,8 @@ import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
 )
@@ -64,7 +64,7 @@ from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_control.stored.json_values import read_row_column
+from vonk_control.stored.rows import read_row_column
 
 from .recipe_operations_support import (
     ConcurrentPublisher,

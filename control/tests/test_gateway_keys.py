@@ -23,14 +23,14 @@ from vonk_control.capabilities import CapabilityRegistry, CapabilityUnavailableE
 from vonk_control.capability_contract import CapabilityAvailability
 from vonk_control.gateway import keys as gateway_keys
 from vonk_control.gateway.keys import (
-    GatewayKeyCreated,
     GatewayKeyError,
     GatewayKeyService,
     install_gateway_key_routes,
     keep_default_key,
 )
+from vonk_control.gateway.keys_contract import GatewayKeyCreated
 from vonk_control.gateway.route_grants import GatewayInferenceRoute
-from vonk_control.strict_json import ControllerAPIRoute
+from vonk_control.operator_acceptance import ControllerAPIRoute
 
 from .observed_actions import observe_action
 

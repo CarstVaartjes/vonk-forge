@@ -5,6 +5,7 @@ from __future__ import annotations
 import array
 import contextlib
 import errno
+import fcntl
 import logging
 import os
 import secrets
@@ -568,8 +569,6 @@ def _disable_copy_on_write(directory: Path) -> None:
     except OSError:
         return
     try:
-        import fcntl
-
         flags = array.array("L", [0])
         fcntl.ioctl(descriptor, _FS_IOC_GETFLAGS, flags, True)
         if not flags[0] & _FS_NOCOW_FL:

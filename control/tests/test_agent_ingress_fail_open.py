@@ -22,8 +22,9 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 import vonk_agent_protocol
+from vonk_agent_protocol.agent_operations import RecipeStartResult
 from vonk_agent_protocol.claims import ClaimRequest
-from vonk_agent_protocol.contracts import AgentProgress, AgentResult, RecipeStartResult
+from vonk_agent_protocol.contracts import AgentProgress, AgentResult
 from vonk_agent_protocol.inventory import InventoryRequest
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, OutcomeKind
 from vonk_agent_protocol.optional_evidence import (

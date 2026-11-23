@@ -19,7 +19,6 @@ from vonk_agent_protocol.outcome import UnknownError
 from vonk_control.enrollment.responses import _issued_response, _json_response
 from vonk_control.operator_receipt_contract import ReceiptPolicy
 
-from ..contract_graph import raw_json_body
 from ..enrollment.body import _bounded_enrollment_body, _scan_enrollment_grants
 from ..enrollment.responses import unknown_response
 from ..enrollment.types import (
@@ -29,6 +28,7 @@ from ..enrollment.types import (
 )
 from ..operation_api.contracts import bounded_error_responses
 from ..operator_acceptance import operator_acceptance
+from ..route_declarations import raw_json_body
 from .common import (
     AgentApiServices,
     EnrollmentRateLimiter,

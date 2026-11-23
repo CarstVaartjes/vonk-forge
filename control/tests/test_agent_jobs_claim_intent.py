@@ -11,7 +11,9 @@ from threading import Event
 import pytest
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
+)
 from vonk_agent_protocol.contracts import AgentProgress, AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,

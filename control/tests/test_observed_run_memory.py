@@ -11,7 +11,6 @@ from vonk_forge_contracts.qualification_status import (
     PublishedRoleMemory,
 )
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics, FailureLogTail
 from vonk_agent_protocol.lifecycle_vocabulary import (
     ResourceBlockerCode,
@@ -20,6 +19,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.state_machines import RunState
 from vonk_agent_protocol.swap import GIB
 from vonk_agent_protocol.telemetry import TelemetrySample
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import (

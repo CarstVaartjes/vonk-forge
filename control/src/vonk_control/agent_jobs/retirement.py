@@ -10,7 +10,6 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -22,8 +21,10 @@ from vonk_agent_protocol.state_machines import (
     ReservationState,
     RunState,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states
+from ..agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
 from ..agent_operation_facts import (
     attempt_holds_open_launch_budget as _attempt_holds_open_launch_budget,
 )
@@ -46,9 +47,9 @@ from ..persisted_waits import schedule_wait
 from ..recipe_operations.lifecycle_contract import (
     RecipeOperationCancellationResult,
 )
-from .contracts import _WORKLOAD_INTENT_OPERATIONS, OperatorRetirementRefused
+from .contracts import OperatorRetirementRefused
 from .retry import _retry_authorized_for_current_attempt
-from .scope import _target_scope
+from .scope import _lock_target_scopes, _target_scope
 from .stored import column_field, column_is_document, column_value
 
 
@@ -246,9 +247,7 @@ def retire_exhausted_operations_in_session(
     if job is None:
         raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
     scope = _target_scope(column_value(job, "targets"))
-    from .service import AgentJobService
-
-    if not scope or not AgentJobService._lock_target_scopes(
+    if not scope or not _lock_target_scopes(
         session, {"retire": (job_id, scope)}, scope[0]
     ):
         raise OperatorRetirementRefused(job_id, "its target scope changed")

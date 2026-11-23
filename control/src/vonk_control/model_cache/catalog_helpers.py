@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import json
-import re
 from datetime import UTC, datetime
 from typing import assert_never
-from urllib.parse import quote, urlsplit
 
-from pydantic import ValidationError
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
@@ -28,12 +25,9 @@ from ..bounded_json import require_mapping
 from ..catalog.revision_contract import read_shared_catalog_document
 from ..categorized_errors import InvalidType
 from ..models.catalog import CatalogDocumentRevision
-from .artifacts import ArtifactSetManifest, ArtifactSpec, _is_hex
+from .artifacts import ArtifactSetManifest, _is_hex
 from .constants import (
     _DIGEST_LENGTH,
-    _GITHUB_API_HOST,
-    _GITHUB_LFS_MEDIA_HOST,
-    _REVISION_PATTERN,
     ProviderKind,
 )
 from .errors import (
@@ -42,144 +36,7 @@ from .errors import (
     ModelCacheResolutionInvalid,
 )
 from .input_contracts import CatalogArtifact, CatalogArtifactPart
-
-
-def _validate_source(source: str) -> None:
-    try:
-        parsed = urlsplit(source)
-        hostname = parsed.hostname
-        port = parsed.port
-    except (TypeError, ValueError) as error:
-        raise ModelCacheResolutionInvalid(
-            ModelCacheCode.SOURCE_INVALID, "cache source URL is invalid"
-        ) from error
-    if parsed.scheme in {"http", "https"}:
-        if (
-            not hostname
-            or parsed.username
-            or parsed.password
-            or parsed.fragment
-            or parsed.query
-            or port is not None
-        ):
-            raise ModelCacheResolutionInvalid(
-                ModelCacheCode.SOURCE_INVALID, "cache source URL is invalid"
-            )
-        return
-    if parsed.scheme == "file":
-        if parsed.netloc not in {"", "localhost"} or not parsed.path.startswith("/"):
-            raise ModelCacheResolutionInvalid(
-                ModelCacheCode.SOURCE_INVALID, "cache file source is invalid"
-            )
-        return
-    raise ModelCacheResolutionInvalid(
-        ModelCacheCode.SOURCE_INVALID, "cache source must use HTTPS, HTTP or file"
-    )
-
-
-def _huggingface_catalog_source(artifact: CatalogArtifact) -> tuple[str, str | None]:
-    repository = artifact.repository
-    path = artifact.path
-    revision = artifact.revision
-    assert isinstance(repository, str)
-    assert isinstance(path, str)
-    # Catalog repositories are immutable HTTPS URLs.  Parse and bind the
-    # repository path to the one trusted Hugging Face authority before
-    # constructing the file URL; accepting the raw URL here would permit
-    # catalog metadata to redirect the Controller to another host.
-    try:
-        parsed = urlsplit(repository)
-        hostname = parsed.hostname
-        port = parsed.port
-    except (TypeError, ValueError) as error:
-        raise ModelCacheResolutionInvalid(
-            ModelCacheCode.SOURCE_INVALID,
-            "catalog Hugging Face repository is invalid",
-        ) from error
-    if parsed.scheme:
-        if (
-            parsed.scheme != "https"
-            or hostname is None
-            or hostname.lower().rstrip(".") != "huggingface.co"
-            or port is not None
-            or parsed.username is not None
-            or parsed.password is not None
-            or parsed.query
-            or parsed.fragment
-            or not parsed.path.startswith("/")
-        ):
-            raise ModelCacheResolutionInvalid(
-                ModelCacheCode.SOURCE_INVALID,
-                "catalog Hugging Face repository must use canonical HTTPS",
-            )
-        repository_path = parsed.path.strip("/")
-    else:
-        # Older catalog fixtures store the repository as the immutable
-        # Hugging Face ``namespace/name`` identifier.  It is safe to
-        # normalize that bounded identifier to the canonical authority;
-        # arbitrary URI repositories still take the guarded path above.
-        repository_path = repository
-    if not _valid_repository(repository_path):
-        raise ModelCacheResolutionInvalid(
-            ModelCacheCode.SOURCE_INVALID,
-            "catalog Hugging Face repository is invalid",
-        )
-    if not isinstance(revision, str) or not re.fullmatch(_REVISION_PATTERN, revision):
-        raise ModelCacheResolutionInvalid(
-            ModelCacheCode.REVISION_INVALID,
-            "catalog artifact revision is not immutable",
-        )
-    source = (
-        f"https://huggingface.co/{repository_path}/resolve/{revision}/"
-        f"{quote(path, safe='/')}"
-    )
-    return source, str(revision)
-
-
-def _github_release_catalog_source(
-    artifact: CatalogArtifact,
-) -> tuple[str, str | None]:
-    repository = artifact.repository
-    assert isinstance(repository, str)
-    release_id = artifact.release_id
-    asset_id = artifact.asset_id
-    owner_and_name = _github_repository_parts(repository)
-    if (
-        type(release_id) is not int
-        or release_id < 1
-        or type(asset_id) is not int
-        or asset_id < 1
-    ):
-        raise ModelCacheResolutionInvalid(
-            ModelCacheCode.SOURCE_INVALID,
-            "catalog GitHub release asset identity is invalid",
-        )
-    owner, name = owner_and_name
-    revision = f"github-release:{release_id}"
-    source = (
-        f"https://{_GITHUB_API_HOST}/repos/{owner}/{name}/releases/assets/{asset_id}"
-    )
-    return source, revision
-
-
-def _github_lfs_media_url(owner: str, name: str, revision: str, path: str) -> str:
-    """The stable, secret-free locator of one LFS object at one commit."""
-
-    return (
-        f"https://{_GITHUB_LFS_MEDIA_HOST}/media/{owner}/{name}/{revision}/"
-        f"{quote(path, safe='/')}"
-    )
-
-
-def _github_lfs_catalog_source(artifact: CatalogArtifact) -> tuple[str, str | None]:
-    owner, name = _github_repository_parts(artifact.repository)
-    revision = artifact.revision
-    if re.fullmatch(_REVISION_PATTERN, revision) is None:
-        raise ModelCacheResolutionInvalid(
-            ModelCacheCode.REVISION_INVALID,
-            "catalog GitHub LFS revision is not a full commit SHA",
-        )
-    return _github_lfs_media_url(owner, name, revision, artifact.path), revision
+from .providers import PROVIDERS
 
 
 def _source_for_catalog_artifact(
@@ -197,7 +54,6 @@ def _source_for_catalog_artifact(
         raise ModelCacheResolutionInvalid(
             ModelCacheCode.ARTIFACT_INVALID, "catalog artifact path is invalid"
         )
-    from .providers import PROVIDERS
 
     provider = PROVIDERS.get(kind)
     if provider is None or provider.catalog_source is None:
@@ -207,103 +63,6 @@ def _source_for_catalog_artifact(
         )
     source, revision = provider.catalog_source(artifact)
     return source, str(revision) if revision is not None else None
-
-
-def _valid_repository(value: str) -> bool:
-    return bool(
-        re.fullmatch(
-            r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}/"
-            r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}",
-            value,
-        )
-    )
-
-
-def _github_repository_parts(repository: str) -> tuple[str, str]:
-    """Validate and split the canonical HTTPS GitHub repository URL."""
-
-    try:
-        # Reuse the current published contract's repository validator instead
-        # of keeping a second URL policy for persisted artifact locators.
-        GitHubReleaseSource.canonical_github_repository(repository)
-        parsed = urlsplit(repository)
-    except (TypeError, ValueError, ValidationError) as error:
-        raise ModelCacheResolutionInvalid(
-            ModelCacheCode.SOURCE_INVALID, "catalog GitHub repository is invalid"
-        ) from error
-    parts = parsed.path.removeprefix("/").split("/")
-    if len(parts) != 2 or parsed.path != f"/{parts[0]}/{parts[1]}":
-        raise ModelCacheResolutionInvalid(
-            ModelCacheCode.SOURCE_INVALID, "catalog GitHub repository is invalid"
-        )
-    return parts[0], parts[1]
-
-
-def _github_release_asset_binding(spec: ArtifactSpec) -> tuple[int, int, str, str]:
-    """Validate that a persisted GitHub source binds one exact release asset."""
-
-    if not isinstance(spec.repository, str):
-        raise ModelCacheResolutionInvalid(
-            ModelCacheCode.SOURCE_INVALID, "GitHub release asset identity is invalid"
-        )
-    owner, name = _github_repository_parts(spec.repository)
-    revision_match = (
-        re.fullmatch(r"github-release:([1-9][0-9]*)", spec.revision)
-        if isinstance(spec.revision, str)
-        else None
-    )
-    try:
-        parsed = urlsplit(spec.source)
-        port = parsed.port
-    except (TypeError, ValueError) as error:
-        raise ModelCacheResolutionInvalid(
-            ModelCacheCode.SOURCE_INVALID, "GitHub release asset URL is invalid"
-        ) from error
-    expected_prefix = f"/repos/{owner}/{name}/releases/assets/"
-    asset_id_text = parsed.path.removeprefix(expected_prefix)
-    if (
-        revision_match is None
-        or parsed.scheme != "https"
-        or parsed.hostname != _GITHUB_API_HOST
-        or parsed.netloc != _GITHUB_API_HOST
-        or port is not None
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
-        or not parsed.path.startswith(expected_prefix)
-        or re.fullmatch(r"[1-9][0-9]*", asset_id_text) is None
-        or spec.source != f"https://{_GITHUB_API_HOST}{expected_prefix}{asset_id_text}"
-    ):
-        raise ModelCacheResolutionInvalid(
-            ModelCacheCode.SOURCE_INVALID, "GitHub release asset URL is invalid"
-        )
-    return int(revision_match.group(1)), int(asset_id_text), owner, name
-
-
-def _github_lfs_binding(spec: ArtifactSpec) -> tuple[str, str, str, str]:
-    """Validate that a persisted LFS source is the locator of its own identity.
-
-    The locator is recomputed from the repository, commit and path and must
-    match exactly, so a stored row cannot point the opener anywhere else.
-    """
-
-    revision = spec.revision
-    if (
-        not isinstance(spec.repository, str)
-        or not isinstance(revision, str)
-        or re.fullmatch(_REVISION_PATTERN, revision) is None
-    ):
-        raise ModelCacheResolutionInvalid(
-            ModelCacheCode.SOURCE_INVALID, "GitHub LFS object identity is invalid"
-        )
-    owner, name = _github_repository_parts(spec.repository)
-    locator = _github_lfs_media_url(owner, name, revision, spec.path)
-    if spec.source != locator:
-        raise ModelCacheResolutionInvalid(
-            ModelCacheCode.SOURCE_INVALID, "GitHub LFS object locator is invalid"
-        )
-    return owner, name, revision, spec.path
 
 
 def _datetime(value: datetime) -> datetime:

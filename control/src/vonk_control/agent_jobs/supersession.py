@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -25,6 +25,7 @@ from ..admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
+from ..agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
 from ..agent_operation_facts import aware as _aware
 from ..categorized_errors import InvalidValue
 from ..jobs import states as job_states
@@ -42,7 +43,6 @@ from ..stall_window import stall_deadline
 from .contracts import (
     _ABANDONABLE_OPERATIONS,
     _CLAIM_REFUSAL_PREFIX,
-    _WORKLOAD_INTENT_OPERATIONS,
     SupersededAgentEffect,
 )
 from .evidence import _exact_service_stop_receipt_covers_start

@@ -26,7 +26,7 @@ WAIT_DEADLINE_MODULES = {
     "vonk_control.model_cache.download_admission",
     "vonk_control.model_cache.split_transfer",
     "vonk_control.agent_jobs.claim_notes",
-    "vonk_control.fleet_profiles.selection",
+    "vonk_control.fleet_profiles.continuing_effects",
     "vonk_control.db.connections",
 }
 

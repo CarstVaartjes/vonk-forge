@@ -8,8 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..catalog.queries import WITHOUT_DOCUMENT
 from ..catalog.revision_contract import (

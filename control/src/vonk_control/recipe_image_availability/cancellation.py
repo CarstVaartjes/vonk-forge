@@ -33,7 +33,7 @@ from ..recipe_builds.cancellation import (
 )
 from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
 from ..recipe_update_batches.contract import UPDATE_KIND, RecipeUpdateResponse
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import serialize_json_value
 from .contracts import (
     OPERATION_KIND,

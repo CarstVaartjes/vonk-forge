@@ -45,16 +45,14 @@ from vonk_control.stored.json_values import (
     ExternalPassthrough,
     bind,
     binding_for,
-    bindings,
     column_violations,
     dump_column,
-    install_write_guard,
     json_columns,
     read_column,
-    read_row_column,
     untyped_leaves,
     write_guard_mode,
 )
+from vonk_control.stored.rows import bindings, install_write_guard, read_row_column
 
 
 def test_every_json_column_is_bound_to_a_contract() -> None:

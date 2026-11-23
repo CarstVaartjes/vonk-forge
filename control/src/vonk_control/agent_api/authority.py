@@ -16,8 +16,8 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.contracts import AgentDirective, AgentProgress, AgentResult
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.enrollment import (
     ActivateRequest,
     EnrollmentObservationReply,
@@ -48,7 +48,6 @@ from ..agent_jobs.contracts import (
     StaleAgentAttempt,
 )
 from ..auth import AgentIdentity, validated_agent_identity_from_scope
-from ..contract_graph import raw_json_body
 from ..enrollment.body import _bounded_enrollment_body
 from ..enrollment.responses import unknown_response
 from ..enrollment.types import (
@@ -69,9 +68,9 @@ from ..http_errors import SecurityHTTPError
 from ..logging import redact_text
 from ..models.jobs import Job
 from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..operator_acceptance import operator_acceptance
+from ..operator_acceptance import ControllerAPIRoute, operator_acceptance
 from ..repeated_evidence_contract import RepeatedEvidenceSubject, host_grant_subject
-from ..strict_json import ControllerAPIRoute
+from ..route_declarations import raw_json_body
 from .common import (
     AgentApiServices,
     EnrollmentRateLimiter,

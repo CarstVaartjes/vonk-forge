@@ -10,13 +10,9 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentFailureResult
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import (
-    AgentFailureKind,
-    AgentFailureResult,
-    AgentProtocolError,
-)
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     FailureCode,
@@ -30,6 +26,7 @@ from vonk_agent_protocol.recipe_jobs import (
     RecipeJobOutputLimits,
     RecipeJobRunResult,
 )
+from vonk_agent_protocol.wire_model import AgentProtocolError
 
 from .. import agent_operation_states
 from ..agent_jobs.retry import result_disposition

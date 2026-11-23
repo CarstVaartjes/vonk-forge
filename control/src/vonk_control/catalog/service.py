@@ -31,9 +31,9 @@ from vonk_forge_contracts.qualification_status import (
 )
 
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.reason_codes.catalog import CatalogCode
 from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.models.catalog import CatalogDocumentRevision
 
 from ..admission_locking import ConstraintReplay, admitting

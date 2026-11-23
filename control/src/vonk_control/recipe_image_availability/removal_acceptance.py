@@ -32,7 +32,7 @@ from ..models.cache import ArtifactLifecycleGate, ModelCacheOperation
 from ..models.catalog import CatalogDocumentRevision
 from ..models.jobs import Job
 from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import serialize_json_value
 from .contracts import (
     OPERATION_KIND,
@@ -42,6 +42,7 @@ from .contracts import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityInvalid,
 )
+from .persistence import removal_status
 from .removal_contract import (
     RecipeCacheRemovalCheckpoint,
     RecipeCacheRemovalIntent,
@@ -166,7 +167,6 @@ def remove_selector(
             )
             session.add(operation)
             session.flush()
-            from .persistence import removal_status
 
             return removal_status(self, operation, owner)
     except ConstraintReplay as duplicate:

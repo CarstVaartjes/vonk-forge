@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import BinaryIO, Protocol
 
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, WaitReason
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
+from vonk_agent_protocol.wire_model import canonical_message
 
 
 class DistributionError(ValueError):

@@ -15,11 +15,13 @@ from pathlib import Path
 
 import pytest
 
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.build_import import RecipeBuildEvidence
-from vonk_agent_protocol.contracts import AgentClaim, AgentOperation, canonical_message
+from vonk_agent_protocol.contracts import AgentClaim
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.contracts import OFF_LANE_OPERATIONS
 from vonk_control.agent_jobs.waits import refresh_queue_waits
 from vonk_control.lifecycle.agent_operation import AgentOperationAdapter

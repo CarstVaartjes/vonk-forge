@@ -23,6 +23,7 @@ from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchQueueItem,
 )
+from vonk_control.fleet_profiles.continuing_effects import _adopted_application_scope
 from vonk_control.fleet_profiles.contracts import (
     FleetProfileAdmissionBusy,
     _FleetProfileSupersededIntentConflict,
@@ -229,7 +230,7 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
     with sessions() as session:
         old = session.get(FleetProfileApplication, original.id)
         assert old is not None
-        assert restarted._adopted_application_scope(session, old) == (_node_id(1),)
+        assert _adopted_application_scope(session, old) == (_node_id(1),)
         assert {
             claim.id
             for claim in session.scalars(

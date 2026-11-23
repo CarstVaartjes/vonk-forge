@@ -21,7 +21,6 @@ from vonk_forge_contracts.recipe import RecipeSetting, RecipeSettings
 
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.build_import import RecipeBuildOptions
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     SecurityRefusalReason,
@@ -32,12 +31,14 @@ from vonk_agent_protocol.outcome import (
     SecurityRefusalError,
     UnknownOutcomeError,
 )
+from vonk_agent_protocol.reason_codes.images import PrebuiltImageCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_agent_protocol.state_machines import (
     NodeIdentityState,
     ReservationState,
     RunState,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..catalog.revision_contract import (
     BuildModelArtifactProjection,
@@ -55,7 +56,6 @@ from ..models.cache import RecipeBuild
 from ..models.catalog import CatalogDocumentRevision
 from ..models.execution import RecipeRun, ResourceReservation, RunNode
 from ..models.fleet import AgentNode
-from ..prebuilt_images import PrebuiltDecision
 from ..recipe_operations.runtime_specs import RecipeRuntimeSpecError, recipe_topology
 from ..resource_planning.memory import memory_capacity_snapshot
 from ..runtime.adapters import (
@@ -69,7 +69,7 @@ from ..source_bundles import (
     generate_source_bundle,
 )
 from ..source_policy import SourcePolicyReport, inspect_build_source_policy
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..stored.states import RecipeBuildState
 
 """Durable source-build planning and exact OCI result recording."""
@@ -769,3 +769,24 @@ def _digest(value: object) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+# Why a plan did or did not use the catalog's prebuilt image.  The codes are
+# stable: they are stored with the build, logged, and shown as operation
+# blockers, so an operator can tell a Spark build from an image pull.
+PREBUILT_USED = PrebuiltImageCode.USED
+
+
+@dataclass(frozen=True, slots=True)
+class PrebuiltDecision:
+    """The named outcome of choosing between a prebuilt image and a Spark build."""
+
+    code: str
+    detail: str
+
+    @property
+    def used(self) -> bool:
+        return self.code == PREBUILT_USED
+
+    def __str__(self) -> str:
+        return f"{self.code}: {self.detail}"

@@ -14,13 +14,13 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from tests.observation_transfer_peer import observation_document
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.host_tuning import HostTuning
 from vonk_agent_protocol.inventory import HostSettings, InventoryRequest
 from vonk_agent_protocol.reason_codes.admission import InstallDegradedReason
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.state_machines import InstallationState, NodeIdentityState
 from vonk_agent_protocol.store_cleanup import StoreRetentionFailure
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_contacts import record_contact
 from vonk_control.fleet_projection import service
 from vonk_control.fleet_projection.common import (

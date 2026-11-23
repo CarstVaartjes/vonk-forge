@@ -19,7 +19,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import load_only
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import SecurityRefusalError
 from vonk_agent_protocol.state_machines import (
@@ -28,6 +27,7 @@ from vonk_agent_protocol.state_machines import (
     RunState,
     adopt_machine_state,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..api_availability import AVAILABILITY_ERRORS
 from ..catalog.queries import active_head_revision
@@ -56,7 +56,7 @@ from ..models.execution import RecipeInstallation, RecipeRun, RunNode
 from ..operator_receipt_contract import ReceiptOwner
 from ..persisted_waits import read_wait
 from ..revision_images import revision_images
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..stored.states import CatalogRevisionState, RecipeBuildState
 from .common import (
     _ACTIVE_RUN_STATES,

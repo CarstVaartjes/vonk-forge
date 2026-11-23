@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from ..categorized_errors import InvalidValue

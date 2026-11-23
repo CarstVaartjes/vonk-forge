@@ -14,17 +14,17 @@ from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import (
-    AgentClaim,
+from vonk_agent_protocol.agent_operations import (
     AgentFailureKind,
-    AgentResult,
     ArtifactDistributionResult,
-    canonical_message,
 )
-from vonk_agent_protocol.contracts import AgentOperation as Operation
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation as Operation
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
+)
+from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.contracts import AgentClaim, AgentResult
 from vonk_agent_protocol.helper_response import HostHelperResponse
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
@@ -38,16 +38,17 @@ from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
-from vonk_agent_protocol.wire_model import OperationCheckpoint, OperationProgress
+from vonk_agent_protocol.wire_model import (
+    OperationCheckpoint,
+    OperationProgress,
+    canonical_message,
+)
 from vonk_control import agent_operation_states as aos
 from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.agent_jobs.contracts import StaleAgentAttempt
 from vonk_control.agent_jobs.retry import abandon_idempotent_job_in_session
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.agent_operation_facts import (
-    AGENT_ORDER_RECOVERY_BUDGET,
-    order_recovery_deadline,
-)
+from vonk_control.agent_operation_facts import AGENT_ORDER_RECOVERY_BUDGET
 from vonk_control.auth import TokenCodec
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment.service import EnrollmentService
@@ -62,6 +63,7 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.operation_api.durable import durable_operation_services
 from vonk_control.operations.progress import stored_progress
+from vonk_control.owner_liveness import order_recovery_deadline
 from vonk_control.pki import IssuedCertificate
 from vonk_control.recovery_policy import RECOVERY
 

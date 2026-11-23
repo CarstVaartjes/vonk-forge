@@ -10,21 +10,21 @@ import pytest
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.contracts import (
-    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
-    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
-    MAX_DOCUMENT_BYTES,
     RESULT_MODELS,
     AgentClaim,
-    AgentOperation,
     AgentProgress,
-    AgentProtocolError,
     AgentResult,
     _validate_safe_keys,
-    canonical_message,
     schema_validator,
     validate_result_for_operation,
     validate_schema_message,
+)
+from vonk_agent_protocol.document_limits import (
+    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
+    MAX_DOCUMENT_BYTES,
 )
 from vonk_agent_protocol.package_upgrade import PackageActivationOutcome
 from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
@@ -32,6 +32,7 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeStopPayload,
     RecipeUninstallPayload,
 )
+from vonk_agent_protocol.wire_model import AgentProtocolError, canonical_message
 
 
 def valid_claim() -> dict[str, object]:

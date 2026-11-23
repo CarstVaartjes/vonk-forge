@@ -10,22 +10,17 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.agent_words import (
-    Disposition,
-    ProfileAction,
-    ProfileChildPhase,
     ProfileProjectionKind,
-    ProfileSwitchChildKind,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
 )
 from vonk_agent_protocol.outcome import UnknownOutcomeError
-from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
-from vonk_agent_protocol.state_machines import DesiredAssignmentState, ReservationState
+from vonk_agent_protocol.state_machines import ReservationState
 
 from ..categorized_errors import MissingRecord
-from ..failure_classification import is_definite, is_redownload, is_security_failure
+from ..failure_classification import is_definite
 from ..fleet_profile_contract.applications import FleetProfileChildOperation
 from ..fleet_profile_contract.assessment import (
     FleetProfileAdmissionDecision,
@@ -49,7 +44,6 @@ from ..run_switch_contract.requests import (
     SparkGroup,
     SparkGroupNode,
 )
-from ..run_switch_contract.vocabulary import RunSwitchPlacementAction
 from ..run_switch_operations.errors import RunSwitchOperationConflict
 from ..run_switch_operations.service import RunSwitchOperationService
 from .assessment_support import (
@@ -65,10 +59,13 @@ from .contracts import (
 from .dependencies import _LOGGER
 from .error_summary import _error_summary, _normalized_failure_text
 from .persistence import (
+    _intended_profile,
     _persisted_profile_plan,
     _persisted_profile_progress,
+    _reviewed_profile_plan,
     _stored_recipe,
 )
+from .switch_children import _assignment_intent, _cache_loss, _ending_disposition
 from .switch_dispatch import RunSwitchFleetProfileAdapter as _SwitchDispatch
 from .switch_observation import RunSwitchFleetProfileAdapter as _SwitchObservation
 from .switch_projection import RunSwitchFleetProfileAdapter as _SwitchProjection
@@ -237,7 +234,6 @@ class RunSwitchFleetProfileAdapter(
         actor: str,
         request_id: str,
     ) -> FleetProfileChildOperation | Residue:
-        from .service import FleetProfileService
 
         scope = set(scope_node_ids)
         if tuple(scope_node_ids) != tuple(sorted(scope)):
@@ -288,13 +284,9 @@ class RunSwitchFleetProfileAdapter(
                 # it was issued (an old run survives an upgrade), whatever scope a
                 # replayed request names now.  Its own scope is the durable one.
                 return self._view_from_state(application, existing)
-            intended = FleetProfileService._intended_profile(
-                application, session=session
-            )
+            intended = _intended_profile(application, session=session)
             plan = _persisted_profile_plan(application)
-            reviewed_plan = FleetProfileService._reviewed_profile_plan(
-                application, session=session
-            )
+            reviewed_plan = _reviewed_profile_plan(application, session=session)
             if isinstance(intended, Residue):
                 return intended
             if isinstance(plan, Residue):
@@ -374,17 +366,6 @@ class RunSwitchFleetProfileAdapter(
         return self._advance(operation_id, assignments)
 
     @staticmethod
-    def _assignment_intent(
-        assignment: FleetProfileAssignment,
-    ) -> tuple[RunSwitchPlacementAction, str]:
-        return (
-            ProfileSwitchChildKind.INSTALL.value
-            if assignment.desired_state == DesiredAssignmentState.INSTALLED
-            else ProfileAction.SWITCH.value,
-            assignment.alias or assignment.id,
-        )
-
-    @staticmethod
     def _assignment_request(
         session: Session,
         assignment: FleetProfileAssignment,
@@ -442,7 +423,7 @@ class RunSwitchFleetProfileAdapter(
                 for node in sorted(assignment.nodes, key=lambda item: item.rank)
             ]
         )
-        action, alias = RunSwitchFleetProfileAdapter._assignment_intent(assignment)
+        action, alias = _assignment_intent(assignment)
         return RunSwitchApplyRequest(
             model_content_sha256=model_digest,
             recipe_revision_id=assignment.recipe_revision_id,
@@ -639,46 +620,3 @@ class RunSwitchFleetProfileAdapter(
                     + (f": {reasons}" if reasons else ""),
                     shortfalls=_disk_shortfalls(fresh),
                 )
-
-
-def _cache_loss(child: RunSwitchOperation) -> bool:
-    """A typed, pre-effect Controller cache loss: the replay prepares it again."""
-
-    result = child.result
-    return (
-        child.state == LifecycleState.FAILED.value
-        and result is not None
-        and result.phase == ProfileChildPhase.PREPARE.value
-        and result.subphase == "runtime-image"
-        and result.child_operation_id is None
-        and result.failure_code == RuntimeImageCode.CACHE_MISSING
-    )
-
-
-def _ending_disposition(child: RunSwitchOperation) -> Disposition:
-    """What a Run/Switch child's ending lets profile recovery do.
-
-    The Run/Switch owner ends a definite failure (a ``FAIL`` or ``SECURITY``
-    :func:`~vonk_control.failure_classification.disposition`) not retryable,
-    under its typed code; only an observation window that expired ends
-    retryable.  A replay can change bytes it fetches again (a cache loss, a
-    digest mismatch), and an ending its owner never typed is unknown: those are
-    observed again within the repeat budget.  A child that has not failed has
-    no ending to judge.
-    """
-
-    result = child.result
-    code = None if result is None else result.failure_code
-    if is_security_failure(code):
-        return Disposition.SECURITY
-    if _cache_loss(child):
-        return Disposition.WAIT
-    if (
-        child.state not in job_states.words(LifecycleState.FAILED)
-        or result is None
-        or code is None
-        or result.retryable
-        or is_redownload(code)
-    ):
-        return Disposition.OBSERVE
-    return Disposition.FAIL

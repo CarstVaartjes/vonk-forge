@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.lifecycle_vocabulary import ResourceBlockerCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
-from ..lifecycle_preflight import LifecyclePreflightCheckpoint
+from ..lifecycle_preflight_contract import LifecyclePreflightCheckpoint
 from ..models.cache import RecipeBuild
 from ..models.execution import RecipeRun, RunNode
 from ..recipe_operations.interfaces import RecipeOperationView

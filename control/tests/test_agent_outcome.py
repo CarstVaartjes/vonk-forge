@@ -14,12 +14,9 @@ from uuid import uuid4
 
 import pytest
 
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import (
-    AgentOperation,
-    AgentResult,
-    AgentResultPayload,
-)
+from vonk_agent_protocol.contracts import AgentResult, AgentResultPayload
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     FailureCode,

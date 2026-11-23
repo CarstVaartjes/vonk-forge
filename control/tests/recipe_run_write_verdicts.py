@@ -28,13 +28,13 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "agent_jobs/observation_receipts.py": {
         "adopt_observation_receipt": (
-            "f57e0f77ab25d966222fc927817d886720f9c143d7ae3ba782e67299f752694b",
+            "805d701b7bb98de86029b668eae41e06a565a3a2bbee581dabbe26770edc3e2a",
             "HTTP/background wait: middleware or per-candidate order sweep classifies conflicts; rollback retains receipt for next pass",
         ),
     },
     "recipe_operations/result_consumption.py": {
         "consume_agent_result": (
-            "e5921b370347f1eeb19e14877bea482db8f81bfb369a96b21670dde3b6d29baf",
+            "0ecf77e8a3fac0c8d41fd9f2468f5c5f9c2b213af99acfb46f700a428f2a7548",
             "caller-owned: queue claim/result and background order-sweep transactions fence child effects; HTTP disposition or per-candidate sweep waits and re-observes",
         ),
     },
@@ -150,7 +150,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/start.py": {
         "_start_once": (
-            "be02c1ae27d4dea18b79e88cd34d73ee114fc633112f5a42406d362481d91ba2",
+            "bfd62cdf17e896a066779f29dc84550c9c04ebf98df050add20adcdca7f8aa80",
             "retain: Start admission binds run and capacity",
         ),
     },

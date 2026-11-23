@@ -28,7 +28,7 @@ from cluster_profiles.generated_control.models.recipe_definition import (
 from cluster_profiles.generated_control.models.recipe_revision_projection import (
     RecipeRevisionProjection,
 )
-from vonk_control.catalog.entities import recipe_document_projection
+from vonk_control.catalog.revision_contract import recipe_document_projection
 
 
 def _recipe(

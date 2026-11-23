@@ -3,6 +3,10 @@
   "note": "Modules allowed to define Pydantic data models; one model per name and field set across them.",
   "modules": [
     {
+      "module": "agent_protocol/src/vonk_agent_protocol/agent_operations.py",
+      "kind": "agent-protocol"
+    },
+    {
       "module": "agent_protocol/src/vonk_agent_protocol/agent_state.py",
       "kind": "agent-protocol"
     },
@@ -80,10 +84,6 @@
     },
     {
       "module": "agent_protocol/src/vonk_agent_protocol/inventory.py",
-      "kind": "agent-protocol"
-    },
-    {
-      "module": "agent_protocol/src/vonk_agent_protocol/job_inputs.py",
       "kind": "agent-protocol"
     },
     {
@@ -342,9 +342,8 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/lifecycle_preflight.py",
-      "kind": "declared",
-      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+      "module": "control/src/vonk_control/lifecycle_preflight_contract.py",
+      "kind": "controller-contract"
     },
     {
       "module": "control/src/vonk_control/gateway/litellm.py",
@@ -406,9 +405,8 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/fleet_profiles/stop_authority.py",
-      "kind": "declared",
-      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+      "module": "control/src/vonk_control/fleet_profiles/stop_contract.py",
+      "kind": "controller-contract"
     },
     {
       "module": "control/src/vonk_control/metrics/prometheus_api.py",
@@ -417,11 +415,6 @@
     },
     {
       "module": "control/src/vonk_control/recipe_operations/availability_intent.py",
-      "kind": "declared",
-      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
-    },
-    {
-      "module": "control/src/vonk_control/recipe_builds/cancellation.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
@@ -459,6 +452,10 @@
       "kind": "controller-contract"
     },
     {
+      "module": "control/src/vonk_control/recipe_image_availability/response_contract.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/recipe_operations/lifecycle_contract.py",
       "kind": "controller-contract"
     },
@@ -487,6 +484,10 @@
     },
     {
       "module": "control/src/vonk_control/gateway/route_bundle_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/gateway/keys_contract.py",
       "kind": "controller-contract"
     },
     {

@@ -20,7 +20,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.enrollment import MAX_CSR_BYTES, ExpiredRenewRequest
 from vonk_agent_protocol.lifecycle_vocabulary import (
     ErrorCategory,
@@ -33,6 +33,7 @@ from vonk_agent_protocol.state_machines import (
     EnrollmentRecordState,
     NodeIdentityState,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.contracts import StaleAgentAttempt
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.auth import AgentIdentity, AgentSource

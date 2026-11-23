@@ -17,14 +17,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import make_transient
 from starlette.types import Message
 
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
     HostRuntimeRequest,
     InstallVonkDebOperation,
-    RecipeReconciliationIdentity,
     SignedHostHelperGrant,
     host_helper_grant_signing_bytes,
 )
@@ -36,7 +34,9 @@ from vonk_agent_protocol.inventory import (
     NetworkInterface,
 )
 from vonk_agent_protocol.package_upgrade import PackageRollbackAuthority
+from vonk_agent_protocol.recipe_operations import RecipeReconciliationIdentity
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_api import observations
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,

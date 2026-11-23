@@ -11,7 +11,6 @@ from sqlalchemy import event, func, insert, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.gpu_clock import (
     GpuClockApplyState,
     GpuClockMetric,
@@ -21,6 +20,7 @@ from vonk_agent_protocol.gpu_clock import (
     default_gpu_clock,
 )
 from vonk_agent_protocol.telemetry import HostResourceSample, TelemetrySample
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.db.schema import reconcile_schema
 from vonk_control.inventory.items_contract import InventorySnapshotKind
 from vonk_control.model_primitives import Base

@@ -19,6 +19,7 @@ from vonk_forge_contracts import (
 )
 
 import vonk_control.catalog.entities as catalog_entities_module
+import vonk_control.catalog.revision_contract as catalog_revision_contract_module
 import vonk_control.catalog.service as catalog_service_module
 import vonk_control.catalog.sync as catalog_sync_module
 from tests.recipe_library_source import recipe_library_root
@@ -327,9 +328,8 @@ def test_unchanged_catalog_refreshes_build_policy_without_refetching_recipe(
 
     # Persist the previous compiler output through the real import path.
     with monkeypatch.context() as previous:
-        previous.setattr(
-            catalog_entities_module, "build_policy_projection", previous_policy
-        )
+        for consumer in (catalog_entities_module, catalog_revision_contract_module):
+            previous.setattr(consumer, "build_policy_projection", previous_policy)
         first = sync.automatic()
     builds = RecipeBuildService(
         sessions, bundles=SourceBundleStore(tmp_path / "bundles")

@@ -14,6 +14,7 @@ from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 
 from ..agent_operation_facts import aware as _aware
 from ..lifecycle.evidence import Residue
+from ..lifecycle.model_cache import ModelCacheStore
 from ..lifecycle.reconciler import Reconciler
 from ..lifecycle.types import CancelRequested, State, Tick
 from ..models.cache import ModelCacheOperation
@@ -139,7 +140,7 @@ class CancellationMixin:
 
         with cache._session() as session:
             candidates = [
-                (operation.id, cache._payload_of(operation))
+                (operation.id, _payload_of(operation))
                 for operation in session.scalars(
                     select(ModelCacheOperation)
                     .where(
@@ -164,7 +165,6 @@ class CancellationMixin:
                 settled += int(cache._try_settle_cancellation(operation_id))
         if requested_id is None:
             return settled + cache._reconciler.reconcile().changed
-        from ..lifecycle.model_cache import ModelCacheStore
 
         reconciler = Reconciler(
             ModelCacheStore(cache._session, cache._lifecycle, cache, requested_id),
@@ -173,13 +173,6 @@ class CancellationMixin:
             enabled=True,
         )
         return settled + reconciler.reconcile().changed
-
-    @staticmethod
-    def _payload_of(
-        operation: ModelCacheOperation,
-    ) -> ModelCacheOperationPayload | None:
-        value = _operation_payload(operation)
-        return None if isinstance(value, Residue) else value  # no readable intent
 
     def _cancellation_intent(
         self, *, actor: str, request_key: str, reason: str
@@ -334,3 +327,10 @@ class CancellationMixin:
         # only a prompt to workers already sampling or reading a source.
         cache.signal_cancelled_operation(operation_id)
         return cache.get_operation(operation_id)
+
+
+def _payload_of(
+    operation: ModelCacheOperation,
+) -> ModelCacheOperationPayload | None:
+    value = _operation_payload(operation)
+    return None if isinstance(value, Residue) else value  # no readable intent

@@ -31,7 +31,6 @@ import threading
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -40,17 +39,14 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import RecipeDefinition, read_recipe, read_recipe_display
 from vonk_forge_contracts.catalog_index import PREBUILT_REFERENCE_PATTERN
 
+from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentFailureResult
 from vonk_agent_protocol.build_import import RecipeBuildEvidence, RecipeBuildOptions
-from vonk_agent_protocol.contracts import (
-    AgentFailureKind,
-    AgentFailureResult,
-    canonical_message,
-)
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.images import PrebuiltImageCode
+from vonk_agent_protocol.wire_model import canonical_message
 
-from .catalog.revision_contract import BuildSecurityProjection
+from .catalog.revision_contract import BuildSecurityProjection, build_policy_projection
 from .image_store_collection import GRACE
 from .lifecycle.image_availability import PrebuiltImageAdapter
 from .models.cache import RecipeBuild
@@ -62,12 +58,20 @@ from .oci_image_store import (
     OciImageStoreError,
     StoreUnknown,
 )
+from .recipe_builds.cancellation import build_cancellation
+from .recipe_builds.common import (
+    canonical_build,
+    derive_build_input_identity,
+    inspect_package_source_policy,
+)
 from .recipe_library_types import RecipeLibraryItem
 from .recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     StoredBuildPolicyReport,
     parse_stored_build_policy,
 )
+from .recipe_operations.observation_helpers import record_build_evidence
+from .recipe_packages.client import load_recipe_package
 from .runtime.adapters import (
     RUNTIME_ADAPTER_DIGEST_LABEL,
     RUNTIME_ADAPTER_LABEL,
@@ -75,7 +79,8 @@ from .runtime.adapters import (
     RUNTIME_INTERFACE_LABEL_VALUE,
     resolve_runtime_adapter,
 )
-from .source_bundles import GeneratedSourceBundle
+from .source_bundles import GeneratedSourceBundle, parse_source_bundle
+from .source_policy import SourcePolicyError, dockerfile_base_images
 from .stored.states import RecipeBuildState
 
 _LOGGER = logging.getLogger(__name__)
@@ -92,27 +97,8 @@ _CONVERSION_BACKOFF = timedelta(minutes=10)
 _CONVERSION_BACKOFF_CAP = timedelta(hours=2)
 _REFERENCE = re.compile(PREBUILT_REFERENCE_PATTERN)
 
-# Why a plan did or did not use the catalog's prebuilt image.  The codes are
-# stable: they are stored with the build, logged, and shown as operation
-# blockers, so an operator can tell a Spark build from an image pull.
-PREBUILT_USED = PrebuiltImageCode.USED
 PREBUILT_NOT_PINNED = PrebuiltImageCode.NOT_PINNED
 PREBUILT_KEY_MISMATCH = PrebuiltImageCode.BUILD_KEY_MISMATCH
-
-
-@dataclass(frozen=True, slots=True)
-class PrebuiltDecision:
-    """The named outcome of choosing between a prebuilt image and a Spark build."""
-
-    code: str
-    detail: str
-
-    @property
-    def used(self) -> bool:
-        return self.code == PREBUILT_USED
-
-    def __str__(self) -> str:
-        return f"{self.code}: {self.detail}"
 
 
 def executable_build_key(identity: Mapping[str, object]) -> str:
@@ -158,10 +144,6 @@ def package_build_intent(
     a stored revision, fed from a recipe package instead.  Only the fields
     :func:`executable_build_key` reads matter for a prebuilt image.
     """
-
-    from .catalog.entities import build_policy_projection
-    from .recipe_builds.common import canonical_build, derive_build_input_identity
-    from .source_policy import dockerfile_base_images
 
     recipe = (
         document if isinstance(document, RecipeDefinition) else read_recipe(document)
@@ -276,8 +258,6 @@ def write_library_image_plan(library_root: Path, output: Path) -> dict[str, obje
     prebuilt image.
     """
 
-    from .catalog.entities import build_policy_projection
-
     index = json.loads((library_root / "catalog-index.json").read_text("utf-8"))
     images: dict[str, dict[str, object]] = {}
     skipped: list[dict[str, str]] = []
@@ -386,9 +366,6 @@ def _library_recipe(
 ) -> tuple[RecipeLibraryItem, GeneratedSourceBundle]:
     """Load one indexed recipe package with its verified build-context bundle."""
 
-    from .recipe_packages.client import load_recipe_package
-    from .source_bundles import parse_source_bundle
-
     document = entry["document"]
     assert isinstance(document, Mapping)
     identity = document["identity"]
@@ -417,8 +394,6 @@ def _require_source_policy(
     bundle: GeneratedSourceBundle,
     source_sha256: str | None,
 ) -> None:
-    from .recipe_builds.common import inspect_package_source_policy
-    from .source_policy import SourcePolicyError
 
     report = inspect_package_source_policy(
         document, bundle, source_sha256=source_sha256
@@ -668,7 +643,6 @@ class PrebuiltImageImporter:
         )
 
     def _claim(self, job_id: str | None = None) -> str | None:
-        from .recipe_builds.cancellation import build_cancellation
 
         now = self._clock()
         with self._sessions.begin() as session:
@@ -719,7 +693,6 @@ class PrebuiltImageImporter:
                 }
 
     def run(self, job_id: str) -> None:
-        from .recipe_builds.cancellation import build_cancellation
 
         with self._sessions() as session:
             job = session.get(Job, job_id)
@@ -809,7 +782,6 @@ class PrebuiltImageImporter:
         evidence: RecipeBuildEvidence | None = None,
         failure: tuple[str, str] | None = None,
     ) -> None:
-        from .recipe_operations.observation_helpers import record_build_evidence
 
         now = self._clock()
         with self._sessions.begin() as session:
@@ -874,8 +846,6 @@ __all__ = [
     "PREBUILT_KEY_MISMATCH",
     "PREBUILT_KEY_SCHEMA_VERSION",
     "PREBUILT_NOT_PINNED",
-    "PREBUILT_USED",
-    "PrebuiltDecision",
     "PrebuiltImageImporter",
     "executable_build_key",
     "library_source_policy_failures",

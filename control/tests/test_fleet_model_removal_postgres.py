@@ -9,11 +9,12 @@ import pytest
 from sqlalchemy import select
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
-from vonk_agent_protocol.contracts import AgentOperation, canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.state_machines import InstallationState, NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     require_reference_open,

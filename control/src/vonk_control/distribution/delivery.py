@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from sqlalchemy import select, update
 
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
@@ -24,6 +24,8 @@ from vonk_agent_protocol.recipe_operations import (
 )
 from vonk_agent_protocol.state_machines import DistributionAssignmentState
 
+from ..agent_jobs.stored import column_field, column_value
+from ..agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
 from ..distribution_assignment import NodeDistributionAssignment
 from ..models.fleet import AgentNode
 from ..models.jobs import Job
@@ -57,8 +59,6 @@ class DeliveryMixin:
         Storage verification happens after releasing the database session.
         """
         service = cast("DistributionService", self)
-        from ..agent_jobs.contracts import _WORKLOAD_INTENT_OPERATIONS
-        from ..agent_jobs.stored import column_field, column_value
 
         if service.sessions is None:
             return

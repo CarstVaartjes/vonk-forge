@@ -14,15 +14,17 @@ import pytest
 from sqlalchemy import select
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
 from vonk_control.fleet_profile_contract.vocabulary import (
     profile_switch_child_request_key,
 )
+from vonk_control.fleet_profiles.continuing_effects import _adopted_application_scope
 from vonk_control.fleet_profiles.persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
@@ -45,7 +47,8 @@ from vonk_control.models.operations import AgentOperation
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_switch_operations.result_helpers import _read_progress
 from vonk_control.run_switch_operations.results import _persisted_result
-from vonk_control.stored.json_values import read_row_column, write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
+from vonk_control.stored.rows import read_row_column
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .fleet_profiles_support import NOW, _node_id, _uuid
@@ -369,7 +372,7 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
             selected_row = session.get(FleetProfileApplication, selected.id)
             assert row is not None
             assert selected_row is not None
-            assert profiles._adopted_application_scope(session, row) == (nodes[0],)
+            assert _adopted_application_scope(session, row) == (nodes[0],)
             bound = _persisted_profile_plan(selected_row)
             assert isinstance(bound, FleetProfilePreview), bound
             assert bound.effects.adopted == review.effects.adopted
@@ -563,7 +566,7 @@ def test_postgres_stop_adoption_loses_authority_on_exact_refusal(pending_stop, f
     with sessions() as session:
         original_row = session.get(FleetProfileApplication, original.id)
         assert original_row is not None
-        assert profiles._adopted_application_scope(session, original_row) == (nodes[0],)
+        assert _adopted_application_scope(session, original_row) == (nodes[0],)
     if fault == "selected-cancel":
         profiles.cancel(
             selected.id,
@@ -587,4 +590,4 @@ def test_postgres_stop_adoption_loses_authority_on_exact_refusal(pending_stop, f
     with sessions() as session:
         original_row = session.get(FleetProfileApplication, original.id)
         assert original_row is not None
-        assert profiles._adopted_application_scope(session, original_row) is None
+        assert _adopted_application_scope(session, original_row) is None

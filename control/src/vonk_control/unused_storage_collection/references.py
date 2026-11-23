@@ -12,7 +12,7 @@ from pydantic import TypeAdapter
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.state_machines import InstallationState
 
@@ -25,6 +25,7 @@ from ..fleet_profile_contract.review import FleetProfilePreview
 from ..fleet_profile_contract.vocabulary import NodeId
 from ..inventory.repository import newest_snapshot_ids
 from ..model_cache import states as model_cache_states
+from ..model_cache.lineage import verifies_model
 from ..models.cache import ModelCacheOperation, ModelCacheSet
 from ..models.catalog import CatalogDocumentRevision
 from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun
@@ -280,8 +281,6 @@ def _model_kept(
     session: Session, digest: str, evidence: _CollectorEvidence
 ) -> str | None:
     """Why a model's cached files stay, or ``None`` when no profile needs them."""
-
-    from ..model_cache.lineage import verifies_model
 
     reference = evidence.reference
     if reference.pointers is None:

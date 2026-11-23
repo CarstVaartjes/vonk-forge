@@ -9,14 +9,13 @@ from dataclasses import dataclass
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 from vonk_forge_contracts import CONTRACT_MAJOR
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
 from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
 
 from ..catalog.sync_contract import ManagedCatalogSyncProblem
-from ..recipe_library_types import RecipeLibraryError, RecipeLibrarySnapshot
+from ..recipe_library_types import RecipeLibraryError
 
 _RELEASE_TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 
@@ -120,24 +119,3 @@ class RecipePackageRequestInvalid(InvalidRequestError, RecipePackageError):
         RecipePackageError.__init__(self, code, detail)
         self.typed_reason = InvalidRequestReason.MALFORMED
         self.typed_field = "snapshot"
-
-
-def _snapshot_content(value: RecipeLibrarySnapshot) -> bytes:
-    return canonical_message(
-        (
-            sorted(
-                [
-                    (
-                        item.uri,
-                        item.content_sha256,
-                        item.package_sha256,
-                        item.source_bundle_sha256,
-                        item.prebuilt_image,
-                    )
-                    for item in value.items
-                ],
-                key=lambda item: item[0],
-            ),
-            sorted(model.entry.content_sha256 for model in value.catalog_entities),
-        )
-    )

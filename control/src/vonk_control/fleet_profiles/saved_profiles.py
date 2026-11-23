@@ -202,12 +202,6 @@ class FleetProfileService:
                 updated_at=now,
             )
 
-    @staticmethod
-    def _definition(row: FleetProfile) -> FleetProfileDefinition:
-        """Read exact authoring intent; partial reconstruction could delete choices."""
-
-        return _profile_definition(row)
-
     def _required_definition(self, row: FleetProfile) -> FleetProfileDefinition:
         """Refuse new effects with the same typed cause as the draft read."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
@@ -254,7 +248,7 @@ class FleetProfileService:
     ) -> FleetProfileDefinition | SavedProfileProjectionIssue:
         """The saved definition, or the typed issue that it cannot be read."""
         try:
-            return self._definition(row)
+            return _definition(row)
         except (TypeError, ValueError):
             return self._definition_issue()
 
@@ -358,7 +352,7 @@ class FleetProfileService:
                 value.model_dump(exclude={"expected_revision"})
             )
             try:
-                previous = self._definition(row)
+                previous = _definition(row)
             except (TypeError, ValueError):
                 # Equality is only an optimization. An unreadable old draft
                 # cannot prevent an authorized complete replacement.
@@ -473,3 +467,9 @@ class FleetProfileService:
             if row is None:
                 raise MissingRecord(number, reason=InvalidRequestReason.NOT_FOUND)
             return self._application_view(row)
+
+
+def _definition(row: FleetProfile) -> FleetProfileDefinition:
+    """Read exact authoring intent; partial reconstruction could delete choices."""
+
+    return _profile_definition(row)

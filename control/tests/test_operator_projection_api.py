@@ -21,9 +21,11 @@ from vonk_control.auth import MUTATION_ROLES, Actor, CursorError
 from vonk_control.enrollment.contract import EnrollmentRevocationStatus
 from vonk_control.enrollment.types import EnrollmentDenied, RemoteRevocationUncertain
 from vonk_control.fleet_projection.common import FleetNode, FleetSnapshot
-from vonk_control.library.api import SelectorAmbiguityHTTPError
 from vonk_control.library.api import _error as library_error
-from vonk_control.library_projection.common import LibrarySelectorAmbiguous
+from vonk_control.library_projection.common import (
+    LibrarySelectorAmbiguous,
+    SelectorAmbiguityHTTPError,
+)
 from vonk_control.operator_projection_api.contracts import FleetActionResponse
 from vonk_control.operator_projection_api.errors import _node, _operator_error
 from vonk_control.operator_projection_api.routes import (

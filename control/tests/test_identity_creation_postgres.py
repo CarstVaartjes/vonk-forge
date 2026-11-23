@@ -15,7 +15,7 @@ from sqlalchemy import event, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import document_sha256
 
-from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 from vonk_agent_protocol.state_machines import (

@@ -15,7 +15,8 @@ from vonk_agent_protocol.outcome import ErrorCatalog
 from vonk_agent_protocol.reason_codes.vocabulary import ReasonCodeVocabulary
 
 from ..auth_api import CliTokenDownload
-from ..stored.json_values import ExternalPassthrough, bindings, contract_models
+from ..stored.json_values import ExternalPassthrough, contract_models
+from ..stored.rows import bindings
 from .constants import _ADMIN_OPERATION_IDS, _HTTP_METHODS
 
 type ExternalSchemaDocument = Annotated[

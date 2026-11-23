@@ -16,11 +16,11 @@ import pytest
 from sqlalchemy import Engine, create_engine, event, select, update
 from sqlalchemy.orm import sessionmaker
 
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.agent_words import (
     ProfileEffectState,
     ProfileSwitchChildKind,
 )
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.recipe_operations import RecipeInstallPayload
@@ -80,10 +80,13 @@ from vonk_control.storage_demands import (
     spark_scope,
 )
 from vonk_control.unused_storage_collection import evidence as collector_evidence
-from vonk_control.unused_storage_collection.common import ACTOR, spark_eviction_capacity
+from vonk_control.unused_storage_collection.common import ACTOR
 from vonk_control.unused_storage_collection.evidence import _Evidence
 from vonk_control.unused_storage_collection.references import _installation_kept
-from vonk_control.unused_storage_collection.service import UnusedStorageCollector
+from vonk_control.unused_storage_collection.service import (
+    UnusedStorageCollector,
+    spark_eviction_capacity,
+)
 
 from .model_cache_support import _artifact, _download
 from .removal_settle import release_ended_gates

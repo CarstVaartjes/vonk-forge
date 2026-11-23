@@ -32,10 +32,8 @@ from vonk_control.storage_demands import (
     StorageDemands,
     spark_scope,
 )
-from vonk_control.unused_storage_collection.common import (
-    _eviction_order,
-    spark_eviction_capacity,
-)
+from vonk_control.unused_storage_collection.common import _eviction_order
+from vonk_control.unused_storage_collection.service import spark_eviction_capacity
 
 from .test_catalog_revision_collection import NODE, NOW, OLD, Catalog
 from .unused_storage_collection_support import (

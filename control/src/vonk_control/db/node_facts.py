@@ -8,11 +8,12 @@ from pydantic import ValidationError
 from sqlalchemy import insert, inspect, select, text
 from sqlalchemy.engine import Connection
 
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentOperation, canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 from vonk_agent_protocol.telemetry import HostResourceSample
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..inventory.items_contract import (
     AgentInventoryItems,

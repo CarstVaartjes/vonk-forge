@@ -36,6 +36,12 @@ from ..jobs import states as job_states
 from ..lifecycle.evidence import Residue
 from ..logging import redact_text
 from ..models.fleet import FleetProfile, FleetProfileApplication, User
+from ..operation_api.contracts import (
+    OperationListPage,
+    OperationProvider,
+    OperationQuery,
+)
+from ..operation_api.providers import _activity_keyset_filter
 from ..operations.contract import OperationFailureEvidence
 from ..operations.item_contract import (
     OperationItem,
@@ -80,12 +86,6 @@ class FleetProfileService:
 
         # Keep this import local so the profile domain remains usable by the
         # profile routes when the optional Activity projection is unavailable.
-        from ..operation_api.contracts import (
-            OperationListPage,
-            OperationProvider,
-            OperationQuery,
-        )
-        from ..operation_api.providers import _activity_keyset_filter
 
         def list_operations(query: OperationQuery) -> OperationListPage:
             after = query.after
@@ -163,170 +163,7 @@ class FleetProfileService:
         """One Activity row, with retry facts read once in the row's session."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
-        return self._operation_item(
-            row, retry_available=self._retry_eligible(session, row)
-        )
-
-    @staticmethod
-    def _operation_scope(plan: FleetProfilePreview) -> tuple[str, ...]:
-        return tuple(plan.scope.node_ids)
-
-    @classmethod
-    def _operation_phase(
-        cls,
-        row: FleetProfileApplication,
-        plan: FleetProfilePreview,
-        progress: FleetProfileApplicationProgress,
-    ) -> str:
-        cls = _typing_cast("type[_FleetProfileService]", cls)  # noqa: PLW0642 -- assembled mixin interface
-        if row.state == LifecycleState.SUCCEEDED.value:
-            return ProfileReportedPhase.FINAL_VERIFY.value
-        if 0 <= row.current_step < len(plan.steps):
-            kind = plan.steps[row.current_step].kind
-            if kind == ProfileChildPhase.PREPARE.value:
-                return ProfileChildPhase.PREPARE.value
-            if kind == ProfileAction.SWITCH.value:
-                if progress.child_progress is not None:
-                    return progress.child_progress.phase
-                return ProfileChildPhase.PREPARE.value
-        return ProfileReportedPhase.FINAL_VERIFY.value
-
-    @classmethod
-    def _operation_item(
-        cls,
-        row: FleetProfileApplication,
-        *,
-        retry_available: bool = False,
-    ) -> OperationItem:
-        """Project profile progress and its operator-visible failure into Activity.
-
-        A single damaged historical row must not fail the whole page and must
-        not be hidden as an empty success: its unreadable document becomes an
-        explicit failure on that record while every readable record stays
-        usable.
-        """
-        cls = _typing_cast("type[_FleetProfileService]", cls)  # noqa: PLW0642 -- assembled mixin interface
-
-        try:
-            typed_progress = _persisted_profile_progress(row)
-        except (FleetProfileConflict, ValidationError, TypeError, ValueError):
-            warn_unreadable_once("profile application", row.id)
-            return cls._unreadable_operation_item(row)
-        plan = _persisted_profile_plan(row)
-        result = _persisted_profile_result(row)
-        if isinstance(plan, Residue):
-            warn_unreadable_once("profile application", row.id)
-            return cls._unreadable_operation_item(row)
-        cancellation = _application_cancellation_view(row, plan, typed_progress)
-        state = _profile_activity_state(row.state, typed_progress.cancellation)
-        next_attempt = None
-        if state == LifecycleState.BACKOFF.value:
-            # The Controller retries this by itself: it is waiting, not failed.
-            next_attempt = row.next_action_at
-        elif state == LifecycleState.QUEUED.value and typed_progress.admission_pending:
-            next_attempt = row.next_action_at
-        failure = None
-        if state in job_states.words(LifecycleState.FAILED):
-            # A failed row that recorded no reason still shows what is known of it.
-            reason = (
-                row.status_reason
-                if row.status_reason and row.status_reason.strip()
-                else f"The profile application ended {state} without a recorded reason"
-            )
-            failure = OperationFailureEvidence(
-                error_code=OperationFailureCode.FLEET_PROFILE_APPLICATION_FAILED,
-                summary="Profile application failed",
-                detail=redact_text(reason),
-                retryable=retry_available,
-                uncertain=False,
-            )
-        wait = read_wait(row)
-        return OperationItem(
-            id=row.id,
-            parent_id=typed_progress.retry_of_application_id,
-            node_ids=list(cls._operation_scope(plan)),
-            kind=typed_progress.operation_kind or ProfileOperationKind.APPLY.value,
-            state=state,
-            attempt=typed_progress.attempt,
-            progress=OperationProgress.model_validate(
-                {"phase": cls._operation_phase(row, plan, typed_progress)}
-            ),
-            created_at=_aware(row.created_at).isoformat(),
-            updated_at=_aware(row.updated_at).isoformat(),
-            supported_actions=["retry"] if retry_available else [],
-            owner=OperationOwnerReference(
-                kind=ProfileProjectionKind.FLEET_APPLICATION.value,
-                id=row.id,
-                request_id=row.request_key,
-            ),
-            failure=failure,
-            superseded_by=(
-                typed_progress.superseded_by
-                if state == ProfileCancellationCause.SUPERSEDED.value
-                else None
-            ),
-            reason_code=(
-                typed_progress.supersede_code
-                if state == ProfileCancellationCause.SUPERSEDED.value
-                else None
-            ),
-            result=OperationResultFacts.of(result),
-            cancellation=cancellation,
-            status_reason=(
-                redact_text(row.status_reason)
-                if (
-                    cancellation is not None
-                    or state
-                    in {
-                        LifecycleState.QUEUED.value,
-                        ProfileCancellationCause.SUPERSEDED.value,
-                    }
-                )
-                and row.status_reason is not None
-                else None
-            ),
-            blockers=(
-                list(typed_progress.blockers)
-                if state
-                in job_states.words(
-                    LifecycleState.QUEUED,
-                    LifecycleState.RUNNING,
-                    LifecycleState.BACKOFF,
-                    LifecycleState.FAILED,
-                )
-                else []
-            ),
-            wait=wait,
-            next_attempt_at=next_attempt.isoformat()
-            if next_attempt is not None
-            else None,
-        )
-
-    @staticmethod
-    def _unreadable_operation_item(row: FleetProfileApplication) -> OperationItem:
-        """Project a damaged application instead of letting it break Activity.
-
-        Durable columns stay authoritative for identity and declared scope;
-        only the unreadable document is replaced by an explicit failure, and
-        no retry is offered because intent cannot be proven.
-        """
-
-        return OperationItem(
-            id=row.id,
-            node_ids=list(_persisted_profile_scope(row) or ()),
-            kind=ProfileOperationKind.APPLY.value,
-            state=row.state,
-            attempt=0,
-            created_at=_aware(row.created_at).isoformat(),
-            updated_at=_aware(row.updated_at).isoformat(),
-            supported_actions=[],
-            owner=OperationOwnerReference(
-                kind=ProfileProjectionKind.FLEET_APPLICATION.value,
-                id=row.id,
-                request_id=row.request_key,
-            ),
-            status_reason="Stored profile application record is unreadable.",
-        )
+        return _operation_item(row, retry_available=self._retry_eligible(session, row))
 
     def application(self, application_id: str) -> FleetProfileApplicationView:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
@@ -405,3 +242,158 @@ class FleetProfileService:
             ):
                 raise MissingRecord(request_key, reason=InvalidRequestReason.NOT_FOUND)
             return self._application_view(row)
+
+
+def _operation_scope(plan: FleetProfilePreview) -> tuple[str, ...]:
+    return tuple(plan.scope.node_ids)
+
+
+def _operation_phase(
+    row: FleetProfileApplication,
+    plan: FleetProfilePreview,
+    progress: FleetProfileApplicationProgress,
+) -> str:
+    if row.state == LifecycleState.SUCCEEDED.value:
+        return ProfileReportedPhase.FINAL_VERIFY.value
+    if 0 <= row.current_step < len(plan.steps):
+        kind = plan.steps[row.current_step].kind
+        if kind == ProfileChildPhase.PREPARE.value:
+            return ProfileChildPhase.PREPARE.value
+        if kind == ProfileAction.SWITCH.value:
+            if progress.child_progress is not None:
+                return progress.child_progress.phase
+            return ProfileChildPhase.PREPARE.value
+    return ProfileReportedPhase.FINAL_VERIFY.value
+
+
+def _operation_item(
+    row: FleetProfileApplication,
+    *,
+    retry_available: bool = False,
+) -> OperationItem:
+    """Project profile progress and its operator-visible failure into Activity.
+
+    A single damaged historical row must not fail the whole page and must
+    not be hidden as an empty success: its unreadable document becomes an
+    explicit failure on that record while every readable record stays
+    usable.
+    """
+
+    try:
+        typed_progress = _persisted_profile_progress(row)
+    except (FleetProfileConflict, ValidationError, TypeError, ValueError):
+        warn_unreadable_once("profile application", row.id)
+        return _unreadable_operation_item(row)
+    plan = _persisted_profile_plan(row)
+    result = _persisted_profile_result(row)
+    if isinstance(plan, Residue):
+        warn_unreadable_once("profile application", row.id)
+        return _unreadable_operation_item(row)
+    cancellation = _application_cancellation_view(row, plan, typed_progress)
+    state = _profile_activity_state(row.state, typed_progress.cancellation)
+    next_attempt = None
+    if state == LifecycleState.BACKOFF.value:
+        # The Controller retries this by itself: it is waiting, not failed.
+        next_attempt = row.next_action_at
+    elif state == LifecycleState.QUEUED.value and typed_progress.admission_pending:
+        next_attempt = row.next_action_at
+    failure = None
+    if state in job_states.words(LifecycleState.FAILED):
+        # A failed row that recorded no reason still shows what is known of it.
+        reason = (
+            row.status_reason
+            if row.status_reason and row.status_reason.strip()
+            else f"The profile application ended {state} without a recorded reason"
+        )
+        failure = OperationFailureEvidence(
+            error_code=OperationFailureCode.FLEET_PROFILE_APPLICATION_FAILED,
+            summary="Profile application failed",
+            detail=redact_text(reason),
+            retryable=retry_available,
+            uncertain=False,
+        )
+    wait = read_wait(row)
+    return OperationItem(
+        id=row.id,
+        parent_id=typed_progress.retry_of_application_id,
+        node_ids=list(_operation_scope(plan)),
+        kind=typed_progress.operation_kind or ProfileOperationKind.APPLY.value,
+        state=state,
+        attempt=typed_progress.attempt,
+        progress=OperationProgress.model_validate(
+            {"phase": _operation_phase(row, plan, typed_progress)}
+        ),
+        created_at=_aware(row.created_at).isoformat(),
+        updated_at=_aware(row.updated_at).isoformat(),
+        supported_actions=["retry"] if retry_available else [],
+        owner=OperationOwnerReference(
+            kind=ProfileProjectionKind.FLEET_APPLICATION.value,
+            id=row.id,
+            request_id=row.request_key,
+        ),
+        failure=failure,
+        superseded_by=(
+            typed_progress.superseded_by
+            if state == ProfileCancellationCause.SUPERSEDED.value
+            else None
+        ),
+        reason_code=(
+            typed_progress.supersede_code
+            if state == ProfileCancellationCause.SUPERSEDED.value
+            else None
+        ),
+        result=OperationResultFacts.of(result),
+        cancellation=cancellation,
+        status_reason=(
+            redact_text(row.status_reason)
+            if (
+                cancellation is not None
+                or state
+                in {
+                    LifecycleState.QUEUED.value,
+                    ProfileCancellationCause.SUPERSEDED.value,
+                }
+            )
+            and row.status_reason is not None
+            else None
+        ),
+        blockers=(
+            list(typed_progress.blockers)
+            if state
+            in job_states.words(
+                LifecycleState.QUEUED,
+                LifecycleState.RUNNING,
+                LifecycleState.BACKOFF,
+                LifecycleState.FAILED,
+            )
+            else []
+        ),
+        wait=wait,
+        next_attempt_at=next_attempt.isoformat() if next_attempt is not None else None,
+    )
+
+
+def _unreadable_operation_item(row: FleetProfileApplication) -> OperationItem:
+    """Project a damaged application instead of letting it break Activity.
+
+    Durable columns stay authoritative for identity and declared scope;
+    only the unreadable document is replaced by an explicit failure, and
+    no retry is offered because intent cannot be proven.
+    """
+
+    return OperationItem(
+        id=row.id,
+        node_ids=list(_persisted_profile_scope(row) or ()),
+        kind=ProfileOperationKind.APPLY.value,
+        state=row.state,
+        attempt=0,
+        created_at=_aware(row.created_at).isoformat(),
+        updated_at=_aware(row.updated_at).isoformat(),
+        supported_actions=[],
+        owner=OperationOwnerReference(
+            kind=ProfileProjectionKind.FLEET_APPLICATION.value,
+            id=row.id,
+            request_id=row.request_key,
+        ),
+        status_reason="Stored profile application record is unreadable.",
+    )

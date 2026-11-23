@@ -15,9 +15,9 @@ from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.contracts import OperatorRetirementRefused
 from vonk_control.agent_jobs.service import AgentJobService

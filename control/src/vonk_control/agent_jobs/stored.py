@@ -7,10 +7,12 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 
+from ..fleet_profiles.stop_contract import ProfileJobRunStopJob
+from ..jobs.documents import _RecipeParent
 from ..lifecycle.evidence import Residue
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 
 
 def column_value(row: object, column: str) -> Any:
@@ -44,8 +46,6 @@ def column_message(row: object, column: str) -> bytes:
     encoding. Agent orders and other accepted documents retain their bound wire
     bytes, including timestamp spellings. A damaged column has no valid bytes.
     """
-    from ..fleet_profiles.stop_authority import ProfileJobRunStopJob
-    from ..jobs.documents import _RecipeParent
 
     value = read_row_column(row, column)
     if isinstance(value, Residue):

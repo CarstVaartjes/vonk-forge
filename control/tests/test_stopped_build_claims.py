@@ -14,9 +14,9 @@ import uuid
 
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import AgentOperation as WireOperation
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as WireOperation
 from vonk_agent_protocol.state_machines import ReservationState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.attempt_residues import AttemptResidueReconciler
 from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
 from vonk_control.inventory.repository import (

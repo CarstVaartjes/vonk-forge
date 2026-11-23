@@ -8,14 +8,11 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
+from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentFailureResult
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import (
-    AgentFailureKind,
-    AgentFailureResult,
-    canonical_message,
-)
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.availability_production import production as availability_production
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,
@@ -37,7 +34,7 @@ from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityError,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_control.stored.json_values import read_row_column
+from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import read_stored_model, serialize_json_value
 
 from .recipe_builds_support import _write_controller_build_receipt

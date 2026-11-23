@@ -7,7 +7,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_operations import (
     RecipeReconcilePayload,
@@ -20,7 +20,7 @@ from ..lifecycle.recipe_operation import RecipeOperationAdapter
 from ..models.execution import RecipeInstallation, RecipeRun, ResourceReservation
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .lifecycle_contract import (
     LifecycleNodeResult,

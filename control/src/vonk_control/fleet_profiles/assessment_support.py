@@ -12,9 +12,9 @@ from vonk_agent_protocol.agent_words import (
     ProfileDocumentState,
     ProfileReasonSeverity,
 )
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..bounded_json import sequence
 from ..failure_classification import is_security_failure

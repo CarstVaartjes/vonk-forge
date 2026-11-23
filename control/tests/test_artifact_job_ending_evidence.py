@@ -15,8 +15,8 @@ from datetime import UTC
 import pytest
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.host_helper import ContainerRuntimeAction
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
@@ -41,6 +41,7 @@ from vonk_agent_protocol.state_machines import (
     InstallationState,
     RunState,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.contracts import (
     CLAIM_LEASE_SECONDS,
     controller_result_consumer,
