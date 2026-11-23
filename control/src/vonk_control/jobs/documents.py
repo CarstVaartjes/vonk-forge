@@ -24,8 +24,10 @@ from pydantic import (
     StringConstraints,
     field_validator,
 )
-from vonk_agent_protocol.build_import import RecipeBuildCleanupRequest
-from vonk_agent_protocol.contracts import RecipeBuildRequest
+from vonk_agent_protocol.build_import import (
+    RecipeBuildCleanupRequest,
+    RecipeBuildRequest,
+)
 from vonk_agent_protocol.integer_domains import (
     MAX_DATABASE_BIGINT,
     MAX_DATABASE_INTEGER,

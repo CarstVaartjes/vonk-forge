@@ -383,7 +383,7 @@ def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
         assert parent is not None and parent.request_id == "source-read-recovery"
     assert rederived == []
     fault[0] = "permission"
-    from vonk_agent_protocol.disposition import Disposition
+    from vonk_agent_protocol.agent_words import Disposition
     from vonk_agent_protocol.outcome import SecurityRefusalError
     from vonk_control.recipe_image_availability.contracts import (
         availability_disposition,

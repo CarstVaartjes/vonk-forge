@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, WaitReason
 from vonk_agent_protocol.outcome import (
     InvalidRequestError,

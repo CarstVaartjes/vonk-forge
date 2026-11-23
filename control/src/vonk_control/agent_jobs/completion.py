@@ -7,13 +7,13 @@ import json
 from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.contracts import (
     AgentOperation,
     AgentResultPayload,
     canonical_message,
     canonical_payload,
 )
-from vonk_agent_protocol.disposition import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState
 from vonk_agent_protocol.outcome import (
     OutcomeDone,

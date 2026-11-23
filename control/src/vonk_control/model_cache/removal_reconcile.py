@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, cast, get_args
 from pydantic import ValidationError
 from sqlalchemy import and_, false, or_, select, true
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 

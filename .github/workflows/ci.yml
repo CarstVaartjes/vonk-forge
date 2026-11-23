@@ -1100,9 +1100,10 @@ jobs:
           if-no-files-found: ignore
 
   corpus-acceptance:
-    # The whole-corpus catalog import into fresh PostgreSQL takes about 35 s
-    # alone but over 100 s beside the shards' parallel workers, so it runs here
-    # by itself against its own budget; the control shards deselect it.
+    # The whole-corpus catalog import into fresh PostgreSQL takes 96-105 s beside
+    # the shards' parallel workers and about 71 s alone on a runner (over its
+    # 60 s budget). It runs here by itself; the lane reports the budget and does
+    # not enforce it. The control shards deselect it.
     name: Corpus acceptance
     needs: changes
     if: needs.changes.outputs.full == 'true'

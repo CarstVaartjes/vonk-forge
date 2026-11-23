@@ -12,10 +12,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import object_session
 from vonk_agent_protocol.agent_words import (
+    Disposition,
     ProfileOperationKind,
     ProfileReasonSeverity,
 )
-from vonk_agent_protocol.disposition import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode

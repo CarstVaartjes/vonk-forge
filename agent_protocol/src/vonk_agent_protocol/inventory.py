@@ -21,8 +21,12 @@ from .optional_evidence import (
 from .reason_codes.evidence import AgentEvidenceCode
 from .store_cleanup import StoreRetentionFailure
 from .swap import SwapObservation
-from .telemetry import MAX_TELEMETRY_CAPACITY_BYTES
-from .wire_model import WireEnum, WireModel, strict_json_datetime
+from .wire_model import (
+    MAX_TELEMETRY_CAPACITY_BYTES,
+    WireEnum,
+    WireModel,
+    strict_json_datetime,
+)
 
 
 class GpuHealth(WireEnum):

@@ -6,10 +6,10 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
-from vonk_agent_protocol.disposition import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.admission import InstallAdmissionCode

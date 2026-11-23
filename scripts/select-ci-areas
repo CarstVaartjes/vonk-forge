@@ -58,9 +58,6 @@ CORE_TEST_DIRECTORIES = frozenset(
 # helpers require a dependency review rather than a blanket directory exemption.
 CORE_TEST_HELPERS = frozenset({"control/tests/catalog_dry_run.py"})
 ROOT = Path(__file__).resolve().parents[1]
-# Markers the control shards deselect because another job runs them.
-LANE_MARKERS = ("built_image", "corpus_acceptance")
-LANE_MARKER_PATTERN = re.compile(r"\b(" + "|".join(LANE_MARKERS) + r")\b")
 
 
 def _core_test_input(path: str) -> bool:
@@ -74,8 +71,8 @@ def _core_test_input(path: str) -> bool:
     ):
         return False
     if path.startswith("control/tests/"):
-        # The control shards deselect built_image and corpus_acceptance tests.
-        # Preserve their own lanes for changes to those consumers, including newly added tests.
+        # The control shards deselect built_image tests. Preserve the image
+        # build for changes to those consumers, including newly added tests.
         # Inspect syntax without importing test code or its dependencies. Strings
         # cover marker-expression declarations; attributes cover decorators and
         # module/class markers. Unknown or unavailable source stays conservative.
@@ -84,12 +81,12 @@ def _core_test_input(path: str) -> bool:
         except (OSError, UnicodeError, SyntaxError):
             return False
         for node in ast.walk(tree):
-            if isinstance(node, ast.Attribute) and node.attr in LANE_MARKERS:
+            if isinstance(node, ast.Attribute) and node.attr == "built_image":
                 return False
             if (
                 isinstance(node, ast.Constant)
                 and isinstance(node.value, str)
-                and LANE_MARKER_PATTERN.search(node.value)
+                and re.search(r"\bbuilt_image\b", node.value)
             ):
                 return False
     return True

@@ -9,9 +9,12 @@ from typing import (
 from typing import cast as typing_cast
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileEffectState
+from vonk_agent_protocol.agent_words import (
+    Disposition,
+    ProfileChildPhase,
+    ProfileEffectState,
+)
 from vonk_agent_protocol.contracts import AgentOperation
-from vonk_agent_protocol.disposition import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 

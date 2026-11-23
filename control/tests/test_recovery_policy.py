@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_control.failure_classification import disposition
 from vonk_control.recovery_policy import (
     FailureKind,

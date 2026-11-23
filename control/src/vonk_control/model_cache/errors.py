@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import ClassVar
 from urllib.parse import urlsplit
 
-from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     SecurityRefusalReason,

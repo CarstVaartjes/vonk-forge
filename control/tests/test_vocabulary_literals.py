@@ -239,7 +239,7 @@ def test_the_contract_module_of_the_machines_may_spell_them(tmp_path: Path) -> N
 def test_the_enum_members_are_not_literals(tmp_path: Path) -> None:
     counts = _python(
         tmp_path,
-        "from vonk_agent_protocol import RunAdmissionCode\n"
+        "from vonk_agent_protocol.lifecycle_vocabulary import RunAdmissionCode\n"
         "code = RunAdmissionCode.PORT_OCCUPIED\n",
     )
 

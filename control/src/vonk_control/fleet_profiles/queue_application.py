@@ -8,13 +8,13 @@ from typing import cast as _typing_cast
 
 from sqlalchemy import select
 from vonk_agent_protocol.agent_words import (
+    Disposition,
     ProfileAction,
     ProfileCancellationCause,
     ProfileChildPhase,
     ProfileOperationKind,
     ProfileReasonSeverity,
 )
-from vonk_agent_protocol.disposition import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,

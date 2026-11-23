@@ -194,7 +194,7 @@ def outcome_body(
 
     This is the shape the Controller persists and every downstream reader
     already understands (an operation's success model, an
-    :class:`~vonk_agent_protocol.AgentFailureResult`, or a job receipt), so a
+    :class:`~vonk_agent_protocol.contracts.AgentFailureResult`, or a job receipt), so a
     typed report changes nothing a stored row exposes.
     """
 

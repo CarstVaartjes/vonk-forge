@@ -13,12 +13,12 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.contracts import (
     AgentOperation,
     AgentResult,
     AgentResultPayload,
 )
-from vonk_agent_protocol.disposition import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     FailureCode,

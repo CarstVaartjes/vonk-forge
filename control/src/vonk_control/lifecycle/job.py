@@ -52,7 +52,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     OperatorActionName,

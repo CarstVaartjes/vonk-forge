@@ -151,7 +151,7 @@ def test_every_security_refusal_class_is_reviewed() -> None:
     aliased = (
         "vonk_control.example",
         (
-            "from vonk_agent_protocol import SecurityRefusalError as Denied\n"
+            "from vonk_agent_protocol.outcome import SecurityRefusalError as Denied\n"
             "class Refusal(Denied): pass\n"
             "class Indirect(Refusal): pass\n"
         ),

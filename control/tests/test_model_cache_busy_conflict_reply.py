@@ -11,10 +11,8 @@ from vonk_control.model_cache.errors import (
 )
 from vonk_control.strict_json import ControllerAPIRoute
 
-from cluster_profiles.control_client.common import (
-    DISPOSITION_WAIT,
-    observation_disposition,
-)
+from cluster_profiles.cli_states_generated import DISPOSITION_WAIT
+from cluster_profiles.control_client.common import observation_disposition
 from cluster_profiles.control_client.errors import ControlHTTPError
 
 

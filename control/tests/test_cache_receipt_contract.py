@@ -158,7 +158,7 @@ def test_bad_ingress_digest_refuses_and_fresh_valid_ingress_is_admitted(
     controller, tmp_path
 ):
     """Local misses must not weaken verification when new bytes enter storage."""
-    from vonk_agent_protocol.disposition import Disposition
+    from vonk_agent_protocol.agent_words import Disposition
     from vonk_agent_protocol.outcome import SecurityRefusalError
     from vonk_control.failure_classification import disposition
 

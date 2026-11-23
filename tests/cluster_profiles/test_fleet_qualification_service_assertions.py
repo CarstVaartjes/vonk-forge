@@ -4,10 +4,10 @@ import json
 
 import pytest
 
-from cluster_profiles.fleet_qualification import (
+from cluster_profiles.fleet_qualification import _assert_service_response
+from cluster_profiles.fleet_qualification_observation import (
     QualificationObservationUnknown,
     QualificationQualityFailure,
-    _assert_service_response,
 )
 
 LEAK: list[object] = [

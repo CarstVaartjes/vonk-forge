@@ -14,12 +14,12 @@ from datetime import UTC, datetime, timedelta
 
 import httpx2
 import pytest
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.contracts import AgentFailureKind
 from vonk_agent_protocol.disposition import (
     FAILURE_KIND_DISPOSITION,
     HTTP_STATUS_DISPOSITIONS,
     WAIT_REASON_DISPOSITION,
-    Disposition,
     http_status_disposition,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import (

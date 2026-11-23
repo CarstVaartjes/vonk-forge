@@ -58,8 +58,8 @@ from typing import Any, Literal
 from sqlalchemy import Select, or_, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.contracts import AgentFailureResult
-from vonk_agent_protocol.disposition import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     FailureCode,
     InvalidRequestReason,

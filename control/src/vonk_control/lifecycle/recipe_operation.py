@@ -34,7 +34,7 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
-from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitOwnerKind
 
 from ..agent_operation_facts import aware

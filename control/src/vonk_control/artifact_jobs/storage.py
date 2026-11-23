@@ -7,8 +7,8 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.disposition import Disposition
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,

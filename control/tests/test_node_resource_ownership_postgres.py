@@ -7,11 +7,8 @@ from sqlalchemy import event, inspect, select
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.state_machines import NodeIdentityState
-from vonk_agent_protocol.telemetry import (
-    MAX_TELEMETRY_CAPACITY_BYTES,
-    HostResourceSample,
-    TelemetrySample,
-)
+from vonk_agent_protocol.telemetry import HostResourceSample, TelemetrySample
+from vonk_agent_protocol.wire_model import MAX_TELEMETRY_CAPACITY_BYTES
 from vonk_control.db import node_facts
 from vonk_control.db.startup import initialize_database
 from vonk_control.model_primitives import Base

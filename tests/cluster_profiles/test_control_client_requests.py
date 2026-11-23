@@ -30,11 +30,12 @@ from vonk_control.observation.transfer import (
 )
 
 from cluster_profiles import cli
-from cluster_profiles.control_client.errors import ControlClientError, ControlTimeout
-from cluster_profiles.control_client.transfers import (
-    ControlClient,
+from cluster_profiles.control_client.errors import (
+    ControlClientError,
+    ControlTimeout,
     LocalFilesystemError,
 )
+from cluster_profiles.control_client.transfers import ControlClient
 from cluster_profiles.control_client.transport import _RecordingTransport
 from cluster_profiles.generated_control.models.fleet_profile_definition import (
     FleetProfileDefinition,

@@ -9,6 +9,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, select
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import (
@@ -17,7 +18,6 @@ from vonk_agent_protocol.contracts import (
     AgentProgress,
     canonical_payload,
 )
-from vonk_agent_protocol.disposition import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,

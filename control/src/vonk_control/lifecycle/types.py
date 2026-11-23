@@ -14,8 +14,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import ClassVar
 
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.contracts import AgentFailureKind
-from vonk_agent_protocol.disposition import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     TERMINAL_LIFECYCLE_STATES,
     LifecycleEffect,

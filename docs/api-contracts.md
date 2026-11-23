@@ -469,7 +469,7 @@ The stored `state` of a lifecycle subject speaks the nine words of
 `LifecycleState` (`queued`, `running`, `observing`, `backoff`, `succeeded`,
 `failed`, `cancelled`, `superseded`, `needs-operator`) and nothing else; the
 state CHECK constraints admit only those words. Every reader of a stored state goes
-through `vonk_agent_protocol.adopt_state(subject, stored)` (selections through
+through `vonk_agent_protocol.lifecycle_vocabulary.adopt_state(subject, stored)` (selections through
 `stored_words`). A word outside the vocabulary is unknown: the subject's adapter
 re-evaluates the row (it is retried or observed), never trusts or refuses it.
 

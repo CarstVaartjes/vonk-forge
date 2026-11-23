@@ -9,13 +9,13 @@ from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.contracts import (
     AgentFailureKind,
     AgentFailureResult,
     AgentProtocolError,
 )
 from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.disposition import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     FailureCode,

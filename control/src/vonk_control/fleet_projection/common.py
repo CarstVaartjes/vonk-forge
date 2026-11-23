@@ -26,8 +26,10 @@ from vonk_agent_protocol.reason_codes.evidence import (
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.state_machines import CertificateState
 from vonk_agent_protocol.swap import SwapIntent, SwapPolicy
-from vonk_agent_protocol.telemetry import MAX_TELEMETRY_CAPACITY_BYTES
-from vonk_agent_protocol.wire_model import strict_json_datetime
+from vonk_agent_protocol.wire_model import (
+    MAX_TELEMETRY_CAPACITY_BYTES,
+    strict_json_datetime,
+)
 from vonk_forge_contracts import (
     EndpointAlias,
     RecipeDefinition,

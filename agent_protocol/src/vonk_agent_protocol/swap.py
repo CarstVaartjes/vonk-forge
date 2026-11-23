@@ -12,8 +12,12 @@ from typing import Literal
 
 from pydantic import Field, field_validator
 
-from .telemetry import MAX_TELEMETRY_CAPACITY_BYTES
-from .wire_model import MAX_RUN_GENERATION, WireEnum, WireModel
+from .wire_model import (
+    MAX_RUN_GENERATION,
+    MAX_TELEMETRY_CAPACITY_BYTES,
+    WireEnum,
+    WireModel,
+)
 
 GIB = 1024**3
 

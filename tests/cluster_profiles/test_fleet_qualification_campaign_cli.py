@@ -8,13 +8,12 @@ from typing import Any
 
 import pytest
 
-from cluster_profiles.fleet_qualification import QualificationError
 from cluster_profiles.fleet_qualification_campaign_cli import (
     application as load_campaign_batch,
 )
 from cluster_profiles.fleet_qualification_campaign_cli import cli
 from cluster_profiles.fleet_qualification_campaign_cli import smoke as campaign_smoke
-from cluster_profiles.fleet_qualification_campaign_cli import smoke as smoke_module
+from cluster_profiles.fleet_qualification_observation import QualificationError
 from control.tests.consumer_outcomes import not_adopted
 
 ALPHA = "vonk-forge/alpha"
@@ -411,7 +410,7 @@ def test_campaign_reconciles_lost_reply_and_restart_reuses_one_application(
             return value
 
     controller = LostReply()
-    smoke = smoke_module._smoke_lanes
+    smoke = campaign_smoke._smoke_lanes
     crashed = False
 
     def crash_after_acceptance(*args, **kwargs):

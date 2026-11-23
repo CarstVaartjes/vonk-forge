@@ -12,8 +12,8 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
-from vonk_agent_protocol.disposition import Disposition
 from vonk_agent_protocol.inventory import MemoryPool
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,

@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from pydantic import Field
 
-from .telemetry import MAX_TELEMETRY_CAPACITY_BYTES
-from .wire_model import WireEnum, WireModel
+from .wire_model import MAX_TELEMETRY_CAPACITY_BYTES, WireEnum, WireModel
 
 
 class DisplayMemorySignal(WireEnum):

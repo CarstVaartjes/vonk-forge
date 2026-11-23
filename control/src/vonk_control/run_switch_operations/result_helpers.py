@@ -6,9 +6,8 @@ from collections.abc import Mapping
 from datetime import datetime
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
-from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol.agent_words import Disposition, ProfileChildPhase
 from vonk_agent_protocol.contracts import AgentFailureResult, canonical_message
-from vonk_agent_protocol.disposition import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     OutcomeKind,

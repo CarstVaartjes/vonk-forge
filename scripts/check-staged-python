@@ -36,14 +36,21 @@ def type_checked(files: list[str]) -> list[str]:
     The full check (CI) reports only ``include`` minus ``exclude`` from
     pyproject.toml; handing pyright a file outside it reports errors CI never
     sees. pyproject.toml is the one owner of the scope."""
-    config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    pyright = config["tool"]["pyright"]
-    include = [entry.rstrip("/") for entry in pyright["include"]]
+    try:
+        config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        config = {}
+    pyright = config.get("tool", {}).get("pyright", {})
+    # Like pyright, no ``include`` means the whole root.
+    include = [entry.rstrip("/") for entry in pyright.get("include", ["."])]
     exclude = [pattern.replace("**", "*") for pattern in pyright.get("exclude", [])]
     return [
         path
         for path in files
-        if any(path == entry or path.startswith(entry + "/") for entry in include)
+        if any(
+            entry == "." or path == entry or path.startswith(entry + "/")
+            for entry in include
+        )
         and not any(fnmatch.fnmatch(path, pattern) for pattern in exclude)
     ]
 

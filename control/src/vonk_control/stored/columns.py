@@ -16,11 +16,8 @@ from vonk_agent_protocol.agent_words import (
     ProfileChildJobKind,
     RunSwitchReasonScopeName,
 )
-from vonk_agent_protocol.contracts import (
-    PAYLOAD_MODELS,
-    AgentResultPayload,
-    RecipeBuildRequest,
-)
+from vonk_agent_protocol.build_import import RecipeBuildRequest
+from vonk_agent_protocol.contracts import PAYLOAD_MODELS, AgentResultPayload
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.gpu_clock import GpuClockObservation

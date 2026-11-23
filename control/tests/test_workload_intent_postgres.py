@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.failure_classification import disposition, wait_reason

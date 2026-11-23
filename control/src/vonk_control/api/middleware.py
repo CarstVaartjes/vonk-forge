@@ -12,8 +12,7 @@ from fastapi import (
     Request,
     Response,
 )
-from vonk_agent_protocol.agent_words import AgentClientDecision
-from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.agent_words import AgentClientDecision, Disposition
 from vonk_agent_protocol.error_response import (
     ErrorContextResponse,
 )

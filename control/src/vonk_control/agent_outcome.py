@@ -1,7 +1,7 @@
 """The Controller's single reading of an agent's operation result.
 
 Agents that speak the typed contract send an
-:class:`~vonk_agent_protocol.OperationOutcome` (``done`` | ``failed`` |
+:class:`~vonk_agent_protocol.outcome.OperationOutcome` (``done`` | ``failed`` |
 ``unknown``) as ``AgentResult.result``.  Agents built before it send the four
 legacy state words with an untyped body.  :func:`agent_outcome` is the **one**
 function that turns either into an outcome, and the legacy half of it is the

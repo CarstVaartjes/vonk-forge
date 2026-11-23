@@ -31,7 +31,7 @@ from sqlalchemy import (
     cast as sql_cast,
 )
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import WaitOwnerKind
 
 from . import (

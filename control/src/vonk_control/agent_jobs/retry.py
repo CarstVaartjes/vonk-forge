@@ -10,14 +10,13 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, object_session
 from sqlalchemy.sql.elements import ColumnElement
-from vonk_agent_protocol.agent_words import FailureStage
+from vonk_agent_protocol.agent_words import Disposition, FailureStage
 from vonk_agent_protocol.contracts import (
     AgentFailureKind,
     AgentOperation,
     canonical_payload,
     validate_result_for_operation,
 )
-from vonk_agent_protocol.disposition import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, LifecycleState
 from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult

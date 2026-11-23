@@ -9,7 +9,7 @@ the **only** projection of a core decision back onto the stored row
 (:meth:`ModelCacheAdapter.apply`).  No other code writes an operation's ``state``.
 
 Stored encoding.  The stored ``state`` is a word of the core vocabulary
-(``vonk_agent_protocol.LifecycleState``; readers select by
+(``vonk_agent_protocol.lifecycle_vocabulary.LifecycleState``; readers select by
 ``model_cache_states.LIVE`` and friends, never by a hand-spelled word).  The core's
 states are projected onto it:
 
@@ -57,7 +57,7 @@ from typing import Any, Protocol
 
 from sqlalchemy import select, true
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     WaitOwnerKind,

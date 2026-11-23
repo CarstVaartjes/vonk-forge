@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.recipe_jobs import MAX_TIMEOUT_SECONDS
+from vonk_agent_protocol.job_limits import MAX_TIMEOUT_SECONDS
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,

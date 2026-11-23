@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.jobs import states as job_states
@@ -859,7 +859,7 @@ def test_coordinator_fault_has_durable_api_custody_and_restart_resume(
     postgres_engine, fault
 ):
     """Catches JobService-coupled custody, volatile waits and unchanged retries."""
-    from vonk_agent_protocol.disposition import Disposition
+    from vonk_agent_protocol.agent_words import Disposition
     from vonk_agent_protocol.lifecycle_vocabulary import (
         WaitOwnerKind,
         WaitResumeCondition,

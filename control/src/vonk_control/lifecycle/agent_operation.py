@@ -9,7 +9,7 @@ decision back onto the stored rows (:meth:`AgentOperationAdapter.apply`).  No
 other code writes an order's ``state`` for a recovery decision.
 
 Stored encoding.  An order's stored ``state`` is a word of the core vocabulary
-(``vonk_agent_protocol.LifecycleState``), so each core state is stored as itself:
+(``vonk_agent_protocol.lifecycle_vocabulary.LifecycleState``), so each core state is stored as itself:
 
 ========================  ==========================================
 core state                stored order
@@ -61,13 +61,13 @@ from typing import Any
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.contracts import (
     AgentFailureResult,
     AgentOperation,
     AgentResultPayload,
     canonical_message,
 )
-from vonk_agent_protocol.disposition import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
