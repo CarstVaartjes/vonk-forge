@@ -254,11 +254,9 @@ def _signed_release(
         raise
     except (ValueError, TypeError) as error:
         raise CliUpdateError("immutable release is not yet observable") from error
-    if (
-        not isinstance(release, dict)
-        or any(release.get(name) != fields[name] for name in ("channel", "generation"))
-        or release.get("schema_version") != int(fields["schema_version"])
-    ):
+    if any(
+        release.get(name) != fields[name] for name in ("channel", "generation")
+    ) or release.get("schema_version") != int(fields["schema_version"]):
         raise CliUpdateError("immutable release identity is inconsistent")
     artifacts = release.get("artifacts")
     if not isinstance(artifacts, dict):
