@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Check changed languages, preparing locked dependencies when needed."""
 
+# ruff: noqa: E402 - the sibling helpers import after this file's directory is on sys.path, however it is loaded
 from __future__ import annotations
 
 import hashlib
+import os
 import platform
 import re
 import shlex
@@ -14,7 +16,6 @@ import tomllib
 from pathlib import Path
 
 sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
-import os
 
 # The sibling helper, however this file is loaded.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

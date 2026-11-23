@@ -9,9 +9,11 @@ The TypeScript transport uses pinned openapi-fetch. Its DTOs and standalone
 runtime validators are generated together from this same canonical document.
 """
 
+# ruff: noqa: E402 - the project imports follow run_in_control, which re-executes in the control environment
 from __future__ import annotations
 
 import argparse
+import enum
 import inspect
 import json
 import os
@@ -28,10 +30,18 @@ if __name__ == "__main__":
     from check_environment import run_in_control
 
     run_in_control(ROOT)
-import enum
+
+import nodejs_wheel
+from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts.qualification_status import (
+    QualificationOutcome,
+    QualificationStatus,
+)
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleVocabulary
 from vonk_agent_protocol.reason_codes.vocabulary import ReasonCodeVocabulary
+from vonk_agent_protocol.recipe_jobs import MEDIA_TYPE_PATTERN, canonical_media_types
+from vonk_control import control_limits
 from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
@@ -63,8 +73,6 @@ class _SchemaJobs:
 
 
 def _schema(*, include_browser_auth: bool) -> dict[str, object]:
-    from sqlalchemy.orm import sessionmaker
-
     signing_key = b"schema-only-signing-key-32-bytes!"
     app = create_app(
         jobs=_SchemaJobs(),
@@ -96,11 +104,6 @@ def typescript_vocabulary() -> str:
         "// vonk_agent_protocol.reason_codes and Controller contracts. Do not edit.",
         "",
     ]
-    from vonk_forge_contracts.qualification_status import (
-        QualificationOutcome,
-        QualificationStatus,
-    )
-
     word_types = [
         field.annotation
         for carrier in (LifecycleVocabulary, ReasonCodeVocabulary)
@@ -177,8 +180,6 @@ def _generated_client_schema(
 
 
 def _node_wheel_root() -> Path:
-    import nodejs_wheel
-
     return Path(nodejs_wheel.__file__).parent
 
 
@@ -296,11 +297,6 @@ def main() -> None:
         )
         # Ship the protocol's pure canonicalizer without making the standalone
         # CLI depend on the protocol package or Pydantic at runtime.
-        from vonk_agent_protocol.recipe_jobs import (
-            MEDIA_TYPE_PATTERN,
-            canonical_media_types,
-        )
-
         python_output.mkdir(parents=True, exist_ok=True)
         (python_output / "media_types.py").write_text(
             '"""Generated from vonk_agent_protocol.recipe_jobs. Do not edit."""\n\n'
@@ -311,8 +307,6 @@ def main() -> None:
         )
         # The Controller owns the document bound; the CLI reads a generated copy,
         # never the server package.
-        from vonk_control import control_limits
-
         (python_output / "limits.py").write_text(
             '"""Generated from vonk_control.control_limits. Do not edit."""\n\n'
             f"MAX_CONTROL_DOCUMENT_BYTES = {control_limits.MAX_CONTROL_DOCUMENT_BYTES}\n",

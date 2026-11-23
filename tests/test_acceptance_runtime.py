@@ -12,8 +12,6 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.linux_only
-
 from tests.acceptance.runtime import (
     AcceptanceError,
     PhaseTimings,
@@ -25,6 +23,8 @@ from tests.acceptance.runtime import (
     run_interactive,
     write_all,
 )
+
+pytestmark = pytest.mark.linux_only
 
 
 def test_bootstrap_command_forwards_only_explicit_installer_arguments() -> None:

@@ -9,12 +9,14 @@ changes here, and ``tests/test_generated_contracts.py`` fails while the
 committed files are stale.
 """
 
+# ruff: noqa: E402 - the project imports follow run_in_control, which re-executes in the control environment
 from __future__ import annotations
 
 import argparse
 import json
 import sys
 from pathlib import Path
+from typing import get_args
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -23,7 +25,10 @@ if __name__ == "__main__":
 
     run_in_control(ROOT)
 sys.path[:0] = [str(ROOT / "agent_protocol/src"), str(ROOT / "control/src")]
-from typing import get_args
+from vonk_forge_contracts.qualification_status import (
+    QualificationOutcome,
+    QualificationStatus,
+)
 
 from vonk_agent_protocol.agent_words import (
     Disposition,
@@ -61,12 +66,6 @@ ROUTE_WORDS = ROOT / "agent_protocol/src/vonk_agent_protocol/route_activation_wo
 
 
 def cli_words() -> str:
-
-    from vonk_forge_contracts.qualification_status import (
-        QualificationOutcome,
-        QualificationStatus,
-    )
-
     words = {
         "STOP_UNCONFIRMED": StopOutcome.UNCONFIRMED,
         "PROFILE_NOT_ISSUED": ProfileEffectState.NOT_ISSUED,

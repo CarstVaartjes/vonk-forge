@@ -23,7 +23,8 @@ import pytest
 
 from cluster_profiles import cli
 from cluster_profiles.cli_states_generated import RUNNING, SUCCEEDED
-from cluster_profiles.control_client import common, schema
+from cluster_profiles.control_client import client as client_module
+from cluster_profiles.control_client import common, schema, transfers
 from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlHTTPError,
@@ -67,6 +68,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
@@ -816,8 +818,6 @@ def test_generated_transport_rejects_malformed_raw_response(
 def test_observation_callback_hides_arbitrary_validation_exception_text(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cluster_profiles.control_client import client as control_client
-
     valid = {
         "authority_revision": "a" * 64,
         "event_cursor": 0,
@@ -839,8 +839,8 @@ def test_observation_callback_hides_arbitrary_validation_exception_text(
     def unsafe_validator(_component: str, _document: object) -> dict[str, object]:
         raise ValueError("private arbitrary parser value must not be exported")
 
-    original_validator = control_client.validate_control_document
-    monkeypatch.setattr(control_client, "validate_control_document", unsafe_validator)
+    original_validator = client_module.validate_control_document
+    monkeypatch.setattr(client_module, "validate_control_document", unsafe_validator)
     client = ControlClient(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
@@ -848,7 +848,7 @@ def test_observation_callback_hides_arbitrary_validation_exception_text(
         client.fleet()
     assert "private arbitrary parser value" not in str(failed[0])
     assert len(requests) > 1
-    monkeypatch.setattr(control_client, "validate_control_document", original_validator)
+    monkeypatch.setattr(client_module, "validate_control_document", original_validator)
     assert client.fleet().to_dict()["nodes"] == []
 
 
@@ -1085,8 +1085,6 @@ def test_artifact_output_download_preserves_an_existing_destination(
 def test_artifact_output_download_cleans_temporary_file_after_disk_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cluster_profiles.control_client import transfers as control_client
-
     content = b"verified output"
     digest = hashlib.sha256(content).hexdigest()
     client = ControlClient(
@@ -1098,12 +1096,12 @@ def test_artifact_output_download_cleans_temporary_file_after_disk_failure(
     )
     destination = tmp_path / "result.png"
 
-    original_link = control_client.os.link
+    original_link = transfers.os.link
 
     def disk_full(*_args, **_kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr(control_client.os, "link", disk_full)
+    monkeypatch.setattr(transfers.os, "link", disk_full)
 
     with _not_adopted():
         client.download_file(
@@ -1117,7 +1115,7 @@ def test_artifact_output_download_cleans_temporary_file_after_disk_failure(
 
     assert not destination.exists()
     assert list(tmp_path.glob(".result.png.*.download")) == []
-    control_client.os.link = original_link
+    transfers.os.link = original_link
     client.download_file(
         f"/api/artifact-jobs/12345678-1234-4123-8123-123456789abc/results/result.png/{digest}",
         destination,
@@ -1177,8 +1175,6 @@ def test_wait_initial_and_later_unknown_share_budget_and_fresh_job_is_admitted(
                 200, _job_receipt("22345678-1234-4123-8123-123456789abc", SUCCEEDED)
             )
         if fault == "oversized":
-            from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-
             return _Response(200, {"padding": "x" * MAX_CONTROL_DOCUMENT_BYTES})
         return _Response(503 if fault == "unavailable" else 200, {"broken": True})
 
@@ -1374,8 +1370,6 @@ def test_generated_request_validation_cannot_spend_the_budget_then_dispatch(
     monkeypatch: pytest.MonkeyPatch,
     observation_clock: list[float],
 ) -> None:
-    from cluster_profiles.cli_states_generated import SUCCEEDED
-    from cluster_profiles.control_client import schema
 
     original = schema._request_contract
     calls = []

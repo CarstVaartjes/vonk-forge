@@ -25,6 +25,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from candidate_payload import PayloadError, payload_digest
+from nas_setup_wheel import validate_wheel
 from spark_lifecycle_contract import GATES as SPARK_GATES
 from spark_lifecycle_contract import ContractError as SparkContractError
 from spark_lifecycle_contract import recompute_publication_graphs, validate_lifecycle
@@ -554,7 +555,6 @@ def assemble(arguments: argparse.Namespace) -> str:
     nas_wheel = _safe_bytes(
         arguments.nas_setup_wheel, "NAS setup wheel", 64 * 1024 * 1024
     )
-    from nas_setup_wheel import validate_wheel
 
     try:
         validate_wheel(arguments.nas_setup_wheel.name, nas_wheel)
@@ -653,7 +653,7 @@ def assemble(arguments: argparse.Namespace) -> str:
         raise PublicationError("CLI wheel filename is invalid")
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-        from cluster_profiles.runtime_identity import (
+        from cluster_profiles.runtime_identity import (  # noqa: PLC0415 - the source tree, put on sys.path above
             contract_fingerprint,
             verified_wheel_identity,
         )

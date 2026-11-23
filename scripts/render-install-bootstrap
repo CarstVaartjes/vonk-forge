@@ -14,6 +14,8 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from nas_setup_wheel import validate_wheel
+
 ROOT = Path(__file__).resolve().parents[1]
 PLATFORMS = {
     "nas": ("wheel",),
@@ -144,8 +146,6 @@ def render(
     for platform, path in artifacts.items():
         content = _read_regular(path, f"{platform} setup artifact", MAX_ARTIFACT_BYTES)
         if kind == "nas":
-            from nas_setup_wheel import validate_wheel
-
             try:
                 validate_wheel(path.name, content)
             except ValueError as error:

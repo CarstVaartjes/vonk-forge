@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib.machinery
+import importlib.util
 import json
 import ssl
 from pathlib import Path
@@ -133,8 +135,6 @@ def test_failed_report_cannot_be_signed_as_release_evidence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import importlib.machinery
-    import importlib.util
 
     module = _module()
     arguments = _arguments(tmp_path)

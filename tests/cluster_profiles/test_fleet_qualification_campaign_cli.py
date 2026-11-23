@@ -8,7 +8,10 @@ from typing import Any
 
 import pytest
 
-from cluster_profiles.control_client.errors import ControlTransportError
+from cluster_profiles.control_client.errors import (
+    ControlConflict,
+    ControlTransportError,
+)
 from cluster_profiles.fleet_qualification_campaign_cli import (
     application as load_campaign_batch,
 )
@@ -200,8 +203,6 @@ class FakeController:
             return dict(self.profile)
         if path == "/api/profile/1" and method == "PUT":
             if payload["expected_revision"] != self.profile["revision"]:
-                from cluster_profiles.control_client.errors import ControlConflict
-
                 raise ControlConflict(409, "current owner revision is different")
             self.profile = {
                 "status": "created",

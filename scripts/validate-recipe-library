@@ -220,7 +220,11 @@ def _validate_v2_package(
     package_label: str,
 ) -> None:
     """Validate one self-contained v2 package without hydrating remote files."""
-    from vonk_forge_contracts import document_sha256, read_model, read_recipe
+    from vonk_forge_contracts import (  # noqa: PLC0415 - the candidate's contracts, on sys.path from _validate_v2
+        document_sha256,
+        read_model,
+        read_recipe,
+    )
 
     expected_recipe = read_recipe(recipe_document)
     try:
@@ -485,8 +489,12 @@ def _validate_recipe_option_policy(
     source = platform_root / "control" / "src"
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
-    from vonk_control.harnesses.canonical import validate_runtime_policy
-    from vonk_control.harnesses.common import HarnessCompileError
+    from vonk_control.harnesses.canonical import (  # noqa: PLC0415 - from the platform checkout put on sys.path above
+        validate_runtime_policy,
+    )
+    from vonk_control.harnesses.common import (  # noqa: PLC0415 - from the platform checkout put on sys.path above
+        HarnessCompileError,
+    )
 
     for option in recipe.options:
         for choice in option.choices:
@@ -532,7 +540,9 @@ def _validate_source_policy(library_root: Path, platform_root: Path) -> None:
     source = platform_root / "control" / "src"
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
-    from vonk_control.prebuilt_images import library_source_policy_failures
+    from vonk_control.prebuilt_images import (  # noqa: PLC0415 - from the platform checkout put on sys.path above
+        library_source_policy_failures,
+    )
 
     failures = library_source_policy_failures(library_root)
     if failures:
@@ -549,14 +559,14 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
     if not (contract_root / "vonk_forge_contracts").is_dir():
         raise LibraryValidationError("central contracts package is missing")
     sys.path.insert(0, str(contract_root))
-    import vonk_forge_contracts
-    from vonk_forge_contracts import (
+    import vonk_forge_contracts  # noqa: PLC0415 - the candidate's own contracts, put on sys.path above
+    from vonk_forge_contracts import (  # noqa: PLC0415 - the candidate's own contracts, put on sys.path above
         CONTRACT_VERSION,
         document_sha256,
         read_model,
         read_recipe,
     )
-    from vonk_forge_contracts.resolver import (
+    from vonk_forge_contracts.resolver import (  # noqa: PLC0415 - the candidate's own contracts, put on sys.path above
         ContractResolutionError,
         validate_model_references,
         validate_recipe_models,

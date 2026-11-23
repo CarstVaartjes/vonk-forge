@@ -10,6 +10,7 @@ from urllib.error import HTTPError
 
 import pytest
 from controller_cli_support import FakeClient, _removal_review, run
+from test_control_client_requests import _artifact_job_response, _Response
 
 from cluster_profiles import cli
 from cluster_profiles.control_client.errors import (
@@ -503,7 +504,6 @@ def test_lost_server_error_body_preserves_its_retry_delay(
     assert not sleeps
     assert sum(sleeps) < result["submission"]["timeout_seconds"]
     # Ending observation retains no client gate: a fresh read can succeed.
-    from test_control_client_requests import _artifact_job_response, _Response
 
     control._opener = lambda *_args, **_kwargs: _Response(200, _artifact_job_response())
     assert (

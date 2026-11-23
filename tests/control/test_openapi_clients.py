@@ -17,12 +17,16 @@ from cluster_profiles.generated_control.api.default import (
     resume_job,
 )
 from cluster_profiles.generated_control.client import AuthenticatedClient, Client
+from cluster_profiles.generated_control.models.bounded_error_response import (
+    BoundedErrorResponse as GeneratedBoundedErrorResponse,
+)
 from cluster_profiles.generated_control.models.fleet_profile_assignment_input import (
     FleetProfileAssignmentInput,
 )
 from cluster_profiles.generated_control.models.run_switch_operation import (
     RunSwitchOperation,
 )
+from vonk_agent_protocol.error_response import BoundedErrorResponse
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.evidence import NodeOfflineReason
 from vonk_agent_protocol.telemetry import TelemetrySample
@@ -66,8 +70,6 @@ def test_cli_packages_the_generated_admin_openapi_contract() -> None:
 
 
 def test_enrollment_and_error_producers_reach_generated_http_consumer() -> None:
-
-    from vonk_agent_protocol.error_response import BoundedErrorResponse
 
     client = Client(base_url="https://control.invalid")
     producer = FleetActionResponse(action="enroll", state=LifecycleState.SUCCEEDED)
@@ -547,10 +549,6 @@ def test_generated_telemetry_contract_is_concrete() -> None:
 
 def test_generated_python_client_parses_documented_operation_errors() -> None:
 
-    from cluster_profiles.generated_control.models.bounded_error_response import (
-        BoundedErrorResponse,
-    )
-
     client = Client(base_url="https://control.invalid")
     expected = {
         "resume_job": (401, 403, 404, 409, 503),
@@ -567,5 +565,5 @@ def test_generated_python_client_parses_documented_operation_errors() -> None:
                     json={"detail": f"bounded-{status_code}"},
                 ),
             )
-            assert isinstance(parsed, BoundedErrorResponse)
+            assert isinstance(parsed, GeneratedBoundedErrorResponse)
             assert parsed.detail == f"bounded-{status_code}"

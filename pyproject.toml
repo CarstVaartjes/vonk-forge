@@ -81,7 +81,8 @@ exclude = [
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "."]
+# scripts/: the sibling modules the repository scripts import by bare name.
+pythonpath = ["src", ".", "scripts"]
 testpaths = ["tests"]
 # Hang guard only. Per-test timing (10 s, or @pytest.mark.slow up to 60 s)
 # lives in tools/pytest_budget.py: reported for every test, enforced only on

@@ -1,6 +1,9 @@
 """Wrong implementations: handwritten and stale selections."""
 
 import ast
+import importlib
+import importlib.machinery
+import importlib.util
 import json
 import re
 import shutil
@@ -13,6 +16,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+from tests.scripts.test_verify_supply_chain import _copy
 from tools.single_source_values import tracked_files, violations
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -186,12 +190,6 @@ def test_all_image_policy_consumers_follow_owner_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Wrong implementation: a packager/verifier retains its own copy when policy changes.
-    import importlib
-    import importlib.machinery
-    import importlib.util
-    import json
-
-    from tests.scripts.test_verify_supply_chain import _copy
 
     monkeypatch.syspath_prepend(str(ROOT / "scripts"))
     policy = importlib.import_module("image_policy")
@@ -408,8 +406,6 @@ def uv_pin_violations(root: Path, files: list[str]) -> list[str]:
             ):
                 errors.append(f"{file}:{number}: uv version belongs in .tool-versions")
         if file.endswith((".yml", ".yaml")) and "setup-uv@" in text:
-            import yaml
-
             document = yaml.safe_load(text)
             groups = (
                 [document["runs"]["steps"]]

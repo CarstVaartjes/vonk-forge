@@ -6,6 +6,7 @@ the admin web hooks call it so a tree is generated at most once per change,
 however many tools then read the outputs.
 """
 
+# ruff: noqa: E402 - the repository imports follow the repository root's sys.path entry
 from __future__ import annotations
 
 import sys

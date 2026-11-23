@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Export the complete current installer manifest from its canonical models."""
 
+# ruff: noqa: E402 - the project imports follow run_in_protocol, which re-executes in the protocol environment
 from __future__ import annotations
 
 import argparse

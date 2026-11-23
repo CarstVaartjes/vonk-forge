@@ -339,8 +339,6 @@ def test_native_renewal_helper_uses_candidate_content_identity(
         elif defect == "binary":
             helper.write_bytes(b"substituted helper")
         elif defect == "input":
-            import json
-
             manifest = json.loads(verified_manifest)
             name = next(iter(manifest["source_inputs"]))
             manifest["source_inputs"][name] = "0" * 64

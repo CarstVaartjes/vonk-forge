@@ -27,7 +27,10 @@ import sys
 from pathlib import Path
 from typing import Annotated, Any, Literal, Optional, Union, cast, get_args
 
+from jsonschema import Draft202012Validator
 from pydantic import BaseModel, Field, TypeAdapter, create_model
+from referencing import Registry, Resource
+from referencing.jsonschema import DRAFT202012
 
 from cluster_profiles.cli_json_contract import (
     DOCUMENT_VERSIONS,
@@ -401,9 +404,6 @@ def bundled(published: dict, definitions: dict) -> dict:
 def schema_registry(directory: Path) -> Any:
     """A ``referencing`` registry holding every published file by file name."""
 
-    from referencing import Registry, Resource
-    from referencing.jsonschema import DRAFT202012
-
     return Registry().with_resources(
         (
             path.name,
@@ -417,8 +417,6 @@ def schema_registry(directory: Path) -> Any:
 
 def validator(kind: DocumentKind, directory: Path) -> Any:
     """A validator of one published kind that resolves its shared definitions."""
-
-    from jsonschema import Draft202012Validator
 
     schema = json.loads((directory / schema_filename(kind)).read_text())
     return Draft202012Validator(schema, registry=schema_registry(directory))

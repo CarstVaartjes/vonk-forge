@@ -13,6 +13,10 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from jsonschema import Draft202012Validator
+from pydantic import ValidationError
 
 from tests.scripts.install_release_publication_support import (
     ROOT,
@@ -23,6 +27,7 @@ from tests.scripts.install_release_publication_support import (
     _inputs,
     _publish_accepted,
 )
+from vonk_agent_protocol.installer_release import InstallerReleaseManifest
 
 pytestmark = pytest.mark.needs_dpkg_deb
 
@@ -220,12 +225,6 @@ def test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary(
     probe = os.environ.get("VONK_INSTALLER_RELEASE_WIRE_PROBE")
     if not probe:
         pytest.skip("VONK_INSTALLER_RELEASE_WIRE_PROBE requires the native Rust probe")
-    from cryptography.hazmat.primitives import hashes, serialization
-    from cryptography.hazmat.primitives.asymmetric import padding, rsa
-    from jsonschema import Draft202012Validator
-    from pydantic import ValidationError
-
-    from vonk_agent_protocol.installer_release import InstallerReleaseManifest
 
     inputs = _inputs(tmp_path)
     publication = _assemble(tmp_path, inputs)

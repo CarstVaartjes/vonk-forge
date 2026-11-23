@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+import importlib.machinery
+import importlib.util
 import re
 import textwrap
 from pathlib import Path
@@ -366,8 +368,6 @@ def test_every_job_has_a_timeout_and_a_pinned_runner_label() -> None:
 
 def test_pre_commit_added_line_paths_match_ci() -> None:
     """The hook checks the same pathspec as ci.yml's added-line step."""
-    import importlib.machinery
-    import importlib.util
 
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
     match = re.search(r"--unified=0 \"\$BASE_SHA\" -- \\\n\s+([^|\n]+?)\s*\|", ci)

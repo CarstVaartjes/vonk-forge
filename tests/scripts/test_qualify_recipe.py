@@ -8,11 +8,14 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.machinery import SourceFileLoader
 from importlib.resources import files
+from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
 from threading import Thread
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from vonk_forge_contracts import read_recipe
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "qualify-recipe"
@@ -355,7 +358,6 @@ if args[:1] == ['info']:
 
 
 def _qualify_module() -> Any:
-    from importlib.util import module_from_spec, spec_from_loader
 
     loader = SourceFileLoader("vonk_qualify_recipe_audio", str(SCRIPT))
     spec = spec_from_loader(loader.name, loader)
@@ -372,9 +374,6 @@ def test_qualifier_runs_the_audio_serving_checks_of_the_contract_example() -> No
     Reads the contract's own ``recipe-audio-serving`` example, so it runs in CI
     wherever the contracts are installed (the library-root tests above skip there).
     """
-    from types import SimpleNamespace
-
-    from vonk_forge_contracts import read_recipe
 
     rate = 16000
     data = b"\x00\x00" * rate

@@ -30,6 +30,7 @@ from cluster_profiles.observation_transfer_reader import (
     check_observation_deadline,
     receive_observation,
 )
+from scripts.development_slice_client import MAXIMUM_RESPONSE_BYTES
 
 _REFERENCE = "#/components/schemas/"
 _MAXIMUM_DEPTH = 16
@@ -86,7 +87,6 @@ class ObservationResponseContract:
             raise ContractSkew(f"{self.label} observation status or media differs")
         if self.media_type == "application/json":
             # Only historical sources explicitly declaring JSON take this path.
-            from scripts.development_slice_client import MAXIMUM_RESPONSE_BYTES
 
             body = stream.read(MAXIMUM_RESPONSE_BYTES + 1)
             check_observation_deadline(deadline)

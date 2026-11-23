@@ -8,12 +8,14 @@ image, or imply a native Spark result. Container execution is a separate
 arm64/environment-dependent gate.
 """
 
+# ruff: noqa: E402 - the sibling helper imports after this file's directory is on sys.path, however it is loaded
 from __future__ import annotations
 
 import argparse
 import hashlib
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -26,7 +28,6 @@ from pathlib import Path, PurePosixPath
 from types import ModuleType
 
 sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
-import os
 
 # The sibling helper, however this file is loaded.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -106,8 +107,8 @@ def _install_contract_path(library_root: Path) -> None:
 def _contracts(library_root: Path) -> ModuleType:
     _install_contract_path(library_root)
     try:
-        import vonk_forge_contracts
-        import vonk_forge_contracts.resolver
+        import vonk_forge_contracts  # noqa: PLC0415 - the library's contracts, put on sys.path above
+        import vonk_forge_contracts.resolver  # noqa: PLC0415 - the library's contracts, put on sys.path above
     except ImportError as error:
         raise QualificationError("canonical contracts package cannot be imported") from error
     return vonk_forge_contracts
@@ -333,7 +334,9 @@ def _compile(recipe: object, recipe_digest: str, models: dict[str, object], pack
     if str(control_src) not in sys.path:
         sys.path.insert(0, str(control_src))
     try:
-        from vonk_control.recipe_operations.runtime_specs import compile_runtime_spec
+        from vonk_control.recipe_operations.runtime_specs import (  # noqa: PLC0415 - the platform checkout's compiler, put on sys.path above
+            compile_runtime_spec,
+        )
     except ImportError as error:
         raise QualificationError("canonical runtime compiler is unavailable") from error
     package_paths = set(package.paths)
@@ -449,7 +452,10 @@ def _chat_api(recipe: object, library_root: Path) -> object | None:
     Facts that are absent or unreadable change nothing: the check is sent as declared.
     """
     try:
-        from vonk_forge_contracts.api import ChatApi, read_recipe_api
+        from vonk_forge_contracts.api import (  # noqa: PLC0415 - optional: older library contracts lack it
+            ChatApi,
+            read_recipe_api,
+        )
     except ImportError:
         return None  # a library whose contracts predate API facts publishes none
 
@@ -467,7 +473,9 @@ def _argument_value(recipe: object) -> Callable[[str], int | None] | None:
     A library whose contracts predate it yields none: the check is sent as declared.
     """
     try:
-        from vonk_forge_contracts.api_checks import integer_argument
+        from vonk_forge_contracts.api_checks import (  # noqa: PLC0415 - optional: older library contracts lack it
+            integer_argument,
+        )
     except ImportError:
         return None
     resolved = recipe.with_option_choices({})
@@ -486,7 +494,7 @@ def _run_declared_serving_checks(inputs: QualificationInputs, args: argparse.Nam
     profile_src = args.platform_root / "src"
     if str(profile_src) not in sys.path:
         sys.path.insert(0, str(profile_src))
-    from cluster_profiles.serving_execution import (
+    from cluster_profiles.serving_execution import (  # noqa: PLC0415 - the platform checkout's source, put on sys.path above
         ServingExecutionError,
         execute_http_check,
     )

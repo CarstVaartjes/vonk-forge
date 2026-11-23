@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -175,8 +176,6 @@ def main() -> int:
         document = json.loads(arguments.jobs_file.read_text(encoding="utf-8"))
         jobs = document["jobs"] if isinstance(document, dict) else document
     elif arguments.run_id:
-        import os
-
         repository = arguments.repo or os.environ.get("GITHUB_REPOSITORY")
         if not repository:
             parser.error("--repo or GITHUB_REPOSITORY is required with a run id")

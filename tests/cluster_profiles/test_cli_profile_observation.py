@@ -8,7 +8,7 @@ from typing import cast
 import pytest
 
 from cluster_profiles import cli
-from cluster_profiles.cli_states_generated import SUCCEEDED
+from cluster_profiles.cli_states_generated import RUNNING, SUCCEEDED
 from cluster_profiles.control_client.errors import (
     ControlConflict,
     ControlForbidden,
@@ -80,7 +80,6 @@ class _Successors:
             identity = path.rsplit("/", 1)[-1]
         if self.finish and identity != "0":
             self.successor_reads += 1
-            from cluster_profiles.cli_states_generated import RUNNING, SUCCEEDED
 
             return {
                 "id": identity,

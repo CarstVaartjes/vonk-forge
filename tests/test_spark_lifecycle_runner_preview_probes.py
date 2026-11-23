@@ -12,11 +12,15 @@ import re
 import subprocess
 import sys
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import RecipeDefinition
 
 from scripts.development_slice_client import Client
 from tests.acceptance import artifact_job_canary as job
@@ -24,14 +28,21 @@ from tests.acceptance.controller_contract import ControllerContract
 from tests.spark_lifecycle_runner_support import _module
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
+from vonk_control.auth import TokenCodec
+from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
+from vonk_control.compiled_artifact_contract import compile_artifact_contract
 from vonk_control.fleet_profile_contract.assessment import (
     FleetProfileAdmissionDecision,
 )
+from vonk_control.harnesses.canonical import validate_runtime_policy
 from vonk_control.library import contract
+from vonk_control.model_primitives import Base
 from vonk_control.recipe_operations.start_payloads import (
     RecipeStartPlacement,
     build_recipe_start_payload,
 )
+from vonk_control.source_bundles import SourceBundleStore
 
 
 @pytest.mark.parametrize("foreign_host", [False, True])
@@ -169,19 +180,6 @@ def test_artifact_job_recipe_is_imported_by_the_controller_catalog(
         "VONK_SYNTHETIC_CANARY_INDEX",
         "tests/fixtures/canonical-synthetic-canary/index.json",
     )
-    from datetime import UTC, datetime
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    from vonk_forge_contracts import RecipeDefinition
-
-    from vonk_control.auth import TokenCodec
-    from vonk_control.catalog.service import CatalogService
-    from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
-    from vonk_control.compiled_artifact_contract import compile_artifact_contract
-    from vonk_control.harnesses.canonical import validate_runtime_policy
-    from vonk_control.model_primitives import Base
-    from vonk_control.source_bundles import SourceBundleStore
 
     lifecycle = _module()
     original = lifecycle._canonical_canary_fixture(Path(library))

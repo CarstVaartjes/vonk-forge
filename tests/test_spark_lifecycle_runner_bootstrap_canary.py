@@ -32,6 +32,7 @@ from vonk_control.fleet_projection.common import FleetSnapshot
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.presence import ManagementAddressPolicy, PresenceError
+from vonk_control.source_bundles import SourceBundleStore
 
 
 class _Observed(TypedDict):
@@ -489,16 +490,6 @@ def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> N
     library = os.environ.get("VONK_RECIPE_LIBRARY_ROOT")
     if not library:
         pytest.skip("set VONK_RECIPE_LIBRARY_ROOT to the canonical recipe library")
-    from datetime import UTC, datetime
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    from vonk_control.auth import TokenCodec
-    from vonk_control.catalog.service import CatalogService
-    from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
-    from vonk_control.model_primitives import Base
-    from vonk_control.source_bundles import SourceBundleStore
 
     specification = importlib.util.spec_from_file_location(
         "spark_canary_catalog_import", _module().CANARY_CATALOG_IMPORT

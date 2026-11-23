@@ -5,6 +5,7 @@ from __future__ import annotations
 import fcntl
 import importlib.machinery
 import importlib.util
+import json
 import os
 import shlex
 import shutil
@@ -75,7 +76,6 @@ def test_vm_shell_bounds_contention_and_preserves_caller_arguments(
         check=False,
     )
     assert fresh.returncode == 0
-    import json
 
     assert json.loads(output.read_text()) == [hostile, "", "multiline\nargument"]
     assert not (root / "injected").exists()

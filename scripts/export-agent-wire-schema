@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Export the current Pydantic wire graph without a second field registry."""
 
+# ruff: noqa: E402 - the project imports follow run_in_protocol, which re-executes in the protocol environment
 from __future__ import annotations
 
 import argparse
@@ -23,6 +24,8 @@ from pydantic import BaseModel, TypeAdapter
 from pydantic.json_schema import models_json_schema
 
 import vonk_agent_protocol
+from vonk_agent_protocol.host_helper import HostOperationKind
+from vonk_agent_protocol.lifecycle_vocabulary import RETIRED_RESULT_STATE_SPELLINGS
 
 
 def export_schema() -> dict[str, object]:
@@ -55,15 +58,11 @@ def export_schema() -> dict[str, object]:
         [(model, "validation") for model in ordered],
         title="Vonk Agent Wire",
     )
-    from vonk_agent_protocol.lifecycle_vocabulary import RETIRED_RESULT_STATE_SPELLINGS
-
     schema["$defs"]["AgentResultState"]["x-vonk-read-aliases"] = {
         old: current.value for old, current in RETIRED_RESULT_STATE_SPELLINGS.items()
     }
     # Discriminator constructors also consume the canonical operation vocabulary.
     # Export its enum directly rather than spelling discriminator words in Rust.
-    from vonk_agent_protocol.host_helper import HostOperationKind
-
     schema["$defs"]["HostOperationKind"] = TypeAdapter(HostOperationKind).json_schema()
     # A validation format on a string does not authorize normalizing its bytes
     # into a timestamp type: these values may be inside digest-bound payloads.

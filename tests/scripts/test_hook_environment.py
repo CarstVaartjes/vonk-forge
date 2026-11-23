@@ -9,11 +9,10 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import check_environment as environment
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "scripts"))
-import check_environment as environment
 
 
 def clone(tmp_path: Path) -> Path:

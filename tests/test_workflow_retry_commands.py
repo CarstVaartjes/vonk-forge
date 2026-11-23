@@ -8,14 +8,12 @@ allowlist is read from the script itself.
 import os
 import re
 import shlex
-import sys
 from pathlib import Path
 
 import yaml
+from retry_dependency_fetch import acquisition_prefix, locked_pip_shape
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
-from retry_dependency_fetch import acquisition_prefix, locked_pip_shape
 
 WRAPPER = "scripts/retry-dependency-fetch"
 
