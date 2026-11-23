@@ -537,10 +537,15 @@ def _table_declaring_modules_outside_models(
 
 def _modules_imported_by_models(source: Path) -> set[str]:
     tree = ast.parse((source / "models/__init__.py").read_text())
+    # ``from vonk_control import journal_models`` (absolute, as TID252 requires
+    # inside the package) or ``from vonk_control.x import y``.
     return {
-        node.module or alias.name
+        alias.name if node.module == "vonk_control" else node.module.split(".")[1]
         for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.level == 2
+        if isinstance(node, ast.ImportFrom)
+        and node.module is not None
+        and (node.module == "vonk_control" or node.module.startswith("vonk_control."))
+        and not node.module.startswith("vonk_control.models")
         for alias in node.names
     }
 
