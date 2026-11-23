@@ -16,6 +16,7 @@ from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileInput,
 )
 from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_profiles.continuing_effects import _adopted_application_scope
 from vonk_control.models.fleet import FleetProfileApplication, FleetProfileSelection
 from vonk_control.models.jobs import Job
 
@@ -73,7 +74,7 @@ def test_superseded_replay_ends_and_selected_load_replans(
         )
         newer = load("C+B", [replacement, choices[1]])
         with world.sessions() as session:
-            assert profiles._adopted_application_scope(
+            assert _adopted_application_scope(
                 session, session.get_one(FleetProfileApplication, older.id)
             )
         # Inject a recoverable executor fault after the newer load adopted B.

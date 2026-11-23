@@ -22,9 +22,7 @@ from ..distributed_recovery.common import (
     enforce_recovery_deadline,
     recovery_start_plan,
 )
-from ..fleet_profiles.stop_authority import (
-    ProfileJobRunStopJob,
-)
+from ..fleet_profiles.stop_contract import ProfileJobRunStopJob
 from ..jobs.documents import (
     ProfilePartialStop,
     RecipeStopParent,

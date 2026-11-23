@@ -27,14 +27,16 @@ from vonk_agent_protocol.wire_model import canonical_message
 from ..admission_locking import is_admission_contention
 from ..agent_jobs.service import AgentJobService
 from ..fleet_profiles.stop_authority import (
+    validate_jobrun_stop_source,
+    validate_profile_jobrun_stop_target,
+    validate_profile_stop_owner,
+)
+from ..fleet_profiles.stop_contract import (
     JobRunStopScope,
     ProfileJobRunStopJob,
     ProfileJobRunStopTarget,
     ProfileStopAuthorityError,
     jobrun_stop_key,
-    validate_jobrun_stop_source,
-    validate_profile_jobrun_stop_target,
-    validate_profile_stop_owner,
 )
 from ..jobs.documents import RecipeStopParent, controller_recipe_document
 from ..lifecycle.artifact_job import ArtifactJobAdapter

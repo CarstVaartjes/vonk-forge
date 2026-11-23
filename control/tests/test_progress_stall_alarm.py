@@ -37,6 +37,15 @@ from vonk_control.distribution_executor.receipts import _ChildView
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )
+from vonk_control.fleet_profiles import (
+    cancellation,
+    capacity,
+    control_effects,
+    endpoint_projection,
+    profile_projection,
+    reconcile,
+)
+from vonk_control.fleet_profiles.assignment_assessment import _assignment_state
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.models.execution import ResourceReservation
 from vonk_control.models.fleet import FleetProfileApplication
@@ -754,19 +763,24 @@ def test_a_load_waiting_for_the_load_it_continues_is_never_silent(monkeypatch) -
     # Restoring the exact child receipt releases the dependent load through
     # normal ticks. The escalation is informational, never an operator latch.
     adapter.advance = real_advance
-    real_state = FleetProfileService._assignment_state.__func__
 
-    def observed_running(cls, session, assignment, **kwargs):
-        state = real_state(cls, session, assignment, **kwargs)
+    def observed_running(session, assignment, **kwargs):
+        state = _assignment_state(session, assignment, **kwargs)
         # The synthetic executor's matching workload observation arrives with
         # its receipt. Production reads these facts from its run/installation.
         if adapter.get(held).state == LifecycleState.SUCCEEDED:
             state.current_state = ObservedAssignmentState.RUNNING
         return state
 
-    monkeypatch.setattr(
-        FleetProfileService, "_assignment_state", classmethod(observed_running)
-    )
+    for consumer in (
+        cancellation,
+        capacity,
+        control_effects,
+        endpoint_projection,
+        profile_projection,
+        reconcile,
+    ):
+        monkeypatch.setattr(consumer, "_assignment_state", observed_running)
     for _ in range(24):
         now[0] += timedelta(seconds=30)
         service.tick()

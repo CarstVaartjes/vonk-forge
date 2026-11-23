@@ -24,10 +24,10 @@ from ..admission_locking import (
     set_admission_timeout,
 )
 from ..fleet_profiles.persistence import _persisted_profile_progress
-from ..fleet_profiles.stop_authority import (
+from ..fleet_profiles.stop_authority import validate_profile_stop_owner
+from ..fleet_profiles.stop_contract import (
     ProfileStopAuthorityError,
     ProfileStopOwnerBinding,
-    validate_profile_stop_owner,
 )
 from ..jobs.documents import (
     RecipeStopParent,

@@ -12,6 +12,7 @@ from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileInput,
 )
 from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_profiles.continuing_effects import _adopted_application_scope
 from vonk_control.fleet_profiles.persistence import _persisted_profile_progress
 from vonk_control.models.fleet import FleetProfileApplication, FleetProfileSelection
 from vonk_control.models.jobs import Job
@@ -98,7 +99,7 @@ def test_cancel_adopted_executor_refuses_without_acknowledging_acceptance(
         )
         with world.sessions.begin() as session:
             row = session.get_one(FleetProfileApplication, original.id)
-            assert profiles._adopted_application_scope(session, row)
+            assert _adopted_application_scope(session, row)
             progress = _persisted_profile_progress(row)
             adapter = progress.switch_adapter
             assert adapter is not None

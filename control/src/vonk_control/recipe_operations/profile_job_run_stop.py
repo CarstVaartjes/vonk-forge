@@ -35,13 +35,15 @@ from ..categorized_errors import (
 )
 from ..fleet_profiles.persistence import _persisted_profile_progress
 from ..fleet_profiles.stop_authority import (
+    issued_order_link,
+    validate_profile_jobrun_stop_target,
+    validate_profile_stop_owner,
+)
+from ..fleet_profiles.stop_contract import (
     ProfileJobRunStopAuthorization,
     ProfileJobRunStopJob,
     ProfileJobRunStopTarget,
     ProfileStopAuthorityError,
-    issued_order_link,
-    validate_profile_jobrun_stop_target,
-    validate_profile_stop_owner,
 )
 from ..jobs.documents import RunSwitchJobPayload, controller_recipe_document
 from ..lifecycle.agent_operation import AgentOperationAdapter

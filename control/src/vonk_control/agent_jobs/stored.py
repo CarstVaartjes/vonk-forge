@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from vonk_agent_protocol.wire_model import canonical_message
 
-from ..fleet_profiles.stop_authority import ProfileJobRunStopJob
+from ..fleet_profiles.stop_contract import ProfileJobRunStopJob
 from ..lifecycle.evidence import Residue
 from ..stored.json_values import read_row_column
 

@@ -43,6 +43,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from . import agent_operation_states
 from .artifact_jobs import states as ajs
 from .bounded_json import BoundedJSONError, require_integer, sequence
+from .fleet_profiles.operation_projection import _operation_item
 from .logging import redact_text
 from .models.cache import ModelCacheOperation
 from .models.fleet import FleetProfileApplication
@@ -744,11 +745,7 @@ class FailureEvidenceService:
                 )
             application = session.get(FleetProfileApplication, operation_id)
             if application is not None and application.state in FAILED_ATTEMPT_STATES:
-                from .fleet_profiles.service import FleetProfileService
-
-                projected = operation_item(
-                    FleetProfileService._operation_item(application)
-                )
+                projected = operation_item(_operation_item(application))
                 if projected.attempt != attempt:
                     return None
                 result = (

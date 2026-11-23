@@ -47,6 +47,7 @@ from .projection_support import (
     _profile_document,
 )
 from .read_observation import observe_storage
+from .saved_profiles import _definition
 
 if TYPE_CHECKING:
     from .service import FleetProfileService
@@ -378,9 +379,8 @@ class FleetProfileService:
     @staticmethod
     def _choices(row: FleetProfile) -> tuple[FleetProfileAssignmentInput, ...]:
         """Every saved choice belongs to the exact definition, including on review."""
-        from .service import FleetProfileService
 
-        return tuple(FleetProfileService._definition(row).assignments)
+        return tuple(_definition(row).assignments)
 
     def _validate_draft_review_identity(
         self,

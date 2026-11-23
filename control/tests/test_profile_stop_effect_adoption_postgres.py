@@ -23,6 +23,7 @@ from vonk_control.fleet_profile_contract.review import FleetProfilePreview
 from vonk_control.fleet_profile_contract.vocabulary import (
     profile_switch_child_request_key,
 )
+from vonk_control.fleet_profiles.continuing_effects import _adopted_application_scope
 from vonk_control.fleet_profiles.persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
@@ -367,7 +368,7 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
             selected_row = session.get(FleetProfileApplication, selected.id)
             assert row is not None
             assert selected_row is not None
-            assert profiles._adopted_application_scope(session, row) == (nodes[0],)
+            assert _adopted_application_scope(session, row) == (nodes[0],)
             bound = _persisted_profile_plan(selected_row)
             assert isinstance(bound, FleetProfilePreview), bound
             assert bound.effects.adopted == review.effects.adopted
@@ -565,7 +566,7 @@ def test_postgres_stop_adoption_loses_authority_on_exact_refusal(pending_stop, f
     with sessions() as session:
         original_row = session.get(FleetProfileApplication, original.id)
         assert original_row is not None
-        assert profiles._adopted_application_scope(session, original_row) == (nodes[0],)
+        assert _adopted_application_scope(session, original_row) == (nodes[0],)
     if fault == "selected-cancel":
         profiles.cancel(
             selected.id,
@@ -589,4 +590,4 @@ def test_postgres_stop_adoption_loses_authority_on_exact_refusal(pending_stop, f
     with sessions() as session:
         original_row = session.get(FleetProfileApplication, original.id)
         assert original_row is not None
-        assert profiles._adopted_application_scope(session, original_row) is None
+        assert _adopted_application_scope(session, original_row) is None

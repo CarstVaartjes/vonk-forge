@@ -31,6 +31,7 @@ from vonk_control.fleet_profiles.contracts import FleetProfileStalePlanConflict
 from vonk_control.fleet_profiles.dependencies import (
     _MAX_PARKED_APPLICATION_OBSERVATIONS,
 )
+from vonk_control.fleet_profiles.persistence import _intended_profile
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.cache import RecipeBuild
@@ -1036,7 +1037,7 @@ def test_profile_admission_recovers_after_agent_heartbeat_row_lock(
         assert recovered.request_key == request_key
         assert recovered.plan_digest == pending_plan_digest
         assert recovered.progress["admission_pending"] is False
-        intended = restarted._intended_profile(recovered, session=session)
+        intended = _intended_profile(recovered, session=session)
         assert not isinstance(intended, Residue)
         assert intended.reviewed_plan_digest == review["plan_digest"]
         switch_state = FleetProfileSwitchAdapterState.model_validate_json(
@@ -1082,7 +1083,7 @@ def test_queued_admission_survives_submitter_death_before_first_attempt(
         assert row is not None
         assert row.progress["admission_pending"] is False
         assert row.plan_digest == pending.plan_digest
-        restarted_intent = restarted._intended_profile(row, session=session)
+        restarted_intent = _intended_profile(row, session=session)
         assert not isinstance(restarted_intent, Residue)
         assert restarted_intent.reviewed_plan_digest == review.plan_digest
         assert row.state == "running", row.status_reason

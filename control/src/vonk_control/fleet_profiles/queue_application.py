@@ -68,6 +68,7 @@ from .capacity import (
     reserve_profile_memory,
     reserve_profile_ports,
 )
+from .continuing_effects import _application_is_current_selection, _superseding_intent
 from .contracts import (
     FleetProfileAdmissionEffectBusy,
     FleetProfileConflict,
@@ -76,9 +77,11 @@ from .contracts import (
     FleetProfileStalePlanConflict,
     _FleetProfileSupersededIntentConflict,
 )
+from .control_effects import _control_effects
 from .dependencies import _INSTALLATION_POLICY_ADAPTER
 from .persistence import (
     _application_order_key,
+    _intended_profile,
     _intent_scope,
     _kept_fence_ordinal,
     _newer_pending_profile_load,
@@ -186,7 +189,7 @@ class FleetProfileService:
                 retry_parent_progress = _persisted_profile_progress(retry_parent)
                 selected_application = selected_application or (
                     retry_parent_progress.intended_profile is not None
-                    and self._application_is_current_selection(
+                    and _application_is_current_selection(
                         session, retry_parent, retry_parent_progress
                     )
                 )
@@ -253,7 +256,7 @@ class FleetProfileService:
                         and existing is not None
                         and existing.selection_generation != selection.generation
                     )
-                    or not self._application_is_current_selection(
+                    or not _application_is_current_selection(
                         session, selection_source, selection_source_progress
                     )
                 ):
@@ -421,13 +424,13 @@ class FleetProfileService:
                         ProfileReasonCode.RETRY_INTENT_UNAVAILABLE,
                         "the receipt carries no accepted intent to recover",
                     )
-                if self._superseding_intent(session, parent, prior):
+                if _superseding_intent(session, parent, prior):
                     return self._decline_retry(
                         parent,
                         ProfileReasonCode.RETRY_INTENT_UNAVAILABLE,
                         "A newer accepted workload intent owns the effects",
                     )
-                parent_intent = self._intended_profile(parent, session=session)
+                parent_intent = _intended_profile(parent, session=session)
                 if isinstance(parent_intent, Residue):
                     return self._decline_retry(
                         parent,
@@ -460,7 +463,7 @@ class FleetProfileService:
                     # A receipt that recorded no workload intent takes a fresh one
                     # from the node fence below, like any other admission.
                     recovery_ordinal = prior.workload_intent_ordinal
-            control = self._control_effects(
+            control = _control_effects(
                 session,
                 frozen_assignments,
                 set(frozen_nodes),

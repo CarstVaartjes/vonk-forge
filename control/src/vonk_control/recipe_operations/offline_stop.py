@@ -21,7 +21,7 @@ from vonk_agent_protocol.outcome import (
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.state_machines import RunState
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.fleet_profiles.stop_authority import OfflineStopIntent
+from vonk_control.fleet_profiles.stop_contract import OfflineStopIntent
 
 from ..admission_locking import (
     AdmissionLockBusy,
@@ -31,9 +31,7 @@ from ..admission_locking import (
 )
 from ..agent_contacts import last_seen
 from ..cancelled_runtime import reconcile_cancelled_runtime
-from ..fleet_profiles.stop_authority import (
-    ProfileJobRunStopJob,
-)
+from ..fleet_profiles.stop_contract import ProfileJobRunStopJob
 from ..jobs.documents import RecipeStopParent
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
 from ..logging import redact_text

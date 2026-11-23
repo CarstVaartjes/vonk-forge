@@ -9,7 +9,7 @@ from pydantic import ConfigDict
 
 from vonk_agent_protocol.wire_model import WireModel
 
-from ..fleet_profiles.stop_authority import (
+from ..fleet_profiles.stop_contract import (
     JobRunStopScope,
     ProfileJobRunStopAuthorization,
 )

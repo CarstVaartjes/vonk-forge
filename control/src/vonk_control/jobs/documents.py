@@ -46,7 +46,7 @@ from vonk_agent_protocol.state_machines import RouteState
 from vonk_agent_protocol.wire_model import OperationProgress
 
 from ..distribution_assignment import NodeDistributionAssignment
-from ..fleet_profiles.stop_authority import (
+from ..fleet_profiles.stop_contract import (
     JobRunStopScope,
     OfflineStopIntent,
     ProfileStopOwnerBinding,

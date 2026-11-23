@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
+from typing import ClassVar, Literal, Protocol
 
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -32,17 +32,19 @@ from ..fleet_profile_contract.definitions import (
 )
 from ..fleet_profile_contract.effects import FleetProfileEffects
 from ..fleet_profile_contract.review import FleetProfilePreview
-from ..fleet_profile_contract.vocabulary import FleetProfileSupersedeCode
+from ..fleet_profile_contract.vocabulary import (
+    FleetProfileAssignmentState,
+    FleetProfileSupersedeCode,
+)
 from ..lifecycle.evidence import Residue
+from ..models.execution import RecipeInstallation, RecipeRun
+from ..models.mapping import ClusterMapping
 from ..operations.blockers import OperationBlocker, make_blocker
 from ..preparation_contract import RuntimeImageIdentity
 from ..run_switch_contract.plans import RunSwitchAssessment
 from ..run_switch_operations.errors import RunSwitchOperationConflict
 from ..storage_demands import StorageRelief
 from ..wait_contract import QueueWait
-
-if TYPE_CHECKING:
-    from .service import FleetProfileService
 
 
 class PreparationStarter(Protocol):
@@ -127,7 +129,7 @@ class _AssessmentProvider(Protocol):  # noqa: PYI046 -- used by service composit
 class _ProfileControlEffects:
     """One SQL-owned reconciliation projection for review and admission."""
 
-    states: dict[str, FleetProfileService._AssignmentState]
+    states: dict[str, _AssignmentState]
     effects: FleetProfileEffects
     changed_nodes: set[str]
     unavailable_assignment_ids: set[str]
@@ -373,3 +375,26 @@ def planner_contract_defect(
             f"Planner contract failed for assignment {assignment_id}: {error}",
         ).detail
     )
+
+
+class _AssignmentState:
+    current_state: FleetProfileAssignmentState
+    mapping: ClusterMapping | None
+    installation: RecipeInstallation | None
+    run: RecipeRun | None
+    installation_ready: bool
+
+    def __init__(
+        self,
+        *,
+        current_state: FleetProfileAssignmentState,
+        mapping: ClusterMapping | None,
+        installation: RecipeInstallation | None,
+        run: RecipeRun | None,
+        installation_ready: bool = False,
+    ) -> None:
+        self.current_state = current_state
+        self.mapping = mapping
+        self.installation = installation
+        self.run = run
+        self.installation_ready = installation_ready

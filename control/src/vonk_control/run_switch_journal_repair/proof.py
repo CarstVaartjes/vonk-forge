@@ -13,8 +13,11 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import canonical_message
 
 from ..content_identity import same_image
+from ..fleet_profiles.continuing_effects import (
+    _adopted_application_scope,
+    _application_is_current_selection,
+)
 from ..fleet_profiles.persistence import _stored_progress
-from ..fleet_profiles.service import FleetProfileService
 from ..jobs.documents import RecipeInstallParent
 from ..lifecycle.evidence import Residue
 from ..models.fleet import AgentCertificate, FleetProfileApplication
@@ -160,12 +163,12 @@ def _prove(
         application_progress = _stored_progress(application)
         if isinstance(application_progress, Residue):
             return None
-        adopted = FleetProfileService._adopted_application_scope(session, application)
+        adopted = _adopted_application_scope(session, application)
         journal = application_progress.switch_adapter
         if (
             (
                 purpose == JournalRepairPurpose.MEASUREMENT
-                and not FleetProfileService._application_is_current_selection(
+                and not _application_is_current_selection(
                     session, application, application_progress
                 )
             )

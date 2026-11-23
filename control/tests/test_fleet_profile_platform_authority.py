@@ -58,10 +58,15 @@ def test_maintenance_cannot_add_an_original_author_permission_gate(
         if function.name in request_boundaries:
             continue
         for node in ast.walk(function):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr in {"_authorize", "_user_has_profile_authority"}
+            if isinstance(node, ast.Call) and (
+                (
+                    isinstance(node.func, ast.Attribute)
+                    and node.func.attr in {"_authorize", "_user_has_profile_authority"}
+                )
+                or (
+                    isinstance(node.func, ast.Name)
+                    and node.func.id == "_user_has_profile_authority"
+                )
             ):
                 violations.append((source.name, function.name, node.lineno))
             if (

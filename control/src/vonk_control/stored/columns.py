@@ -80,7 +80,7 @@ from ..fleet_profile_contract.applications import (
 from ..fleet_profile_contract.definitions import FleetProfileAssignmentInput
 from ..fleet_profile_contract.review import FleetProfilePreview
 from ..fleet_profile_contract.vocabulary import LabelName, LabelValue
-from ..fleet_profiles.stop_authority import ProfileJobRunStopJob
+from ..fleet_profiles.stop_contract import ProfileJobRunStopJob
 from ..jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityJobResult,

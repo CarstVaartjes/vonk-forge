@@ -55,9 +55,12 @@ from .contracts import (
 )
 from .dependencies import _DISK_REFUSALS, ENDING_BLOCKER_CODES
 from .persistence import (
+    _intended_profile,
     _persisted_profile_plan,
     _persisted_profile_progress,
+    _reviewed_profile_plan,
 )
+from .switch_children import _assignment_intent
 
 if TYPE_CHECKING:
     from .run_switch_adapter import (
@@ -82,7 +85,6 @@ class RunSwitchFleetProfileAdapter:
         A :class:`Residue` is that element's unknown: the caller records it as
         that assignment's failure and continues with the next element.
         """
-        from .service import FleetProfileService
 
         self = _typing_cast("_RunSwitchFleetProfileAdapter", self)  # noqa: PLW0642 -- assembled mixin interface
 
@@ -202,9 +204,7 @@ class RunSwitchFleetProfileAdapter:
                 raise MissingRecord(
                     application_id, reason=InvalidRequestReason.NOT_FOUND
                 )
-            accepted = FleetProfileService._reviewed_profile_plan(
-                application, session=session
-            )
+            accepted = _reviewed_profile_plan(application, session=session)
             if isinstance(accepted, Residue):
                 return accepted
             progress = _persisted_profile_progress(application)
@@ -254,12 +254,11 @@ class RunSwitchFleetProfileAdapter:
     def _child_review(
         session: Session, application_id: str
     ) -> FleetProfilePreview | Residue:
-        from .service import FleetProfileService
 
         application = session.get(FleetProfileApplication, application_id)
         if application is None:
             raise MissingRecord(application_id, reason=InvalidRequestReason.NOT_FOUND)
-        intended = FleetProfileService._intended_profile(application, session=session)
+        intended = _intended_profile(application, session=session)
         if isinstance(intended, Residue):
             return intended
         return _persisted_profile_plan(application)
@@ -435,9 +434,7 @@ class RunSwitchFleetProfileAdapter:
                     (value for value in assignments if value.id == owner_id), None
                 )
                 expected = (
-                    self._assignment_intent(assignment)
-                    if assignment is not None
-                    else None
+                    _assignment_intent(assignment) if assignment is not None else None
                 )
                 valid = (
                     assignment is not None

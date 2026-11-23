@@ -33,6 +33,11 @@ from .assessment_support import (
     _relief_blocker,
 )
 from .claim_restore import restore_released_profile_claims
+from .continuing_effects import (
+    _adopted_application_scope,
+    _application_is_current_selection,
+    _superseding_intent,
+)
 from .contracts import (
     FleetProfileChildPlanBlocked,
     FleetProfileConflict,
@@ -44,6 +49,7 @@ from .contracts import (
 from .dependencies import _CHILD_PENDING_STATES, _LOGGER, ENDING_BLOCKER_CODES
 from .persistence import (
     _application_order_key,
+    _intended_profile,
     _newer_profile_intent_overlaps,
     _persisted_profile_plan,
     _persisted_profile_progress,
@@ -88,7 +94,7 @@ class FleetProfileService:
             progress = _persisted_profile_progress(row)
             if (
                 progress.cancellation is not None
-                or not self._application_is_current_selection(session, row, progress)
+                or not _application_is_current_selection(session, row, progress)
             ):
                 return None
             try:
@@ -112,7 +118,7 @@ class FleetProfileService:
                 now=now,
                 memory_floor_bytes=self._memory_floor,
                 inventory_max_age_seconds=self._inventory_max_age,
-                node_ids=self._adopted_application_scope(session, row),
+                node_ids=_adopted_application_scope(session, row),
             )
             session.flush()
             return self._application_view(row)
@@ -147,7 +153,7 @@ class FleetProfileService:
         if progress.intended_profile is None:
             return False
         try:
-            superseded = self._superseding_intent(session, row, progress)
+            superseded = _superseding_intent(session, row, progress)
         except (FleetProfileConflict, ValidationError, TypeError, ValueError):
             return False
         if superseded:
@@ -423,7 +429,7 @@ class FleetProfileService:
             row = session.get(FleetProfileApplication, application_id)
             if row is None:
                 return []
-            intended = self._intended_profile(row, session=session)
+            intended = _intended_profile(row, session=session)
             plan = _persisted_profile_plan(row)
             actor = row.actor
         if isinstance(intended, Residue) or isinstance(plan, Residue):
