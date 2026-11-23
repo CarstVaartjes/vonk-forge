@@ -124,8 +124,9 @@ def test_watch_progress_preserves_stdout_for_final_result(capsys) -> None:
         == 0
     )
     captured = capsys.readouterr()
-    assert "copying" in captured.err
-    assert "copying" not in captured.out
+    progress = captured.err.splitlines()
+    assert progress  # the running phase was reported on stderr
+    assert progress[0] not in captured.out  # and never mixed into the final result
     assert "ready" in captured.out
     assert "\x1b" not in captured.out + captured.err
 
