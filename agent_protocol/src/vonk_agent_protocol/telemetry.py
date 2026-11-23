@@ -443,8 +443,8 @@ class _EngineEntries(TelemetryWireModel):
         if isinstance(entries, list):
             kept: list[EngineReading] = []
             for entry in entries:
-                reading, refusal = _engine_reading(entry)
-                if refusal is not None:
+                reading, _refusal = _engine_reading(entry)
+                if reading is None:
                     dropped += 1
                     continue
                 if any(reading.run_id == earlier.run_id for earlier in kept):

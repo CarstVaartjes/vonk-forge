@@ -694,7 +694,8 @@ def _tick(row: Lifecycle, adapter: KindAdapter[Any], now: datetime) -> Decision:
             )
         case State.NEEDS_OPERATOR:
             return _reevaluate_parked(row, adapter, now)
-    return Decision(row)
+        case _:
+            return Decision(row)
 
 
 def _reevaluate_parked(

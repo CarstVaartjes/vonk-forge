@@ -83,7 +83,7 @@ def _bind_string_enum_values(schema: CoreSchema) -> CoreSchema:
         return schema
     if schema.get("type") == "enum" and schema.get("sub_type") == "str":
         enum_type = cast(type[StrEnum], schema.get("cls"))
-        members = frozenset(schema.get("members", ()))
+        members: frozenset[object] = frozenset(schema.get("members", ()))
 
         def bind_member(value: object) -> object:
             if type(value) is str and value in members:
@@ -130,7 +130,7 @@ def _bind_json_string_scalars(schema: CoreSchema) -> CoreSchema:
         return schema
     scalar = schema.get("type")
     if isinstance(scalar, str) and scalar in JSON_STRING_SCALARS:
-        json_mode = SchemaValidator(cast(CoreSchema, deepcopy(schema)))
+        json_mode = SchemaValidator(deepcopy(schema))
 
         def bind_string(value: object) -> object:
             if type(value) is not str:
@@ -232,7 +232,7 @@ class WireModel(StrictJSONModel, Mapping[str, Any]):
         except (KeyError, TypeError):
             raise KeyError(key) from None
 
-    def __iter__(self) -> Iterator[str]:
+    def __iter__(self) -> Iterator[str]:  # pyright: ignore[reportIncompatibleMethodOverride]  # Mapping[str, Any] iterates keys, not BaseModel's (name, value) pairs
         # Mapping iteration exposes explicitly supplied fields. Canonical wire
         # serialization separately applies the model-aware default/null policy.
         declared = (

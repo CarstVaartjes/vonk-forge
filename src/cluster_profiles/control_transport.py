@@ -189,7 +189,7 @@ class HTTPSResponse(io.BufferedIOBase):
                     self._ended = True
         return bytes(result)
 
-    def read(self, amount: int = -1, /) -> bytes:
+    def read(self, amount: int = -1, /) -> bytes:  # pyright: ignore[reportIncompatibleMethodOverride]  # an HTTPS read needs a byte bound; read(None) is refused
         if amount < 0:
             raise ValueError("HTTPS reads must have a byte bound")
         if self._closed:

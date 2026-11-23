@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Coroutine
 from contextlib import suppress
-from typing import Annotated, cast
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, HTTPException, Path, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
@@ -153,7 +153,9 @@ def install_authority_routes(
     class NotedResultRoute(ControllerAPIRoute):
         """A result body refused before the route runs is still counted."""
 
-        def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
+        def get_route_handler(
+            self,
+        ) -> Callable[[Request], Coroutine[Any, Any, Response]]:
             handler = super().get_route_handler()
 
             async def noted(request: Request) -> Response:

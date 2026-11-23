@@ -633,9 +633,11 @@ class AgentOperationAdapter:
                 return "failed", None
             case State.CANCELLED:
                 return "cancelled", None
-        # A state the stored vocabulary has no word for is unknown, not an error:
-        # the order is observed again and the core decides from what it finds.
-        return aos.OBSERVING, after.next_action_at or now  # pragma: no cover
+            case _:
+                # A state the stored vocabulary has no word for is unknown, not an
+                # error: the order is observed again and the core decides from
+                # what it finds.
+                return aos.OBSERVING, after.next_action_at or now  # pragma: no cover
 
     def _scheduled_reason(
         self, operation: StoredOperation, after: Lifecycle, event_reason: str | None

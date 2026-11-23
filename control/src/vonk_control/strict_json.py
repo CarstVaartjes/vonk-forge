@@ -86,7 +86,7 @@ class StrictModel(StrictJSONModel):
 
 
 @overload
-def serialize_json_value(value: RootModel[Any], *, by_alias: bool = True) -> object: ...
+def serialize_json_value(value: RootModel[Any], *, by_alias: bool = True) -> object: ...  # pyright: ignore[reportOverlappingOverload]  # a RootModel serialises to its root value, not an object
 
 
 @overload

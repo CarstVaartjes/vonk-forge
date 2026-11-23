@@ -303,7 +303,7 @@ def fail_open_on_optional_evidence() -> Any:
     checks, whose failures it must see.
     """
 
-    return model_validator(mode="wrap")(classmethod(_drop_invalid_optional_evidence))
+    return model_validator(mode="wrap")(_drop_invalid_optional_evidence)
 
 
 __all__ = [

@@ -583,7 +583,8 @@ class ArtifactJobAdapter:
                 return ajs.OBSERVING
             case State.BACKOFF:
                 return ajs.BACKOFF
-        return ajs.RUNNING
+            case _:
+                return ajs.RUNNING
 
     @staticmethod
     def _default_reason(after: Lifecycle, target: str | None) -> str | None:

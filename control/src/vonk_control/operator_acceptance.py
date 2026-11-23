@@ -674,7 +674,7 @@ def _presence_policy_endpoint(
     # Copy the identity FastAPI derives names, operation ids and descriptions
     # from, but no ``__wrapped__``: FastAPI must see an async endpoint.
     functools.update_wrapper(policy_endpoint, endpoint, updated=("__dict__",))
-    del policy_endpoint.__wrapped__
+    del policy_endpoint.__wrapped__  # pyright: ignore[reportFunctionMemberAccess]  # update_wrapper set it just above
     policy_endpoint.__signature__ = signature.replace(parameters=parameters)
     policy_endpoint.__vonk_endpoint__ = endpoint  # type: ignore[attr-defined]
     return policy_endpoint
