@@ -320,7 +320,7 @@ def configure_tailnet_service_names(
         yaml.safe_dump(document, sort_keys=False, default_flow_style=False),
         encoding="utf-8",
     )
-    os.chmod(compose_path, metadata.st_mode & 0o777)
+    compose_path.chmod(metadata.st_mode & 0o777)
 
 
 def local_installer_command(root: Path, answers: Path) -> list[str] | None:

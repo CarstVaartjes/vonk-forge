@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -170,7 +169,7 @@ def _inputs(
         check=True,
         capture_output=True,
     )
-    os.chmod(signing_key, 0o600)
+    signing_key.chmod(0o600)
     subprocess.run(
         ["openssl", "pkey", "-in", signing_key, "-pubout", "-out", signing_public_key],
         check=True,

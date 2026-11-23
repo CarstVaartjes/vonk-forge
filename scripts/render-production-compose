@@ -126,7 +126,7 @@ def render(
             stream.flush()
             os.fsync(stream.fileno())
         stage.chmod(0o644)
-        os.replace(stage, output)
+        stage.replace(output)
     except BaseException:
         stage.unlink(missing_ok=True)
         raise

@@ -986,7 +986,7 @@ def _configure_acceptance_renewal(
         ),
         encoding="utf-8",
     )
-    os.chmod(caddy_path, 0o644)
+    caddy_path.chmod(0o644)
     caddy_volumes.append("./acceptance-Caddyfile:/etc/caddy/Caddyfile:ro")
     caddy_service["entrypoint"] = _acceptance_caddy_entrypoint(
         caddy_service.get("entrypoint")
@@ -1014,7 +1014,7 @@ def _configure_acceptance_renewal(
         yaml.safe_dump(compose, sort_keys=False, default_flow_style=False),
         encoding="utf-8",
     )
-    os.chmod(compose_path, 0o644)
+    compose_path.chmod(0o644)
 
 
 def _synthetic_device_fixture(platform_name: str) -> tuple[bytes, str]:
@@ -1963,10 +1963,10 @@ class SparkLifecycle:
             cwd=self.bundle,
             timeout=30,
         )
-        os.chmod(root, 0o770)
+        root.chmod(0o770)
         relay = self.bundle.parent / "acceptance-receipt-fault.py"
         shutil.copyfile(Path(__file__).with_name("receipt_fault.py"), relay)
-        os.chmod(relay, 0o644)
+        relay.chmod(0o644)
         path = self.bundle / "docker-compose.yaml"
         compose = yaml.safe_load(path.read_text(encoding="utf-8"))
         service = compose["services"]["control-api"]
@@ -1991,7 +1991,7 @@ class SparkLifecycle:
             json.dumps({"id": str(uuid.uuid4())}),
             encoding="utf-8",
         )
-        os.chmod(root / "armed.json", 0o644)
+        (root / "armed.json").chmod(0o644)
 
     def _container_for_replay(self, run_id: str) -> str:
         assert self.temporary_root is not None
@@ -2347,7 +2347,7 @@ class SparkLifecycle:
         )
         recovered = bundle.parent / "acceptance-receipts/recovered.json"
         recovered.write_text(json.dumps({"fence": fence}), encoding="utf-8")
-        os.chmod(recovered, 0o644)
+        recovered.chmod(0o644)
         self._record_start_recovery_checkpoint(
             "restart_released", operation_id, run_id, fence
         )
@@ -2685,9 +2685,9 @@ class SparkLifecycle:
             "printf '%s\\n' 'nvidia.com/gpu=all'\n",
             encoding="ascii",
         )
-        os.chmod(cdi, 0o600)
-        os.chmod(smi, 0o700)
-        os.chmod(ctk, 0o700)
+        cdi.chmod(0o600)
+        smi.chmod(0o700)
+        ctk.chmod(0o700)
         docker = Path("/usr/bin/docker")
         if not docker.is_file() or not os.access(docker, os.X_OK):
             raise LifecycleError("native synthetic CDI prerequisite is unavailable")
@@ -4963,8 +4963,8 @@ class SparkLifecycle:
             key_v1.write_bytes(
                 _openssl_compatible_ed25519_private_key(key_v2.read_bytes())
             )
-            os.chmod(bundle, 0o600)
-            os.chmod(key_v1, 0o600)
+            bundle.chmod(0o600)
+            key_v1.chmod(0o600)
             return self._run_command(
                 [
                     "/usr/bin/curl",
@@ -5505,7 +5505,7 @@ def _atomic_write(path: Path, value: object) -> None:
             stream.write(_canonical(value))
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        temporary.replace(path)
         directory = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(directory)

@@ -90,7 +90,7 @@ def atomic_install(path: Path, raw: bytes, mode: int) -> None:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
-    os.replace(temporary, path)
+    temporary.replace(path)
     path.chmod(mode)
 
 

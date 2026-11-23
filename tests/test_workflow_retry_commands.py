@@ -5,7 +5,6 @@ workflow that wraps another command fails at run time, after merge. The
 allowlist is read from the script itself.
 """
 
-import os
 import re
 import shlex
 from pathlib import Path
@@ -25,7 +24,7 @@ def wrapped_commands(script: str) -> list[tuple[str, ...]]:
             # Cut at a shell separator so a later command is not part of this one.
             words = shlex.split(re.split(r"&&|\|\||;|\|", call)[0], comments=True)
             if words:
-                found.append((os.path.basename(words[0]), *words[1:]))
+                found.append((Path(words[0]).name, *words[1:]))
     return found
 
 

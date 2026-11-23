@@ -57,7 +57,10 @@ class PhaseTimings:
         if not summary:
             return
         table = "".join(f"| {name} | {seconds} |\n" for name, seconds in self.rows)
-        with contextlib.suppress(OSError), open(summary, "a", encoding="utf-8") as out:
+        with (
+            contextlib.suppress(OSError),
+            Path(summary).open("a", encoding="utf-8") as out,
+        ):
             out.write(
                 f"#### {label} phase timings\n\n| phase | seconds |\n|---|---|\n{table}\n"
             )

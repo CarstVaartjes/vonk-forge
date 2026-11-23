@@ -468,9 +468,9 @@ def test_verified_artifact_hashes_open_descriptor_during_path_substitution(
 
     def substitute_after_open(descriptor: int, size: int) -> bytes:
         nonlocal substituted
-        descriptor_path = Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+        descriptor_path = Path(f"/proc/self/fd/{descriptor}").readlink()
         if not substituted and descriptor_path == artifact:
-            os.replace(replacement, artifact)
+            replacement.replace(artifact)
             substituted = True
         return original_read(descriptor, size)
 

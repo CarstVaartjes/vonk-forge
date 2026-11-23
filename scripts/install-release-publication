@@ -960,7 +960,7 @@ def assemble(arguments: argparse.Namespace) -> str:
         }
         _write(temporary / "publication-plan.json", _canonical(plan))
         _write(temporary / "channel-public-key.pem", signing_public_key)
-        os.replace(temporary, output)
+        temporary.replace(output)
     except BaseException:
         shutil.rmtree(temporary, ignore_errors=True)
         raise
@@ -1438,10 +1438,10 @@ def _atomic_local_copy(source: Path, destination: Path, immutable: bool) -> None
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-        os.chmod(temporary, 0o644)
+        temporary.chmod(0o644)
         if immutable and destination.exists():
             raise PublicationError("refusing to overwrite an immutable object")
-        os.replace(temporary, destination)
+        temporary.replace(destination)
     finally:
         temporary.unlink(missing_ok=True)
 

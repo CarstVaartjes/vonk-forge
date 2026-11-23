@@ -24,7 +24,7 @@ _MAXIMUM_BYTES = 64 * 1024
 def _write(path: Path, document: dict[str, str]) -> None:
     temporary = path.with_suffix(".tmp")
     with temporary.open("w", encoding="utf-8") as stream:
-        os.chmod(temporary, 0o644)
+        temporary.chmod(0o644)
         json.dump(document, stream, sort_keys=True)
         stream.flush()
         os.fsync(stream.fileno())

@@ -15,7 +15,6 @@ import argparse
 import hashlib
 import importlib.util
 import json
-import os
 import re
 import subprocess
 import sys
@@ -30,7 +29,7 @@ from types import ModuleType
 sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
 
 # The sibling helper, however this file is loaded.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, str(Path(__file__).absolute().parent))
 from check_environment import ensure_catalog
 
 ROOT = Path(__file__).resolve().parents[1]

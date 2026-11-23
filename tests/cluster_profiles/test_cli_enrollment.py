@@ -245,7 +245,7 @@ def test_output_path_replacement_never_receives_secret_bytes(tmp_path):
     victim = tmp_path / "victim.json"
     victim.write_text("keep")
     with not_adopted(), PrivateOutput(destination) as output:
-        os.rename(destination, original)
+        destination.rename(original)
         destination.symlink_to(victim)
         output.write(GRANT)
     assert victim.read_text() == "keep"
