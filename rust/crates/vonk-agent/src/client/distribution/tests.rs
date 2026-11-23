@@ -10,7 +10,7 @@ async fn distribution_consumer_fetches_manifest_and_all_objects_with_ranges() {
     let digest = |bytes: &[u8]| hex_sha256(bytes);
     let model_digest = digest(&model);
     let config_digest = digest(&config);
-    let assignment = vonk_agent_protocol::DistributionAssignment {
+    let assignment = DistributionAssignment {
         objects: vec![
             vonk_agent_protocol::DistributionObject {
                 name: "weights/model.bin".to_owned(),
@@ -104,10 +104,10 @@ async fn distribution_consumer_fetches_manifest_and_all_objects_with_ranges() {
         .await
         .unwrap();
     assert_eq!(
-        std::fs::read(&evidence.model_paths[0]).unwrap(),
+        fs::read(&evidence.model_paths[0]).unwrap(),
         b"model payload"
     );
-    assert_eq!(std::fs::read(&evidence.model_paths[1]).unwrap(), b"config!");
+    assert_eq!(fs::read(&evidence.model_paths[1]).unwrap(), b"config!");
     // The runtime image is pulled by these digests, never downloaded here.
     assert_eq!(
         evidence.oci_image_digest,
@@ -256,8 +256,8 @@ async fn distribution_downloads_overlap_without_reordering_evidence_or_progress(
         evidence.model_digests,
         vec![hex_sha256(first), hex_sha256(second)]
     );
-    assert_eq!(std::fs::read(&evidence.model_paths[0]).unwrap(), first);
-    assert_eq!(std::fs::read(&evidence.model_paths[1]).unwrap(), second);
+    assert_eq!(fs::read(&evidence.model_paths[0]).unwrap(), first);
+    assert_eq!(fs::read(&evidence.model_paths[1]).unwrap(), second);
     assert!(
         snapshots
             .windows(2)
@@ -308,14 +308,14 @@ async fn write_path_reserves_space_without_changing_the_length_and_writes_exact_
         .await
         .unwrap();
     assert_eq!(pending.len(), 5);
-    assert!(std::fs::metadata(&path).unwrap().len() > total);
+    assert!(fs::metadata(&path).unwrap().len() > total);
     for range in pending.into_iter().rev() {
         let bytes = payload[range.start as usize..=range.end as usize].to_vec();
         record.write(range.start, bytes).await.unwrap();
         record.complete(range).await.unwrap();
     }
     record.finish().await.unwrap();
-    assert_eq!(std::fs::read(&path).unwrap(), payload);
+    assert_eq!(fs::read(&path).unwrap(), payload);
 }
 
 #[tokio::test]
@@ -334,7 +334,7 @@ async fn distribution_acceptance_uses_authenticated_ranges_and_replays_without_r
     );
     let root = tempfile::tempdir().unwrap();
     let assignment_root = root.path().join("distribution").join("plan");
-    std::fs::create_dir_all(&assignment_root).unwrap();
+    fs::create_dir_all(&assignment_root).unwrap();
     let mut snapshots = Vec::new();
     let evidence = client
         .download_distribution_with_progress(TEST_PLAN_DIGEST, &assignment_root, |item| {
@@ -362,9 +362,9 @@ async fn distribution_acceptance_uses_authenticated_ranges_and_replays_without_r
         evidence.oci_image_config_digest,
         assignment.oci_image_config_digest
     );
-    assert_eq!(std::fs::read(&evidence.model_paths[0]).unwrap(), model);
+    assert_eq!(fs::read(&evidence.model_paths[0]).unwrap(), model);
     assert_eq!(
-        std::fs::metadata(&evidence.model_paths[0])
+        fs::metadata(&evidence.model_paths[0])
             .unwrap()
             .permissions()
             .mode()
@@ -373,13 +373,13 @@ async fn distribution_acceptance_uses_authenticated_ranges_and_replays_without_r
     );
     // Replace the object with same-size different bytes: a replay trusts
     // name, size and custody, so it neither re-hashes nor re-fetches.
-    std::fs::write(&evidence.model_paths[0], vec![0_u8; model.len()]).unwrap();
+    fs::write(&evidence.model_paths[0], vec![0_u8; model.len()]).unwrap();
     let replayed = client
         .download_distribution(TEST_PLAN_DIGEST, &assignment_root)
         .await
         .unwrap();
     assert_eq!(
-        std::fs::read(&replayed.model_paths[0]).unwrap(),
+        fs::read(&replayed.model_paths[0]).unwrap(),
         vec![0_u8; model.len()]
     );
     assert_eq!(replayed.downloaded_bytes, evidence.downloaded_bytes);
@@ -409,7 +409,7 @@ async fn content_addressed_distribution_handoff_reuses_objects_across_plan_diges
     );
     let root = tempfile::tempdir().unwrap();
     let distribution_root = root.path().join("distribution");
-    std::fs::create_dir_all(&distribution_root).unwrap();
+    fs::create_dir_all(&distribution_root).unwrap();
     let evidence = client
         .download_distribution(&plan_digest, &distribution_root)
         .await
@@ -445,7 +445,7 @@ async fn content_addressed_distribution_handoff_reuses_objects_across_plan_diges
         )
         .unwrap();
     assert_eq!(
-        std::fs::read(root.path().join(format!(
+        fs::read(root.path().join(format!(
             "installations/{first_installation}/models/primary/weights.bin"
         )))
         .unwrap(),
@@ -479,7 +479,7 @@ async fn content_addressed_distribution_handoff_reuses_objects_across_plan_diges
         vec![distribution_root.join("models").join(&model_sha256)]
     );
     assert_eq!(
-        std::fs::read_dir(distribution_root.join("models"))
+        fs::read_dir(distribution_root.join("models"))
             .unwrap()
             .count(),
         1,
@@ -498,7 +498,7 @@ async fn content_addressed_distribution_handoff_reuses_objects_across_plan_diges
         )
         .unwrap();
     assert_eq!(
-        std::fs::read(root.path().join(format!(
+        fs::read(root.path().join(format!(
             "installations/{second_installation}/models/primary/weights.bin"
         )))
         .unwrap(),
@@ -518,9 +518,9 @@ async fn distribution_acceptance_resumes_partial_object_and_rejects_corruption()
         .join("models")
         .join(&assignment.objects[0].sha256);
     let partial_path = PathBuf::from(format!("{}.partial", model_path.display()));
-    std::fs::create_dir_all(model_path.parent().unwrap()).unwrap();
-    std::fs::write(&partial_path, &model[..5]).unwrap();
-    std::fs::set_permissions(&partial_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    fs::create_dir_all(model_path.parent().unwrap()).unwrap();
+    fs::write(&partial_path, &model[..5]).unwrap();
+    fs::set_permissions(&partial_path, fs::Permissions::from_mode(0o600)).unwrap();
     let (client, server) = distribution_fixture_server(
         assignment.clone(),
         objects,
@@ -531,7 +531,7 @@ async fn distribution_acceptance_resumes_partial_object_and_rejects_corruption()
         .download_distribution(TEST_PLAN_DIGEST, root.path())
         .await
         .unwrap();
-    assert_eq!(std::fs::read(&model_path).unwrap(), model);
+    assert_eq!(fs::read(&model_path).unwrap(), model);
     let requests = server.finish().unwrap();
     let model_request = requests
         .iter()
@@ -570,47 +570,31 @@ async fn a_finished_object_installations_link_to_is_still_a_trusted_final_object
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
     let object = dir.path().join("object");
-    std::fs::write(&object, b"model").unwrap();
-    let set_mode =
-        |mode| std::fs::set_permissions(&object, std::fs::Permissions::from_mode(mode)).unwrap();
+    fs::write(&object, b"model").unwrap();
+    let set_mode = |mode| fs::set_permissions(&object, fs::Permissions::from_mode(mode)).unwrap();
     set_mode(0o600);
 
     // Installations hold hard links to it; that does not make it untrusted.
-    std::fs::hard_link(&object, dir.path().join("installation-link")).unwrap();
-    assert!(
-        super::inspect_trusted_final(&object, 5)
-            .await
-            .unwrap()
-            .is_some()
-    );
+    fs::hard_link(&object, dir.path().join("installation-link")).unwrap();
+    assert!(inspect_trusted_final(&object, 5).await.unwrap().is_some());
     // Its size is still the identity.
-    assert!(
-        super::inspect_trusted_final(&object, 6)
-            .await
-            .unwrap()
-            .is_none()
-    );
+    assert!(inspect_trusted_final(&object, 6).await.unwrap().is_none());
     assert_eq!(
-        std::fs::read(dir.path().join("installation-link")).unwrap(),
+        fs::read(dir.path().join("installation-link")).unwrap(),
         b"model"
     );
     // Group or world access without the runtime user's exact grant is not.
     for mode in [0o640, 0o644, 0o660, 0o400] {
-        std::fs::write(&object, b"model").unwrap();
+        fs::write(&object, b"model").unwrap();
         set_mode(mode);
-        assert!(
-            super::inspect_trusted_final(&object, 5)
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert!(inspect_trusted_final(&object, 5).await.unwrap().is_none());
         assert!(!object.exists());
         assert_eq!(
-            std::fs::read(dir.path().join("installation-link")).unwrap(),
+            fs::read(dir.path().join("installation-link")).unwrap(),
             b"model"
         );
     }
-    std::fs::write(&object, b"model").unwrap();
+    fs::write(&object, b"model").unwrap();
     // The exact runtime read grant an installation's start leaves behind is.
     let mut acl = 0x0002_u32.to_le_bytes().to_vec();
     for (tag, permissions, identifier) in [
@@ -625,10 +609,7 @@ async fn a_finished_object_installations_link_to_is_still_a_trusted_final_object
         acl.extend_from_slice(&identifier.to_le_bytes());
     }
     set_mode(0o600);
-    let file = std::fs::OpenOptions::new()
-        .write(true)
-        .open(&object)
-        .unwrap();
+    let file = fs::OpenOptions::new().write(true).open(&object).unwrap();
     rustix::fs::fsetxattr(
         &file,
         "system.posix_acl_access",
@@ -637,15 +618,10 @@ async fn a_finished_object_installations_link_to_is_still_a_trusted_final_object
     )
     .unwrap();
     assert_eq!(
-        std::fs::metadata(&object).unwrap().permissions().mode() & 0o777,
+        fs::metadata(&object).unwrap().permissions().mode() & 0o777,
         0o640
     );
-    assert!(
-        super::inspect_trusted_final(&object, 5)
-            .await
-            .unwrap()
-            .is_some()
-    );
+    assert!(inspect_trusted_final(&object, 5).await.unwrap().is_some());
 }
 
 #[tokio::test]
@@ -663,8 +639,8 @@ async fn direct_distribution_object_resumes_private_partial_atomically() {
     let root = tempfile::tempdir().unwrap();
     let destination = root.path().join("config.json");
     let partial = partial_path(&destination);
-    std::fs::write(&partial, &model[..5]).unwrap();
-    std::fs::set_permissions(&partial, std::fs::Permissions::from_mode(0o600)).unwrap();
+    fs::write(&partial, &model[..5]).unwrap();
+    fs::set_permissions(&partial, fs::Permissions::from_mode(0o600)).unwrap();
     client
         .download_distribution_object(
             TEST_PLAN_DIGEST,
@@ -674,7 +650,7 @@ async fn direct_distribution_object_resumes_private_partial_atomically() {
         )
         .await
         .unwrap();
-    assert_eq!(std::fs::read(&destination).unwrap(), model);
+    assert_eq!(fs::read(&destination).unwrap(), model);
     assert!(!partial.exists());
     assert_eq!(server.finish().unwrap().len(), 1);
 }
@@ -710,10 +686,9 @@ async fn distribution_isolates_partial_replacement_and_a_fresh_request_succeeds(
             },
             |_, phase| {
                 if phase == ProgressPhase::Finalizing && !swapped {
-                    std::fs::write(&replacement, &corrupt).unwrap();
-                    std::fs::set_permissions(&replacement, std::fs::Permissions::from_mode(0o600))
-                        .unwrap();
-                    std::fs::rename(&replacement, &partial).unwrap();
+                    fs::write(&replacement, &corrupt).unwrap();
+                    fs::set_permissions(&replacement, fs::Permissions::from_mode(0o600)).unwrap();
+                    fs::rename(&replacement, &partial).unwrap();
                     swapped = true;
                 }
             },
@@ -731,7 +706,7 @@ async fn distribution_isolates_partial_replacement_and_a_fresh_request_succeeds(
         )
         .await
         .unwrap();
-    assert_eq!(std::fs::read(&destination).unwrap(), model);
+    assert_eq!(fs::read(&destination).unwrap(), model);
     assert_eq!(server.finish().unwrap().len(), 2);
 }
 
@@ -745,12 +720,12 @@ async fn distribution_reuses_an_existing_object_without_hashing_or_fetching() {
     let destination = root.path().join("config.json");
     let mut other = model.to_vec();
     other[0] ^= 0xff;
-    std::fs::write(&destination, &other).unwrap();
-    std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(0o600)).unwrap();
+    fs::write(&destination, &other).unwrap();
+    fs::set_permissions(&destination, fs::Permissions::from_mode(0o600)).unwrap();
     let long_ago = std::time::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
-    let age = |path: &std::path::Path| std::fs::metadata(path).unwrap().modified().unwrap();
-    let set_age = |path: &std::path::Path| {
-        std::fs::File::options()
+    let age = |path: &Path| fs::metadata(path).unwrap().modified().unwrap();
+    let set_age = |path: &Path| {
+        fs::File::options()
             .write(true)
             .open(path)
             .unwrap()
@@ -759,7 +734,7 @@ async fn distribution_reuses_an_existing_object_without_hashing_or_fetching() {
     };
     set_age(&destination);
     let client = AgentHttpClient {
-        client: Arc::new(RwLock::new(reqwest::Client::new())),
+        client: Arc::new(RwLock::new(Client::new())),
         controller: Url::parse("http://127.0.0.1:1/").unwrap(),
         node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
         identity_content: Default::default(),
@@ -778,12 +753,12 @@ async fn distribution_reuses_an_existing_object_without_hashing_or_fetching() {
         .await
         .unwrap();
 
-    assert_eq!(std::fs::read(&destination).unwrap(), other);
+    assert_eq!(fs::read(&destination).unwrap(), other);
     // Reuse claims an object no installation links: its retention grace restarts.
     assert!(age(&destination) > long_ago);
 
     // A linked object is an installation's file and is left as it is.
-    std::fs::hard_link(&destination, root.path().join("installation-link")).unwrap();
+    fs::hard_link(&destination, root.path().join("installation-link")).unwrap();
     set_age(&destination);
     client
         .download_distribution_object(
@@ -814,8 +789,8 @@ async fn direct_distribution_repairs_a_symlink_without_touching_its_target() {
     let linked = root.path().join("linked");
     let mut corrupt = model.to_vec();
     corrupt[0] ^= 0xff;
-    std::fs::write(&linked, &corrupt).unwrap();
-    std::fs::set_permissions(&linked, std::fs::Permissions::from_mode(0o600)).unwrap();
+    fs::write(&linked, &corrupt).unwrap();
+    fs::set_permissions(&linked, fs::Permissions::from_mode(0o600)).unwrap();
     let destination = root.path().join("config.json");
     std::os::unix::fs::symlink(&linked, &destination).unwrap();
 
@@ -828,7 +803,7 @@ async fn direct_distribution_repairs_a_symlink_without_touching_its_target() {
         )
         .await
         .unwrap();
-    assert_eq!(std::fs::read(&destination).unwrap(), model);
+    assert_eq!(fs::read(&destination).unwrap(), model);
     // Fresh admission reuses the repaired entry without another transfer.
     client
         .download_distribution_object(
@@ -839,7 +814,7 @@ async fn direct_distribution_repairs_a_symlink_without_touching_its_target() {
         )
         .await
         .unwrap();
-    assert_eq!(std::fs::read(&linked).unwrap(), corrupt);
+    assert_eq!(fs::read(&linked).unwrap(), corrupt);
     assert_eq!(server.finish().unwrap().len(), 1);
 }
 
@@ -872,7 +847,7 @@ async fn direct_distribution_retries_interrupted_body_from_appended_offset() {
         )
         .await
         .unwrap();
-    assert_eq!(std::fs::read(&destination).unwrap(), model);
+    assert_eq!(fs::read(&destination).unwrap(), model);
     assert!(!partial_path(&destination).exists());
     let requests = server.finish().unwrap();
     assert!(
@@ -966,7 +941,7 @@ async fn an_expired_spark_copy_is_recopied_from_the_controller_on_the_next_load(
         .await
         .unwrap();
     assert_eq!(loaded.model_paths, first.model_paths);
-    assert_eq!(std::fs::read(&loaded.model_paths[0]).unwrap(), model);
+    assert_eq!(fs::read(&loaded.model_paths[0]).unwrap(), model);
     assert_eq!(
         server.finish().unwrap().len(),
         2,

@@ -36,7 +36,7 @@ async fn damaged_history_never_prevents_exact_stop_from_reaching_current_authori
     let listener = TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
     listener.set_nonblocking(true).unwrap();
     let address = listener.local_addr().unwrap();
-    let peer = std::thread::spawn(move || {
+    let peer = thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut paths = Vec::new();
         for _ in 0..2 {
@@ -45,7 +45,7 @@ async fn damaged_history_never_prevents_exact_stop_from_reaching_current_authori
                 match listener.accept() {
                     Ok((stream, _)) => break stream,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(Duration::from_millis(1))
+                        thread::sleep(Duration::from_millis(1))
                     }
                     Err(error) => panic!("stop peer: {error}"),
                 }
@@ -88,7 +88,7 @@ async fn damaged_history_never_prevents_exact_stop_from_reaching_current_authori
     let client = AgentHttpClient::for_http_test(&format!("http://{address}/"), NODE_ID);
     let executor = RecipeExecutor {
         client: &client,
-        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        helper_socket: Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime: OciRuntime {
             runner: &NoProcess,
             data_root: data.path(),

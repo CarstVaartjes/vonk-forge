@@ -7,7 +7,7 @@ impl AgentHttpClient {
     pub(crate) fn for_http_test(controller: &str, node_id: &str) -> Self {
         Self {
             client: Arc::new(RwLock::new(
-                reqwest::Client::builder()
+                Client::builder()
                     .retry(reqwest::retry::never())
                     .build()
                     .expect("test transport"),

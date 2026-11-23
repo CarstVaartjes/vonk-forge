@@ -136,10 +136,8 @@ impl ObservationServer {
     }
 }
 
-pub(in crate::executor) fn exact_observation(
-    run_id: Uuid,
-) -> crate::client::ExactRecipeRunObservation {
-    crate::client::ExactRecipeRunObservation {
+pub(in crate::executor) fn exact_observation(run_id: Uuid) -> ExactRecipeRunObservation {
+    ExactRecipeRunObservation {
         run_id,
         run_generation: 3,
         process_running: true,
@@ -350,8 +348,8 @@ impl Executor for RenewalGatedExecutor {
         _lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
         cancellation: tokio::sync::watch::Receiver<bool>,
     ) -> ExecutionResult {
-        let deadline = std::time::Instant::now() + self.cap;
-        while std::time::Instant::now() < deadline {
+        let deadline = Instant::now() + self.cap;
+        while Instant::now() < deadline {
             if *cancellation.borrow() {
                 self.cancelled.store(true, Ordering::SeqCst);
                 break;
@@ -386,8 +384,8 @@ impl Executor for BlockingCancellationExecutor {
     ) -> ExecutionResult {
         // The real Podman runner is synchronous too. A select in the
         // parent cannot observe a failed heartbeat while this poll blocks.
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
-        while std::time::Instant::now() < deadline {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
             if *cancellation.borrow() {
                 self.cancelled.store(true, Ordering::SeqCst);
                 break;
@@ -500,8 +498,8 @@ impl Executor for CancellationExecutor {
         else {
             panic!("expected canonical job claim");
         };
-        let started = std::time::Instant::now();
-        super::wait_for_cancellation(&mut cancellation).await;
+        let started = Instant::now();
+        wait_for_cancellation(&mut cancellation).await;
         crate::executor::cancelled_job(&request, started, "controller cancellation requested")
     }
 }
@@ -577,7 +575,7 @@ pub(in crate::executor) fn claim() -> AgentClaim {
 }
 
 pub(in crate::executor) fn count_watchdog_feed() {
-    WATCHDOG_FEEDS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    WATCHDOG_FEEDS.fetch_add(1, Ordering::SeqCst);
 }
 
 #[derive(Clone)]

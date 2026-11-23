@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use std::{
     collections::BTreeSet,
     io::{self, Read, Write},

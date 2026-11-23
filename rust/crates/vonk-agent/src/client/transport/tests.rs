@@ -5,13 +5,12 @@ use super::*;
 
 #[test]
 fn expired_renewal_proof_matches_the_controller_signed_wire_fixture() {
-    let expected: vonk_agent_protocol::generated::ExpiredRenewRequest =
-        vonk_agent_protocol::parse_strict(include_bytes!(
-            "../../../../../../agent_protocol/fixtures/expired-renewal-request.json"
-        ))
-        .unwrap();
+    let expected: vonk_agent_protocol::generated::ExpiredRenewRequest = parse_strict(
+        include_bytes!("../../../../../../agent_protocol/fixtures/expired-renewal-request.json"),
+    )
+    .unwrap();
     let signer = ring::signature::Ed25519KeyPair::from_seed_unchecked(&[42; 32]).unwrap();
-    let actual = super::expired_renewal_request(
+    let actual = expired_renewal_request(
         &expected.node_id,
         expected.serial.clone(),
         expected.csr.as_bytes(),
@@ -39,7 +38,7 @@ fn cloned_clients_share_the_rotatable_transport() {
     let operation_client = client.clone();
     assert!(Arc::ptr_eq(&client.client, &operation_client.client));
 
-    let replacement = reqwest::Client::builder().build().unwrap();
+    let replacement = Client::builder().build().unwrap();
     *client.client.try_write().expect("uncontended test client") = replacement;
     assert!(Arc::ptr_eq(&client.client, &operation_client.client));
 }
@@ -60,7 +59,7 @@ async fn cloned_operation_client_sends_through_replaced_transport() {
         "x-rotation-marker",
         reqwest::header::HeaderValue::from_static("fresh"),
     );
-    let replacement = reqwest::Client::builder()
+    let replacement = Client::builder()
         .default_headers(headers)
         .timeout(CONTROLLER_REQUEST_TIMEOUT)
         .build()
@@ -151,10 +150,8 @@ async fn rotation_drains_requests_without_starving_heartbeats() {
             "x-rotation-marker",
             reqwest::header::HeaderValue::from_static("fresh"),
         );
-        *replacement.client.try_write().unwrap() = reqwest::Client::builder()
-            .default_headers(headers)
-            .build()
-            .unwrap();
+        *replacement.client.try_write().unwrap() =
+            Client::builder().default_headers(headers).build().unwrap();
         let operation = client.clone();
         let request = spawn_async_peer(async move {
             operation
@@ -297,7 +294,7 @@ async fn rotation_silent_activation_retries_same_generation_and_repairs_heartbea
         "x-rotation-marker",
         reqwest::header::HeaderValue::from_static("old"),
     );
-    *client.client.try_write().unwrap() = reqwest::Client::builder()
+    *client.client.try_write().unwrap() = Client::builder()
         .default_headers(old_headers)
         .timeout(HEARTBEAT_REQUEST_TIMEOUT)
         .build()
@@ -308,7 +305,7 @@ async fn rotation_silent_activation_retries_same_generation_and_repairs_heartbea
         "x-rotation-marker",
         reqwest::header::HeaderValue::from_static("fresh"),
     );
-    *replacement.client.try_write().unwrap() = reqwest::Client::builder()
+    *replacement.client.try_write().unwrap() = Client::builder()
         .default_headers(headers)
         .timeout(HEARTBEAT_REQUEST_TIMEOUT)
         .build()

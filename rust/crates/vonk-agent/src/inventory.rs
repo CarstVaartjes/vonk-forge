@@ -545,7 +545,7 @@ fn host_settings<R: ProcessRunner>(
         display_manager_active,
         graphical_default_target: default_target == "graphical.target",
         display_memory: crate::display_memory::observe(
-            std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+            Path::new(crate::host_runtime::HELPER_SOCKET),
             Some(memory_total_bytes),
         ),
         gpu_clock_support: runner

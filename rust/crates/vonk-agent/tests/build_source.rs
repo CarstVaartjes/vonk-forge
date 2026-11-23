@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use std::io::Cursor;
 
 use tempfile::tempdir;

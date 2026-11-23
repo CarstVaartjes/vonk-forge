@@ -175,7 +175,7 @@ fn a_drop_the_host_refuses_is_a_typed_note_not_an_error() {
     let root = host();
     let target = root.path().join(DROP_CACHES);
     fs::set_permissions(&target, fs::Permissions::from_mode(0o000)).unwrap();
-    let refused = fs::OpenOptions::new().write(true).open(&target).is_err();
+    let refused = OpenOptions::new().write(true).open(&target).is_err();
     let report = drop_page_cache(
         root.path(),
         &lane,

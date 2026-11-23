@@ -34,7 +34,7 @@ fn inventory() -> InventoryRequest {
 #[test]
 fn inventory_health_survives_the_shared_python_vector() {
     // Catches an independent Rust shape dropping or renaming GPU health.
-    let mut document: serde_json::Value = serde_json::from_str(include_str!(
+    let mut document: Value = serde_json::from_str(include_str!(
         "../../../../../agent_protocol/src/vonk_agent_protocol/vectors/inventory-wifi-link-v1.json"
     ))
     .unwrap();
@@ -45,7 +45,7 @@ fn inventory_health_survives_the_shared_python_vector() {
     ] {
         document["gpu_health"] = serde_json::to_value(health).unwrap();
         let bytes = serde_json::to_vec(&document).unwrap();
-        let request: InventoryRequest = crate::parse_strict(&bytes).unwrap();
+        let request: InventoryRequest = parse_strict(&bytes).unwrap();
         assert_eq!(request.gpu_health, Some(health));
         assert_eq!(serde_json::to_value(request).unwrap(), document);
     }

@@ -467,13 +467,13 @@ fn exact_cancel_stop_waits_for_active_start_then_blocks_late_start() {
         .update_runtime_generation_fence(&identity, RuntimeGenerationFenceUse::Start)
         .unwrap();
     let active = executor.job_cancellation.begin(identity).unwrap();
-    std::thread::scope(|scope| {
+    thread::scope(|scope| {
         let stop = scope
             .spawn(|| executor.runtime_stop_authorized(identity, identity.runtime_id, 1, true));
         let deadline = Instant::now() + Duration::from_secs(2);
         while !executor.job_cancellation.was_cancelled(identity).unwrap() {
             assert!(Instant::now() < deadline);
-            std::thread::yield_now();
+            thread::yield_now();
         }
         assert!(!stop.is_finished(), "stop acknowledged an active START");
         drop(active);
@@ -531,7 +531,7 @@ fn exact_stop_repairs_unsafe_generation_custody_without_touching_its_target() {
         identity.installation_id,
         identity.runtime_id,
     ));
-    std::os::unix::fs::symlink(&outside, &fence).unwrap();
+    symlink(&outside, &fence).unwrap();
     executor
         .runtime_stop_authorized(identity, identity.runtime_id, 1, true)
         .unwrap();

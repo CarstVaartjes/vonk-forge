@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 //! Compiled launch plans derived from the real recipe catalog must be accepted
 //! by the agent's typed wire model.
 //!

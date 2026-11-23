@@ -7,7 +7,7 @@ use super::*;
 async fn recipe_image_upload_resumes_interruption_and_waits_for_the_verifying_peer() {
     let directory = tempfile::tempdir().unwrap();
     let archive = directory.path().join("image.docker.tar");
-    std::fs::write(&archive, b"accepted archive").unwrap();
+    fs::write(&archive, b"accepted archive").unwrap();
     let (client, server) = delayed_upload_client(Duration::from_millis(150));
 
     let result = client
@@ -59,7 +59,7 @@ async fn recipe_job_input_stream_is_exact_and_cleans_interrupted_or_invalid_temp
         assert_eq!(result.is_ok(), succeeds);
         assert_eq!(destination.exists(), succeeds);
         assert!(
-            !std::fs::read_dir(directory.path())
+            !fs::read_dir(directory.path())
                 .unwrap()
                 .filter_map(Result::ok)
                 .any(|entry| entry
@@ -74,7 +74,7 @@ async fn recipe_job_input_stream_is_exact_and_cleans_interrupted_or_invalid_temp
 async fn unreadable_upload_ack_reobserves_exact_content_before_any_second_put() {
     let directory = tempfile::tempdir().unwrap();
     let archive = directory.path().join("image.tar");
-    std::fs::write(&archive, b"accepted archive").unwrap();
+    fs::write(&archive, b"accepted archive").unwrap();
     let listener = TcpListener::bind(FIXTURE_BIND).unwrap();
     let address = listener.local_addr().unwrap();
     let client = authenticated_test_client(&format!("http://{address}"), TEST_NODE_ID);
@@ -135,5 +135,5 @@ async fn unreadable_upload_ack_reobserves_exact_content_before_any_second_put() 
         .unwrap();
     let (uploads, accepted) = server.finish().unwrap();
     assert_eq!(uploads, 1);
-    assert_eq!(accepted, std::fs::read(archive).unwrap());
+    assert_eq!(accepted, fs::read(archive).unwrap());
 }

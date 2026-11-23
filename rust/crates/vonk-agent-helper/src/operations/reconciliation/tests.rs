@@ -19,7 +19,7 @@ fn installation_cleanup_removes_only_private_runtime_cache_and_is_retryable() {
     fs::write(private.join("engine-owned.bin"), b"private").unwrap();
     fs::write(models.join("model.bin"), b"model").unwrap();
     fs::write(outside.join("sentinel"), b"outside").unwrap();
-    std::os::unix::fs::symlink(&outside, cache.join("outside-link")).unwrap();
+    symlink(&outside, cache.join("outside-link")).unwrap();
     fs::set_permissions(cache.join("home"), fs::Permissions::from_mode(0o700)).unwrap();
     fs::set_permissions(
         cache.join("home/private"),
@@ -63,7 +63,7 @@ fn installation_cleanup_rejects_symlinked_managed_roots() {
         .join("runtime-cache");
     fs::create_dir_all(&cache).unwrap();
     fs::write(cache.join("sentinel"), b"outside").unwrap();
-    std::os::unix::fs::symlink(&outside, &linked).unwrap();
+    symlink(&outside, &linked).unwrap();
     let roots = ManagedRoots::under(&linked);
     let executor = OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
 
@@ -369,15 +369,15 @@ fn installation_cleanup_rejects_symlinked_installation_path_components() {
 
         let installations = roots.agent_data.join("installations");
         if linked_component == "installations" {
-            std::os::unix::fs::symlink(&outside, &installations).unwrap();
+            symlink(&outside, &installations).unwrap();
         } else {
             fs::create_dir(&installations).unwrap();
             let installation = installations.join(installation_id);
             if linked_component == "installation" {
-                std::os::unix::fs::symlink(&outside, &installation).unwrap();
+                symlink(&outside, &installation).unwrap();
             } else {
                 fs::create_dir(&installation).unwrap();
-                std::os::unix::fs::symlink(&outside, installation.join("runtime-cache")).unwrap();
+                symlink(&outside, installation.join("runtime-cache")).unwrap();
             }
         }
 

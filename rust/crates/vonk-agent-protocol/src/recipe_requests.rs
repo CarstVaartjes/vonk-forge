@@ -357,34 +357,31 @@ pub(super) mod recipe_start_tests {
             ContainerRunTarget, ContainerRunTargetKind, RunNameTarget, RunNameTargetKind,
         };
         let container = || {
-            Some(crate::RunInspectTarget::ContainerRunTarget(
-                ContainerRunTarget {
-                    kind: ContainerRunTargetKind::ContainerRun,
-                    archive_sha256: "a".repeat(64),
-                    registry_index_digest: format!("sha256:{}", "b".repeat(64)),
-                    platform_manifest_digest: format!("sha256:{}", "b".repeat(64)),
-                    image_reference: "vonk/image:test".to_owned(),
-                    command: vec!["run".to_owned()],
-                },
-            ))
+            Some(RunInspectTarget::ContainerRunTarget(ContainerRunTarget {
+                kind: ContainerRunTargetKind::ContainerRun,
+                archive_sha256: "a".repeat(64),
+                registry_index_digest: format!("sha256:{}", "b".repeat(64)),
+                platform_manifest_digest: format!("sha256:{}", "b".repeat(64)),
+                image_reference: "vonk/image:test".to_owned(),
+                command: vec!["run".to_owned()],
+            }))
         };
-        let request =
-            |action, target: Option<crate::RunInspectTarget>, generation| HostRuntimeRequest {
-                inspect_target: target.clone(),
-                action,
-                fence: Uuid::new_v4(),
-                arguments: if target.is_some() {
-                    Vec::new()
-                } else {
-                    vec!["run".to_owned()]
-                },
-                job_plan: None,
-                installation_id: None,
-                reconciliation_identity: None,
-                run_generation: generation,
-                start_plan: None,
-                stop_plan: None,
-            };
+        let request = |action, target: Option<RunInspectTarget>, generation| HostRuntimeRequest {
+            inspect_target: target.clone(),
+            action,
+            fence: Uuid::new_v4(),
+            arguments: if target.is_some() {
+                Vec::new()
+            } else {
+                vec!["run".to_owned()]
+            },
+            job_plan: None,
+            installation_id: None,
+            reconciliation_identity: None,
+            run_generation: generation,
+            start_plan: None,
+            stop_plan: None,
+        };
         for generation in [None, Some(1), Some(i64::MAX as u64)] {
             assert!(
                 request(HostRuntimeAction::RunInspect, container(), generation)
@@ -392,7 +389,7 @@ pub(super) mod recipe_start_tests {
                     .is_ok()
             );
         }
-        let by_name = Some(crate::RunInspectTarget::RunNameTarget(RunNameTarget {
+        let by_name = Some(RunInspectTarget::RunNameTarget(RunNameTarget {
             kind: RunNameTargetKind::RunName,
             run_id: Uuid::new_v4(),
         }));

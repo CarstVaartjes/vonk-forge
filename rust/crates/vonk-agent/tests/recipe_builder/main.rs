@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,
@@ -617,7 +615,7 @@ fn stage_base_archive(root: &Path) {
     fs::write(directory.join("image.oci.tar"), oci_archive(&fixture)).unwrap();
 }
 
-fn base_archive_path(root: &Path) -> std::path::PathBuf {
+fn base_archive_path(root: &Path) -> PathBuf {
     let fixture = registry_fixture();
     root.join("base-images")
         .join("sha256")
@@ -715,7 +713,7 @@ fn docker_archive(fixture: &OciRegistryFixture, image_name: &str) -> Vec<u8> {
 struct PrivateContainerd {
     _root: TempDir,
     child: Child,
-    socket: std::path::PathBuf,
+    socket: PathBuf,
 }
 
 impl PrivateContainerd {

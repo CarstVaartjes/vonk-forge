@@ -47,6 +47,20 @@ wait-timeout = "0.2.1"
 xattr = "1.7.0"
 x509-parser = "0.18.1"
 
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_qualifications = "warn"
+unreachable_pub = "warn"
+trivial_casts = "warn"
+trivial_numeric_casts = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unused_lifetimes = "warn"
+redundant_lifetimes = "warn"
+single_use_lifetimes = "warn"
+meta_variable_misuse = "warn"
+unit_bindings = "warn"
+unused_macro_rules = "warn"
+
 [profile.release]
 codegen-units = 1
 lto = true

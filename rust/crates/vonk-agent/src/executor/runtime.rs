@@ -46,7 +46,7 @@ const PULL_INACTIVITY: Duration = Duration::from_secs(610);
 /// contributes transferred bytes, not completed items. Artifact availability
 /// remains established by the distribution's receipt, not this progress.
 pub(super) fn pull_progress<'a>(
-    client: &'a crate::client::AgentHttpClient,
+    client: &'a AgentHttpClient,
     fence: uuid::Uuid,
     pulled: &'a Inactivity,
 ) -> impl Fn(u64) + Sync + 'a {

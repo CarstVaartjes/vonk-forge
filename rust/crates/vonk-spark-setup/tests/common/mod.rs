@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 use vonk_agent_protocol::generated::InstallerCandidateRelease;
 
-pub fn candidate_release(mut document: Value) -> InstallerCandidateRelease {
+pub(crate) fn candidate_release(mut document: Value) -> InstallerCandidateRelease {
     let prefix = format!(
         "artifacts/{}/releases/{}",
         document["channel"].as_str().unwrap(),

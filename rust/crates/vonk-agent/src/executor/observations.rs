@@ -694,7 +694,7 @@ impl<R> RecipeExecutor<'_, R> {
         target: &ContainerRunTarget,
         run_generation: u64,
         why: &str,
-    ) -> super::failures::WorkloadEvidence {
+    ) -> WorkloadEvidence {
         let request_root = self.runtime_root.join("runtime-requests");
         let boundary = HostRuntimeBoundary {
             client: self.client,
@@ -722,7 +722,7 @@ impl<R> RecipeExecutor<'_, R> {
                     crate::failure_evidence::ExitCause::of_summary(text)
                         == Some(crate::failure_evidence::ExitCause::HostMemoryExhausted)
                 });
-                super::failures::WorkloadEvidence {
+                WorkloadEvidence {
                     logs: report.process_logs.map(|logs| *logs),
                     account,
                     exit_summary,
@@ -742,7 +742,7 @@ impl<R> RecipeExecutor<'_, R> {
                         error.preflight_code()
                     ));
                 }
-                super::failures::WorkloadEvidence {
+                WorkloadEvidence {
                     logs: error.process_logs().cloned(),
                     account,
                     exit_summary: error.diagnostic().map(str::to_owned),

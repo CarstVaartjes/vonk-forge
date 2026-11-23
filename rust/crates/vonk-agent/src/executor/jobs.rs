@@ -12,7 +12,7 @@ impl<'runtime, 'data, R: ProcessRunner> JobScopeCleanup<'runtime, 'data, R> {
         }
     }
 
-    pub(super) fn finish(mut self) -> Result<(), crate::oci::OciError> {
+    pub(super) fn finish(mut self) -> Result<(), OciError> {
         let result = self.runtime.cleanup_job_scope(self.job_scope);
         self.active = result.is_err();
         result
@@ -473,7 +473,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                             return temporary_preparation_failure(
                                 FailureStage::JobInputs,
                                 "job input download",
-                                super::installation::attempt_end_cause(&lease_deadline),
+                                installation::attempt_end_cause(&lease_deadline),
                             );
                         }
                     }
@@ -748,7 +748,7 @@ pub(super) fn job_placement(
 
 pub fn recipe_job_input_manifest(
     request: &vonk_agent_protocol::RecipeJobRunRequest,
-) -> Result<Vec<u8>, vonk_agent_protocol::ProtocolError> {
+) -> Result<Vec<u8>, ProtocolError> {
     canonical_json(&vonk_agent_protocol::generated::RecipeJobInputManifest {
         schema_version: 1,
         total_bytes: request.input_total_bytes,
@@ -811,7 +811,7 @@ pub(super) fn job_failure(receipt: RecipeJobRunResult) -> ExecutionResult {
     } else {
         FailureCode::RecipeJobRunFailed
     };
-    let logs = outputs::process_logs(&receipt);
+    let logs = process_logs(&receipt);
     ExecutionResult::Failed(
         Failure::new(reason)
             .code(code)
@@ -871,7 +871,7 @@ pub(super) fn refused_job_start(
 pub(super) fn local_step(
     fallback: FailureStage,
     step: &str,
-    error: &crate::oci::OciError,
+    error: &OciError,
 ) -> (FailureStage, String) {
     let (stage, category) = error.safe_start_context();
     let stage = if matches!(stage, FailureStage::Unknown) {
@@ -941,6 +941,7 @@ use endings::*;
 mod outputs;
 #[cfg(test)]
 pub(super) use outputs::*;
+use outputs::{OutputRefusal, collect_job_outputs, process_logs};
 mod reobserve;
 
 #[cfg(test)]
@@ -961,7 +962,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         claim: &AgentClaim,
         request: &vonk_agent_protocol::RecipeJobRunRequest,
         mut receipt: RecipeJobRunResult,
-    ) -> super::operation_observation::OperationObservation {
+    ) -> operation_observation::OperationObservation {
         use super::operation_observation::{OperationObservation, PendingObservation};
         let unknown = |stage, cause: String, receipt: RecipeJobRunResult| {
             OperationObservation::confirmed(ExecutionResult::Unknown(crate::outcome::Unconfirmed {
@@ -976,16 +977,16 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             Err(error) => return unknown(FailureStage::OutputStorage, error.to_string(), receipt),
         };
         if receipt.output_manifest.files.is_empty() && request.is_endpoint_owner() {
-            receipt.output_manifest = match outputs::collect_job_outputs(
+            receipt.output_manifest = match collect_job_outputs(
                 Some(&root),
                 &request.output_limits,
                 &request.output_mappings,
             ) {
                 Ok(manifest) => manifest,
-                Err(outputs::OutputRefusal::Breach(breach)) => {
+                Err(OutputRefusal::Breach(breach)) => {
                     return OperationObservation::confirmed(breach.failure(&receipt));
                 }
-                Err(outputs::OutputRefusal::Unreadable { cause, .. }) => {
+                Err(OutputRefusal::Unreadable { cause, .. }) => {
                     return OperationObservation::Unknown(PendingObservation::new(
                         claim,
                         WaitReason::ObservationUnavailable,
@@ -1016,7 +1017,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         claim: &AgentClaim,
         request: &vonk_agent_protocol::RecipeJobRunRequest,
         outcome: HostRuntimeOutcome,
-    ) -> super::operation_observation::OperationObservation {
+    ) -> operation_observation::OperationObservation {
         use super::operation_observation::OperationObservation;
         let Some(stop_plan) = job_run_stop_plan(claim, request) else {
             return OperationObservation::confirmed(failed("job observation identity is invalid"));

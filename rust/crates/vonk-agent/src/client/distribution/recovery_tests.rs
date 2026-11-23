@@ -34,7 +34,7 @@ async fn reference_busy_manifest_retries_in_the_original_download() {
         .collect();
     assert!(evidence.is_ok(), "{evidence:?}; requests={targets:?}");
     let evidence = evidence.unwrap();
-    assert_eq!(std::fs::read(&evidence.model_paths[0]).unwrap(), model);
+    assert_eq!(fs::read(&evidence.model_paths[0]).unwrap(), model);
     assert_eq!(requests.len(), 6);
     for request in &requests[..5] {
         assert!(String::from_utf8_lossy(request).contains(TEST_PLAN_DIGEST));
@@ -99,18 +99,18 @@ async fn damaged_managed_objects_and_oversized_checkpoints_refetch_exact_content
             .path()
             .join("models")
             .join(&assignment.objects[0].sha256);
-        std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        fs::create_dir_all(destination.parent().unwrap()).unwrap();
         let damaged = if final_damage {
             destination.clone()
         } else {
             partial_path(&destination)
         };
         if directory_damage {
-            std::fs::create_dir(&damaged).unwrap();
-            std::fs::write(damaged.join("preserved"), b"unmatched local bytes").unwrap();
+            fs::create_dir(&damaged).unwrap();
+            fs::write(damaged.join("preserved"), b"unmatched local bytes").unwrap();
         } else {
-            std::fs::write(&damaged, vec![0; model.len() + 1]).unwrap();
-            std::fs::set_permissions(&damaged, std::fs::Permissions::from_mode(0o600)).unwrap();
+            fs::write(&damaged, vec![0; model.len() + 1]).unwrap();
+            fs::set_permissions(&damaged, fs::Permissions::from_mode(0o600)).unwrap();
         }
         let mut objects = HashMap::new();
         objects.insert(hex_sha256(model), model.to_vec());
@@ -120,7 +120,7 @@ async fn damaged_managed_objects_and_oversized_checkpoints_refetch_exact_content
             .download_distribution(TEST_PLAN_DIGEST, root.path())
             .await
             .unwrap();
-        assert_eq!(std::fs::read(&destination).unwrap(), model);
+        assert_eq!(fs::read(&destination).unwrap(), model);
         // A fresh request reuses the repaired object with no second transfer.
         client
             .download_distribution(TEST_PLAN_DIGEST, root.path())
@@ -158,7 +158,7 @@ async fn malformed_delivery_is_refused_before_effects_and_a_fresh_request_is_adm
             .download_distribution(TEST_PLAN_DIGEST, root.path())
             .await
             .unwrap();
-        assert_eq!(std::fs::read(&destination).unwrap(), model);
+        assert_eq!(fs::read(&destination).unwrap(), model);
         assert_eq!(server.finish().unwrap().len(), requests);
     }
 }
@@ -188,7 +188,7 @@ async fn repeated_truncation_that_keeps_moving_bytes_finishes_without_spending_r
         )
         .await
         .unwrap();
-    assert_eq!(std::fs::read(&destination).unwrap(), model);
+    assert_eq!(fs::read(&destination).unwrap(), model);
     assert!(!partial_path(&destination).exists());
     assert_eq!(server.finish().unwrap().len(), 6);
 }
@@ -257,7 +257,7 @@ async fn malformed_range_observation_ends_boundedly_and_same_digest_is_admitted_
         .download_distribution_object(TEST_PLAN_DIGEST, &digest, model.len() as u64, &destination)
         .await
         .unwrap();
-    assert_eq!(std::fs::read(&destination).unwrap(), model);
+    assert_eq!(fs::read(&destination).unwrap(), model);
     client
         .download_distribution_object(TEST_PLAN_DIGEST, &digest, model.len() as u64, &destination)
         .await

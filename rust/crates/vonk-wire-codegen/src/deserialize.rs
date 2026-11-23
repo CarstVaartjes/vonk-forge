@@ -38,52 +38,53 @@ pub(super) fn untagged_deserialize_impl(
                 object.keys().map(String::as_str).collect::<Vec<_>>());
         }
     } else { quote! {} };
-    let branches = item.variants.iter().map(|variant| {
+    let (helpers, branches): (Vec<_>, Vec<_>) = item.variants.iter().map(|variant| {
         let name = &variant.ident;
         match &variant.fields {
-            syn::Fields::Unit => quote! {
+            syn::Fields::Unit => (quote! {}, quote! {
                 if ::serde_json::from_value::<()>(value.clone()).is_ok() {
                     return Ok(Self::#name);
                 }
-            },
+            }),
             syn::Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
                 let payload = &fields.unnamed.first().unwrap().ty;
                 match named_payload_schema(payload, schema_names) {
-                    Some(model) => quote! {
+                    Some(model) => (quote! {}, quote! {
                         if crate::wire_schema::may_match_wire_model_shape(#model, object_keys.as_deref())
                             && let Ok(payload) = ::serde_json::from_value::<#payload>(value.clone()) {
                             return Ok(Self::#name(payload));
                         }
-                    },
-                    None => quote! {
+                    }),
+                    None => (quote! {}, quote! {
                         if let Ok(payload) = ::serde_json::from_value::<#payload>(value.clone()) {
                             return Ok(Self::#name(payload));
                         }
-                    },
+                    }),
                 }
             }
             syn::Fields::Unnamed(fields) => {
                 let types: Vec<_> = fields.unnamed.iter().map(|field| &field.ty).collect();
                 let names: Vec<_> = (0..types.len()).map(|index| format_ident!("value{index}")).collect();
-                quote! {
+                (quote! {}, quote! {
                     if let Ok((#(#names),*)) = ::serde_json::from_value::<(#(#types),*)>(value.clone()) {
                         return Ok(Self::#name(#(#names),*));
                     }
-                }
+                })
             }
             syn::Fields::Named(fields) => {
                 let helper = format_ident!("Raw{name}");
                 let names: Vec<_> = fields.named.iter().map(|field| field.ident.as_ref().unwrap()).collect();
-                quote! {
+                (quote! {
                     #[derive(::serde::Deserialize)]
                     struct #helper #fields
+                }, quote! {
                     if let Ok(payload) = ::serde_json::from_value::<#helper>(value.clone()) {
                         return Ok(Self::#name { #(#names: payload.#names),* });
                     }
-                }
+                })
             }
         }
-    });
+    }).unzip();
     let schema_owner = match schema_name {
         Some(schema_name) => quote! { Some(#schema_name) },
         None => quote! { None },
@@ -91,6 +92,7 @@ pub(super) fn untagged_deserialize_impl(
     let implementation = parse_quote! {
         impl<'de> ::serde::Deserialize<'de> for #ident {
             fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                #(#helpers)*
                 let value = crate::wire_schema::deserialize_wire_value(deserializer, #schema_owner)?;
                 #object_keys
                 #(#branches)*
@@ -118,7 +120,7 @@ pub(super) fn untagged_deserialize_impl(
 }
 
 pub(super) fn deserialize_impl(item: &mut Item, schema_name: &str) -> Option<Item> {
-    let (ident, fields, attrs, raw, construction) = match item {
+    let (ident, uses_raw, attrs, raw, construction) = match item {
         Item::Struct(item) if matches!(item.fields, syn::Fields::Named(_)) => {
             let mut raw = item.clone();
             raw.ident = format_ident!("Raw");
@@ -131,7 +133,7 @@ pub(super) fn deserialize_impl(item: &mut Item, schema_name: &str) -> Option<Ite
             let construction = quote! { Self { #(#names: raw.#names),* } };
             (
                 item.ident.clone(),
-                true,
+                !names.is_empty(),
                 &mut item.attrs,
                 quote!(#raw),
                 construction,
@@ -164,7 +166,7 @@ pub(super) fn deserialize_impl(item: &mut Item, schema_name: &str) -> Option<Ite
             let construction = quote! { match raw { #(#arms),* } };
             (
                 item.ident.clone(),
-                false,
+                true,
                 &mut item.attrs,
                 quote!(#raw),
                 construction,
@@ -172,7 +174,8 @@ pub(super) fn deserialize_impl(item: &mut Item, schema_name: &str) -> Option<Ite
         }
         _ => return None,
     };
-    let _ = fields;
+    // An empty message constructs itself without reading its decoded fields.
+    let raw_binding = format_ident!("{}", if uses_raw { "raw" } else { "_raw" });
     for attr in attrs
         .iter_mut()
         .filter(|attr| attr.path().is_ident("derive"))
@@ -191,11 +194,9 @@ pub(super) fn deserialize_impl(item: &mut Item, schema_name: &str) -> Option<Ite
     Some(parse_quote! {
         impl<'de> ::serde::Deserialize<'de> for #ident {
             fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                let value = crate::wire_schema::deserialize_wire_value(deserializer, Some(#schema_name))?;
                 #raw
-                // An empty message constructs itself without reading `raw`.
-                #[allow(unused_variables)]
-                let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+                let value = crate::wire_schema::deserialize_wire_value(deserializer, Some(#schema_name))?;
+                let #raw_binding: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
                 Ok(#construction)
             }
         }

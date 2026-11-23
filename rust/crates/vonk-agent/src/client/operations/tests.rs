@@ -21,8 +21,7 @@ async fn heartbeat_preserves_lossless_progress_counters_on_the_network() {
         assert_eq!(client.heartbeat(&progress).await.unwrap(), directive);
         let request = finish_capture_peer(server).await;
         let start = request.windows(4).position(|v| v == b"\r\n\r\n").unwrap() + 4;
-        let observed =
-            vonk_agent_protocol::parse_strict::<AgentProgress>(&request[start..]).unwrap();
+        let observed = parse_strict::<AgentProgress>(&request[start..]).unwrap();
         assert_eq!(observed, progress);
         assert!(
             std::str::from_utf8(&request[start..])
@@ -51,7 +50,7 @@ async fn ordinary_heartbeat_preserves_active_upload_counters() {
         .position(|value| value == b"\r\n\r\n")
         .unwrap()
         + 4;
-    let received = vonk_agent_protocol::parse_strict::<AgentProgress>(&request[start..])
+    let received = parse_strict::<AgentProgress>(&request[start..])
         .unwrap()
         .progress
         .unwrap();

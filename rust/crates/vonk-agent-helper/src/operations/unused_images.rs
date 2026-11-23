@@ -18,7 +18,7 @@
 use super::*;
 
 /// How long an image no installation names stays after its last pull.
-pub const UNUSED_IMAGE_GRACE: Duration = vonk_agent_protocol::store_retention::GRACE;
+pub(super) const UNUSED_IMAGE_GRACE: Duration = vonk_agent_protocol::store_retention::GRACE;
 /// How often the helper looks for unused images.
 pub const UNUSED_IMAGE_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 /// One `docker image rm` of a large image.

@@ -26,13 +26,13 @@ fn model_materialization_temp_cleanup_is_task_owned() {
     let temporary = data.path().join("model.partial");
     fs::write(&temporary, b"incomplete").unwrap();
     {
-        let _guard = super::TemporaryArtifact::new(temporary.clone());
+        let _guard = TemporaryArtifact::new(temporary.clone());
     }
     assert!(!temporary.exists());
 
     fs::write(&temporary, b"published").unwrap();
     {
-        let mut guard = super::TemporaryArtifact::new(temporary.clone());
+        let mut guard = TemporaryArtifact::new(temporary.clone());
         guard.retain();
     }
     assert_eq!(fs::read(temporary).unwrap(), b"published");
@@ -40,8 +40,7 @@ fn model_materialization_temp_cleanup_is_task_owned() {
 
 #[test]
 fn compiled_models_materialize_selection_scoped_colliding_paths() {
-    let plan: crate::workloads::CompiledExecutionPlan =
-        serde_json::from_value(compiled_plan()).unwrap();
+    let plan: CompiledExecutionPlan = serde_json::from_value(compiled_plan()).unwrap();
     plan.validate().unwrap();
     let data = tempdir().unwrap();
     let root = data.path().join("distribution").join("models");
@@ -88,7 +87,7 @@ fn compiled_models_materialize_valid_empty_support_files() {
     artifact["size_bytes"] = json!(0);
     artifact["roles"] = json!(["tokenizer"]);
     value["artifacts"] = json!([artifact.clone()]);
-    let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+    let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
     let data = tempdir().unwrap();
     let source = data.path().join("distribution").join("models");
     fs::create_dir_all(&source).unwrap();
@@ -109,7 +108,7 @@ fn compiled_models_materialize_one_source_for_two_mount_projections() {
     let mut projection = value["artifacts"][0].clone();
     projection["mount"]["target"] = json!("/models/target");
     value["artifacts"] = json!([value["artifacts"][0].clone(), projection]);
-    let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+    let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
     let data = tempdir().unwrap();
     let source = data.path().join("distribution").join("models");
     fs::create_dir_all(&source).unwrap();
@@ -139,8 +138,7 @@ fn compiled_models_materialize_one_source_for_two_mount_projections() {
 #[test]
 fn a_new_installation_links_the_shared_model_files_instead_of_copying_them() {
     let data = tempdir().unwrap();
-    let plan: crate::workloads::CompiledExecutionPlan =
-        serde_json::from_value(compiled_plan()).unwrap();
+    let plan: CompiledExecutionPlan = serde_json::from_value(compiled_plan()).unwrap();
     let store = stock_store(data.path(), &plan);
 
     let first = linked_installation(data.path(), &plan, FIRST);
@@ -178,8 +176,7 @@ fn a_new_installation_links_the_shared_model_files_instead_of_copying_them() {
 #[test]
 fn a_sibling_installation_changing_the_link_count_does_not_stale_the_others_custody() {
     let data = tempdir().unwrap();
-    let plan: crate::workloads::CompiledExecutionPlan =
-        serde_json::from_value(compiled_plan()).unwrap();
+    let plan: CompiledExecutionPlan = serde_json::from_value(compiled_plan()).unwrap();
     stock_store(data.path(), &plan);
     linked_installation(data.path(), &plan, FIRST);
     let runner = NoProcess;
@@ -202,8 +199,7 @@ fn a_sibling_installation_changing_the_link_count_does_not_stale_the_others_cust
 #[test]
 fn a_model_file_linked_to_anything_but_the_store_object_is_refused() {
     let data = tempdir().unwrap();
-    let plan: crate::workloads::CompiledExecutionPlan =
-        serde_json::from_value(compiled_plan()).unwrap();
+    let plan: CompiledExecutionPlan = serde_json::from_value(compiled_plan()).unwrap();
     stock_store(data.path(), &plan);
     let installation = linked_installation(data.path(), &plan, FIRST);
     let runner = NoProcess;
@@ -238,8 +234,7 @@ fn a_model_file_linked_to_anything_but_the_store_object_is_refused() {
 #[cfg(target_os = "linux")]
 fn an_object_a_workload_already_runs_from_still_links_into_a_new_installation() {
     let data = tempdir().unwrap();
-    let plan: crate::workloads::CompiledExecutionPlan =
-        serde_json::from_value(compiled_plan()).unwrap();
+    let plan: CompiledExecutionPlan = serde_json::from_value(compiled_plan()).unwrap();
     let store = stock_store(data.path(), &plan);
     linked_installation(data.path(), &plan, FIRST);
     // The helper grants the runtime user read access when the first
@@ -291,8 +286,7 @@ fn an_installation_replaces_a_private_copy_with_the_shared_object() {
 #[test]
 fn a_store_object_that_is_not_private_owner_only_is_never_linked() {
     let data = tempdir().unwrap();
-    let plan: crate::workloads::CompiledExecutionPlan =
-        serde_json::from_value(compiled_plan()).unwrap();
+    let plan: CompiledExecutionPlan = serde_json::from_value(compiled_plan()).unwrap();
     let store = stock_store(data.path(), &plan);
     fs::set_permissions(&store[0], fs::Permissions::from_mode(0o644)).unwrap();
 
@@ -403,20 +397,18 @@ fn real_cross_device_link_failure_reports_layout_without_copy() {
 #[test]
 fn linkable_bytes_count_only_complete_store_objects() {
     let data = tempdir().unwrap();
-    let plan: crate::workloads::CompiledExecutionPlan =
-        serde_json::from_value(compiled_plan()).unwrap();
-    assert_eq!(super::linkable_model_bytes(data.path(), &plan), 0);
+    let plan: CompiledExecutionPlan = serde_json::from_value(compiled_plan()).unwrap();
+    assert_eq!(linkable_model_bytes(data.path(), &plan), 0);
     let store = stock_store(data.path(), &plan);
-    assert_eq!(super::linkable_model_bytes(data.path(), &plan), 7 + 9);
+    assert_eq!(linkable_model_bytes(data.path(), &plan), 7 + 9);
     fs::write(&store[1], b"short").unwrap();
-    assert_eq!(super::linkable_model_bytes(data.path(), &plan), 7);
+    assert_eq!(linkable_model_bytes(data.path(), &plan), 7);
 }
 
 #[test]
 fn cancelled_copy_yields_without_publishing_and_fresh_preparation_converges() {
     let data = tempdir().unwrap();
-    let plan: crate::workloads::CompiledExecutionPlan =
-        serde_json::from_value(compiled_plan()).unwrap();
+    let plan: CompiledExecutionPlan = serde_json::from_value(compiled_plan()).unwrap();
     let store = stock_store(data.path(), &plan);
     let checks = std::cell::Cell::new(0);
     let cancelled = || {

@@ -174,7 +174,7 @@ pub fn read_sample(mut read: impl FnMut(&str) -> std::io::Result<String>) -> Sam
 }
 
 /// Whether an NVRM line seen at `line` still counts at `now` (R5).
-pub fn driver_line_counts(line: Instant, now: Instant) -> bool {
+pub(super) fn driver_line_counts(line: Instant, now: Instant) -> bool {
     now.saturating_duration_since(line) <= DRIVER_LINE_WINDOW
 }
 
@@ -410,7 +410,7 @@ fn packed(fields: &[&str], readings: &[String]) -> String {
 
 /// The readings behind a kill (Step 0) as one evidence property,
 /// `PRESSURE_PROPERTY`, its value packing every `PRESSURE_FIELDS` reading.
-pub fn readings(sample: &Sample, rates: Option<Rates>, loading: bool) -> (String, String) {
+pub(super) fn readings(sample: &Sample, rates: Option<Rates>, loading: bool) -> (String, String) {
     let rate = |value: Option<f64>| value.map_or_else(unknown, |v| format!("{v:.0}"));
     let values = [
         loading.to_string(),

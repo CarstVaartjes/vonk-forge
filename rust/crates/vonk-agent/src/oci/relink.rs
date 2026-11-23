@@ -12,7 +12,7 @@ use super::*;
 
 /// What one relink pass did.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct Relinked {
+pub(crate) struct Relinked {
     /// Private copies that now are the shared store object.
     pub files: u64,
     /// Bytes of the private copies replaced by a link of an existing object.
@@ -24,7 +24,7 @@ pub struct Relinked {
 /// Relink the receipt-matched private model copies of every installation that
 /// no started run names (`started`), until `deadline`. Runs between claims, so
 /// no install or start is writing an installation meanwhile.
-pub fn relink_private_model_copies(
+pub(crate) fn relink_private_model_copies(
     data_root: &Path,
     started: &BTreeSet<String>,
     deadline: Instant,

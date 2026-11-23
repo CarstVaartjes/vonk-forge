@@ -19,10 +19,8 @@ pub(super) use tempfile::tempdir;
 
 pub(super) use uuid::Uuid;
 
-pub(super) fn reconciliation_identity(
-    installation_id: Uuid,
-) -> vonk_agent_protocol::RecipeReconciliationIdentity {
-    vonk_agent_protocol::RecipeReconciliationIdentity {
+pub(super) fn reconciliation_identity(installation_id: Uuid) -> RecipeReconciliationIdentity {
+    RecipeReconciliationIdentity {
         installation_id,
         plan_digest: "c".repeat(64),
     }
@@ -31,7 +29,7 @@ pub(super) fn reconciliation_identity(
 pub(super) fn reconciliation_installation(
     data_root: &Path,
     installation_id: Uuid,
-) -> (PathBuf, vonk_agent_protocol::RecipeReconciliationIdentity) {
+) -> (PathBuf, RecipeReconciliationIdentity) {
     let installation = data_root
         .join("installations")
         .join(installation_id.to_string());
@@ -91,7 +89,7 @@ impl ProcessRunner for Gb10MemoryRunner {
 }
 
 pub(super) fn digest(value: &[u8]) -> String {
-    hex::encode(sha2::Sha256::digest(value))
+    hex::encode(Sha256::digest(value))
 }
 
 pub(super) fn compiled_plan() -> Value {
@@ -168,7 +166,7 @@ pub(super) fn compiled_plan() -> Value {
     })
 }
 
-pub(super) fn large_plan() -> crate::workloads::CompiledExecutionPlan {
+pub(super) fn large_plan() -> CompiledExecutionPlan {
     let mut value = compiled_plan();
     let artifacts = value["artifacts"].as_array_mut().unwrap();
     let template = artifacts[0].clone();
@@ -183,20 +181,17 @@ pub(super) fn large_plan() -> crate::workloads::CompiledExecutionPlan {
     serde_json::from_value(value).unwrap()
 }
 
-pub(crate) fn persisted_installation(
-    data: &Path,
-) -> (String, PathBuf, crate::workloads::CompiledExecutionPlan) {
+pub(crate) fn persisted_installation(data: &Path) -> (String, PathBuf, CompiledExecutionPlan) {
     let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f".to_owned();
-    let plan: crate::workloads::CompiledExecutionPlan =
-        serde_json::from_value(compiled_plan()).unwrap();
+    let plan: CompiledExecutionPlan = serde_json::from_value(compiled_plan()).unwrap();
     persisted_plan_installation(data, installation_id, plan)
 }
 
 pub(super) fn persisted_plan_installation(
     data: &Path,
     installation_id: String,
-    plan: crate::workloads::CompiledExecutionPlan,
-) -> (String, PathBuf, crate::workloads::CompiledExecutionPlan) {
+    plan: CompiledExecutionPlan,
+) -> (String, PathBuf, CompiledExecutionPlan) {
     let installation = data.join("installations").join(&installation_id);
     for artifact in unique_plan_artifacts(&plan) {
         let path = installation
@@ -244,7 +239,7 @@ pub(super) fn apply_acl(path: &Path, entries: &[(u16, u16, u32)]) {
         value.extend_from_slice(&permissions.to_le_bytes());
         value.extend_from_slice(&identifier.to_le_bytes());
     }
-    let file = fs::OpenOptions::new()
+    let file = OpenOptions::new()
         .read(true)
         .write(true)
         .open(path)
@@ -259,10 +254,7 @@ pub(super) fn apply_acl(path: &Path, entries: &[(u16, u16, u32)]) {
 }
 
 /// Put the plan's two model files in the shared store, as distribution does.
-pub(super) fn stock_store(
-    data: &Path,
-    plan: &crate::workloads::CompiledExecutionPlan,
-) -> Vec<PathBuf> {
+pub(super) fn stock_store(data: &Path, plan: &CompiledExecutionPlan) -> Vec<PathBuf> {
     let root = data.join("distribution/models");
     fs::create_dir_all(&root).unwrap();
     [
@@ -285,7 +277,7 @@ pub(super) const SECOND: &str = "cb555393-764b-4eb6-8f15-b416d2894290";
 
 pub(super) fn linked_installation(
     data: &Path,
-    plan: &crate::workloads::CompiledExecutionPlan,
+    plan: &CompiledExecutionPlan,
     installation_id: &str,
 ) -> PathBuf {
     let installation = data.join("installations").join(installation_id);

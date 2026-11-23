@@ -233,7 +233,7 @@ fn helper_receipt_remains_readable_under_service_umask() {
         return;
     }
     assert!(
-        std::process::Command::new(std::env::current_exe().unwrap())
+        Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
                 "operations::gpu_clock::tests::helper_receipt_remains_readable_under_service_umask",

@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use chrono::{DateTime, FixedOffset, Utc};
 use serde_json::json;
 use tempfile::tempdir;

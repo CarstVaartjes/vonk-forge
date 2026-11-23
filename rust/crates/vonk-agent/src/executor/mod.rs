@@ -164,7 +164,7 @@ pub enum RecipeObservationError {
         labels: Option<vonk_agent_protocol::generated::HostHelperContainerLabels>,
     },
     #[error("managed recipe run observation failed ({})", .0.safe_category())]
-    Runtime(#[from] crate::oci::OciError),
+    Runtime(#[from] OciError),
     #[error("exact recipe run inspection failed ({})", .0.preflight_code())]
     Inspection(#[from] crate::host_runtime::HostRuntimeError),
     #[error("exact recipe run observation could not be reported: {0}")]

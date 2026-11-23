@@ -41,8 +41,7 @@ fn completed_podman_import_failure_retains_evidence_and_only_retries_transient_c
         };
         assert_eq!(failure.failure_kind, kind);
         assert_eq!(failure.retry_after_seconds, kind.map(|_| 30));
-        let wire = ExecutionResult::Failed(failure)
-            .finish_for(&vonk_agent_protocol::generated::AgentOperation::RecipeBuildV1);
+        let wire = ExecutionResult::Failed(failure).finish_for(&AgentOperation::RecipeBuildV1);
         let vonk_agent_protocol::generated::AgentResultResult::OutcomeFailed(outcome) = wire.result
         else {
             panic!("the Controller must receive a definite failure");

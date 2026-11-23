@@ -265,7 +265,7 @@ pub(super) fn release_pages(_file: &fs::File, _offset: u64, _length: u64) {}
 /// and a failed hint must not turn that into a failed transfer.  A node that
 /// keeps the pages is the behaviour that shipped before this call.
 pub(super) fn release_distribution_page_cache(path: &Path) {
-    if let Ok(file) = std::fs::File::open(path) {
+    if let Ok(file) = fs::File::open(path) {
         let _ = rustix::fs::fadvise(&file, 0, None, rustix::fs::Advice::DontNeed);
     }
 }

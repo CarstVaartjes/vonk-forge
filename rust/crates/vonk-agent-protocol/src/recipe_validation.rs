@@ -108,7 +108,7 @@ pub(super) fn validate_recipe_start(value: &RecipeStartRequest) -> bool {
     if value
         .gpu_clock
         .as_ref()
-        .is_some_and(|clock| !crate::gpu_clock::valid_range(&clock.range))
+        .is_some_and(|clock| !gpu_clock::valid_range(&clock.range))
     {
         return false;
     }

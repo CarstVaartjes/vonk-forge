@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use std::fs::{self, OpenOptions};
 use std::io::Read;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};

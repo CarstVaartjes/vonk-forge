@@ -91,7 +91,7 @@ pub(super) fn observe_enrollment(
             Err(error @ (SetupError::ControllerCa | SetupError::UnsafeInput(_))) => {
                 return Err(error);
             }
-            Err(_) if attempt < 2 => std::thread::sleep(std::time::Duration::from_millis(100)),
+            Err(_) if attempt < 2 => thread::sleep(Duration::from_millis(100)),
             Err(_) => break,
         }
     }

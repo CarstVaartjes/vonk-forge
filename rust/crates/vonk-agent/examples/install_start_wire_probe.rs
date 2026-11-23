@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 //! Stdin/stdout probe for the connected schema-2 recipe install/start wire.
 //!
 //! Each input line is a Controller AgentClaim.  The probe validates the claim,

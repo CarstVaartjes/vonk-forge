@@ -239,7 +239,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             unproven.retain(|id| {
                 listed
                     .get(*id)
-                    .is_some_and(|state| !super::exited_serving::is_ended_state(state))
+                    .is_some_and(|state| !exited_serving::is_ended_state(state))
             });
         }
         if unproven.is_empty() {

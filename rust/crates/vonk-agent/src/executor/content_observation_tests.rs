@@ -194,7 +194,7 @@ async fn every_dispatched_kind_reaches_its_real_probe_and_preserves_unknown() {
     let AgentClaimPayload::RecipeInstallPayload(install) = &base.payload else {
         panic!("install");
     };
-    let vector: serde_json::Value = serde_json::from_str(include_str!(
+    let vector: Value = serde_json::from_str(include_str!(
         "../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-build-claim-v1.json"
     ))
     .unwrap();
@@ -333,7 +333,7 @@ async fn refused_content_probe_stays_unconfirmed_instead_of_failing_the_distribu
     }
     let socket = root.path().join("helper.sock");
     let listener = UnixListener::bind(&socket).unwrap();
-    let peer = std::thread::spawn(move || {
+    let peer = thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
         let mut prefix = [0; 4];
         stream.read_exact(&mut prefix).unwrap();

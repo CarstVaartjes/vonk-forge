@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use serde_json::{Value, json};
 use std::{
     fs,

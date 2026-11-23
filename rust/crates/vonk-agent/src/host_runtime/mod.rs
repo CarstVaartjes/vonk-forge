@@ -75,8 +75,7 @@ pub(crate) const RUN_INSPECTION_REQUEST_TIMEOUT: Duration = Duration::from_secs(
 fn background_inspection_slots(socket: &Path) -> std::sync::Arc<tokio::sync::Semaphore> {
     // The privileged helper endpoint owns the native capacity. Independent
     // helpers must not compete for it; cloned boundaries for one helper do.
-    type Slots =
-        std::collections::BTreeMap<std::path::PathBuf, std::sync::Weak<tokio::sync::Semaphore>>;
+    type Slots = std::collections::BTreeMap<PathBuf, std::sync::Weak<tokio::sync::Semaphore>>;
     static SLOTS: std::sync::OnceLock<std::sync::Mutex<Slots>> = std::sync::OnceLock::new();
     let mut slots = SLOTS
         .get_or_init(Default::default)

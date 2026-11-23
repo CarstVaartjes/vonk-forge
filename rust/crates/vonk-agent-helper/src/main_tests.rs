@@ -60,7 +60,7 @@ fn runtime_command_rejection_retains_stderr_and_numeric_exit_in_frame() {
         uuid::Uuid::new_v4().to_string(),
         false,
         OperationError::CommandFailed {
-            cause: vonk_agent_helper::operations::CommandFailure::Exit {
+            cause: CommandFailure::Exit {
                 code: Some(125),
                 stderr: "opaque runtime failure".into(),
             },

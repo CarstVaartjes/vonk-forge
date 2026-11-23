@@ -13,7 +13,7 @@ async fn an_invalid_compiled_plan_is_refused_at_dispatch_with_its_rule_text() {
     );
     let executor = RecipeExecutor {
         client: &client,
-        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        helper_socket: Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime_root: runtime.path(),
         runtime: OciRuntime {
             runner: &NoProcess,
@@ -67,9 +67,7 @@ async fn a_refusal_past_its_cool_down_is_offered_again_and_never_holds_the_claim
     let mut state = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
     let old = claim();
     state.begin(&old, Utc::now()).unwrap();
-    let retained = state
-        .finish(&old, super::super::failures::recipe_install_success(0))
-        .unwrap();
+    let retained = state.finish(&old, recipe_install_success(0)).unwrap();
     state
         .reject_result(
             &retained,
@@ -78,7 +76,7 @@ async fn a_refusal_past_its_cool_down_is_offered_again_and_never_holds_the_claim
         )
         .unwrap();
     let mut fresh = old.clone();
-    fresh.fence = uuid::Uuid::new_v4();
+    fresh.fence = Uuid::new_v4();
     let client = RecordingClient {
         cancel_requested: false,
         claim: Arc::new(Mutex::new(Some(fresh.clone()))),
@@ -145,7 +143,7 @@ fn helper_install_and_response_loss_reach_unknown_wire_then_accept_a_fresh_hando
     let root = tempfile::tempdir().unwrap();
     let socket = root.path().join("helper.sock");
     let listener = UnixListener::bind(&socket).unwrap();
-    let request_id = uuid::Uuid::new_v4();
+    let request_id = Uuid::new_v4();
     listener.set_nonblocking(true).unwrap();
     let peer = std::thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -195,7 +193,7 @@ fn helper_install_and_response_loss_reach_unknown_wire_then_accept_a_fresh_hando
         let observed = crate::agent_upgrade::call_helper_within(
             &socket,
             b"signed request",
-            &crate::stall_window::Inactivity::new(Duration::from_secs(1)),
+            &Inactivity::new(Duration::from_secs(1)),
         )
         .and_then(|response| {
             crate::agent_upgrade::installed_handoff(&response, &request_id.to_string())
@@ -234,7 +232,7 @@ async fn superseded_distribution_yields_without_network_or_host_effects() {
     );
     let executor = RecipeExecutor {
         client: &client,
-        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        helper_socket: Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime_root: runtime.path(),
         runtime: OciRuntime {
             runner: &NoProcess,
@@ -271,8 +269,8 @@ async fn superseded_distribution_yields_without_network_or_host_effects() {
         panic!("expected confirmed cancellation before distribution effects");
     };
     assert_eq!(failure.code, Some(FailureCode::OperationCancelled));
-    assert!(std::fs::read_dir(data.path()).unwrap().next().is_none());
-    assert!(std::fs::read_dir(runtime.path()).unwrap().next().is_none());
+    assert!(fs::read_dir(data.path()).unwrap().next().is_none());
+    assert!(fs::read_dir(runtime.path()).unwrap().next().is_none());
     // Cancellation ownership is per request; ending an obsolete transfer
     // leaves a new operation free to execute on the normal dispatch path.
     drop(cancel);

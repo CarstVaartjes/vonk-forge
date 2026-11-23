@@ -97,8 +97,7 @@ fn unreadable_claims_or_listing_remove_nothing() {
     let (_temp, executor) = host_executor(&host);
     // A malformed/symlinked claims directory is unknown, never absence.
     fs::create_dir_all(&executor.roots.agent_data).unwrap();
-    std::os::unix::fs::symlink(_temp.path(), executor.roots.agent_data.join("run-metadata"))
-        .unwrap();
+    symlink(_temp.path(), executor.roots.agent_data.join("run-metadata")).unwrap();
     executor.sweep_exited_serving_at(after(24 * 14));
     assert!(host.present(ENDED));
 

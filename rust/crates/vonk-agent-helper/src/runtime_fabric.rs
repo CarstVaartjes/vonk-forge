@@ -7,14 +7,14 @@ use std::{
 };
 
 #[derive(Debug, thiserror::Error)]
-pub enum FabricError {
+pub(crate) enum FabricError {
     #[error("native fabric observation failed")]
     Io(#[from] io::Error),
     #[error("native fabric has no unique active RoCE v2 binding")]
     Unavailable,
 }
 
-pub const ENVIRONMENT_NAMES: [&str; 5] = [
+pub(crate) const ENVIRONMENT_NAMES: [&str; 5] = [
     "NCCL_SOCKET_IFNAME",
     "NCCL_IB_HCA",
     "NCCL_IB_GID_INDEX",
@@ -22,7 +22,7 @@ pub const ENVIRONMENT_NAMES: [&str; 5] = [
     "GLOO_SOCKET_IFNAME",
 ];
 
-pub fn valid_interface(value: &str) -> bool {
+pub(crate) fn valid_interface(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 15
         && value
@@ -53,7 +53,7 @@ fn entries(path: &Path, limit: usize) -> Result<Vec<fs::DirEntry>, FabricError> 
 
 /// Reconstruct disposable firewall interface output from the kernel's exact
 /// signed local address. Discovery cannot change firewall rules or addresses.
-pub fn resolve_address(root: &Path, address: Ipv4Addr) -> Result<Binding, FabricError> {
+pub(crate) fn resolve_address(root: &Path, address: Ipv4Addr) -> Result<Binding, FabricError> {
     let mut interfaces = std::collections::BTreeSet::new();
     for device in entries(root, 32)? {
         for port in entries(&device.path().join("ports"), 8)? {
@@ -87,7 +87,7 @@ const MAX_RAILS: usize = 4;
 
 /// The platform-owned binding for one distributed rank.
 #[derive(Debug, PartialEq, Eq)]
-pub struct Binding {
+pub(crate) struct Binding {
     /// Environment naming only the device whose GID matches the link address.
     /// This is what the container identity is computed over: whether a second
     /// rail happens to be up must never decide whether an existing run is the
@@ -102,11 +102,11 @@ pub struct Binding {
 }
 
 impl Binding {
-    pub fn rails(&self) -> usize {
+    pub(crate) fn rails(&self) -> usize {
         self.launch_hca.matches(',').count() + 1
     }
 
-    pub fn identity_hca(&self) -> &str {
+    pub(crate) fn identity_hca(&self) -> &str {
         self.environment
             .iter()
             .find(|value| value.starts_with("NCCL_IB_HCA="))
@@ -201,7 +201,11 @@ fn same_port_rails(
     (rails, notes)
 }
 
-pub fn resolve(root: &Path, interface: &str, address: Ipv4Addr) -> Result<Binding, FabricError> {
+pub(crate) fn resolve(
+    root: &Path,
+    interface: &str,
+    address: Ipv4Addr,
+) -> Result<Binding, FabricError> {
     if !valid_interface(interface) {
         return Err(FabricError::Unavailable);
     }

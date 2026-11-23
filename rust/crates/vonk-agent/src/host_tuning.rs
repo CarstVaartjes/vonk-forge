@@ -54,7 +54,7 @@ const READ_LIMIT: u64 = 64 * 1024;
 
 /// `root` is `/` on a Spark (tests pass a directory shaped like it) and
 /// `page_size` the running kernel's.
-pub fn observe<R: ProcessRunner>(runner: &R, root: &Path, page_size: u64) -> HostTuning {
+pub(crate) fn observe<R: ProcessRunner>(runner: &R, root: &Path, page_size: u64) -> HostTuning {
     let read = |path: &str| -> Option<String> {
         let mut text = String::new();
         fs::File::open(root.join(path))

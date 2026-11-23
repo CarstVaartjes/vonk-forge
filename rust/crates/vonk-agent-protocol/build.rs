@@ -70,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fs::write(
             output.join(file),
             format!(
-                "pub const {constant}: crate::generated::{model} = crate::generated::{model} {{ {} }};",
+                "pub const {constant}: {model} = {model} {{ {} }};",
                 fields.join(",")
             ),
         )?;

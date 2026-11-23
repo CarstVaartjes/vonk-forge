@@ -1,14 +1,14 @@
 #![cfg(test)]
 use super::*;
 
-fn vectors() -> serde_json::Value {
+fn vectors() -> Value {
     serde_json::from_str(include_str!(
             "../../../../../agent_protocol/src/vonk_agent_protocol/vectors/run-inspect-target-requests-v1.json"
         ))
         .unwrap()
 }
 
-fn accepted(document: &serde_json::Value) -> Result<HostRuntimeRequest, String> {
+fn accepted(document: &Value) -> Result<HostRuntimeRequest, String> {
     let request: HostRuntimeRequest =
         serde_json::from_value(document.clone()).map_err(|error| error.to_string())?;
     request.validate().map_err(|rule| rule.to_string())?;

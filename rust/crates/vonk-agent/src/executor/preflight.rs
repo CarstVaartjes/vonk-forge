@@ -12,7 +12,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         use crate::runtime_preflight::{
             PROBE_BINARY, RuntimePreflight, finding, host_fingerprint_until,
         };
-        let worker_owner = super::build::BuildWorkerOwner::new();
+        let worker_owner = build::BuildWorkerOwner::new();
         let deadline = Instant::now()
             + Duration::from_secs(60.min(u64::from(claim.observation_budget_seconds)));
         // Each attempt's cause is kept: the unknown outcome names the last one.

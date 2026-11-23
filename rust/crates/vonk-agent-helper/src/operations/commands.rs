@@ -331,8 +331,12 @@ fn drive_command(
         let mut output = child.stdout.take();
         let mut errors = child.stderr.take();
         for pipe in [
-            output.as_ref().map(|pipe| pipe as &dyn std::os::fd::AsFd),
-            errors.as_ref().map(|pipe| pipe as &dyn std::os::fd::AsFd),
+            output
+                .as_ref()
+                .map(|pipe| -> &dyn std::os::fd::AsFd { pipe }),
+            errors
+                .as_ref()
+                .map(|pipe| -> &dyn std::os::fd::AsFd { pipe }),
         ]
         .into_iter()
         .flatten()

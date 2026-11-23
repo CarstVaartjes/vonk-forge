@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use chrono::DateTime;
 use serde_json::{Value, json};
 use uuid::Uuid;

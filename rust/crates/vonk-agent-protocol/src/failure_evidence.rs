@@ -1,3 +1,4 @@
+use crate::generated::FailureLogPolicy;
 pub use crate::generated::{
     FailureDiagnostics, FailureDiagnosticsCategory as FailureCategory, FailureLogTail,
     FailureProperty,

@@ -274,7 +274,7 @@ pub(crate) fn clamp_network_evidence(
     const MAX_INTERFACES: usize = 16;
     if let Some(interfaces) = request.network_interfaces.as_mut() {
         let reported = interfaces.len();
-        let mut seen = std::collections::BTreeSet::new();
+        let mut seen = BTreeSet::new();
         interfaces.retain_mut(|interface| {
             if !vonk_agent_protocol::valid_interface_name(&interface.name)
                 || !seen.insert(interface.name.clone())

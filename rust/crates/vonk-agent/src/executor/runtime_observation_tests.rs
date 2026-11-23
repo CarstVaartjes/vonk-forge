@@ -99,7 +99,7 @@ fn runtime_death_child() {
                 "expected_bytes": 0, "compiled_execution_plan": start.compiled_execution_plan,
             }))
             .unwrap();
-            super::content_observation_tests::prepare_effect(root, &installation);
+            content_observation_tests::prepare_effect(root, &installation);
         }
         if let AgentClaimPayload::RecipeJobRunRequest(job) = &accepted.payload {
             let scope = root.join("runs").join(job.job_id.to_string());
@@ -312,7 +312,7 @@ async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims
             stop.store(true, Ordering::SeqCst);
             tokio::time::timeout(
                 Duration::from_secs(20),
-                tokio::task::spawn_blocking(move || std::thread::JoinHandle::join(peer)),
+                tokio::task::spawn_blocking(move || thread::JoinHandle::join(peer)),
             )
             .await
             .unwrap()

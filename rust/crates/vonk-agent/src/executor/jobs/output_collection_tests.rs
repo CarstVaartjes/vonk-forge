@@ -70,7 +70,7 @@ impl Exited {
         let client = AgentHttpClient::for_http_test(endpoint, NODE_ID);
         let executor = RecipeExecutor {
             client: &client,
-            helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+            helper_socket: Path::new(crate::host_runtime::HELPER_SOCKET),
             runtime: OciRuntime {
                 runner: &NoProcess,
                 data_root: self._data.path(),
@@ -198,7 +198,7 @@ async fn refused_output_upload_is_redelivered_from_the_durable_exit_receipt() {
         .await
         .unwrap();
     let endpoint = format!("http://{}/", listener.local_addr().unwrap());
-    let uploads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let uploads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed = uploads.clone();
     let peer = tokio::spawn(async move {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
@@ -231,7 +231,7 @@ async fn refused_output_upload_is_redelivered_from_the_durable_exit_receipt() {
             stream.read_exact(&mut request[header_end..]).await.unwrap();
             let status = if headers.starts_with("put ") {
                 assert_eq!(&request[header_end..], b"image");
-                if observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                if observed.fetch_add(1, Ordering::SeqCst) == 0 {
                     "413 Payload Too Large"
                 } else {
                     "204 No Content"
@@ -260,7 +260,7 @@ async fn refused_output_upload_is_redelivered_from_the_durable_exit_receipt() {
     job.request.output_delivery_only = Some(true);
     let delivered = job.claim_at(&endpoint).await;
     assert_eq!(delivered.state(), AgentResultState::Succeeded);
-    assert_eq!(uploads.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert_eq!(uploads.load(Ordering::SeqCst), 2);
     peer.abort();
 }
 

@@ -9,42 +9,6 @@ pub(super) fn strip_docs(item: &mut Item) {
         _ => return,
     };
     attrs.retain(|attr| !attr.path().is_ident("doc"));
-    // typify's union variants mirror canonical model names and use inline
-    // payloads. Keep that generated API stable; names and layout are not
-    // handwritten choices. Copy this narrowly scoped attribute to Raw too.
-    if let Item::Enum(item) = item
-        && item
-            .variants
-            .iter()
-            .any(|variant| !matches!(variant.fields, syn::Fields::Unit))
-    {
-        item.attrs
-            .push(parse_quote!(#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]));
-    }
-    // A closed word set whose members all live in one namespace (`run.*`,
-    // `resource.*`) names every variant with that namespace as its prefix.
-    // The wire words, not the Rust names, are the contract.
-    if let Item::Enum(item) = item
-        && item.variants.len() >= 3
-        && item
-            .variants
-            .iter()
-            .all(|variant| matches!(variant.fields, syn::Fields::Unit))
-    {
-        let prefixes: std::collections::BTreeSet<String> = item
-            .variants
-            .iter()
-            .map(|variant| {
-                let name = variant.ident.to_string();
-                let tail = name.chars().skip(1).position(char::is_uppercase);
-                name[..tail.map_or(name.len(), |index| index + 1)].to_string()
-            })
-            .collect();
-        if prefixes.len() == 1 {
-            item.attrs
-                .push(parse_quote!(#[allow(clippy::enum_variant_names)]));
-        }
-    }
     if let Item::Struct(item) = item {
         for field in &mut item.fields {
             if let syn::Type::Path(path) = &field.ty {
@@ -233,4 +197,27 @@ pub(super) fn enum_string_impl(item: &syn::ItemEnum) -> Option<Vec<Item>> {
         parse_quote! { impl ::std::cmp::PartialEq<str> for #ident { fn eq(&self, other: &str) -> bool { self.as_str() == other } } },
         parse_quote! { impl ::std::cmp::PartialEq<&str> for #ident { fn eq(&self, other: &&str) -> bool { self.as_str() == *other } } },
     ])
+}
+
+/// Rewrites typify's `self::...` paths to the bare path, which resolves identically
+/// from the generated module and keep `unused_qualifications` quiet.
+pub(super) struct SelfPaths;
+
+impl syn::visit_mut::VisitMut for SelfPaths {
+    fn visit_path_mut(&mut self, path: &mut syn::Path) {
+        if path.leading_colon.is_none()
+            && path.segments.len() == 3
+            && path.segments[0].ident == "crate"
+            && path.segments[1].ident == "integer"
+        {
+            path.segments = path.segments.iter().skip(2).cloned().collect();
+        }
+        if path.leading_colon.is_none()
+            && path.segments.len() > 1
+            && path.segments[0].ident == "self"
+        {
+            path.segments = path.segments.iter().skip(1).cloned().collect();
+        }
+        syn::visit_mut::visit_path_mut(self, path);
+    }
 }

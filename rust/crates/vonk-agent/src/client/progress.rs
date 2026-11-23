@@ -5,7 +5,7 @@ use super::*;
 #[derive(Debug, Clone)]
 pub struct DistributionDownloadEvidence {
     pub model_digests: Vec<String>,
-    pub model_paths: Vec<std::path::PathBuf>,
+    pub model_paths: Vec<PathBuf>,
     pub oci_image_digest: String,
     pub oci_image_config_digest: String,
     pub downloaded_bytes: u64,

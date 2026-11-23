@@ -66,7 +66,7 @@ fn accept<L>(
                 if done.load(Ordering::SeqCst) {
                     return None;
                 }
-                std::thread::sleep(Duration::from_millis(1));
+                thread::sleep(Duration::from_millis(1));
             }
             Err(error) => panic!("peer unavailable: {error}"),
         }
@@ -83,13 +83,12 @@ pub(super) fn peers(job_id: Uuid, script: Vec<Answer>) -> Peers {
     let requests = runtime_root.path().join("runtime-requests");
     let helper = std::os::unix::net::UnixListener::bind(&socket).unwrap();
     helper.set_nonblocking(true).unwrap();
-    let controller =
-        std::net::TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
+    let controller = TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
     controller.set_nonblocking(true).unwrap();
     let address = controller.local_addr().unwrap();
     let deadline = Instant::now() + Duration::from_secs(60);
     let (helper_log, helper_done) = (log.clone(), done.clone());
-    std::thread::spawn(move || {
+    thread::spawn(move || {
         let mut answers = script.into_iter().peekable();
         let mut last = Answer::Running;
         while let Some((mut stream, _)) = accept(&helper_done, deadline, || helper.accept()) {
@@ -166,7 +165,7 @@ pub(super) fn peers(job_id: Uuid, script: Vec<Answer>) -> Peers {
                 }
             };
             helper_log.lock().unwrap().push(event);
-            let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
+            let body = canonical_generated_json(&response).unwrap();
             stream
                 .write_all(&(body.len() as u32).to_be_bytes())
                 .unwrap();
@@ -174,7 +173,7 @@ pub(super) fn peers(job_id: Uuid, script: Vec<Answer>) -> Peers {
         }
     });
     let (controller_log, controller_done) = (log.clone(), done.clone());
-    std::thread::spawn(move || {
+    thread::spawn(move || {
         while let Some((mut stream, _)) = accept(&controller_done, deadline, || controller.accept())
         {
             stream.set_nonblocking(false).unwrap();
@@ -568,13 +567,9 @@ impl Restarted {
             },
             runtime_root: self.peers.runtime_root.path(),
         };
-        crate::executor::operation_observation::reobserve_operations(
-            &mut self.store,
-            &executor,
-            now,
-        )
-        .await
-        .unwrap();
+        operation_observation::reobserve_operations(&mut self.store, &executor, now)
+            .await
+            .unwrap();
     }
 
     fn runtime(&self) -> OciRuntime<'_, NoProcess> {

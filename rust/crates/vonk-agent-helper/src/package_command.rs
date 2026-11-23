@@ -97,10 +97,8 @@ fn run_inner(command: &mut Command, timeout: Duration) -> Result<Output, String>
             .stderr
             .take()
             .ok_or("package error custody unavailable")?;
-        for pipe in [
-            &stdout as &dyn std::os::fd::AsFd,
-            &stderr as &dyn std::os::fd::AsFd,
-        ] {
+        let pipes: [&dyn std::os::fd::AsFd; 2] = [&stdout, &stderr];
+        for pipe in pipes {
             let flags = rustix::fs::fcntl_getfl(pipe).map_err(|e| e.to_string())?;
             rustix::fs::fcntl_setfl(pipe, flags | rustix::fs::OFlags::NONBLOCK)
                 .map_err(|e| e.to_string())?;

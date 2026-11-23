@@ -1,4 +1,3 @@
-#![forbid(unsafe_code)]
 //! Actual generated wire parsers and durable agent result writer/restart reader.
 use std::{
     io::{self, Read},

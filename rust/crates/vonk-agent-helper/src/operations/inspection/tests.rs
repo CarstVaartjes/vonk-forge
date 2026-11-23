@@ -34,7 +34,7 @@ fn a_process_exit_always_carries_logs_or_a_typed_reason_none_were_read() {
                 logs,
                 capture_error,
                 exit_summary,
-            } = super::process_exited(log.clone(), exit)
+            } = process_exited(log.clone(), exit)
             else {
                 panic!("a process exit must stay a process exit");
             };
@@ -53,16 +53,14 @@ fn a_process_exit_always_carries_logs_or_a_typed_reason_none_were_read() {
 fn through_docker_logs_capture(stdout: &[u8], stderr: &[u8]) -> CommandOutput {
     let directory = tempfile::tempdir().unwrap();
     let (out, err) = (directory.path().join("out"), directory.path().join("err"));
-    std::fs::write(&out, stdout).unwrap();
-    std::fs::write(&err, stderr).unwrap();
-    let mut command = std::process::Command::new("/bin/sh");
+    fs::write(&out, stdout).unwrap();
+    fs::write(&err, stderr).unwrap();
+    let mut command = Command::new("/bin/sh");
     command
         .args(["-c", "cat \"$1\"; cat \"$2\" >&2", "sh"])
         .arg(&out)
         .arg(&err);
-    let result =
-        crate::package_command::run_quiet(&mut command, std::time::Duration::from_secs(30))
-            .unwrap();
+    let result = crate::package_command::run_quiet(&mut command, Duration::from_secs(30)).unwrap();
     CommandOutput {
         success: result.status.success() && !result.timed_out,
         stdout: result.stdout,
@@ -80,16 +78,10 @@ fn exited(code: i32) -> crate::runtime_logs::ContainerExit {
     }
 }
 
-fn summary_of(
-    log: CommandOutput,
-    code: i32,
-) -> (
-    vonk_agent_protocol::generated::HostHelperProcessLogs,
-    String,
-) {
+fn summary_of(log: CommandOutput, code: i32) -> (HostHelperProcessLogs, String) {
     let OperationError::RuntimeProcessExited {
         logs, exit_summary, ..
-    } = super::process_exited(Ok(log), Ok(exited(code)))
+    } = process_exited(Ok(log), Ok(exited(code)))
     else {
         panic!("a process exit must stay a process exit");
     };
@@ -536,7 +528,7 @@ fn a_job_at_its_deadline_is_ended_and_an_unread_one_keeps_its_exit_unknown() {
     let outcome = expired(&running).unwrap();
     assert_eq!(
         outcome.exit_code,
-        Some(super::super::start::JOB_ENDED_BY_HELPER_EXIT_CODE)
+        Some(start::JOB_ENDED_BY_HELPER_EXIT_CODE)
     );
     assert!(outcome.evidence.is_some());
     assert!(!running.present(JOB));

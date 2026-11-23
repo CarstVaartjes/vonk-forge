@@ -5,7 +5,7 @@ use crate::operations::test_support::*;
 
 const KEPT_INSTALLATION: &str = "60000000-0000-4000-8000-000000000006";
 
-fn executor() -> (tempfile::TempDir, PullRunner, OperationExecutor<PullRunner>) {
+fn executor() -> (TempDir, PullRunner, OperationExecutor<PullRunner>) {
     let temp = tempfile::tempdir().unwrap();
     let runner = PullRunner {
         pulled_config: format!("sha256:{}", "c".repeat(64)),

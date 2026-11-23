@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 //! Linux production wire probe. `persist-binding` exercises OCI start
 //! persistence and retained inspection planning; `serialize` uses the exact
 //! client envelope factory used by AgentHttpClient.
@@ -24,7 +22,7 @@ impl ProcessRunner for NoProcess {
         &self,
         _program: Program,
         _arguments: &[String],
-        _timeout: std::time::Duration,
+        _timeout: Duration,
     ) -> Result<ProcessOutput, ProcessError> {
         Ok(ProcessOutput {
             exit_code: None,

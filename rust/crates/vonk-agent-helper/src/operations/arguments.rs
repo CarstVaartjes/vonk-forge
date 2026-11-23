@@ -39,7 +39,7 @@ pub(super) fn parse_numeric_user(value: &str) -> Result<(u32, Option<u32>), Oper
     Ok((uid, gid))
 }
 
-pub(super) fn parse_publication(value: &str) -> Option<(std::net::Ipv4Addr, u16, u16)> {
+pub(super) fn parse_publication(value: &str) -> Option<(Ipv4Addr, u16, u16)> {
     let (address, ports) = if let Some(value) = value.strip_prefix('[') {
         let (address, ports) = value.split_once("]:")?;
         (address, ports)
@@ -47,7 +47,7 @@ pub(super) fn parse_publication(value: &str) -> Option<(std::net::Ipv4Addr, u16,
         let (address, ports) = value.split_once(':')?;
         (address, ports)
     };
-    let address = address.parse::<std::net::Ipv4Addr>().ok()?;
+    let address = address.parse::<Ipv4Addr>().ok()?;
     if address.is_unspecified()
         || address.is_loopback()
         || address.is_multicast()

@@ -191,7 +191,7 @@ async fn a_load_after_the_cadence_ended_starts_it_again() {
 
 #[tokio::test(start_paused = true)]
 async fn a_tick_asks_load_while_any_phase_loads_and_hygiene_after() {
-    let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let asked = Arc::new(Mutex::new(Vec::new()));
     let log = Arc::clone(&asked);
     let dropper: Dropper = Arc::new(move |purpose| {
         log.lock().unwrap().push(purpose);

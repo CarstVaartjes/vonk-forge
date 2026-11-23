@@ -4,12 +4,7 @@ use super::*;
 use std::sync::Arc;
 
 /// Every program the swap pass may run; the desktop tests refuse them all.
-const SWAP_EXECUTABLES: [&str; 4] = [
-    crate::operations::swap::FALLOCATE,
-    crate::operations::swap::MKSWAP,
-    crate::operations::swap::SWAPON,
-    crate::operations::swap::SWAPOFF,
-];
+const SWAP_EXECUTABLES: [&str; 4] = [swap::FALLOCATE, swap::MKSWAP, swap::SWAPON, swap::SWAPOFF];
 
 /// systemd as `systemctl` answers it: `None` cannot be read, and every
 /// command is recorded.

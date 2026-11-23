@@ -366,7 +366,7 @@ fn replacement_archive_path(root: &Path, generation: u64) -> Result<PathBuf, Ide
     ensure_private_directory(&retired)?;
     let base = format!(
         "identity-{}-{generation:020}-{}",
-        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+        Utc::now().timestamp_nanos_opt().unwrap_or_default(),
         std::process::id()
     );
     for suffix in 0..1000_u16 {

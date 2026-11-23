@@ -13,3 +13,6 @@ vonk-agent = { path = "../vonk-agent" }
 [[bin]]
 name = "vonk-monitor"
 path = "src/main.rs"
+
+[lints]
+workspace = true

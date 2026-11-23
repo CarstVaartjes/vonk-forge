@@ -578,8 +578,8 @@ fn serve_helper(
     state.stop_held = std::mem::take(&mut state.hold_next_stop);
     drop(state);
     thread::sleep(slow);
-    let deadline = std::time::Instant::now() + Duration::from_secs(30);
-    while host.lock().unwrap().stop_held && std::time::Instant::now() < deadline {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while host.lock().unwrap().stop_held && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(5));
     }
     let mut state = host.lock().unwrap();

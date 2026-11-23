@@ -8,7 +8,7 @@ async fn sixty_five_exact_observations_use_two_bounded_native_wire_batches() {
     let server = ObservationServer::new(Some(204));
     let root = tempdir().unwrap();
     let installation = Uuid::new_v4().to_string();
-    let mut plan: crate::workloads::CompiledExecutionPlan = serde_json::from_str(include_str!(
+    let mut plan: CompiledExecutionPlan = serde_json::from_str(include_str!(
         "../../../../../../control/tests/fixtures/compiled_workload_v2.json"
     ))
     .unwrap();
@@ -39,7 +39,7 @@ async fn sixty_five_exact_observations_use_two_bounded_native_wire_batches() {
                 &installation,
                 &id.to_string(),
                 &plan.runtime.placement,
-                &crate::oci::RecipeRunStartIdentity { run_generation: 2 },
+                &RecipeRunStartIdentity { run_generation: 2 },
             )
             .unwrap();
     }
@@ -161,7 +161,7 @@ async fn exact_snapshot_inspection_failure_preserves_other_runs_without_reportin
             crate::host_runtime::HelperProtocolCause::InspectionOutcome,
         ),
         crate::host_runtime::HostRuntimeError::Controller(ClientError::Controller(Box::new(
-            crate::client::ControllerError::from_status(403),
+            ControllerError::from_status(403),
         ))),
     ] {
         let server = ObservationServer::new(Some(204));
@@ -248,7 +248,7 @@ async fn exact_snapshot_reports_empty_only_when_no_managed_runs_exist() {
     let runner = NoProcess;
     let executor = RecipeExecutor {
         client: &server.client,
-        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        helper_socket: Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime: OciRuntime {
             runner: &runner,
             data_root: data.path(),
@@ -294,7 +294,7 @@ async fn complete_observation_sweep(executor: &RecipeExecutor<'_, NoProcess>) ->
 fn assert_fresh_run_preparation(runtime: &OciRuntime<'_, NoProcess>) {
     use vonk_agent_protocol::generated::CompiledSecurityNetworkMode;
 
-    let mut plan: crate::workloads::CompiledExecutionPlan = serde_json::from_str(include_str!(
+    let mut plan: CompiledExecutionPlan = serde_json::from_str(include_str!(
         "../../../../../../control/tests/fixtures/compiled_workload_v2.json"
     ))
     .unwrap();
@@ -322,17 +322,17 @@ fn assert_fresh_run_preparation(runtime: &OciRuntime<'_, NoProcess>) {
             &installation_id,
             &Uuid::new_v4().to_string(),
             &plan.runtime.placement,
-            &crate::oci::RecipeRunStartIdentity { run_generation: 2 },
+            &RecipeRunStartIdentity { run_generation: 2 },
         )
         .expect("retired bookkeeping must not block a fresh run");
 }
 
-fn lifecycle_inspector(socket: &std::path::Path, running: bool) -> std::thread::JoinHandle<()> {
+fn lifecycle_inspector(socket: &Path, running: bool) -> thread::JoinHandle<()> {
     use std::io::{Read, Write};
     use vonk_agent_protocol::generated::{HostHelperResponse, HostHelperResponseStatus};
     let listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
     listener.set_nonblocking(true).unwrap();
-    std::thread::spawn(move || {
+    thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut stream = loop {
             match listener.accept() {
@@ -342,7 +342,7 @@ fn lifecycle_inspector(socket: &std::path::Path, running: bool) -> std::thread::
                         Instant::now() < deadline,
                         "lifecycle inspection never arrived"
                     );
-                    std::thread::sleep(Duration::from_millis(1));
+                    thread::sleep(Duration::from_millis(1));
                 }
                 Err(error) => panic!("{error}"),
             }
@@ -373,7 +373,7 @@ fn lifecycle_inspector(socket: &std::path::Path, running: bool) -> std::thread::
 
             container_labels: None,
         };
-        let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
+        let body = canonical_generated_json(&response).unwrap();
         stream
             .write_all(&(body.len() as u32).to_be_bytes())
             .unwrap();
@@ -472,7 +472,7 @@ async fn unreadable_lifecycle_of_an_unowned_run_is_retired_whatever_the_local_er
 
 #[tokio::test]
 async fn known_disposition_carries_the_controller_generation() {
-    let run_id = uuid::Uuid::parse_str("ab69f1ba-1fa2-4283-bdf1-a6d2ed59549c").unwrap();
+    let run_id = Uuid::parse_str("ab69f1ba-1fa2-4283-bdf1-a6d2ed59549c").unwrap();
     for (answer, expected) in [
         ("generation=7", Some(7)),
         ("generation=0", None),
@@ -482,7 +482,7 @@ async fn known_disposition_carries_the_controller_generation() {
         let server = ObservationServer::with_disposition(Some(204), Some(answer));
         assert_eq!(
             server.client.recipe_run_disposition(run_id).await.unwrap(),
-            crate::client::RecipeRunDisposition::Known {
+            RecipeRunDisposition::Known {
                 run_generation: expected
             }
         );
@@ -523,7 +523,7 @@ async fn durable_partial_history_page_does_not_starve_an_unrelated_ready_claim()
     let mut state = StateStore::open(&database, NODE_ID).unwrap();
     let recipes = RecipeExecutor {
         client: &server.client,
-        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        helper_socket: Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime_root: directory.path(),
         runtime: OciRuntime {
             runner: &runner,
@@ -585,7 +585,7 @@ async fn ended_observation_loss_does_not_hold_the_next_claim() {
         async fn observe(
             &self,
             _claim: &AgentClaim,
-        ) -> Option<crate::executor::operation_observation::OperationObservation> {
+        ) -> Option<operation_observation::OperationObservation> {
             None
         }
 
@@ -638,7 +638,7 @@ async fn exited_serving_workload_carries_its_retained_output() {
     let socket = temp.path().join("helper.sock");
     let requests = temp.path().join("requests");
     let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
-    let helper = std::thread::spawn(move || {
+    let helper = thread::spawn(move || {
         let mut asked_for_output = Vec::new();
         for _ in 0..2 {
             let (mut stream, _) = listener.accept().unwrap();
@@ -682,7 +682,7 @@ async fn exited_serving_workload_carries_its_retained_output() {
                     ),
                 });
             }
-            let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
+            let body = canonical_generated_json(&response).unwrap();
             stream
                 .write_all(&(body.len() as u32).to_be_bytes())
                 .unwrap();
@@ -690,7 +690,7 @@ async fn exited_serving_workload_carries_its_retained_output() {
         }
         asked_for_output
     });
-    let client = crate::client::AgentHttpClient::for_http_test(
+    let client = AgentHttpClient::for_http_test(
         "http://127.0.0.1:9/",
         "spk_0123456789abcdef0123456789abcdef",
     );
@@ -699,12 +699,10 @@ async fn exited_serving_workload_carries_its_retained_output() {
         request_root: &requests,
         helper_socket: &socket,
     };
-    let target = vonk_agent_protocol::RunInspectTarget::RunNameTarget(
-        vonk_agent_protocol::generated::RunNameTarget {
-            kind: vonk_agent_protocol::generated::RunNameTargetKind::RunName,
-            run_id: Uuid::new_v4(),
-        },
-    );
+    let target = RunInspectTarget::RunNameTarget(RunNameTarget {
+        kind: RunNameTargetKind::RunName,
+        run_id: Uuid::new_v4(),
+    });
     let observed = boundary
         .inspect_recipe_run_evidence_for_observation(target.clone(), false, None)
         .await
@@ -773,7 +771,7 @@ async fn an_observation_names_the_generation_of_its_run() {
     let root = tempdir().unwrap();
     let runtime_root = tempdir().unwrap();
     let installation = Uuid::new_v4().to_string();
-    let mut plan: crate::workloads::CompiledExecutionPlan = serde_json::from_str(include_str!(
+    let mut plan: CompiledExecutionPlan = serde_json::from_str(include_str!(
         "../../../../../../control/tests/fixtures/compiled_workload_v2.json"
     ))
     .unwrap();
@@ -802,13 +800,13 @@ async fn an_observation_names_the_generation_of_its_run() {
             &installation,
             &Uuid::new_v4().to_string(),
             &plan.runtime.placement,
-            &crate::oci::RecipeRunStartIdentity { run_generation: 2 },
+            &RecipeRunStartIdentity { run_generation: 2 },
         )
         .unwrap();
     let socket = runtime_root.path().join("helper.sock");
     let requests = runtime_root.path().join("runtime-requests");
     let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
-    let helper = std::thread::spawn(move || {
+    let helper = thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
         let mut prefix = [0; 4];
         stream.read_exact(&mut prefix).unwrap();
@@ -834,7 +832,7 @@ async fn an_observation_names_the_generation_of_its_run() {
 
             container_labels: None,
         };
-        let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
+        let body = canonical_generated_json(&response).unwrap();
         stream
             .write_all(&(body.len() as u32).to_be_bytes())
             .unwrap();
@@ -987,7 +985,7 @@ fn largest_inspection_wave_fits_the_edge_document_limit() {
             run
         })
         .collect();
-    let bytes = vonk_agent_protocol::canonical_generated_json(&report).unwrap();
+    let bytes = canonical_generated_json(&report).unwrap();
     eprintln!("maximal escaped observation wave bytes={}", bytes.len());
     assert!(
         bytes.len() <= 1024 * 1024,
@@ -1000,13 +998,13 @@ fn largest_inspection_wave_fits_the_edge_document_limit() {
 /// snapshot as fresh evidence after dealing with the pending page.
 async fn pending_cycle(
     server: &ObservationServer,
-    database_root: &std::path::Path,
+    database_root: &Path,
 ) -> Result<usize, RecipeObservationError> {
     let runtime = tempdir().unwrap();
     let runner = NoProcess;
     let executor = RecipeExecutor {
         client: &server.client,
-        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        helper_socket: Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime: OciRuntime {
             runner: &runner,
             data_root: database_root,
@@ -1019,7 +1017,7 @@ async fn pending_cycle(
         .map(|page| page.reported)
 }
 
-fn retain_pending(database_root: &std::path::Path, run_id: Uuid) -> Value {
+fn retain_pending(database_root: &Path, run_id: Uuid) -> Value {
     let report = crate::client::build_exact_recipe_run_observations(
         Utc::now(),
         &[exact_observation(run_id)],

@@ -114,7 +114,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
             .map(|item| scalar(&item.value).map(|value| format!("{}={value}", item.name)))
             .collect::<Result<Vec<_>, _>>()?;
         // Reconcile every operation-owned cgroup before reusing private storage.
-        super::cleanup::cleanup_build_until(
+        cleanup_build_until(
             self.runner,
             &RecipeBuildCleanupRequest {
                 build_id: operation_id,
@@ -131,13 +131,13 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
         // host policy into unrestricted egress. Public builds therefore get
         // an operation-private internal network and dual-homed proxy below.
         let network = build_network(&request.network);
-        let staging_root = super::budget::owned_directory(self.data_root, "build-staging")?;
+        let staging_root = owned_directory(self.data_root, "build-staging")?;
         let staging =
             PodmanBuildStaging::durable(&staging_root, &request.build_input_sha256, operation_id)?;
         let context = staging.path().join("context");
         let storage_existed = staging.path().join("podman-storage").is_dir();
-        let storage = super::budget::owned_directory(staging.path(), "podman-storage")?;
-        let _podman_image_tmp = super::budget::owned_directory(staging.path(), "podman-image-tmp")?;
+        let storage = owned_directory(staging.path(), "podman-storage")?;
+        let _podman_image_tmp = owned_directory(staging.path(), "podman-image-tmp")?;
         fs::create_dir_all(self.runtime_root)?;
         // Ubuntu 24.04 ships Podman 4.9, which rejects runroot path strings
         // longer than 50 bytes. Keep the durable, storage-accounted graphroot
@@ -156,12 +156,12 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
         };
         if retained
             .as_ref()
-            .is_some_and(super::import::podman_database_conflict)
+            .is_some_and(import::podman_database_conflict)
         {
             // The exact build's services have already been reconciled above.
             // Discard only its incompatible execution cache, retaining source
             // archives and verified base bytes. Replan once through normal build.
-            super::cleanup::remove_private_tree(&storage, deadline)?;
+            cleanup::remove_private_tree(&storage, deadline)?;
             fs::create_dir_all(&storage)?;
         }
         let resumed = retained.as_ref().is_some_and(|output| {
@@ -347,15 +347,14 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
             let recipe_inspection =
                 self.inspect_image(&storage, runroot.as_path(), &tag, deadline, cancelled)?;
             if !recipe_inspection.success {
-                return Err(super::diagnostics::command_failure(
+                return Err(diagnostics::command_failure(
                     FailureStage::ImageVerification,
                     &recipe_inspection,
                 ));
             }
             inspect_recipe_image(&recipe_inspection.stdout)
                 .map_err(|_| RecipeBuildError::ImageInspect)?;
-            let adapter_context =
-                super::budget::owned_directory(staging.path(), "adapter-context")?;
+            let adapter_context = owned_directory(staging.path(), "adapter-context")?;
             let adapter_containerfile = adapter_context.join("Containerfile");
             write_adapter_containerfile(&adapter_containerfile, &request.adapter)?;
             self.build_adaptation(
@@ -375,7 +374,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
             let adapted_inspection =
                 self.inspect_image(&storage, runroot.as_path(), &final_tag, deadline, cancelled)?;
             if !adapted_inspection.success {
-                return Err(super::diagnostics::command_failure(
+                return Err(diagnostics::command_failure(
                     FailureStage::ImageVerification,
                     &adapted_inspection,
                 ));
@@ -383,7 +382,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
             inspect_adapted_image(&adapted_inspection.stdout, &request.adapter)
                 .map_err(|_| RecipeBuildError::AdapterInspect)?;
         }
-        let build_root = super::budget::owned_directory(self.data_root, "builds")?;
+        let build_root = owned_directory(self.data_root, "builds")?;
         let operation_root = build_root.join(operation_id.to_string());
         if let Ok(metadata) = fs::symlink_metadata(&operation_root)
             && (!metadata.is_dir() || metadata.file_type().is_symlink())
@@ -427,7 +426,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
             cancelled,
         )?;
         if !saved.success {
-            return Err(super::diagnostics::command_failure(
+            return Err(diagnostics::command_failure(
                 FailureStage::OutputStorage,
                 &saved,
             ));
@@ -492,8 +491,8 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
         file.sync_all()?;
         fs::rename(partial, receipt)?;
         File::open(&operation_root)?.sync_all()?;
-        super::cleanup::remove_private_tree(staging.path(), deadline)?;
-        super::cleanup::remove_private_tree(&runroot, deadline)?;
+        cleanup::remove_private_tree(staging.path(), deadline)?;
+        cleanup::remove_private_tree(&runroot, deadline)?;
         Ok(evidence)
     }
 
@@ -745,7 +744,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
                 cancelled,
             )?;
             if !tagged.success {
-                return Err(super::diagnostics::command_failure(
+                return Err(diagnostics::command_failure(
                     FailureStage::BaseImageImport,
                     &tagged,
                 ));
@@ -765,7 +764,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
                 cancelled,
             )?;
             if !inspected.success {
-                return Err(super::diagnostics::command_failure(
+                return Err(diagnostics::command_failure(
                     FailureStage::ImageVerification,
                     &inspected,
                 ));
@@ -788,7 +787,7 @@ pub(super) fn build_runroot(
         "b-{}",
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(operation.as_bytes())
     );
-    let path = super::budget::owned_directory(root, &name)?;
+    let path = owned_directory(root, &name)?;
     if path.as_os_str().as_bytes().len() > 50 {
         return Err(RecipeBuildError::CleanupBlocked(
             "the Podman runroot exceeds 50 bytes".into(),
@@ -799,8 +798,8 @@ pub(super) fn build_runroot(
     // although rootless bootstrap still writes $XDG_RUNTIME_DIR/libpod/tmp/pause.pid
     // before the runtime opens storage. Prepare it on fresh hosts and retries.
     fs::set_permissions(&path, fs::Permissions::from_mode(0o700))?;
-    let libpod = super::budget::owned_directory(&path, "libpod")?;
-    super::budget::owned_directory(&libpod, "tmp")?;
+    let libpod = owned_directory(&path, "libpod")?;
+    owned_directory(&libpod, "tmp")?;
     Ok(path)
 }
 

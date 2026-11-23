@@ -51,8 +51,8 @@ pub(super) use vonk_agent_protocol::{AgentDirective, AgentProgress, canonical_js
 
 pub(super) struct NoProcess;
 
-pub(super) fn valid_inventory() -> vonk_agent_protocol::InventoryRequest {
-    vonk_agent_protocol::InventoryRequest {
+pub(super) fn valid_inventory() -> InventoryRequest {
+    InventoryRequest {
         schema_version: 1,
         observed_at: Utc::now().into(),
         disk_total_bytes: 100,
@@ -206,7 +206,7 @@ pub(super) async fn request_capture_client(
         "x-vonk-fixture-auth",
         reqwest::header::HeaderValue::from_static("enrolled-agent"),
     );
-    *client.client.write().await = reqwest::Client::builder()
+    *client.client.write().await = Client::builder()
         .default_headers(headers)
         .timeout(budget)
         .build()
@@ -243,10 +243,8 @@ pub(super) async fn observation_client(status: u16) -> (AgentHttpClient, Capture
     .await
 }
 
-pub(super) fn distribution_assignment_fixture(
-    model: &[u8],
-) -> vonk_agent_protocol::DistributionAssignment {
-    vonk_agent_protocol::DistributionAssignment {
+pub(super) fn distribution_assignment_fixture(model: &[u8]) -> DistributionAssignment {
+    DistributionAssignment {
         objects: vec![vonk_agent_protocol::DistributionObject {
             name: "weights/model.bin".to_owned(),
             sha256: hex_sha256(model),
@@ -283,7 +281,7 @@ pub(super) fn authenticated_test_client(controller: &str, node_id: &str) -> Agen
     );
     AgentHttpClient {
         client: Arc::new(RwLock::new(
-            reqwest::Client::builder()
+            Client::builder()
                 .retry(reqwest::retry::never())
                 .timeout(CONTROLLER_REQUEST_TIMEOUT)
                 .default_headers(headers)
@@ -300,7 +298,7 @@ pub(super) fn authenticated_test_client(controller: &str, node_id: &str) -> Agen
 }
 
 pub(super) fn distribution_fixture_server(
-    assignment: vonk_agent_protocol::DistributionAssignment,
+    assignment: DistributionAssignment,
     objects: HashMap<String, Vec<u8>>,
     expected_requests: usize,
     mode: DistributionFixtureMode,
@@ -448,7 +446,7 @@ pub(super) fn distribution_fixture_server(
             {
                 stream.write_all(&body[..5]).unwrap();
                 stream.flush().unwrap();
-                std::thread::sleep(Duration::from_millis(50));
+                thread::sleep(Duration::from_millis(50));
                 continue;
             }
             if matches!(mode, DistributionFixtureMode::InterruptFirstFiveObjects)
@@ -495,7 +493,7 @@ pub(super) fn job_input_client(
     });
     (
         AgentHttpClient {
-            client: Arc::new(RwLock::new(reqwest::Client::new())),
+            client: Arc::new(RwLock::new(Client::new())),
             controller: Url::parse(&format!("http://{address}/")).unwrap(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
             identity_content: Default::default(),
@@ -598,7 +596,7 @@ pub(super) fn delayed_upload_client(
     });
     // Production carries no client-wide total; the upload's own window is
     // shorter than the peer's verification delay.
-    let http_client = reqwest::Client::builder().build().unwrap();
+    let http_client = Client::builder().build().unwrap();
     (
         AgentHttpClient {
             client: Arc::new(RwLock::new(http_client)),
@@ -639,7 +637,7 @@ pub(super) fn progress() -> AgentProgress {
     }
 }
 
-pub(super) fn rejection_problem(issues: serde_json::Value) -> Vec<u8> {
+pub(super) fn rejection_problem(issues: Value) -> Vec<u8> {
     serde_json::json!({
         "context": null,
         "detail": "request is invalid",
@@ -662,19 +660,18 @@ pub(super) fn retained_result() -> AgentResult {
         }
     });
     let bytes = document.to_string();
-    vonk_agent_protocol::parse_strict(bytes.as_bytes())
-        .expect("the retained failure envelope parses")
+    parse_strict(bytes.as_bytes()).expect("the retained failure envelope parses")
 }
 
 /// One deadline covers fixture acceptance, reads, writes and result observation.
 pub(super) const PEER_BUDGET: Duration = Duration::from_secs(15);
 
 pub(super) struct ThreadPeer<T> {
-    result: std::sync::mpsc::Receiver<std::thread::Result<T>>,
+    result: std::sync::mpsc::Receiver<thread::Result<T>>,
 }
 
 impl<T> ThreadPeer<T> {
-    pub(super) fn finish(self) -> std::thread::Result<T> {
+    pub(super) fn finish(self) -> thread::Result<T> {
         self.result
             .recv_timeout(PEER_BUDGET)
             .expect("fixture completion deadline")
@@ -735,7 +732,7 @@ impl<T> AsyncPeer<T> {
     }
 }
 
-impl<T> std::future::Future for AsyncPeer<T> {
+impl<T> Future for AsyncPeer<T> {
     type Output = Result<T, tokio::task::JoinError>;
 
     fn poll(
@@ -753,7 +750,7 @@ impl<T> Drop for AsyncPeer<T> {
 }
 
 pub(super) fn spawn_async_peer<T: Send + 'static>(
-    work: impl std::future::Future<Output = T> + Send + 'static,
+    work: impl Future<Output = T> + Send + 'static,
 ) -> AsyncPeer<T> {
     AsyncPeer {
         task: tokio::spawn(async move {

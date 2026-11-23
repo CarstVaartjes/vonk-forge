@@ -1,5 +1,4 @@
 //! Statically linked, offline scratch-image payload; never needs a shell.
-#![forbid(unsafe_code)]
 use std::{fs, process::ExitCode};
 
 fn failure(code: u8) -> ExitCode {

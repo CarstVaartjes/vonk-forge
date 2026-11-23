@@ -73,7 +73,7 @@ impl HostHelperOperation {
             Self::ApplyGpuClockOperation(operation) => {
                 operation.desired.range.min_mhz <= operation.desired.range.max_mhz
             }
-            Self::ApplySwapOperation(operation) => crate::swap::valid_intent(&operation.desired),
+            Self::ApplySwapOperation(operation) => swap::valid_intent(&operation.desired),
             Self::ExecuteContainerRuntimeRequestOperation(operation) => {
                 operation.fence.get_version() == Some(uuid::Version::Random)
                     && (operation.installation_id.is_some()

@@ -103,7 +103,7 @@ async fn a_long_execution_keeps_feeding_the_service_watchdog_through_its_renewal
         observed_deadline: Arc::new(Mutex::new(None)),
     };
     let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
-    let before = WATCHDOG_FEEDS.load(std::sync::atomic::Ordering::SeqCst);
+    let before = WATCHDOG_FEEDS.load(Ordering::SeqCst);
 
     run_once_with_heartbeat_interval(
         &client,
@@ -123,7 +123,7 @@ async fn a_long_execution_keeps_feeding_the_service_watchdog_through_its_renewal
     .unwrap()
     .settled();
 
-    assert!(WATCHDOG_FEEDS.load(std::sync::atomic::Ordering::SeqCst) - before >= 3);
+    assert!(WATCHDOG_FEEDS.load(Ordering::SeqCst) - before >= 3);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -480,8 +480,7 @@ async fn cancelled_heartbeat_preserves_the_executors_confirmed_stop_result() {
     let results = client.results.lock().unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].state.as_str(), "cancelled");
-    let vonk_agent_protocol::generated::AgentResultResult::OutcomeFailed(body) = &results[0].result
-    else {
+    let AgentResultResult::OutcomeFailed(body) = &results[0].result else {
         panic!("cancelled start outcome lost its typed failure result");
     };
     vonk_agent_protocol::revalidate(body).unwrap();
@@ -794,8 +793,7 @@ async fn assert_renewal_unknown_ends_then_admits_fresh(unreadable: bool) {
         "phase": vonk_agent_protocol::generated::RecipeStartPayloadPhase::RankLaunch.as_str(),
         "start_deadline": (Utc::now() - ChronoDuration::seconds(1)).to_rfc3339(),
     });
-    let typed: vonk_agent_protocol::generated::AgentClaimPayload =
-        serde_json::from_value(payload).unwrap();
+    let typed: AgentClaimPayload = serde_json::from_value(payload).unwrap();
     start.payload = typed;
     let client = LeaseLapseClient {
         inner: RecordingClient {
@@ -1047,7 +1045,7 @@ impl Executor for DamagedDeadlineExecutor {
     async fn observe(
         &self,
         _claim: &AgentClaim,
-    ) -> Option<crate::executor::operation_observation::OperationObservation> {
+    ) -> Option<operation_observation::OperationObservation> {
         None
     }
 
@@ -1176,10 +1174,14 @@ async fn damaged_receipt_and_failed_projection_writes_do_not_gate_fresh_success(
             )
             .unwrap();
         assert_eq!(preserved, damaged);
-        assert!(client.results.lock().unwrap().iter().any(|result| matches!(
-            result.result,
-            vonk_agent_protocol::generated::AgentResultResult::OutcomeDone(_)
-        )));
+        assert!(
+            client
+                .results
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|result| matches!(result.result, AgentResultResult::OutcomeDone(_)))
+        );
         db.execute_batch("DROP TRIGGER prevent_suppression_cleanup; DROP TRIGGER prevent_old_ack;")
             .unwrap();
         let mut newer = claim();
@@ -1210,7 +1212,7 @@ async fn damaged_receipt_and_failed_projection_writes_do_not_gate_fresh_success(
 async fn unavailable_custody_observes_without_effects_and_restores_fresh_execution() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("state.sqlite");
-    std::fs::create_dir(&path).unwrap();
+    fs::create_dir(&path).unwrap();
     assert!(StateStore::open_recovered(&path, NODE_ID).is_err());
     let mut state = StateStore::observation_only(&path, NODE_ID).unwrap();
     let client = RecordingClient {
@@ -1233,7 +1235,7 @@ async fn unavailable_custody_observes_without_effects_and_restores_fresh_executi
         .settled();
     assert!(executor.observed_deadline.lock().unwrap().is_none());
     assert!(path.is_dir());
-    std::fs::remove_dir(&path).unwrap();
+    fs::remove_dir(&path).unwrap();
     state.restore_custody();
     let mut fresh = claim();
     fresh.fence = Uuid::new_v4();
@@ -1364,10 +1366,7 @@ async fn projections_removed_after_startup_are_rebuilt_before_fresh_success() {
         let submitted = client.results.lock().unwrap();
         assert!(submitted.iter().any(|result| result == &old));
         assert!(submitted.iter().any(|result| result.fence == fresh_fence
-            && matches!(
-                result.result,
-                vonk_agent_protocol::generated::AgentResultResult::OutcomeDone(_)
-            )));
+            && matches!(result.result, AgentResultResult::OutcomeDone(_))));
     }
     // The old effect is delivered from its exact receipt, never dispatched.
     assert!(state.pending_results().unwrap().is_empty());

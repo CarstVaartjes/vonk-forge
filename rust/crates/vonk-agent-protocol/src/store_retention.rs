@@ -1,4 +1,5 @@
 //! Store ownership shared by the unprivileged agent and privileged helper.
+use crate::generated::StoragePolicy;
 use Collector::*;
 use StoreRoot::*;
 

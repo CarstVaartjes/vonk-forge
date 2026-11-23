@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use std::{
     cell::{Cell, RefCell},
     fs,
@@ -581,7 +579,7 @@ fn host_settings_are_observed_and_an_unreadable_systemd_leaves_them_unknown() {
 fn reset_inventory_reaches_the_wire_and_recovers_without_a_flag() {
     // Catches retaining stale healthy inventory when GPU discovery fails.
     struct HealthRunner {
-        health: Cell<vonk_agent_protocol::generated::GpuHealth>,
+        health: Cell<GpuHealth>,
     }
     impl ProcessRunner for HealthRunner {
         fn run(

@@ -173,7 +173,7 @@ pub fn cleanup_build_storage<R: ProcessRunner + ?Sized>(
         let metadata = fs::symlink_metadata(entry.path()).map_err(at("stat", &entry.path()))?;
         if metadata.is_dir() && !metadata.file_type().is_symlink() {
             fs::create_dir_all(runtime_root).map_err(at("create", runtime_root))?;
-            let runroot = super::builder::build_runroot(runtime_root, request.build_id)?;
+            let runroot = builder::build_runroot(runtime_root, request.build_id)?;
             let staging = entry.path();
             let tmp = staging.join("podman-image-tmp");
             let storage = staging.join("podman-storage");
@@ -220,7 +220,7 @@ pub fn cleanup_build_storage<R: ProcessRunner + ?Sized>(
                 // A missing container/network is an idempotent miss. The exact
                 // cgroup must still settle before its private storage is removed.
                 if let Ok(output) = runner.run(Program::SystemdRun, &arguments, timeout)
-                    && super::import::podman_database_conflict(&output)
+                    && import::podman_database_conflict(&output)
                 {
                     // Exact operation services are already settled. Reconcile
                     // an incompatible private execution cache once, retaining
@@ -272,7 +272,7 @@ pub fn cleanup_build_storage<R: ProcessRunner + ?Sized>(
                                 .map(|name| format!("{what} \"{name}\" is still present")),
                         ),
                         Ok(output) => {
-                            return Err(super::diagnostics::command_failure(
+                            return Err(diagnostics::command_failure(
                                 FailureStage::BoundedBuildProcess,
                                 &output,
                             ));

@@ -1040,8 +1040,8 @@ fn collect_sources(directory: &Path, sources: &mut Vec<PathBuf>) {
 
 pub(crate) fn retention() -> vonk_agent_protocol::generated::StoreRetentionRequest {
     vonk_agent_protocol::generated::StoreRetentionRequest {
-        issued_at: std::time::SystemTime::now()
-            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        issued_at: SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_secs(),
         expires_at: SystemTime::now()

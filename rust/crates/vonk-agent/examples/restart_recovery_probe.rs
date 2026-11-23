@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 //! Exercise the agent's persistent claim journal and real HTTPS distribution
 //! client in separate processes for Controller restart recovery acceptance.
 //! `execute-build` runs the production build executor and result normalizer

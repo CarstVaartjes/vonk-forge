@@ -23,7 +23,7 @@ impl CommandRunner for InstallRunner {
             format!(
                 "{}\ttrue\ttrue\t{}\t\t\t\t\n",
                 "f".repeat(64),
-                super::super::test_support::RUN_ID
+                test_support::RUN_ID
             )
             .into_bytes()
         } else if executable == Path::new("/usr/bin/dpkg-deb") {
@@ -80,7 +80,7 @@ fn scan_overlap_and_expired_copy_release_custody_before_fresh_signed_install() {
         inspect_target: Some(RunInspectTarget::RunNameTarget(
             vonk_agent_protocol::generated::RunNameTarget {
                 kind: vonk_agent_protocol::generated::RunNameTargetKind::RunName,
-                run_id: super::super::test_support::RUN_ID.parse().unwrap(),
+                run_id: test_support::RUN_ID.parse().unwrap(),
             },
         )),
         action: HostRuntimeAction::RunInspect,

@@ -78,7 +78,7 @@ fn damaged_local_layer_is_refetched_and_verified_before_import() {
 }
 
 struct ReplacementRaceRunner {
-    archive_path: std::path::PathBuf,
+    archive_path: PathBuf,
     inner: Runner,
     loaded: RefCell<Vec<u8>>,
 }

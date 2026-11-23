@@ -73,7 +73,7 @@ fn unbound_helper_rejection_names_the_check_that_refused() {
             .as_bytes(),
         )
         .unwrap();
-        super::super::require_bound_response(&response, request_id).unwrap();
+        require_bound_response(&response, request_id).unwrap();
         assert_eq!(
             super::super::runtime_rejection(&response, HostRuntimeAction::Start).preflight_code(),
             expected
@@ -89,9 +89,7 @@ fn a_reply_this_agent_cannot_bind_is_still_a_protocol_error() {
             br#"{"schema_version":1,"request_id":"20000000-0000-4000-8000-000000000002","status":"rejected","error_code":"grant_unauthorized"}"#,
         )
         .unwrap();
-    assert!(
-        super::super::require_bound_response(&rejected_for_another_request, request_id).is_err()
-    );
+    assert!(require_bound_response(&rejected_for_another_request, request_id).is_err());
 
     // Every other code is produced only after the helper knows the request,
     // so an unbound reply claiming one cannot be accounted for.
@@ -109,7 +107,7 @@ fn a_reply_this_agent_cannot_bind_is_still_a_protocol_error() {
         )
         .unwrap();
         assert!(
-            super::super::require_bound_response(&unbound, request_id).is_err(),
+            require_bound_response(&unbound, request_id).is_err(),
             "{code} must not be accepted without a request identity"
         );
     }
@@ -118,7 +116,7 @@ fn a_reply_this_agent_cannot_bind_is_still_a_protocol_error() {
         br#"{"schema_version":1,"request_id":null,"status":"container-runtime-request-executed"}"#,
     )
     .unwrap();
-    assert!(super::super::require_bound_response(&unbound_success, request_id).is_err());
+    assert!(require_bound_response(&unbound_success, request_id).is_err());
 }
 
 #[test]

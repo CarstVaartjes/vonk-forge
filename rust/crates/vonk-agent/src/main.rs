@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use std::{
     future::Future,
     io::{self, Read},
@@ -153,7 +151,7 @@ async fn agent_main() -> Result<(), Box<dyn std::error::Error>> {
             let request = inventory.to_request(chrono::Utc::now().into());
             let bytes = vonk_agent_protocol::canonical_json(&request)?;
             use std::io::Write;
-            std::io::stdout().write_all(&bytes)?;
+            io::stdout().write_all(&bytes)?;
         }
         Command::SelfTest => {
             let config = AgentConfig::load(&cli.config)?;
@@ -179,7 +177,7 @@ async fn agent_main() -> Result<(), Box<dyn std::error::Error>> {
                 &receipt,
                 &identity,
                 pid,
-                std::time::Duration::from_secs(max_age_seconds),
+                Duration::from_secs(max_age_seconds),
             )?;
         }
         Command::Pair {
@@ -749,7 +747,7 @@ async fn claim_lane<'a>(
 // gate stop/reconciliation claims; admission remains with the Controller.
 /// One bounded store retention pass; returns when the next one is due.
 async fn collect_stores(
-    data_root: std::path::PathBuf,
+    data_root: PathBuf,
     untracked: Option<vonk_agent::store_retention::Untracked>,
 ) -> Instant {
     const PASS: Duration = Duration::from_secs(60);

@@ -5,7 +5,7 @@ use super::*;
 pub(super) fn podman_import_diagnostic(
     output: &crate::process::ProcessOutput,
 ) -> PodmanImportDiagnostic {
-    let logs = super::diagnostics::sanitized_process_logs(output);
+    let logs = sanitized_process_logs(output);
     if logs.stdout.text.trim().is_empty() && logs.stderr.text.trim().is_empty() {
         return PodmanImportDiagnostic::NonzeroWithoutOutput;
     }
@@ -87,7 +87,7 @@ pub(crate) fn podman_build_diagnostic(
     // A RUN's own failure exits its step; real host denials arrive before any
     // step exit or name the OCI runtime. Words a RUN printed are not denials.
     let denial_visible = !step_exited || causes.contains("crun:") || causes.contains("runc:");
-    let logs = super::diagnostics::sanitized_process_logs(output);
+    let logs = sanitized_process_logs(output);
     if logs.stdout.text.trim().is_empty() && logs.stderr.text.trim().is_empty() {
         PodmanBuildDiagnostic::NonzeroWithoutOutput
     } else if evidence.contains("no space left on device")

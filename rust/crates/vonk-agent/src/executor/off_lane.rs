@@ -202,7 +202,7 @@ fn executing() -> std::sync::MutexGuard<'static, BTreeSet<(PathBuf, uuid::Uuid)>
 static BUILDS_BESIDE: Mutex<BTreeSet<(PathBuf, uuid::Uuid)>> = Mutex::new(BTreeSet::new());
 
 /// The build identities running beside the lane over `data_root`.
-pub fn builds_beside(data_root: &std::path::Path) -> BTreeSet<uuid::Uuid> {
+pub fn builds_beside(data_root: &Path) -> BTreeSet<uuid::Uuid> {
     builds()
         .iter()
         .filter(|(root, _)| root == data_root)
@@ -215,7 +215,7 @@ pub fn builds_beside(data_root: &std::path::Path) -> BTreeSet<uuid::Uuid> {
 pub(crate) struct BuildBeside((PathBuf, uuid::Uuid));
 
 impl BuildBeside {
-    pub(crate) fn hold(data_root: &std::path::Path, build_id: uuid::Uuid) -> Self {
+    pub(crate) fn hold(data_root: &Path, build_id: uuid::Uuid) -> Self {
         let key = (data_root.to_path_buf(), build_id);
         builds().insert(key.clone());
         Self(key)

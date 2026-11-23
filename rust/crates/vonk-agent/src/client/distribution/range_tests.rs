@@ -28,15 +28,15 @@ struct Served {
 /// seconds, which a test then sees in `peak`); request number `refuse` (from
 /// 1) is answered with another object's ETag.
 fn range_server(hold: usize, refuse: Option<usize>) -> (String, Arc<(Mutex<Served>, Condvar)>) {
-    let listener = std::net::TcpListener::bind(FIXTURE_BIND).unwrap();
+    let listener = TcpListener::bind(FIXTURE_BIND).unwrap();
     let address = listener.local_addr().unwrap();
     let served = Arc::new((Mutex::new(Served::default()), Condvar::new()));
     let shared = served.clone();
-    std::thread::spawn(move || {
+    thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { return };
             let served = shared.clone();
-            std::thread::spawn(move || {
+            thread::spawn(move || {
                 let deadline = std::time::Instant::now() + Duration::from_secs(5);
                 let mut head = Vec::new();
                 let mut byte = [0_u8; 1];
@@ -117,8 +117,8 @@ fn ranges(served: &Arc<(Mutex<Served>, Condvar)>) -> Vec<(u64, u64)> {
 }
 
 fn write_private(path: &Path, bytes: &[u8]) {
-    std::fs::write(path, bytes).unwrap();
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    fs::write(path, bytes).unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
 }
 
 #[tokio::test]
@@ -130,7 +130,7 @@ async fn a_single_large_object_keeps_the_governors_streams_in_flight() {
     download(&url, root.path(), &StreamGovernor::default())
         .await
         .unwrap();
-    assert_eq!(std::fs::read(root.path().join("object")).unwrap(), BODY);
+    assert_eq!(fs::read(root.path().join("object")).unwrap(), BODY);
     assert!(!partial_path(&root.path().join("object")).exists());
     assert!(served.0.lock().unwrap().peak >= INITIAL_STREAMS);
     assert_eq!(
@@ -153,13 +153,13 @@ async fn an_interrupted_object_resumes_only_its_unrecorded_ranges() {
     let landed = first.0.lock().unwrap().ranges[..2].to_vec();
     // The checkpoint is longer than the object: an earlier agent discards
     // it rather than reading its length as a prefix.
-    assert!(std::fs::metadata(&partial).unwrap().len() > BODY.len() as u64);
+    assert!(fs::metadata(&partial).unwrap().len() > BODY.len() as u64);
 
     let (url, second) = range_server(0, None);
     download(&url, root.path(), &StreamGovernor::default())
         .await
         .unwrap();
-    assert_eq!(std::fs::read(root.path().join("object")).unwrap(), BODY);
+    assert_eq!(fs::read(root.path().join("object")).unwrap(), BODY);
     let fetched = ranges(&second);
     assert_eq!(fetched.len(), 3);
     assert!(landed.iter().all(|range| !fetched.contains(range)));
@@ -173,7 +173,7 @@ async fn an_earlier_agents_prefix_is_adopted_and_only_the_rest_is_fetched() {
     download(&url, root.path(), &StreamGovernor::default())
         .await
         .unwrap();
-    assert_eq!(std::fs::read(root.path().join("object")).unwrap(), BODY);
+    assert_eq!(fs::read(root.path().join("object")).unwrap(), BODY);
     assert_eq!(ranges(&served), [(13, 15), (16, 23), (24, 31), (32, 39)]);
 }
 
@@ -189,7 +189,7 @@ async fn a_checkpoint_of_record_length_without_a_record_starts_over() {
     download(&url, root.path(), &StreamGovernor::default())
         .await
         .unwrap();
-    assert_eq!(std::fs::read(root.path().join("object")).unwrap(), BODY);
+    assert_eq!(fs::read(root.path().join("object")).unwrap(), BODY);
     assert_eq!(
         ranges(&served),
         [(0, 7), (8, 15), (16, 23), (24, 31), (32, 39)]
@@ -209,5 +209,5 @@ async fn a_last_range_continues_the_prefix_without_a_record() {
         Err(ClientError::Protocol)
     ));
     assert_eq!(ranges(&served), [(33, 39)]);
-    assert_eq!(std::fs::read(&partial).unwrap(), &BODY[..33]);
+    assert_eq!(fs::read(&partial).unwrap(), &BODY[..33]);
 }

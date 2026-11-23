@@ -51,7 +51,7 @@ fn python_issuer_fixture_is_verified_by_the_rust_helper() {
     let raw = fs::read(fixtures().join("host-helper-grant-python-issued.json")).unwrap();
     let raw = raw.strip_suffix(b"\n").unwrap_or(&raw);
     let request = parse_request(raw).unwrap();
-    assert_eq!(vonk_agent_protocol::canonical_json(&request).unwrap(), raw);
+    assert_eq!(canonical_json(&request).unwrap(), raw);
     let public_key =
         hex::decode("66cd608b928b88e50e0efeaa33faf1c43cefe07294b0b87e9fe0aba6a3cf7633").unwrap();
     GrantVerifier::new(&public_key, 971)
@@ -96,7 +96,7 @@ fn signed(operation: HostOperation, signer: &Ed25519KeyPair) -> SignedGrant {
         claims,
         signature: GrantSignature {
             algorithm: "ed25519".to_owned(),
-            key_id: vonk_agent_protocol::hex_sha256(signer.public_key().as_ref()),
+            key_id: hex_sha256(signer.public_key().as_ref()),
             value: hex::encode(signature.as_ref()),
         },
     }
@@ -152,7 +152,7 @@ fn every_permitted_operation_has_an_exact_typed_shape() {
 
     for operation in operations {
         let request = signed(operation, &signer);
-        let raw = vonk_agent_protocol::canonical_json(&request).unwrap();
+        let raw = canonical_json(&request).unwrap();
         assert_eq!(parse_request(&raw).unwrap(), request);
     }
 }
@@ -161,7 +161,7 @@ fn every_permitted_operation_has_an_exact_typed_shape() {
 fn rejects_unknown_fields_and_untyped_process_control() {
     let signer = signer(7);
     let request = signed(confirm_activation(), &signer);
-    let raw = vonk_agent_protocol::canonical_json(&request).unwrap();
+    let raw = canonical_json(&request).unwrap();
     let mut document: serde_json::Value = serde_json::from_slice(&raw).unwrap();
     for (field, value) in [
         ("executable", serde_json::json!("/bin/sh")),
@@ -175,7 +175,7 @@ fn rejects_unknown_fields_and_untyped_process_control() {
             .as_object_mut()
             .unwrap()
             .insert(field.to_owned(), value);
-        let invalid = vonk_agent_protocol::canonical_json(&document).unwrap();
+        let invalid = canonical_json(&document).unwrap();
         assert!(parse_request(&invalid).is_err(), "accepted {field}");
         document["claims"]["operation"]
             .as_object_mut()
@@ -822,7 +822,7 @@ fn package_restart_and_reboot_commands_are_compiled_not_caller_supplied() {
     .unwrap()
     .with_package_owner(package_owner);
     let package = b"signed deb";
-    let digest = vonk_agent_protocol::hex_sha256(package);
+    let digest = hex_sha256(package);
     let incoming = roots.incoming.join(format!("{digest}.deb"));
     fs::write(&incoming, package).unwrap();
     fs::set_permissions(&incoming, fs::Permissions::from_mode(0o600)).unwrap();

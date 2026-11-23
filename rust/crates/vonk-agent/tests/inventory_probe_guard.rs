@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use std::{fs, path::Path};
 
 /// An optional dependency never blocks the mandatory capacity observation:

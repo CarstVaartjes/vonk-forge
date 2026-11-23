@@ -195,6 +195,8 @@ async fn completed_stop_collects_on_a_bounded_schedule_and_leaves_the_cadence_al
     assert!((120..=122).contains(&times[5]), "{times:?}");
 }
 
+type GpuMemoryReader = fn() -> Option<u64>;
+
 #[tokio::test(start_paused = true)]
 async fn only_a_done_recipe_stop_arms_the_post_stop_schedule() {
     use vonk_agent::{executor::Executor as _, outcome::ExecutionResult};
@@ -247,7 +249,7 @@ async fn only_a_done_recipe_stop_arms_the_post_stop_schedule() {
             executor: &Fake(result),
             available: true,
             stops: stops.clone(),
-            memory: std::sync::Arc::new(vonk_agent::memory_readings::Ledger::open(
+            memory: Arc::new(vonk_agent::memory_readings::Ledger::open(
                 std::path::Path::new("/nonexistent"),
                 data.path(),
                 4096,
@@ -275,23 +277,20 @@ async fn only_a_done_recipe_stop_arms_the_post_stop_schedule() {
     )
     .unwrap();
     std::fs::write(proc.join("meminfo"), "SecPageTables: 100 kB\n").unwrap();
-    let memory = std::sync::Arc::new(vonk_agent::memory_readings::Ledger::open(
+    let memory = Arc::new(vonk_agent::memory_readings::Ledger::open(
         host.path(),
         data.path(),
         4096,
     ));
     let mut stop = template.clone();
     stop.operation = AgentOperation::RecipeStop;
-    for (result, gpu_memory, recorded) in [
-        (
-            ExecutionResult::failed("no"),
-            (|| Some(0)) as fn() -> Option<u64>,
-            false,
-        ),
+    let cases: [(ExecutionResult, GpuMemoryReader, bool); 4] = [
+        (ExecutionResult::failed("no"), || Some(0), false),
         (done(), || Some(1 << 30), false),
         (done(), || None, false),
         (done(), || Some(0), true),
-    ] {
+    ];
+    for (result, gpu_memory, recorded) in cases {
         let executor = super::CustodyExecutor {
             executor: &Fake(result),
             available: true,
@@ -384,7 +383,7 @@ node_id = "spk_0123456789abcdef0123456789abcdef"
                         .map(|_| ())
                         .map_err(Into::into),
                 };
-                std::future::ready(outcome)
+                future::ready(outcome)
             },
             |_| {
                 std::fs::write(&config_path, repaired_config).unwrap();

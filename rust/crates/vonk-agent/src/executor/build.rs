@@ -341,13 +341,13 @@ pub(super) fn build_error_outcome(
     // Actual source/adapter digest ingress still refuses substitution.
     if matches!(
         error,
-        crate::recipe_builder::RecipeBuildError::Source(
+        RecipeBuildError::Source(
             crate::build_source::BuildSourceError::Archive
                 | crate::build_source::BuildSourceError::Path
                 | crate::build_source::BuildSourceError::Entry
                 | crate::build_source::BuildSourceError::Size
                 | crate::build_source::BuildSourceError::Digest
-        ) | crate::recipe_builder::RecipeBuildError::AdapterInvalid
+        ) | RecipeBuildError::AdapterInvalid
     ) {
         return ExecutionResult::Failed(error.failure_evidence());
     }
@@ -357,9 +357,9 @@ pub(super) fn build_error_outcome(
             .diagnostics(crate::failure_evidence::from_failure(&AgentOperation::RecipeBuildV1, &error.failure_evidence())))
 }
 
-fn platform_build_blocked(mut failure: crate::outcome::Failure) -> crate::outcome::Failure {
+fn platform_build_blocked(mut failure: Failure) -> Failure {
     failure.reason = format!("rootless Podman platform is blocked: {}", failure.reason);
-    failure.code(vonk_agent_protocol::generated::FailureCode::RecipeBuildPlatformBlocked)
+    failure.code(FailureCode::RecipeBuildPlatformBlocked)
 }
 
 fn build_transfer_outcome(

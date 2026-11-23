@@ -46,7 +46,7 @@ fn lost_pending_key_prepares_a_fresh_request_without_a_local_gate() {
 fn damaged_staged_pointer_preserves_active_identity_and_replays_pending_request() {
     let temporary = tempdir().unwrap();
     let root = temporary.path().join("credentials");
-    persist_identity(&root, &super::tests::certificate_material(1, false)).unwrap();
+    persist_identity(&root, &tests::certificate_material(1, false)).unwrap();
     let active = active_identity_paths(&root).unwrap();
     let active_bytes = fs::read(&active.certificate).unwrap();
     let request = prepare_pending(&root, NODE_ID).unwrap();
@@ -76,7 +76,7 @@ fn short_lived_certificate_renews_before_expiry_across_upgrade_restart() {
     let temporary = tempdir().unwrap();
     let root = temporary.path().join("credentials");
     // This fixture has a 24-hour validity, as opposed to the 30-day default.
-    persist_identity(&root, &super::tests::certificate_material(1, true)).unwrap();
+    persist_identity(&root, &tests::certificate_material(1, true)).unwrap();
     let due = Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).unwrap();
     assert!(!renewal_due(&root, due - chrono::Duration::seconds(1)).unwrap());
     assert!(renewal_due(&root, due).unwrap());
@@ -95,7 +95,7 @@ fn half_lifetime_reconcile_survives_restart_without_schedule_state() {
     // Wrong implementation: renewal at two-thirds misses 40% remaining.
     let temporary = tempdir().unwrap();
     let root = temporary.path().join("credentials");
-    persist_identity(&root, &super::tests::certificate_material(1, true)).unwrap();
+    persist_identity(&root, &tests::certificate_material(1, true)).unwrap();
     let start = Utc.with_ymd_and_hms(2026, 8, 1, 0, 0, 0).unwrap();
     let lifetime = chrono::Duration::hours(24);
     assert!(!renewal_due(&root, start + lifetime * 4 / 10).unwrap());
@@ -112,7 +112,7 @@ fn renewal_window_samples_once_and_restart_at_55_percent_is_due() {
     // or a new process delays renewal despite the certificate already being due.
     let temporary = tempdir().unwrap();
     let root = temporary.path().join("credentials");
-    persist_identity(&root, &super::tests::certificate_material(1, true)).unwrap();
+    persist_identity(&root, &tests::certificate_material(1, true)).unwrap();
     let start = Utc.with_ymd_and_hms(2026, 8, 1, 0, 0, 0).unwrap();
     let lifetime = chrono::Duration::hours(24);
     let mut early = RenewalWindow::default();
@@ -137,7 +137,7 @@ fn renewal_window_samples_once_and_restart_at_55_percent_is_due() {
             .due(&root, start + lifetime * 55 / 100, || u16::MAX)
             .unwrap()
     );
-    persist_identity(&root, &super::tests::certificate_material(2, true)).unwrap();
+    persist_identity(&root, &tests::certificate_material(2, true)).unwrap();
     assert!(
         late.due(&root, half, || 0).unwrap(),
         "replacement retained old jitter"

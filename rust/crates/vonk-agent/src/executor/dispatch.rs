@@ -72,7 +72,7 @@ impl Executor for RejectingExecutor {
     async fn observe(
         &self,
         _claim: &AgentClaim,
-    ) -> Option<crate::executor::operation_observation::OperationObservation> {
+    ) -> Option<operation_observation::OperationObservation> {
         None
     }
 
@@ -98,7 +98,7 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
                 .observe_operation(
                     claim,
                     (claim.operation == AgentOperation::AgentUpgradeV1).then(|| {
-                        super::upgrade_observation::UpgradeObservation {
+                        upgrade_observation::UpgradeObservation {
                             node_id: self.upgrades.client.node_id(),
                             identity: self.runtime_identity,
                             receipt: crate::package_activation::read_receipt(

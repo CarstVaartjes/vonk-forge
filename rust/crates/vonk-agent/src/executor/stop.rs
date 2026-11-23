@@ -145,7 +145,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         &self,
         claim: &AgentClaim,
         cancellation: tokio::sync::watch::Receiver<bool>,
-        request: vonk_agent_protocol::RecipeStopRequest,
+        request: RecipeStopRequest,
     ) -> ExecutionResult {
         self.report_phase(claim, ProgressPhase::Stopping).await;
         // A stopped run loads no longer: a launched rank's drops end here,

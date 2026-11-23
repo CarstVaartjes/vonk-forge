@@ -66,7 +66,7 @@ fn staging() -> Staging {
         data.path()
             .join("build-staging")
             .join(format!("{}-{}", "a".repeat(64), request.build_id));
-    std::fs::create_dir_all(entry.join("podman-storage")).unwrap();
+    fs::create_dir_all(entry.join("podman-storage")).unwrap();
     Staging {
         data,
         runtime,
@@ -168,13 +168,13 @@ fn a_path_the_agent_may_not_remove_fails_with_its_path_and_errno() {
     }
     let staging = staging();
     let parent = staging.entry.parent().unwrap().to_path_buf();
-    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o555)).unwrap();
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o555)).unwrap();
     let spark = Spark {
         unit_running: false,
         proxy_container: None,
     };
     let result = cleanup(&spark, &staging);
-    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o755)).unwrap();
     // Waiting cannot end a permission denial: the order ends with its evidence
     // instead of being retried as an unconfirmed effect.
     let AgentResultResult::OutcomeFailed(failed) = result else {

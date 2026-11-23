@@ -182,10 +182,7 @@ async fn a_refused_core_discards_delivery_with_evidence_across_restart() {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
-    assert_eq!(
-        retained,
-        vonk_agent_protocol::canonical_json(&full).unwrap()
-    );
+    assert_eq!(retained, canonical_json(&full).unwrap());
     assert!(
         !acknowledged,
         "discarding delivery must not claim acceptance"
