@@ -31,7 +31,7 @@ export function ObservationNotice({
         {ageLabel(lastSuccessAt, now)}.{" "}
         {onResume && (
           <button type="button" onClick={onResume}>
-            Check status
+            Refresh status
           </button>
         )}
       </p>
