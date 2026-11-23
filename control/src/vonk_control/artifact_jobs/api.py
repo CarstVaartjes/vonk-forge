@@ -162,9 +162,9 @@ def install_artifact_job_routes(
         operation_id="listArtifactJobsForRun",
     )
     def list_jobs(
-        run_id: str = Path(pattern=_UUID),
+        run_id: Annotated[str, Path(pattern=_UUID)],
         # A read never refuses: a limit outside 1..100 is clamped into it.
-        limit: int = Query(default=100),
+        limit: Annotated[int, Query()] = 100,
         _actor: Actor = actor_dependency,
     ) -> ArtifactJobListResponse:
         try:
@@ -192,7 +192,7 @@ def install_artifact_job_routes(
     def create_job(
         body: ArtifactJobCreate,
         request_id: Annotated[str, Header(alias="X-Request-ID", pattern=_UUID)],
-        run_id: str = Path(pattern=_UUID),
+        run_id: Annotated[str, Path(pattern=_UUID)],
         actor: Actor = actor_dependency,
     ) -> ArtifactJobResponse:
         _mutating(actor)
@@ -221,7 +221,8 @@ def install_artifact_job_routes(
         operation_id="getArtifactJobByRequestId",
     )
     def job_by_request_id(
-        request_id: str = Path(pattern=_UUID), _actor: Actor = actor_dependency
+        request_id: Annotated[str, Path(pattern=_UUID)],
+        _actor: Actor = actor_dependency,
     ) -> ArtifactJobResponse:
         try:
             return _view(_service(service).get_by_request_id(request_id))
@@ -250,8 +251,8 @@ def install_artifact_job_routes(
     @operator_acceptance(ReceiptPolicy.ARTIFACT_JOB)
     async def upload_input(
         request: Request,
-        job_id: str = Path(pattern=_UUID),
-        name: str = Path(pattern=_NAME),
+        job_id: Annotated[str, Path(pattern=_UUID)],
+        name: Annotated[str, Path(pattern=_NAME)],
         content_sha256: Annotated[
             str, Header(alias="X-Content-SHA256", pattern=_DIGEST)
         ] = "",
@@ -292,7 +293,7 @@ def install_artifact_job_routes(
     )
     @operator_acceptance(ReceiptPolicy.ARTIFACT_JOB)
     def finalize_job(
-        job_id: str = Path(pattern=_UUID), actor: Actor = actor_dependency
+        job_id: Annotated[str, Path(pattern=_UUID)], actor: Actor = actor_dependency
     ) -> ArtifactJobResponse:
         _mutating(actor)
         try:
@@ -317,7 +318,7 @@ def install_artifact_job_routes(
     @operator_acceptance(ReceiptPolicy.ARTIFACT_SUBMIT)
     def submit_job(
         request_id: Annotated[str, Header(alias="X-Request-ID", pattern=_UUID)],
-        job_id: str = Path(pattern=_UUID),
+        job_id: Annotated[str, Path(pattern=_UUID)],
         actor: Actor = actor_dependency,
     ) -> ArtifactJobResponse:
         _mutating(actor)
@@ -375,7 +376,7 @@ def install_artifact_job_routes(
         operation_id="getArtifactJobStatus",
     )
     def job_status(
-        job_id: str = Path(pattern=_UUID), _actor: Actor = actor_dependency
+        job_id: Annotated[str, Path(pattern=_UUID)], _actor: Actor = actor_dependency
     ) -> ArtifactJobResponse:
         try:
             return _view(_service(service).get(job_id))
@@ -394,7 +395,7 @@ def install_artifact_job_routes(
     def cancel_job(
         body: CancelRequest,
         request_id: Annotated[str, Header(alias="X-Request-ID", pattern=_UUID)],
-        job_id: str = Path(pattern=_UUID),
+        job_id: Annotated[str, Path(pattern=_UUID)],
         actor: Actor = actor_dependency,
     ) -> ArtifactJobResponse:
         _mutating(actor)
@@ -429,9 +430,9 @@ def install_artifact_job_routes(
         openapi_extra={"x-vonk-streaming-transport": True},
     )
     def download_result(
-        job_id: str = Path(pattern=_UUID),
-        name: str = Path(pattern=_NAME),
-        sha256: str = Path(pattern=_DIGEST),
+        job_id: Annotated[str, Path(pattern=_UUID)],
+        name: Annotated[str, Path(pattern=_NAME)],
+        sha256: Annotated[str, Path(pattern=_DIGEST)],
         _actor: Actor = actor_dependency,
     ) -> Response:
         try:

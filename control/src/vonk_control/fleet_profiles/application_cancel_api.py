@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Path, status
 
@@ -46,8 +46,8 @@ def install_profile_application_cancel_route(
         operation_id="getProfileApplicationCancellation",
     )
     def get_profile_application_cancellation(
-        application_id: str = Path(pattern=_UUID),
-        request_key: str = Path(pattern=_UUID),
+        application_id: Annotated[str, Path(pattern=_UUID)],
+        request_key: Annotated[str, Path(pattern=_UUID)],
         actor: Actor = actor_dependency,
     ) -> FleetProfileApplicationView:
         if actor.role not in MUTATION_ROLES[("POST", _CANCEL_PATH)]:
@@ -83,7 +83,7 @@ def install_profile_application_cancel_route(
     @operator_acceptance(ReceiptPolicy.PROFILE_CANCEL)
     def cancel_profile_application(
         body: FleetProfileApplicationCancelRequest,
-        application_id: str = Path(pattern=_UUID),
+        application_id: Annotated[str, Path(pattern=_UUID)],
         actor: Actor = actor_dependency,
     ) -> FleetProfileApplicationView:
         if actor.role not in MUTATION_ROLES[("POST", _CANCEL_PATH)]:

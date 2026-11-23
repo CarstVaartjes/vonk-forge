@@ -599,7 +599,6 @@ def install_metrics_routes(
 
     @app.get(
         "/api/metrics/catalogue",
-        response_model=list[MetricSpec],
         responses=bounded_error_responses(401),
         operation_id="getMetricsCatalogue",
     )
@@ -608,7 +607,6 @@ def install_metrics_routes(
 
     @app.get(
         "/api/metrics/series",
-        response_model=MetricsSeriesResponse,
         responses=bounded_error_responses(401, 422, 503),
         operation_id="getMetricsSeries",
     )

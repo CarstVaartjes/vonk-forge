@@ -1261,8 +1261,8 @@ def install_gateway_key_routes(
         operation_id="getGatewayKeyReceipt",
     )
     def key_receipt(
-        name: str = PathParameter(pattern=_NAME_PATTERN, max_length=63),
-        request_id: str = Query(min_length=1, max_length=128),
+        name: Annotated[str, PathParameter(pattern=_NAME_PATTERN, max_length=63)],
+        request_id: Annotated[str, Query(min_length=1, max_length=128)],
         actor: Actor = actor_dependency,
     ) -> GatewayMutationStatus:
         authorize(actor, _KEY_PATH)
@@ -1345,7 +1345,7 @@ def install_gateway_key_routes(
     )
     @operator_acceptance(ReceiptPolicy.KEY)
     def roll_gateway_key(
-        name: str = PathParameter(pattern=_NAME_PATTERN, max_length=63),
+        name: Annotated[str, PathParameter(pattern=_NAME_PATTERN, max_length=63)],
         request_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
         actor: Actor = actor_dependency,
     ) -> GatewayKeyCreated:

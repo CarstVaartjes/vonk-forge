@@ -75,21 +75,21 @@ def register_job_routes(
         openapi_extra={"x-vonk-response-max-bytes": MAX_CONTROL_DOCUMENT_BYTES},
     )
     def operations_view(
-        cursor: str | None = Query(default=None, max_length=MAX_CURSOR_LENGTH),
-        limit: int = Query(default=20, ge=1, le=100),
-        operation_state: str | None = Query(
-            default=None,
-            alias="state",
-            pattern=r"^[a-z][a-z0-9-]{0,31}$",
-        ),
-        node_id: str | None = Query(default=None, pattern=r"^spk_[0-9a-f]{32}$"),
-        request_id: str | None = Query(
-            default=None,
-            pattern=(
-                r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-                r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        cursor: Annotated[str | None, Query(max_length=MAX_CURSOR_LENGTH)] = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 20,
+        operation_state: Annotated[
+            str | None, Query(alias="state", pattern=r"^[a-z][a-z0-9-]{0,31}$")
+        ] = None,
+        node_id: Annotated[str | None, Query(pattern=r"^spk_[0-9a-f]{32}$")] = None,
+        request_id: Annotated[
+            str | None,
+            Query(
+                pattern=(
+                    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+                    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                )
             ),
-        ),
+        ] = None,
         _actor: Actor = authenticated_actor,
     ) -> OperationsResponse:
         if operations is None:
@@ -142,7 +142,7 @@ def register_job_routes(
         openapi_extra={"x-vonk-response-max-bytes": MAX_CONTROL_DOCUMENT_BYTES},
     )
     def operation_view(
-        operation_id: str = ApiPath(min_length=1, max_length=128),
+        operation_id: Annotated[str, ApiPath(min_length=1, max_length=128)],
         _actor: Actor = authenticated_actor,
     ) -> OperationDetailResponse:
         if operations is None:
@@ -177,11 +177,13 @@ def register_job_routes(
     )
     def job_view(
         job_id: str,
-        operation_cursor: str | None = Query(
-            default=None, max_length=MAX_CURSOR_LENGTH
-        ),
-        target_cursor: str | None = Query(default=None, max_length=MAX_CURSOR_LENGTH),
-        limit: int = Query(default=20, ge=1, le=100),
+        operation_cursor: Annotated[
+            str | None, Query(max_length=MAX_CURSOR_LENGTH)
+        ] = None,
+        target_cursor: Annotated[
+            str | None, Query(max_length=MAX_CURSOR_LENGTH)
+        ] = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 20,
         _actor: Actor = authenticated_actor,
     ) -> JobDetailResponse:
         try:

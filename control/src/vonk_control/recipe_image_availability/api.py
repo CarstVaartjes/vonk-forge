@@ -597,7 +597,7 @@ def install_recipe_operator_routes(
     def download(
         body: RecipeDownloadRequest,
         _request: Request,
-        selector: str = Path(min_length=1, max_length=256),
+        selector: Annotated[str, Path(min_length=1, max_length=256)],
         actor: Any = actor_dependency,
     ) -> RecipeImageAvailabilityResponse:
         _mutating(actor, "/api/recipe/{selector:path}/download")
@@ -629,7 +629,7 @@ def install_recipe_operator_routes(
     def remove(
         body: RecipeOperatorRequest,
         _request: Request,
-        selector: str = Path(min_length=1, max_length=256),
+        selector: Annotated[str, Path(min_length=1, max_length=256)],
         actor: Any = actor_dependency,
     ) -> RecipeOperatorResponse:
         _mutating(actor, "/api/recipe/{selector:path}/remove")
@@ -658,8 +658,8 @@ def install_recipe_operator_routes(
     )
     def review_remove(
         _request: Request,
-        selector: str = Path(min_length=1, max_length=256),
-        with_model: bool = Query(...),
+        selector: Annotated[str, Path(min_length=1, max_length=256)],
+        with_model: Annotated[bool, Query()],
         actor: Any = actor_dependency,
     ) -> CacheRemovalReview:
         _mutating(actor, "/api/recipe/{selector:path}/remove")

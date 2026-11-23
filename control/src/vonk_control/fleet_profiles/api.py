@@ -165,11 +165,10 @@ def install_fleet_profile_routes(
     def profile_endpoints(
         request: Request,
         number: Annotated[int, Path(ge=1, le=MAX_DATABASE_INTEGER)],
-        alias: str | None = Query(
-            default=None,
-            pattern=ENDPOINT_ALIAS_PATTERN,
-            max_length=ENDPOINT_ALIAS_MAX_LENGTH,
-        ),
+        alias: Annotated[
+            str | None,
+            Query(pattern=ENDPOINT_ALIAS_PATTERN, max_length=ENDPOINT_ALIAS_MAX_LENGTH),
+        ] = None,
         _actor: Actor = authenticated,
     ) -> FleetProfileEndpointsView:
         projection = getattr(operations, "profile_endpoint", None)
@@ -316,7 +315,7 @@ def install_fleet_profile_routes(
         operation_id="getProfileApplication",
     )
     def profile_application(
-        application_id: str = Path(pattern=_UUID),
+        application_id: Annotated[str, Path(pattern=_UUID)],
         _actor: Actor = authenticated,
     ) -> FleetProfileApplicationView:
         # A client that submitted one load must be able to follow that exact
@@ -342,7 +341,7 @@ def install_fleet_profile_routes(
     )
     def profile_application_by_request(
         number: Annotated[int, Path(ge=1, le=MAX_DATABASE_INTEGER)],
-        request_key: str = Path(pattern=_UUID),
+        request_key: Annotated[str, Path(pattern=_UUID)],
         actor: Actor = authenticated,
     ) -> FleetProfileApplicationView:
         try:
