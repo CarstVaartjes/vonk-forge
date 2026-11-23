@@ -154,7 +154,7 @@ export function CacheRemovalProgress({
         disabled={busy}
         onClick={() => void refresh()}
       >
-        {receipt ? "Refresh removal status" : "Check request status"}
+        {receipt ? "Refresh status" : "Refresh status"}
       </button>
       {!receipt && requestMissing && (
         <button

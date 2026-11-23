@@ -188,13 +188,13 @@ test("queued and partial cleanup remain visible until the same owner succeeds", 
   );
   expect(onRemoved).not.toHaveBeenCalled();
   expect(screen.queryByRole("button", { name: "Remove recipe" })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Refresh removal status" }));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Removal partial"));
   expect(screen.getByLabelText("Cache removal progress")).toHaveTextContent(
     "waiting for model child",
   );
   expect(onRemoved).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Refresh removal status" }));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
   await waitFor(() => expect(onRemoved).toHaveBeenCalledTimes(1));
   expect(recipeCacheOperation).toHaveBeenNthCalledWith(1, accepted.operation_id, expect.anything());
   expect(recipeCacheOperation).toHaveBeenNthCalledWith(2, accepted.operation_id, expect.anything());
@@ -240,7 +240,7 @@ test("an observation of another operation cannot complete accepted cleanup", asy
       onRejected={() => undefined}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Refresh removal status" }));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
   await waitFor(() =>
     expect(screen.getByRole("alert")).toHaveTextContent("different removal operation"),
   );
@@ -412,7 +412,7 @@ test("unreadable removal effects show unknown and preserve the original operatio
       onRejected={vi.fn()}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Refresh removal status" }));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
   expect(await screen.findByText(/Removal effects are unknown/)).toBeVisible();
   expect(screen.getByText("Removal unknown: operation")).toBeVisible();
   expect(

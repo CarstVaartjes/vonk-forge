@@ -611,7 +611,7 @@ function JobProgressDetails({
               disabled={loading}
               onClick={() => void loadDetail()}
             >
-              {loading ? "Retrying…" : "Try again"}
+              {loading ? "Retrying…" : "Retry"}
             </button>
           </div>
         )}
@@ -1725,7 +1725,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
             disabled={loading || loadingMore}
             onClick={() => setAttempt((value) => value + 1)}
           >
-            Try again
+            Retry
           </button>
         </section>
       )}

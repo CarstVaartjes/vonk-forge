@@ -310,6 +310,8 @@ The administrator menu is four uniform left-aligned rows (download CLI token, AP
 One word per thing, in the Controller, `vonkctl`, the site and the docs (owner decision, 20 Nov 2026).
 
 - **Load**: the profile verb. A profile is loaded onto the fleet (`profile load`).
+- **Refresh / Retry**: Refresh is a manual re-read of data that is correct but may be stale (it may carry the noun: "Refresh status"). Retry is the action offered after a read or an operation failed. No other verb ("Try again", "Check", "Review again") stands for either one. A surface that updates itself offers neither unless its last read failed.
+- **Remove / Delete / Revoke**: Remove is for anything stored or enrolled (cached models and recipes, installations, Sparks). Delete is only for user-authored saved profiles. Revoke is only for credentials (client keys, enrollment grants). The Controller, `vonkctl` and the web interface use the same word for the same thing.
 - **Controller**: the host that runs the control plane and serves the web interface.
 - **Overview / Workloads**: the two views of where things run. Overview leads with the workload per Spark; Workloads is one line per workload.
 - **Capabilities**: what a model or recipe can do.

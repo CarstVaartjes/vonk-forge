@@ -658,7 +658,7 @@ test("shows a retryable operation-detail failure without offering resume", async
   await user.click(screen.getByText("View operation progress"));
   expect(await screen.findByRole("alert")).toHaveTextContent("operation projection unavailable");
   expect(screen.queryByRole("button", { name: "Resume operation" })).not.toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Try again" }));
+  await user.click(screen.getByRole("button", { name: "Retry" }));
   expect(await screen.findByText("worker exited")).toBeVisible();
   expect(loadJob).toHaveBeenCalledTimes(2);
 });
@@ -679,7 +679,7 @@ test("shows a retryable error when activity fails to load", async () => {
   expect(
     screen.queryByRole("region", { name: "Activity history coverage" }),
   ).not.toBeInTheDocument();
-  await user.click(within(alert).getByRole("button", { name: "Try again" }));
+  await user.click(within(alert).getByRole("button", { name: "Retry" }));
   await waitFor(() => expect(screen.getByText("No activity yet")).toBeVisible());
   expect(loadOperations).toHaveBeenCalledTimes(2);
 });
@@ -756,7 +756,7 @@ test("shows a full retryable error when operations fail to load", async () => {
   expect(
     screen.queryByRole("region", { name: "Activity history coverage" }),
   ).not.toBeInTheDocument();
-  await user.click(within(alert).getByRole("button", { name: "Try again" }));
+  await user.click(within(alert).getByRole("button", { name: "Retry" }));
   expect(client.operations).toHaveBeenCalledTimes(2);
 });
 
