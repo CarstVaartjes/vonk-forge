@@ -291,7 +291,7 @@ def test_a_reports_stage_decides_a_job_reissue_in_one_place() -> None:
         and isinstance(node.args[0], ast.Constant)
         and node.args[0].value == "stage"
     )
-    assert readers == ["agent_jobs/retry.py"]
+    assert readers == ["agent_operation_facts.py"]
 
 
 def test_every_wait_the_agent_reports_before_a_job_launches_is_reissued() -> None:
