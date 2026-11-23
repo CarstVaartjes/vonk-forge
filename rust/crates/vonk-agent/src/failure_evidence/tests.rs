@@ -1,5 +1,6 @@
 #![cfg(test)]
 use super::*;
+use std::fmt::Write as _;
 
 /// Scales the fixtures that are sized against the retained bound.
 const SCALE: usize = LOG_BYTES / 2048;
@@ -13,7 +14,7 @@ fn a_retained_tail_is_bounded_as_the_shared_clamp_vector_says() {
     .expect("log-tail omission vector");
     for case in vector["clamps"].as_array().expect("clamp cases") {
         let text = case["text"].as_str().expect("text").to_owned();
-        let limit = case["limit"].as_u64().expect("limit") as usize;
+        let limit = usize::try_from(case["limit"].as_u64().expect("limit")).unwrap();
         let (kept, dropped) = clamp_retained(text.clone(), limit);
         assert_eq!(kept, case["kept"].as_str().expect("kept"), "{text:?}");
         assert_eq!(
@@ -32,9 +33,11 @@ fn a_podman_crash_header_stays_ahead_of_its_goroutine_dump() {
         "uv: downloading wheels\npanic: runtime error: index out of range\n\ngoroutine 61 [running]:\n",
     );
     for frame in 0..80 {
-        stderr.push_str(&format!(
+        write!(
+            stderr,
             "netavark.frame{frame}(...)\n\t/go/src/f{frame}.go:1\n"
-        ));
+        )
+        .unwrap();
     }
     let tail = podman_stderr_tail(stderr.as_bytes());
     assert!(

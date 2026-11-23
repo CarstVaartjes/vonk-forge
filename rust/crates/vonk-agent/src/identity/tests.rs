@@ -41,7 +41,7 @@ pub(super) fn certificate_material(generation: u64, expired: bool) -> IdentityMa
 #[test]
 fn interrupted_pending_publication_keeps_active_authority_and_accepts_a_new_csr() {
     for name in ["pending-key.pem", "pending-csr.pem"] {
-        let temporary = tempfile::tempdir().unwrap();
+        let temporary = tempdir().unwrap();
         let root = temporary.path().join("credentials");
         persist_identity(&root, &material(1, 7)).unwrap();
         let active = fs::read(root.join("private-key.pem")).unwrap();

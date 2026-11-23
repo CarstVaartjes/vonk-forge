@@ -9,13 +9,17 @@ use sha2::{Digest, Sha256};
 pub(super) fn now() -> Result<i64, String> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
+        .map(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
         .map_err(|e| e.to_string())
 }
 pub(super) fn digest(path: &Path) -> Result<String, String> {
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
+        .custom_flags(
+            (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                .bits()
+                .cast_signed(),
+        )
         .open(path)
         .map_err(|e| e.to_string())?;
     digest_file(&mut file)
@@ -36,7 +40,9 @@ pub(super) fn digest_file(file: &mut File) -> Result<String, String> {
                 vonk_agent_protocol::generated::WaitReason::ObservationUnavailable.to_string(),
             );
         }
-        let limit = remaining.min(buffer.len() as u64) as usize;
+        let limit = usize::try_from(remaining)
+            .unwrap_or(usize::MAX)
+            .min(buffer.len());
         let count = file
             .read(&mut buffer[..limit])
             .map_err(|error| error.to_string())?;

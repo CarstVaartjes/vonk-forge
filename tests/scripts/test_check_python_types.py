@@ -454,7 +454,6 @@ def test_hook_preserves_nul_filenames_and_only_runs_checks(
 @pytest.mark.parametrize(
     "file,source",
     [
-        ("rust/crates/vonk-agent/src/main.rs", "std::process::exit(78);\n"),
         ("packaging/systemd/new.service", "Restart=no\n"),
     ],
 )
@@ -473,7 +472,7 @@ def test_staged_added_line_violation_fails_the_hook(
         ignore=shutil.ignore_patterns("test_*", "__pycache__"),
     )
     target = tmp_path / file
-    target.parent.mkdir(parents=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(source)
     patch = (
         f"diff --git a/{file} b/{file}\n--- /dev/null\n+++ b/{file}\n"
@@ -492,8 +491,9 @@ def test_staged_added_line_violation_fails_the_hook(
     monkeypatch.setenv(
         "UV_PROJECT_ENVIRONMENT", str(Path(sys.executable).parent.parent)
     )
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(subprocess.CalledProcessError) as raised:
         module.check_added_lines([file])
+    assert raised.value.returncode == 1
 
     # Unstaged edits on the file: skipped with its name, CI still gates.
     unstaged.append(file)

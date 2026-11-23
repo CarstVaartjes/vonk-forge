@@ -244,10 +244,15 @@ pub(super) fn rollback_retry_budget(tx: &Transaction, timestamp: i64) -> Option<
     let deadline = tx
         .rollback
         .activation_deadline
-        .saturating_add(ROLLBACK_RETRY_TIMEOUT.as_secs() as i64);
+        .saturating_add(i64::try_from(ROLLBACK_RETRY_TIMEOUT.as_secs()).unwrap_or(i64::MAX));
     let remaining = deadline.saturating_sub(timestamp);
-    (remaining > 0)
-        .then(|| Duration::from_secs((remaining as u64).min(ROLLBACK_RETRY_TIMEOUT.as_secs())))
+    (remaining > 0).then(|| {
+        Duration::from_secs(
+            remaining
+                .unsigned_abs()
+                .min(ROLLBACK_RETRY_TIMEOUT.as_secs()),
+        )
+    })
 }
 
 pub(super) fn retry_process_proof<F>(

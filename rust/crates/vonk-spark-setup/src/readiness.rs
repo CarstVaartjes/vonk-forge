@@ -48,36 +48,33 @@ pub(super) fn verify_sustained_readiness(
                 ),
             )
         });
-        match current_pid.and_then(|output| {
+        if let Ok(current_pid) = current_pid.and_then(|output| {
             let value = String::from_utf8(output.stdout)
                 .map_err(|_| SetupError::Command("systemctl".to_owned()))?;
             let value = value.trim();
             if value
                 .parse::<u32>()
                 .ok()
-                .filter(|value| *value != 0)
-                .is_none()
+                .as_ref()
+                .is_none_or(|value| *value == 0)
             {
                 return Err(SetupError::Command("systemctl".to_owned()));
             }
             Ok(value.to_owned())
         }) {
-            Ok(current_pid) => {
-                if pid.as_ref() != Some(&current_pid) {
-                    healthy = 0;
-                }
-                pid = Some(current_pid.clone());
-                let ready = run_checked(runner, readiness_probe(paths, &current_pid, true));
-                if ready.is_ok() {
-                    healthy += 1;
-                } else {
-                    healthy = 0;
-                }
-            }
-            Err(_) => {
+            if pid.as_ref() != Some(&current_pid) {
                 healthy = 0;
-                pid = None;
             }
+            pid = Some(current_pid.clone());
+            let ready = run_checked(runner, readiness_probe(paths, &current_pid, true));
+            if ready.is_ok() {
+                healthy += 1;
+            } else {
+                healthy = 0;
+            }
+        } else {
+            healthy = 0;
+            pid = None;
         }
         if healthy >= READINESS_REQUIRED_SAMPLES {
             return Ok(());
@@ -92,6 +89,10 @@ pub(super) fn verify_sustained_readiness(
     // or an invalid self-test) to repair the host.  These final diagnostics do
     // not include any credentials and inherit stderr from the setup command.
     if let Some(current_pid) = pid {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort cleanup: the next reconciliation pass repeats it"
+        )]
         let _ = runner.run(readiness_probe(paths, &current_pid, false));
     } else {
         emit_diagnostic_stdout(runner.run(Command::new(
@@ -116,7 +117,7 @@ pub(super) fn verify_sustained_readiness(
 }
 
 /// The command runner captures stdout so setup can inspect machine-readable
-/// values (for example, systemd's MainPID).  Final failure diagnostics are
+/// values (for example, systemd's `MainPID`).  Final failure diagnostics are
 /// human-facing, though, and systemctl/journalctl write their useful detail to
 /// stdout.  Forward only this bounded, non-secret diagnostic output; transient
 /// readiness probes and command failures remain fail-closed and quiet.

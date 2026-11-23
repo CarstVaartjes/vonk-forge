@@ -219,7 +219,8 @@ fn process_proof_returns_the_last_error_at_the_deadline() {
 #[test]
 fn rollback_retry_end_survives_restart_and_a_fresh_request_is_admitted() {
     let mut tx = transaction();
-    let end = tx.rollback.activation_deadline + ROLLBACK_RETRY_TIMEOUT.as_secs() as i64;
+    let end =
+        tx.rollback.activation_deadline + i64::try_from(ROLLBACK_RETRY_TIMEOUT.as_secs()).unwrap();
     assert_eq!(
         rollback_retry_budget(&tx, end - 1),
         Some(Duration::from_secs(1))
@@ -408,13 +409,17 @@ fn retiring_leaves_finished_and_missing_transactions_alone() {
     );
 }
 
-fn watch_outcome(tx: Transaction, restore: Result<(), String>) -> (Phase, u32, u32) {
+fn watch_outcome(tx: &Transaction, restore: &Result<(), String>) -> (Phase, u32, u32) {
     let temporary = tempfile::tempdir().unwrap();
     let store = tempdir_store(&temporary);
     drop(store.lock().unwrap());
-    store.write(&tx).unwrap();
+    store.write(tx).unwrap();
     let (attempts, heals) = (Cell::new(0), Cell::new(0));
     // A failed restore is also the watchdog's own error; the journal carries it.
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "a failed restore is also the watchdog's own error; the journal carries it"
+    )]
     let _ = store.watch_with(
         |_, _| {
             attempts.set(attempts.get() + 1);
@@ -430,11 +435,11 @@ fn a_failed_restore_ends_rollback_failed_and_starts_the_agent_again() {
     // Armed and due: the deadline is the current second.
     let mut due = transaction();
     due.rollback.activation_deadline = now().unwrap();
-    let (phase, attempts, heals) = watch_outcome(due, Err("dpkg failed".into()));
+    let (phase, attempts, heals) = watch_outcome(&due, &Err("dpkg failed".into()));
     assert_eq!((phase, attempts, heals), (Phase::RollbackFailed, 1, 1));
     // The retry budget is spent (a restart after the failure): no attempt, and
     // the agent is still started again.
-    let (phase, attempts, heals) = watch_outcome(transaction(), Err("dpkg failed".into()));
+    let (phase, attempts, heals) = watch_outcome(&transaction(), &Err("dpkg failed".into()));
     assert_eq!((phase, attempts, heals), (Phase::RollbackFailed, 0, 1));
 }
 
@@ -442,7 +447,7 @@ fn a_failed_restore_ends_rollback_failed_and_starts_the_agent_again() {
 fn a_successful_restore_starts_nothing_extra() {
     let mut due = transaction();
     due.rollback.activation_deadline = now().unwrap();
-    let (phase, attempts, heals) = watch_outcome(due, Ok(()));
+    let (phase, attempts, heals) = watch_outcome(&due, &Ok(()));
     assert_eq!((phase, attempts, heals), (Phase::RolledBack, 1, 0));
 }
 

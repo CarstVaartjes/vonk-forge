@@ -67,7 +67,7 @@ fn exec_accounting_accepts_empty_and_multiline_arguments_at_exact_limit() {
 
     let mut one_more = args;
     one_more.push("x".to_owned());
-    let expected_over = usage.total_bytes + 2 + std::mem::size_of::<usize>() as u64;
+    let expected_over = usage.total_bytes + 2 + size_of::<usize>() as u64;
     assert!(matches!(
         measure_exec_invocation("/usr/bin/docker", &one_more, &environment, exact),
         Err(CompiledOciError::InvocationBytes { limit, observed })

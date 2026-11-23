@@ -1,5 +1,8 @@
-#![forbid(unsafe_code)]
 //! Actual generated wire parsers and durable agent result writer/restart reader.
+#![expect(
+    clippy::expect_used,
+    reason = "example program: a failed unwrap ends the demonstration"
+)]
 use std::{
     io::{self, Read},
     path::PathBuf,
@@ -18,6 +21,10 @@ use vonk_agent_protocol::generated::{
 use vonk_agent_protocol::{AgentClaim, AgentResult, canonical_json, parse_strict};
 
 #[tokio::main]
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "any other value is the failure this code reports"
+)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut raw = Vec::new();
     io::stdin().read_to_end(&mut raw)?;

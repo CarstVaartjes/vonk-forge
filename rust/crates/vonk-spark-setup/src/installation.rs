@@ -4,6 +4,10 @@ use super::*;
 
 pub(super) use vonk_agent_protocol::generated::SparkInstallationState as InstallState;
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the Result keeps the signature shared with its sibling operations"
+)]
 pub(super) fn install_state(paths: &InstallPaths) -> Result<InstallState, SetupError> {
     // Generated files and the marker are observations, never admission gates.
     // A valid config keeps enrollment identity; otherwise bootstrap uses the
@@ -150,6 +154,10 @@ fn parse_firewall_configuration(
     Ok(config)
 }
 
+#[expect(
+    clippy::match_same_arms,
+    reason = "the arms stay apart on purpose: each names a distinct case of the state machine"
+)]
 pub(super) fn safe_existing_parent(
     path: &Path,
     required_owner: Option<u32>,
@@ -217,6 +225,10 @@ pub(super) fn paired_configuration(
     ))
 }
 
+#[expect(
+    clippy::match_same_arms,
+    reason = "the arms stay apart on purpose: each names a distinct case of the state machine"
+)]
 pub(super) fn safe_existing_file(
     path: &Path,
     required_owner: Option<u32>,

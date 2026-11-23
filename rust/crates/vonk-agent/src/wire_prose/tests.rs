@@ -31,11 +31,16 @@ fn prose_leaves(value: &Value, found: &mut Vec<String>) {
                     Value::String(text) if PROSE_LEAVES.contains(&key.as_str()) => {
                         found.push(text.clone());
                     }
-                    _ => prose_leaves(field, found),
+                    Value::Null
+                    | Value::Bool(_)
+                    | Value::Number(_)
+                    | Value::String(_)
+                    | Value::Array(_)
+                    | Value::Object(_) => prose_leaves(field, found),
                 }
             }
         }
-        _ => {}
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
     }
 }
 

@@ -18,8 +18,7 @@ fn completed_install_retry_reuses_exact_receipt_without_another_space_reservatio
     let data = tempdir().unwrap();
     let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f".to_owned();
     let installation = data.path().join("installations").join(&installation_id);
-    let plan: crate::workloads::CompiledExecutionPlan =
-        serde_json::from_value(compiled_plan()).unwrap();
+    let plan: CompiledExecutionPlan = serde_json::from_value(compiled_plan()).unwrap();
     let recipe_digest = plan.identity.recipe_revision_sha256.clone();
     let model_root = data.path().join("distribution/models");
     fs::create_dir_all(&model_root).unwrap();
@@ -51,11 +50,7 @@ fn completed_install_retry_reuses_exact_receipt_without_another_space_reservatio
             fs::read(installation.join("models/primary/config.json")).unwrap(),
             b"primary"
         );
-        assert!(
-            installation
-                .join(super::INSTALLATION_METADATA_FILE)
-                .is_file()
-        );
+        assert!(installation.join(INSTALLATION_METADATA_FILE).is_file());
     }
     let runtime = runtime(data.path(), &runner);
     let unavailable_full_copy_bytes = crate::inventory::available_disk_bytes(data.path()).unwrap();
@@ -83,7 +78,7 @@ fn completed_install_retry_reuses_exact_receipt_without_another_space_reservatio
     assert!(model_root.is_dir());
 
     fs::write(
-        installation.join(super::INSTALLATION_METADATA_FILE),
+        installation.join(INSTALLATION_METADATA_FILE),
         b"invalid receipt",
     )
     .unwrap();
@@ -168,7 +163,7 @@ fn installation_metadata_deduplicates_physical_projection_entries() {
     let mut second = first.clone();
     second["mount"]["target"] = json!("/models/target");
     value["artifacts"] = json!([first, second]);
-    let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+    let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
     let (installation_id, installation, plan) = persisted_plan_installation(
         data.path(),
         "cb555393-764b-4eb6-8f15-b416d2894291".to_owned(),
@@ -405,8 +400,7 @@ fn normal_uninstall_resumes_after_identifying_files_were_deleted() {
     };
     runtime.prepare_reconciliation(&identity).unwrap();
     let root = data.path().join(INSTALLATION_RECONCILIATION_ROOT);
-    let quarantine =
-        super::super::reconciliation::reconciliation_quarantine_path(&root, &id).unwrap();
+    let quarantine = reconciliation::reconciliation_quarantine_path(&root, &id).unwrap();
     fs::rename(&installation, &quarantine).unwrap();
     fs::remove_file(quarantine.join("spec.json")).unwrap();
     // A fresh normal uninstall reobserves remaining effects without reopening
@@ -455,10 +449,9 @@ fn repair_from_current_plan(data: &Path, installation_id: &str, plan: &CompiledE
 fn resumed_install_credits_bytes_already_in_partial_files() {
     let data = tempdir().unwrap();
     let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
-    let plan: crate::workloads::CompiledExecutionPlan =
-        serde_json::from_value(compiled_plan()).unwrap();
+    let plan: CompiledExecutionPlan = serde_json::from_value(compiled_plan()).unwrap();
     assert_eq!(
-        super::resumable_partial_bytes(data.path(), installation_id, &plan),
+        resumable_partial_bytes(data.path(), installation_id, &plan),
         0
     );
     let artifact = &plan.artifacts[0];
@@ -476,7 +469,7 @@ fn resumed_install_credits_bytes_already_in_partial_files() {
     .unwrap();
     // Only the remainder is required: expected size minus the partial bytes.
     assert_eq!(
-        super::resumable_partial_bytes(data.path(), installation_id, &plan),
+        resumable_partial_bytes(data.path(), installation_id, &plan),
         3.min(artifact.size_bytes)
     );
 }

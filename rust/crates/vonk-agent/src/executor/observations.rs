@@ -17,7 +17,9 @@ fn run_name_target(run_id: &str) -> Result<RunInspectTarget, RecipeObservationEr
 pub(super) fn first_report_of_run(key: &str) -> bool {
     static SEEN: std::sync::Mutex<Option<std::collections::HashSet<String>>> =
         std::sync::Mutex::new(None);
-    let mut seen = SEEN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut seen = SEEN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     seen.get_or_insert_with(Default::default)
         .insert(key.to_owned())
 }
@@ -527,16 +529,13 @@ impl<R> RecipeExecutor<'_, R> {
                 let plan = match prepared {
                     Ok(plan) => plan,
                     Err(failure) => {
-                        return match failure.run_id {
-                            Some(run_id) => {
-                                self.observe_unreadable_run(&run_id, &failure.error).await
+                        return if let Some(run_id) = failure.run_id {
+                            self.observe_unreadable_run(&run_id, &failure.error).await
+                        } else {
+                            if first_report_of_run("invalid-observation-directory-entry") {
+                                eprintln!("vonk-agent: managed run scan has an invalid directory entry ({}); absence remains unknown", failure.error.safe_category());
                             }
-                            None => {
-                                if first_report_of_run("invalid-observation-directory-entry") {
-                                    eprintln!("vonk-agent: managed run scan has an invalid directory entry ({}); absence remains unknown", failure.error.safe_category());
-                                }
-                                Err(RecipeObservationError::SkippedRun)
-                            },
+                            Err(RecipeObservationError::SkippedRun)
                         };
                     }
                 };
@@ -572,7 +571,7 @@ impl<R> RecipeExecutor<'_, R> {
                 if process_running {
                     running
                         .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .push((plan.run_id.to_string(), inspection.container_labels.clone()));
                 } else if self
                     .retire_unowned_run(&plan.run_id.to_string(), "not running")
@@ -670,7 +669,7 @@ impl<R> RecipeExecutor<'_, R> {
         // Delivered or not, a container nothing owns is still stopped.
         let running = running
             .into_inner()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         self.settle_running_unowned(confirmed, running, windows)
             .await;
         let reported = reported?;
@@ -694,7 +693,7 @@ impl<R> RecipeExecutor<'_, R> {
         target: &ContainerRunTarget,
         run_generation: u64,
         why: &str,
-    ) -> super::failures::WorkloadEvidence {
+    ) -> WorkloadEvidence {
         let request_root = self.runtime_root.join("runtime-requests");
         let boundary = HostRuntimeBoundary {
             client: self.client,
@@ -712,17 +711,17 @@ impl<R> RecipeExecutor<'_, R> {
                         .log_error
                         .as_deref()
                         .unwrap_or("the helper returned no output");
-                    account.push_str(&format!(
-                        " logs_unavailable={:?}",
+                    account = format!(
+                        "{account} logs_unavailable={:?}",
                         reason.chars().take(160).collect::<String>()
-                    ));
+                    );
                 }
                 // A guard stop's receipt answers as the inspection's log error.
                 let exit_summary = report.log_error.clone().filter(|text| {
                     crate::failure_evidence::ExitCause::of_summary(text)
                         == Some(crate::failure_evidence::ExitCause::HostMemoryExhausted)
                 });
-                super::failures::WorkloadEvidence {
+                WorkloadEvidence {
                     logs: report.process_logs.map(|logs| *logs),
                     account,
                     exit_summary,
@@ -737,12 +736,12 @@ impl<R> RecipeExecutor<'_, R> {
                     account.push_str(&detail.chars().take(320).collect::<String>());
                 }
                 if error.process_logs().is_none() {
-                    account.push_str(&format!(
-                        " logs_unavailable=\"inspection failed: {}\"",
+                    account = format!(
+                        "{account} logs_unavailable=\"inspection failed: {}\"",
                         error.preflight_code()
-                    ));
+                    );
                 }
-                super::failures::WorkloadEvidence {
+                WorkloadEvidence {
                     logs: error.process_logs().cloned(),
                     account,
                     exit_summary: error.diagnostic().map(str::to_owned),

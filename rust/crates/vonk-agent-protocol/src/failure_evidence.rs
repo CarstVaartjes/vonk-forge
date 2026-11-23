@@ -1,3 +1,4 @@
+use crate::generated::FailureLogPolicy;
 pub use crate::generated::{
     FailureDiagnostics, FailureDiagnosticsCategory as FailureCategory, FailureLogTail,
     FailureProperty,
@@ -7,6 +8,10 @@ include!(concat!(env!("OUT_DIR"), "/failure_log_policy.rs"));
 
 /// Bytes retained per failure log stream, from `FailureLogPolicy` in the Python
 /// protocol: the helper, the agent and the Controller bound a log by this one number.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "a small policy constant; usize is 64-bit on every supported target and `try_from` is not const"
+)]
 pub const LOG_TAIL_BYTES: usize = FAILURE_LOG_POLICY.log_tail_bytes as usize;
 
 /// The field of a process-exit summary that carries the uncaught exception
@@ -28,7 +33,7 @@ pub const FAILURE_PROPERTY_VALUE_CHARS: usize = 256;
 /// A process-exit summary's bound on the helper's reply.
 pub const EXIT_SUMMARY_CHARS: usize = 480;
 /// A host-memory-guard summary is all facts, each its own failure property:
-/// bounded by those properties, not cut at EXIT_SUMMARY_CHARS.
+/// bounded by those properties, not cut at `EXIT_SUMMARY_CHARS`.
 pub const HOST_MEMORY_SUMMARY_CHARS: usize =
     MAX_PREFLIGHT_PROPERTIES * (64 + 2 + FAILURE_PROPERTY_VALUE_CHARS);
 
@@ -84,7 +89,7 @@ impl ExitCause {
 
     /// The process ended without running its own cleanup: the host memory
     /// guard or the kernel's OOM killer sent it SIGKILL (`host_memory_exhausted`,
-    /// `oom_killed`: the runtime's OOMKilled fact), or it ended by a signal
+    /// `oom_killed`: the runtime's `OOMKilled` fact), or it ended by a signal
     /// (`crashed_by_signal`: SIGABRT/SIGBUS/SIGKILL/SIGSEGV, exit
     /// 134/135/137/139; a bare 137 is not proof of OOM). What it left behind is a
     /// consequence of that ending, not something it chose to produce. A
@@ -135,9 +140,10 @@ impl FailureDiagnostics {
                         && value.value.chars().count() <= FAILURE_PROPERTY_VALUE_CHARS
                 })
         };
-        let valid = serde_json::to_vec(self)
-            .is_ok_and(|bytes| bytes.len() <= FAILURE_LOG_POLICY.document_bytes as usize)
-            && self.collected_at.chars().count() <= 64
+        let valid = serde_json::to_vec(self).is_ok_and(|bytes| {
+            u64::try_from(bytes.len())
+                .is_ok_and(|length| length <= FAILURE_LOG_POLICY.document_bytes)
+        }) && self.collected_at.chars().count() <= 64
             && self.process_exit_code.is_none_or(|code| code <= 255)
             && self.schema_version == 1
             && chrono::DateTime::parse_from_rfc3339(&self.collected_at).is_ok()

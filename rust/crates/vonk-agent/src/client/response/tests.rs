@@ -75,11 +75,11 @@ async fn exact_worker_observation_reports_process_without_endpoint_result() {
         .position(|value| value == b"\r\n\r\n")
         .map(|index| &raw[index + 4..])
         .unwrap();
-    let body: serde_json::Value = serde_json::from_slice(body).unwrap();
+    let body: Value = serde_json::from_slice(body).unwrap();
     assert!(body["observed_at"].is_string());
     assert_eq!(body["runs"][0]["run_id"], run_id.to_string());
     assert_eq!(body["runs"][0]["process_running"], false);
-    assert_eq!(body["runs"][0]["endpoint_ready"], serde_json::Value::Null);
+    assert_eq!(body["runs"][0]["endpoint_ready"], Value::Null);
     assert_eq!(body["runs"][0]["run_generation"], i64::MAX as u64);
 }
 
@@ -92,8 +92,7 @@ async fn controller_rejection_preserves_safe_status_code_and_request_id() {
             "X-Request-ID: 00000000-0000-4000-8000-000000000099".to_owned(),
             format!(
                 "X-Vonk-Error-Code: {}",
-                vonk_agent_protocol::generated::SecurityRefusalReason::ControllerRequestRejected
-                    .as_str()
+                SecurityRefusalReason::ControllerRequestRejected.as_str()
             ),
         ],
         Vec::new(),
@@ -110,10 +109,7 @@ async fn controller_rejection_preserves_safe_status_code_and_request_id() {
     assert_eq!(error.status(), Some(403));
     assert_eq!(
         error.code(),
-        Some(
-            vonk_agent_protocol::generated::SecurityRefusalReason::ControllerRequestRejected
-                .as_str()
-        )
+        Some(SecurityRefusalReason::ControllerRequestRejected.as_str())
     );
     assert_eq!(
         error.request_id(),
@@ -127,7 +123,7 @@ fn a_union_refusal_digest_reports_the_broken_constraint_not_the_branches() {
     // The Controller reports every union branch that did not match, so the
     // digest must surface the one constraint the producer broke and count
     // the rest, instead of listing branch shape mismatches.
-    let body = rejection_problem(serde_json::json!([
+    let body = rejection_problem(&serde_json::json!([
         {
             "type": "missing",
             "loc": ["body", "result", "RuntimePreflightResult", "schema_version"],
@@ -173,7 +169,7 @@ fn a_refusal_digest_falls_back_to_shape_errors_and_stays_bounded() {
     // remain are still more useful than nothing, and an over-long location
     // is truncated rather than refusing the record.
     let long = "segment".repeat(40);
-    let body = rejection_problem(serde_json::json!([
+    let body = rejection_problem(&serde_json::json!([
         {"type": "missing", "loc": ["body", long, "state"], "msg": "Field required"}
     ]));
 
@@ -216,7 +212,7 @@ async fn a_refused_result_records_the_controller_validation_digest() {
     // End to end over the real transport: the 422 problem the Controller
     // publishes is what the durable refusal keeps, so an operator can read
     // the failing field and rule from the agent's own record.
-    let body = rejection_problem(serde_json::json!([
+    let body = rejection_problem(&serde_json::json!([
         {
             "type": "missing",
             "loc": ["body", "result", "RuntimePreflightResult", "schema_version"],
@@ -297,7 +293,7 @@ async fn transport_timeout_uses_full_jitter_with_a_cap() {
             Box::pin(std::future::pending())
         }
     }
-    let error = reqwest::Client::builder()
+    let error = Client::builder()
         .no_proxy()
         .dns_resolver(Arc::new(StalledResolver))
         .build()
@@ -334,8 +330,7 @@ async fn host_grant_403_keeps_typed_denial_without_retrying_or_stopping_the_agen
         403,
         vec![format!(
             "x-vonk-error-code: {}",
-            vonk_agent_protocol::generated::SecurityRefusalReason::HostHelperAuthorityDenied
-                .as_str()
+            SecurityRefusalReason::HostHelperAuthorityDenied.as_str()
         )],
         Vec::new(),
         None,
@@ -359,10 +354,7 @@ async fn host_grant_403_keeps_typed_denial_without_retrying_or_stopping_the_agen
     assert_eq!(error.disposition(), Disposition::Security);
     assert_eq!(
         error.code(),
-        Some(
-            vonk_agent_protocol::generated::SecurityRefusalReason::HostHelperAuthorityDenied
-                .as_str()
-        )
+        Some(SecurityRefusalReason::HostHelperAuthorityDenied.as_str())
     );
     assert_eq!(
         error.decision(),

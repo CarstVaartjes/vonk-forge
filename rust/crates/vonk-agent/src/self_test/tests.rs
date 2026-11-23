@@ -26,13 +26,13 @@ fn private_directory_observation_repairs_owned_permissions_without_waiting() {
     fs::create_dir(&path).unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     let mut waits = 0;
-    let result = super::observe_private_directory(
-        || super::inspect_private_directory(&path, "runtime"),
+    let result = observe_private_directory(
+        || inspect_private_directory(&path, "runtime"),
         || waits += 1,
     );
     assert!(result.is_ok() && waits == 0);
     assert_eq!(fs::metadata(&path).unwrap().mode() & 0o777, 0o700);
-    assert!(super::verify_private_directory(&path, "runtime").is_ok());
+    assert!(verify_private_directory(&path, "runtime").is_ok());
 }
 
 #[test]
@@ -40,7 +40,7 @@ fn unavailable_private_directory_has_a_finite_budget_and_no_fresh_gate() {
     for unreadable in [true, false] {
         let mut reads = 0;
         let mut waits = 0;
-        let result = super::observe_private_directory(
+        let result = observe_private_directory(
             || {
                 reads += 1;
                 if unreadable {
@@ -55,6 +55,6 @@ fn unavailable_private_directory_has_a_finite_budget_and_no_fresh_gate() {
         );
         assert!(result.is_err());
         assert_eq!((reads, waits), (3, 2));
-        assert!(super::observe_private_directory(|| Ok(()), || panic!("no wait")).is_ok());
+        assert!(observe_private_directory(|| Ok(()), || panic!("no wait")).is_ok());
     }
 }

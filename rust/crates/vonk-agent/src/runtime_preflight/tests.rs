@@ -212,7 +212,7 @@ fn excessive_runroot_and_unverified_fabric_do_not_become_success() {
     let runner = Runner::default();
     let mut req = request();
     req.fabric_connectivity = "connected".parse().unwrap();
-    req.fabric_minimum_mbps = 300000;
+    req.fabric_minimum_mbps = 300_000;
     let result = RuntimePreflight {
         runner: &runner,
         data_root: data.path(),
@@ -231,7 +231,9 @@ fn excessive_runroot_and_unverified_fabric_do_not_become_success() {
         runtime_root: &runtime,
         probe_binary: Path::new("/unneeded"),
     }
-    .run(&req, "a".repeat(64), Some(("connected", 200000)), &|| false)
+    .run(&req, "a".repeat(64), Some(("connected", 200_000)), &|| {
+        false
+    })
     .unwrap();
     assert_eq!(status(&result, "fabric").status, Status::Unknown);
     let short_runtime = tempfile::tempdir().unwrap();
@@ -244,7 +246,9 @@ fn excessive_runroot_and_unverified_fabric_do_not_become_success() {
         runtime_root: short_runtime.path(),
         probe_binary: &binary,
     }
-    .run(&req, "b".repeat(64), Some(("connected", 400000)), &|| false)
+    .run(&req, "b".repeat(64), Some(("connected", 400_000)), &|| {
+        false
+    })
     .unwrap();
     assert_eq!(status(&fresh, "fabric").status, Status::Passed);
     assert_eq!(status(&fresh, "podman_build").status, Status::Passed);

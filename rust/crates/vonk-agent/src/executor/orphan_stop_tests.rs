@@ -51,7 +51,7 @@ impl World {
 
     /// One run the agent holds a readable lifecycle for.
     fn prepared_run(&self, generation: u64) -> (Uuid, Uuid) {
-        let mut plan: crate::workloads::CompiledExecutionPlan = serde_json::from_str(include_str!(
+        let mut plan: CompiledExecutionPlan = serde_json::from_str(include_str!(
             "../../../../../control/tests/fixtures/compiled_workload_v2.json"
         ))
         .unwrap();
@@ -85,7 +85,7 @@ impl World {
             &installation.to_string(),
             &run.to_string(),
             &plan.runtime.placement,
-            &crate::oci::RecipeRunStartIdentity {
+            &RecipeRunStartIdentity {
                 run_generation: generation,
             },
         )

@@ -35,6 +35,10 @@ fn trickle(chunks: usize, pause: Duration) -> String {
             }
         }
         let length = chunks.max(1) * CHUNK;
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the peer may have closed the connection; the assertions are on the other side"
+        )]
         let _ = write!(
             stream,
             "HTTP/1.1 200 OK\r\nContent-Length: {length}\r\n\r\n"

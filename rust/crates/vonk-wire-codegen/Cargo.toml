@@ -13,3 +13,6 @@ serde_json.workspace = true
 syn = { version = "=3.0.9", features = ["full", "visit-mut"] }
 prettyplease = "=0.3.0"
 quote = "=1.0.47"
+
+[lints]
+workspace = true

@@ -1,5 +1,8 @@
-#![forbid(unsafe_code)]
-
+#![expect(
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -34,7 +37,7 @@ fn schema2_dual_plan() -> CompiledExecutionPlan {
     value["runtime"]["placement"] = json!({
         "endpoint_address": null, "rank": 1, "role": "worker", "world_size": 2,
         "local_address": "192.168.100.11", "master_address": "192.168.100.10",
-        "master_port": 29500, "port": 8000, "reserved_memory_bytes": 68719476736_u64,
+        "master_port": 29500, "port": 8000, "reserved_memory_bytes": 68_719_476_736_u64,
         "memory_floor_bytes": 0
     });
     value["security"]["network_mode"] = json!("host");

@@ -210,11 +210,11 @@ pub(super) async fn wait_for_launch_stability(
         let effective = crate::health::phase_deadline(&lease_deadline, start_deadline.as_ref());
         let until_deadline = (effective - Utc::now()).to_std().unwrap_or(Duration::ZERO);
         tokio::select! {
-            _ = tokio::time::sleep_until(stable_at) => {
+            () = tokio::time::sleep_until(stable_at) => {
                 return before_phase_deadline(&lease_deadline, start_deadline.as_ref())
                     && !*cancellation.borrow();
             }
-            _ = tokio::time::sleep(until_deadline) => return false,
+            () = tokio::time::sleep(until_deadline) => return false,
             changed = lease_deadline.changed() => {
                 if changed.is_err() {
                     return false;

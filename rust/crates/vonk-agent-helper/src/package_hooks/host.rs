@@ -180,7 +180,7 @@ impl Host for SystemHost {
             && Path::new("/run/systemd/system").is_dir()
     }
     fn parent_pid(&self) -> u32 {
-        rustix::process::getppid().map_or(0, |pid| pid.as_raw_nonzero().get() as u32)
+        rustix::process::getppid().map_or(0, |pid| pid.as_raw_nonzero().get().cast_unsigned())
     }
     fn process_start(&self, pid: u32) -> Option<u64> {
         let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;

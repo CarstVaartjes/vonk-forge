@@ -14,8 +14,8 @@ pub fn policy() -> GpuClockPolicy {
 pub fn default_range() -> GpuClockRange {
     let policy = policy();
     GpuClockRange {
-        min_mhz: policy.default_min_mhz as u32,
-        max_mhz: policy.default_max_mhz as u32,
+        min_mhz: u32::try_from(policy.default_min_mhz).unwrap_or(u32::MAX),
+        max_mhz: u32::try_from(policy.default_max_mhz).unwrap_or(u32::MAX),
     }
 }
 

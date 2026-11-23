@@ -45,20 +45,10 @@ impl CommandRunner for Runner {
         Err("unexpected command".into())
     }
 }
-fn fixture() -> (
-    tempfile::TempDir,
-    OperationExecutor<Runner>,
-    ValidatedDockerRun,
-) {
+fn fixture() -> (TempDir, OperationExecutor<Runner>, ValidatedDockerRun) {
     fixture_for_gpu(true)
 }
-fn fixture_for_gpu(
-    gpu: bool,
-) -> (
-    tempfile::TempDir,
-    OperationExecutor<Runner>,
-    ValidatedDockerRun,
-) {
+fn fixture_for_gpu(gpu: bool) -> (TempDir, OperationExecutor<Runner>, ValidatedDockerRun) {
     let (root, roots) = runtime_fixture();
     let model = artifact_path(&roots, 'a');
     fs::create_dir(&model).unwrap();
@@ -159,7 +149,7 @@ fn corrupted_unwritable_or_unknown_cache_falls_back_without_poisoning_next_start
         let entry = store.join(&key);
         ensure_private_directory(&entry, None).unwrap();
         match fault {
-            "symlink" => std::os::unix::fs::symlink(&run.outputs, entry.join("data")).unwrap(),
+            "symlink" => symlink(&run.outputs, entry.join("data")).unwrap(),
             "unwritable" => {
                 fs::create_dir(entry.join("data")).unwrap();
                 fs::set_permissions(entry.join("data"), fs::Permissions::from_mode(0o500)).unwrap();
@@ -283,7 +273,7 @@ fn simultaneous_population_and_restart_reuse_the_same_cache() {
         executor.bind_compile_cache(&mut run).unwrap();
         source(&run)
     };
-    let (a, b) = std::thread::scope(|scope| {
+    let (a, b) = thread::scope(|scope| {
         let a = scope.spawn(|| populate(first));
         let b = scope.spawn(|| populate(second));
         (a.join().unwrap(), b.join().unwrap())
@@ -364,7 +354,7 @@ fn peer_population_during_acl_setup_reuses_the_winner_without_replacing_bytes() 
         entered,
         resume: Mutex::new(paused),
     }));
-    std::thread::scope(|scope| {
+    thread::scope(|scope| {
         let populating = scope.spawn(|| executor.bind_compile_cache(&mut first));
         observing.recv_timeout(Duration::from_secs(10)).unwrap();
         let result = executor.bind_compile_cache(&mut second);

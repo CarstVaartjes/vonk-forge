@@ -57,18 +57,18 @@ impl OutputBreach {
         }
         let mut diagnostic = format!("exit_code={}", receipt.exit_code);
         if let Some(cause) = cause {
-            diagnostic.push_str(&format!(
-                " {}={}",
+            diagnostic = format!(
+                "{diagnostic} {}={}",
                 crate::failure_evidence::EXIT_CAUSE_FIELD,
                 cause.token()
-            ));
+            );
         }
-        diagnostic.push_str(&format!(" rule={}", self.rule));
+        diagnostic = format!("{diagnostic} rule={}", self.rule);
         if let Some((limit, observed)) = self.bound {
-            diagnostic.push_str(&format!(" limit={limit} observed={observed}"));
+            diagnostic = format!("{diagnostic} limit={limit} observed={observed}");
         }
         if let Some(entry) = &self.entry {
-            diagnostic.push_str(&format!(" entry={entry}"));
+            diagnostic = format!("{diagnostic} entry={entry}");
         }
         diagnostic.push_str(&named_entries(&self.entries));
         let reason = if receipt.exit_code == 0 {

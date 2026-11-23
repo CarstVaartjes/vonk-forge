@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use std::{
     cell::{Cell, RefCell},
     fs,
@@ -42,7 +40,9 @@ impl ProcessRunner for FakeRunner {
             // A Spark with the desktop: what the helper switches to headless.
             Program::Systemctl if arguments == ["get-default"] => b"graphical.target\n".to_vec(),
             Program::Systemctl => b"active\n".to_vec(),
-            _ => unreachable!(),
+            Program::Curl | Program::Getent | Program::Ip | Program::Oras | Program::SystemdRun => {
+                unreachable!()
+            }
         };
         Ok(ProcessOutput {
             exit_code: None,
@@ -104,12 +104,12 @@ fn inventory_reports_physical_and_available_memory_disk_and_gpu() {
     .collect()
     .unwrap();
 
-    assert_eq!(inventory.memory_total_bytes, 123456 * 1024);
+    assert_eq!(inventory.memory_total_bytes, 123_456 * 1024);
     assert_eq!(inventory.memory_available_bytes, 65432 * 1024);
     assert!(inventory.disk_total_bytes >= inventory.disk_available_bytes);
     assert_eq!(inventory.gpu_count, 1);
-    assert_eq!(inventory.gpu_memory_total_bytes, 119808 * 1024 * 1024);
-    assert_eq!(inventory.gpu_memory_free_bytes, 110000 * 1024 * 1024);
+    assert_eq!(inventory.gpu_memory_total_bytes, 119_808 * 1024 * 1024);
+    assert_eq!(inventory.gpu_memory_free_bytes, 110_000 * 1024 * 1024);
     assert_eq!(
         inventory.fabric_address.unwrap().to_string(),
         "192.168.100.2"
@@ -151,7 +151,7 @@ fn inventory_reports_physical_and_available_memory_disk_and_gpu() {
     );
     let wire = serde_json::to_value(inventory.to_request(chrono::Utc::now().into())).unwrap();
     assert_eq!(wire["memory_pool"], "separate");
-    assert_eq!(wire["host_memory_total_bytes"], 123456 * 1024);
+    assert_eq!(wire["host_memory_total_bytes"], 123_456 * 1024);
     assert_eq!(wire["host_memory_free_bytes"], 65432 * 1024);
     assert_eq!(wire["disk_free_bytes"], inventory.disk_available_bytes);
     assert_eq!(wire["host_settings"]["gpu_clock_support"]["max_mhz"], 2400);
@@ -187,8 +187,8 @@ fn malformed_gpu_row_does_not_hide_other_inventory_devices() {
     .unwrap();
 
     assert_eq!(inventory.gpu_count, 1);
-    assert_eq!(inventory.gpu_memory_total_bytes, 119808 * 1024 * 1024);
-    assert_eq!(inventory.gpu_memory_free_bytes, 110000 * 1024 * 1024);
+    assert_eq!(inventory.gpu_memory_total_bytes, 119_808 * 1024 * 1024);
+    assert_eq!(inventory.gpu_memory_free_bytes, 110_000 * 1024 * 1024);
 }
 
 #[test]
@@ -243,7 +243,7 @@ fn inventory_uses_host_memory_for_the_unified_memory_gb10() {
     .unwrap();
 
     assert_eq!(inventory.gpu_count, 1);
-    assert_eq!(inventory.gpu_memory_total_bytes, 123456 * 1024);
+    assert_eq!(inventory.gpu_memory_total_bytes, 123_456 * 1024);
     assert_eq!(inventory.gpu_memory_free_bytes, 65432 * 1024);
     assert_eq!(
         serde_json::to_value(inventory.to_request(chrono::Utc::now().into())).unwrap()["memory_pool"],
@@ -473,7 +473,7 @@ fn dead_podman_removes_build_capabilities_but_not_the_capacity_report() {
             assert!(healed.capabilities.contains(&build.to_owned()), "{build}");
         }
 
-        assert_eq!(inventory.memory_total_bytes, 123456 * 1024);
+        assert_eq!(inventory.memory_total_bytes, 123_456 * 1024);
         assert_eq!(inventory.gpu_count, 1);
         assert!(inventory.disk_total_bytes > 0);
         for build in [
@@ -581,7 +581,7 @@ fn host_settings_are_observed_and_an_unreadable_systemd_leaves_them_unknown() {
 fn reset_inventory_reaches_the_wire_and_recovers_without_a_flag() {
     // Catches retaining stale healthy inventory when GPU discovery fails.
     struct HealthRunner {
-        health: Cell<vonk_agent_protocol::generated::GpuHealth>,
+        health: Cell<GpuHealth>,
     }
     impl ProcessRunner for HealthRunner {
         fn run(
@@ -661,28 +661,6 @@ fn reset_inventory_reaches_the_wire_and_recovers_without_a_flag() {
 
 #[tokio::test]
 async fn acceptance_device_uses_the_real_inventory_health_contract() {
-    // Catches a synthetic device that returns inventory CSV for the health query,
-    // so normal admission waits forever for a GPU the fixture says is absent.
-    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../tests/acceptance/fixtures/nvidia-smi.sh");
-    async fn query(script: &Path, arguments: &[&str]) -> Vec<u8> {
-        let output = tokio::time::timeout(
-            Duration::from_secs(10),
-            tokio::process::Command::new("/bin/sh")
-                .arg(script)
-                .args(arguments)
-                .output(),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-        assert!(output.status.success(), "{:?}", output);
-        output.stdout
-    }
-    struct SyntheticRunner {
-        health: Vec<u8>,
-        inventory: Vec<u8>,
-    }
     impl ProcessRunner for SyntheticRunner {
         fn run(
             &self,
@@ -710,6 +688,28 @@ async fn acceptance_device_uses_the_real_inventory_health_contract() {
             .run(program, arguments, timeout)
         }
     }
+    struct SyntheticRunner {
+        health: Vec<u8>,
+        inventory: Vec<u8>,
+    }
+    async fn query(script: &Path, arguments: &[&str]) -> Vec<u8> {
+        let output = tokio::time::timeout(
+            Duration::from_secs(10),
+            tokio::process::Command::new("/bin/sh")
+                .arg(script)
+                .args(arguments)
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        output.stdout
+    }
+    // Catches a synthetic device that returns inventory CSV for the health query,
+    // so normal admission waits forever for a GPU the fixture says is absent.
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../tests/acceptance/fixtures/nvidia-smi.sh");
     let runner = SyntheticRunner {
         health: query(&script, &["-q"]).await,
         inventory: query(
@@ -777,7 +777,7 @@ fn failing_state_database_reserve_is_reported_as_not_held_and_the_inventory_is_s
     let inventory = collector.collect().unwrap();
     assert!(!inventory.state_database_reserve_held);
     let wire = serde_json::to_value(inventory.to_request(chrono::Utc::now().into())).unwrap();
-    assert_eq!(wire["host_memory_total_bytes"], 123456 * 1024);
+    assert_eq!(wire["host_memory_total_bytes"], 123_456 * 1024);
     assert_eq!(wire["gpu_count"], 1);
 
     // Healing: once the obstruction is gone the next report is unaffected.

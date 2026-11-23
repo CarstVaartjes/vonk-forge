@@ -27,7 +27,7 @@ async fn enrollment_peer(
             tokio::pin!(accepting);
             let early = tokio::select! {
                 result = &mut accepting => Some(result),
-                _ = tokio::time::sleep_until(started + elapsed) => None,
+                () = tokio::time::sleep_until(started + elapsed) => None,
             };
             let io_deadline = std::time::Instant::now() + Duration::from_secs(5);
             let io_clock_guard =
@@ -243,6 +243,10 @@ async fn streaming_response(
         let (mut socket, _) = listener.accept().await.unwrap();
         read_request_headers(&mut socket).await;
         socket.write_all(headers.as_bytes()).await.unwrap();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "waits for a task to end; its outcome is observed elsewhere"
+        )]
         let _ = socket.write_all(&body).await;
         std::future::pending::<()>().await;
     });
@@ -279,7 +283,7 @@ async fn pairing_declared_oversize_refuses_before_body_arrives() {
 #[tokio::test]
 async fn pairing_chunked_oversize_refuses_before_eof_and_recovers() {
     let headers = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n";
-    let mut chunks = format!("{:x}\r\n", MAX_RESPONSE_BYTES).into_bytes();
+    let mut chunks = format!("{MAX_RESPONSE_BYTES:x}\r\n").into_bytes();
     chunks.extend(vec![b' '; MAX_RESPONSE_BYTES]);
     chunks.extend_from_slice(b"\r\n1\r\nx\r\n");
     let (response, peer) = streaming_response(headers, chunks).await;
@@ -328,6 +332,10 @@ async fn pairing_reader_cancellation_releases_incomplete_response() {
             .unwrap();
         let mut byte = [0];
         let result = socket.read(&mut byte).await;
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the receiving side may already be gone; nobody is waiting for the value"
+        )]
         let _ = closed.send(matches!(result, Ok(0)) || result.is_err());
     });
     let response = Client::new()

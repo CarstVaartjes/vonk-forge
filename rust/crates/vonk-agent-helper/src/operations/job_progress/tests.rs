@@ -58,7 +58,9 @@ fn a_working_job_outlives_its_original_deadline_but_stale_logs_do_not_renew_it()
                 RUN.parse().unwrap(),
                 PLAN_DIGEST,
                 60,
-                Instant::now() - Duration::from_secs(120),
+                Instant::now()
+                    .checked_sub(Duration::from_secs(120))
+                    .unwrap(),
             )
             .unwrap();
         assert_eq!(result.exit_code, Some(if progressing { 0 } else { 124 }));

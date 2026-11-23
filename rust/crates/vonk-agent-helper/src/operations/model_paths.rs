@@ -167,7 +167,11 @@ pub(super) fn runtime_model_root(source: &Path, roots: &ManagedRoots) -> Option<
     let mut components = relative.components();
     let installation = match components.next()? {
         Component::Normal(value) if valid_artifact_id(&value.to_string_lossy()) => value,
-        _ => return None,
+        Component::Prefix(_)
+        | Component::RootDir
+        | Component::CurDir
+        | Component::ParentDir
+        | Component::Normal(_) => return None,
     };
     if !matches!(components.next(), Some(Component::Normal(value)) if value == "models") {
         return None;

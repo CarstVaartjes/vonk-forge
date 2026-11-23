@@ -64,7 +64,16 @@ pub(super) fn observe_upgrade(
                 crate::agent_upgrade::AgentUpgradeError::Io(cause) => {
                     format!("{error}: {:?}", cause.kind())
                 }
-                _ => error.to_string(),
+                crate::agent_upgrade::AgentUpgradeError::InvalidClaim
+                | crate::agent_upgrade::AgentUpgradeError::DownloadIdentityInvalid
+                | crate::agent_upgrade::AgentUpgradeError::HelperRejected
+                | crate::agent_upgrade::AgentUpgradeError::HelperRejectedWithCode { .. }
+                | crate::agent_upgrade::AgentUpgradeError::HelperResponseInvalid
+                | crate::agent_upgrade::AgentUpgradeError::HelperUnavailable(_)
+                | crate::agent_upgrade::AgentUpgradeError::Transport(_)
+                | crate::agent_upgrade::AgentUpgradeError::Stalled(_)
+                | crate::agent_upgrade::AgentUpgradeError::Controller(_)
+                | crate::agent_upgrade::AgentUpgradeError::PackageStatus(_) => error.to_string(),
             };
             return waiting(
                 WaitReason::ObservationUnavailable,

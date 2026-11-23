@@ -30,7 +30,7 @@ impl ProcessRunner for Driver {
         };
         *calls += 1;
         Ok(crate::process::ProcessOutput {
-            exit_code: Some(if self.fail { 1 } else { 0 }),
+            exit_code: Some(i32::from(self.fail)),
             success: !self.fail,
             stdout: self.readings[index].as_bytes().to_vec(),
             stderr: if self.fail {

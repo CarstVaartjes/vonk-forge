@@ -1,3 +1,9 @@
+#![expect(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 #[path = "../common/mod.rs"]
 mod common;
 
@@ -427,21 +433,13 @@ fn signed_request(root: &std::path::Path) -> (SetupRequest, ReleaseAuthority) {
 fn root_session(root: &std::path::Path, prepared: &vonk_spark_setup::PreparedSetup) -> PathBuf {
     let session = root.join("var/tmp/vonk-spark-setup.0123456789abcdef");
     fs::create_dir_all(&session).unwrap();
-    fs::set_permissions(
-        &session,
-        std::os::unix::fs::PermissionsExt::from_mode(0o700),
-    )
-    .unwrap();
+    fs::set_permissions(&session, PermissionsExt::from_mode(0o700)).unwrap();
     let executable = session.join("vonk-spark-setup");
     fs::copy(prepared.executable_path(), &executable).unwrap();
-    fs::set_permissions(
-        &executable,
-        std::os::unix::fs::PermissionsExt::from_mode(0o700),
-    )
-    .unwrap();
+    fs::set_permissions(&executable, PermissionsExt::from_mode(0o700)).unwrap();
     let package = session.join("vonk-forge-agent.deb");
     fs::copy(prepared.package_path(), &package).unwrap();
-    fs::set_permissions(package, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+    fs::set_permissions(package, PermissionsExt::from_mode(0o600)).unwrap();
     executable
 }
 
@@ -515,28 +513,16 @@ fn apply_setup_from(
         fs::remove_dir_all(&session).unwrap();
     }
     fs::create_dir_all(&session).unwrap();
-    fs::set_permissions(
-        &session,
-        std::os::unix::fs::PermissionsExt::from_mode(0o700),
-    )
-    .unwrap();
+    fs::set_permissions(&session, PermissionsExt::from_mode(0o700)).unwrap();
     let executable = session.join("vonk-spark-setup");
     if executable_source.is_file() {
         fs::copy(executable_source, &executable).unwrap();
-        fs::set_permissions(
-            &executable,
-            std::os::unix::fs::PermissionsExt::from_mode(0o700),
-        )
-        .unwrap();
+        fs::set_permissions(&executable, PermissionsExt::from_mode(0o700)).unwrap();
     }
     let package = session.join("vonk-forge-agent.deb");
     if package_source.is_file() {
         fs::copy(package_source, &package).unwrap();
-        fs::set_permissions(
-            &package,
-            std::os::unix::fs::PermissionsExt::from_mode(0o600),
-        )
-        .unwrap();
+        fs::set_permissions(&package, PermissionsExt::from_mode(0o600)).unwrap();
     }
     apply_setup_from_with_authority(
         input,
@@ -652,7 +638,7 @@ fn rewrite_frame(
     let payload = serde_json::to_vec(&payload).unwrap();
     let mut frame = Vec::new();
     frame.extend_from_slice(MAGIC);
-    frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    frame.extend_from_slice(&u32::try_from(payload.len()).unwrap().to_be_bytes());
     frame.extend_from_slice(&payload);
     frame.extend_from_slice(&Sha256::digest(&payload));
     frame

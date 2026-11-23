@@ -1,5 +1,8 @@
-#![forbid(unsafe_code)]
-
+#![expect(
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 use std::{
     env, fs,
     io::{BufRead, BufReader, Write},
@@ -206,6 +209,10 @@ fn prepared_checkpoint_survives_process_exit_and_resumes_in_a_new_process() {
     }
     // Kill only after the child reports that prepare returned from its synced
     // checkpoint write. This injects process death at a deterministic boundary.
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "best-effort stop of a process that may already have ended"
+    )]
     let _ = child.kill();
     let status = child.wait().unwrap();
     assert!(
@@ -302,12 +309,16 @@ fn missing_installation_without_a_checkpoint_does_not_poison_a_later_prepare() {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test takes a raw lock to prove how a HeldLock contends with it"
+)]
 fn separate_process_lock_contention_is_retryable_after_the_owner_exits() {
     if let Some(lock_path) = env::var_os(LOCK_PATH_ENV) {
         let file = fs::OpenOptions::new()
             .read(true)
             .write(true)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
             .open(lock_path)
             .unwrap();
         flock(&file, FlockOperation::NonBlockingLockExclusive).unwrap();

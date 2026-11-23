@@ -202,11 +202,19 @@ fn serve_controller(mut stream: std::net::TcpStream, state: &Mutex<ControllerSta
             .map(str::to_owned)
     };
     let respond = |stream: &mut std::net::TcpStream, status: &str, headers: &str, body: &[u8]| {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the peer may have closed the connection; the assertions are on the other side"
+        )]
         let _ = write!(
             stream,
             "HTTP/1.1 {status}\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n",
             body.len()
         );
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the peer may have closed the connection; the assertions are on the other side"
+        )]
         let _ = stream.write_all(body);
     };
     match (method, path.as_str()) {
@@ -441,7 +449,15 @@ impl Drop for FakeHost {
 
 fn reply(stream: &mut std::os::unix::net::UnixStream, response: &HostHelperResponse) {
     let body = vonk_agent_protocol::canonical_generated_json(response).unwrap();
-    let _ = stream.write_all(&(body.len() as u32).to_be_bytes());
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the peer may have closed the connection; the assertions are on the other side"
+    )]
+    let _ = stream.write_all(&u32::try_from(body.len()).unwrap().to_be_bytes());
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the peer may have closed the connection; the assertions are on the other side"
+    )]
     let _ = stream.write_all(&body);
 }
 
@@ -468,6 +484,10 @@ fn rejection(request_id: Option<Uuid>, code: HelperErrorCode) -> HostHelperRespo
     }
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn serve_helper(
     mut stream: std::os::unix::net::UnixStream,
     host: &Mutex<HostState>,
@@ -578,8 +598,8 @@ fn serve_helper(
     state.stop_held = std::mem::take(&mut state.hold_next_stop);
     drop(state);
     thread::sleep(slow);
-    let deadline = std::time::Instant::now() + Duration::from_secs(30);
-    while host.lock().unwrap().stop_held && std::time::Instant::now() < deadline {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while host.lock().unwrap().stop_held && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(5));
     }
     let mut state = host.lock().unwrap();

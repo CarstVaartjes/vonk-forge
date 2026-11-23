@@ -29,8 +29,8 @@ pub fn free_memory(text: &str, page_size: u64) -> Option<FreeMemory> {
         zones += 1;
     }
     (zones > 0).then_some(FreeMemory {
-        free_bytes,
         free_2mib_block_bytes,
+        free_bytes,
     })
 }
 

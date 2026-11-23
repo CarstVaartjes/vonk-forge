@@ -7,7 +7,7 @@ fn foreground_sudo_authentication_uses_controlling_terminal() {
     if let Ok(sudo) = std::env::var("VONK_SUDO_PTY_CHILD") {
         authenticate_sudo_foreground(Path::new(&sudo)).unwrap();
         assert!(
-            process::run_process(
+            run_process(
                 Command::new("/usr/bin/true", std::iter::empty::<String>()),
                 DEFAULT_COMMAND_TIMEOUT,
             )

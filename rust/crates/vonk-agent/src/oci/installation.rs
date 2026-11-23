@@ -195,7 +195,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         self.ensure_runtime_cache(installation_id)
             .map_err(|error| install_error(FailureStage::RuntimeCache, error))?;
         repair_installation_projections(&installation)?;
-        super::materialization::materialize_compiled_models_controlled(
+        materialize_compiled_models_controlled(
             self.data_root,
             spec,
             installation_id,

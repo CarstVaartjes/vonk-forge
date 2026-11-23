@@ -13,10 +13,7 @@ fn host_memory_safety_stop_is_a_typed_capacity_failure() {
     let ExecutionResult::Failed(failure) = runtime_observation_failure(&error) else {
         panic!("expected failure");
     };
-    let diagnostics = crate::failure_evidence::from_failure(
-        &vonk_agent_protocol::generated::AgentOperation::RecipeStart,
-        &failure,
-    );
+    let diagnostics = crate::failure_evidence::from_failure(&AgentOperation::RecipeStart, &failure);
     assert!(
         diagnostics
             .preflight
@@ -78,7 +75,7 @@ async fn corrupt_exact_lifecycle_is_skipped_without_reporting_false_absence() {
     let runner = NoProcess;
     let executor = RecipeExecutor {
         client: &server.client,
-        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        helper_socket: Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime: OciRuntime {
             runner: &runner,
             data_root: data.path(),
@@ -118,8 +115,7 @@ fn failed_recipe_build_preserves_only_safe_classified_evidence() {
         Some("temporary-storage-exhausted")
     );
     let wire = serde_json::to_vec(&failed).unwrap();
-    let consumed: vonk_agent_protocol::generated::OutcomeFailed =
-        vonk_agent_protocol::parse_strict(&wire).unwrap();
+    let consumed: OutcomeFailed = vonk_agent_protocol::parse_strict(&wire).unwrap();
     assert_eq!(evidence_of(&consumed).diagnostic, evidence.diagnostic);
 }
 
@@ -467,10 +463,7 @@ fn an_exited_workload_failure_always_has_logs_or_a_typed_reason_and_the_exit_fac
             failure.process_logs.is_some() || failure.diagnostic.is_some(),
             "{diagnostic:?}"
         );
-        let evidence = crate::failure_evidence::from_failure(
-            &vonk_agent_protocol::generated::AgentOperation::RecipeStart,
-            failure,
-        );
+        let evidence = crate::failure_evidence::from_failure(&AgentOperation::RecipeStart, failure);
         if diagnostic.is_some_and(|text| text.contains("oom_killed")) {
             assert!(
                 evidence
@@ -505,7 +498,7 @@ fn preparation_failure_keeps_safe_stage_and_permission_boundary_in_controller_re
             "/private/secret-credential-value",
         ))),
     };
-    let failure = super::preparation_failure_at(&error, FailureStage::Unknown, "preparation");
+    let failure = preparation_failure_at(&error, FailureStage::Unknown, "preparation");
     let failed = failed_outcome(&start_claim, failure);
     assert_eq!(
         failed.reason,
@@ -528,7 +521,7 @@ fn rank_launch_failure_keeps_sanitized_logs_in_the_controller_contract() {
             ),
         })),
     };
-    let failed = super::runtime_failure("rank process did not remain stable after launch", &error);
+    let failed = runtime_failure("rank process did not remain stable after launch", &error);
     let body = failed_outcome(&start_claim, failed);
     let diagnostics = evidence_of(&body).diagnostics.as_ref().unwrap();
     diagnostics.validate().unwrap();
@@ -570,7 +563,7 @@ fn a_refused_request_bound_reaches_the_failure_evidence() {
         limit: Some(limit),
         observed: limit + 1,
     };
-    let finished = super::runtime_failure("container runtime could not start the workload", &error)
+    let finished = runtime_failure("container runtime could not start the workload", &error)
         .finish(&start_claim);
     assert_eq!(finished.state, AgentResultState::Observing);
     let AgentResultResult::OutcomeUnknown(outcome) = finished.result else {
@@ -579,7 +572,7 @@ fn a_refused_request_bound_reaches_the_failure_evidence() {
     let evidence = outcome.evidence.unwrap();
     assert_eq!(
         evidence.helper_error_code.as_deref(),
-        Some(super::runtime_helper_code(&error).as_str())
+        Some(runtime_helper_code(&error).as_str())
     );
     let diagnostic = evidence.diagnostic.unwrap();
     assert!(diagnostic.contains(&limit.to_string()));
@@ -617,7 +610,7 @@ fn image_pull_helper_protocol_cause_survives_normalization() {
     .collect();
     errors.push(crate::host_runtime::HostRuntimeError::StopUncertain);
     for error in errors {
-        let code = super::runtime_helper_code(&error);
+        let code = runtime_helper_code(&error);
         let result = failed_outcome(
             &pull_claim,
             ExecutionResult::Failed(Failure::new("runtime image pull failed").helper(code, None)),
@@ -627,8 +620,7 @@ fn image_pull_helper_protocol_cause_survives_normalization() {
             Some(code.as_str()),
             "{code} must survive normalization rather than be silently dropped"
         );
-        let finished =
-            super::runtime_failure("runtime image pull failed", &error).finish(&pull_claim);
+        let finished = runtime_failure("runtime image pull failed", &error).finish(&pull_claim);
         let wire = AgentResult {
             fence: pull_claim.fence,
             result: finished.result,
@@ -725,7 +717,7 @@ fn image_pull_failure_preserves_only_bounded_helper_diagnostics() {
 #[tokio::test]
 async fn observation_misses_end_without_effects_and_a_fresh_fence_executes() {
     struct RecoveringExecutor(
-        std::sync::Mutex<Option<crate::host_runtime::HostRuntimeError>>,
+        Mutex<Option<crate::host_runtime::HostRuntimeError>>,
         std::sync::atomic::AtomicUsize,
     );
     #[async_trait(?Send)]
@@ -733,7 +725,7 @@ async fn observation_misses_end_without_effects_and_a_fresh_fence_executes() {
         async fn observe(
             &self,
             _claim: &AgentClaim,
-        ) -> Option<crate::executor::operation_observation::OperationObservation> {
+        ) -> Option<operation_observation::OperationObservation> {
             None
         }
 
@@ -744,7 +736,7 @@ async fn observation_misses_end_without_effects_and_a_fresh_fence_executes() {
             _cancellation: tokio::sync::watch::Receiver<bool>,
         ) -> ExecutionResult {
             if let Some(error) = self.0.lock().unwrap().take() {
-                return super::runtime_failure("runtime observation unavailable", &error);
+                return runtime_failure("runtime observation unavailable", &error);
             }
             self.1.fetch_add(1, Ordering::SeqCst);
             recipe_install_success(0)
@@ -763,7 +755,7 @@ async fn observation_misses_end_without_effects_and_a_fresh_fence_executes() {
         let root = tempdir().unwrap();
         let mut state = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
         let executor = RecoveringExecutor(
-            std::sync::Mutex::new(Some(error)),
+            Mutex::new(Some(error)),
             std::sync::atomic::AtomicUsize::new(0),
         );
         let original = claim();
@@ -903,7 +895,7 @@ fn a_preparation_failure_names_its_step_and_cause() {
     // An attempt that ended on its budget resumes: temporary, and it says so.
     let ended = OciError::Install {
         stage: FailureStage::ModelMaterialization,
-        source: Box::new(OciError::Process(crate::process::ProcessError::Cancelled)),
+        source: Box::new(OciError::Process(ProcessError::Cancelled)),
     };
     let outcome = failed_outcome(
         &start_claim,
@@ -949,7 +941,7 @@ fn a_permanent_preparation_cause_is_not_a_temporary_dependency() {
 #[test]
 fn grant_403_ends_its_operation_with_evidence_without_refusing_agent_identity() {
     // Wrong implementation: any grant 403 poisons the whole control lane.
-    let mut denied = crate::client::ControllerError::from_status(403);
+    let mut denied = ControllerError::from_status(403);
     denied.endpoint = "/agent/host-runtime/grant".into();
     denied.code = vonk_agent_protocol::generated::SecurityRefusalReason::HostHelperAuthorityDenied
         .to_string();
@@ -990,7 +982,7 @@ fn grant_403_ends_its_operation_with_evidence_without_refusing_agent_identity() 
     ));
     // Renewal/activation denials still stop effects.
     for endpoint in ["/agent/renew", "/agent/renew/activate"] {
-        let mut denied = crate::client::ControllerError::from_status(403);
+        let mut denied = ControllerError::from_status(403);
         denied.endpoint = endpoint.into();
         let error = ClientError::Controller(Box::new(denied));
         assert!(error.fatal());
@@ -1238,7 +1230,7 @@ fn a_start_whose_exception_names_host_paths_is_the_shared_vector_on_the_wire() {
     // diagnostic, no host path in either.  The Controller accepts it without a
     // redaction (its ingress tests read the same vector); the clock- and
     // host-dependent diagnostics are compared by shape.
-    let vector: serde_json::Value = serde_json::from_str(include_str!(
+    let vector: Value = serde_json::from_str(include_str!(
         "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-start-workload-exited-v1.json"
     ))
     .unwrap();
@@ -1259,16 +1251,14 @@ fn a_start_whose_exception_names_host_paths_is_the_shared_vector_on_the_wire() {
     let mut start_claim = claim();
     start_claim.operation = AgentOperation::RecipeStart;
     let finished = runtime_observation_failure(&error).finish(&start_claim);
-    let mut produced = serde_json::to_value(crate::wire_prose::wire_result(
-        &vonk_agent_protocol::generated::AgentResult {
-            fence: start_claim.fence,
-            result: finished.result,
-            state: finished.state,
-        },
-    ))
+    let mut produced = serde_json::to_value(crate::wire_prose::wire_result(&AgentResult {
+        fence: start_claim.fence,
+        result: finished.result,
+        state: finished.state,
+    }))
     .unwrap();
     let mut expected = vector.clone();
-    let take_diagnostics = |body: &mut serde_json::Value| {
+    let take_diagnostics = |body: &mut Value| {
         body["result"]["evidence"]
             .as_object_mut()
             .unwrap()
@@ -1299,14 +1289,14 @@ fn a_start_failure_carries_its_page_cache_drops_as_the_shared_vector_on_the_wire
         FreeMemory, MemoryCompaction, MemoryCompactionOutcome, PageCacheDropEvidence,
         PageCacheDropProblem, PageCacheDropReport, PageCacheSync,
     };
-    let vector: serde_json::Value = serde_json::from_str(include_str!(
+    let vector: Value = serde_json::from_str(include_str!(
         "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-start-page-cache-v1.json"
     ))
     .unwrap();
     let report = |id: &str, at: &str| PageCacheDropReport {
         compaction: None,
-        request_id: uuid::Uuid::parse_str(id).unwrap(),
-        dropped_at: chrono::DateTime::parse_from_rfc3339(at).unwrap(),
+        request_id: Uuid::parse_str(id).unwrap(),
+        dropped_at: DateTime::parse_from_rfc3339(at).unwrap(),
         cached_before_bytes: None,
         cached_after_bytes: None,
         mem_available_after_bytes: None,
@@ -1323,8 +1313,7 @@ fn a_start_failure_carries_its_page_cache_drops_as_the_shared_vector_on_the_wire
     // The load phase's compaction rides the drop that answered from it.
     let dropped = PageCacheDropReport {
         compaction: Some(MemoryCompaction {
-            started_at: chrono::DateTime::parse_from_rfc3339("2026-10-27T23:11:00.600000Z")
-                .unwrap(),
+            started_at: DateTime::parse_from_rfc3339("2026-10-27T23:11:00.600000Z").unwrap(),
             outcome: MemoryCompactionOutcome::Completed,
             duration_ms: 1840,
             free_before: Some(FreeMemory {
@@ -1372,19 +1361,17 @@ fn a_start_failure_carries_its_page_cache_drops_as_the_shared_vector_on_the_wire
     let mut start_claim = claim();
     start_claim.operation = AgentOperation::RecipeStart;
     let finished = ExecutionResult::Failed(failure).finish(&start_claim);
-    let mut produced = serde_json::to_value(crate::wire_prose::wire_result(
-        &vonk_agent_protocol::generated::AgentResult {
-            fence: start_claim.fence,
-            result: finished.result,
-            state: finished.state,
-        },
-    ))
+    let mut produced = serde_json::to_value(crate::wire_prose::wire_result(&AgentResult {
+        fence: start_claim.fence,
+        result: finished.result,
+        state: finished.state,
+    }))
     .unwrap();
     if let Some(path) = std::env::var_os("VONK_WRITE_PAGE_CACHE_VECTOR") {
-        std::fs::write(path, serde_json::to_vec_pretty(&produced).unwrap()).unwrap();
+        fs::write(path, serde_json::to_vec_pretty(&produced).unwrap()).unwrap();
     }
     let mut expected = vector.clone();
-    let take_diagnostics = |body: &mut serde_json::Value| {
+    let take_diagnostics = |body: &mut Value| {
         body["result"]["evidence"]
             .as_object_mut()
             .unwrap()
@@ -1448,10 +1435,8 @@ fn model_layout_fault_retains_actionable_evidence_for_bounded_recovery() {
         Some(AgentFailureKind::TemporaryDependency)
     );
     assert_eq!(failure.retry_after_seconds, Some(5));
-    let finished = ExecutionResult::Failed(failure)
-        .finish_for(&vonk_agent_protocol::generated::AgentOperation::RecipeInstall);
-    let vonk_agent_protocol::generated::AgentResultResult::OutcomeFailed(outcome) = finished.result
-    else {
+    let finished = ExecutionResult::Failed(failure).finish_for(&AgentOperation::RecipeInstall);
+    let AgentResultResult::OutcomeFailed(outcome) = finished.result else {
         panic!("layout fault lost at wire projection")
     };
     assert_eq!(outcome.code, FailureCode::ModelStoreLayout);
@@ -1509,7 +1494,7 @@ fn a_guard_kill_crosses_the_helper_boundary_with_every_reading_on_both_paths() {
     // sanitizer kept 6 facts on the start path and 7 on the receipt path:
     // `-`/`+` joined recent samples into a 40+ character run the opaque-value
     // rule redacted, and the helper cut the summary at 480 characters.
-    let vectors: serde_json::Value = serde_json::from_str(include_str!(
+    let vectors: Value = serde_json::from_str(include_str!(
         "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/host-memory-guard-summary-v1.json"
     ))
     .unwrap();
@@ -1529,15 +1514,12 @@ fn a_guard_kill_crosses_the_helper_boundary_with_every_reading_on_both_paths() {
         )
         .unwrap();
     // Start and exited paths: the inspection's rejection.
-    let error = crate::host_runtime::runtime_rejection(
-        &response,
-        vonk_agent_protocol::HostRuntimeAction::RunInspect,
-    );
+    let error = crate::host_runtime::runtime_rejection(&response, HostRuntimeAction::RunInspect);
     let ExecutionResult::Failed(failure) = runtime_observation_failure(&error) else {
         panic!("expected failure");
     };
     assert_every_guard_reading(&crate::failure_evidence::from_failure(
-        &vonk_agent_protocol::generated::AgentOperation::RecipeStart,
+        &AgentOperation::RecipeStart,
         &failure,
     ));
     // Receipt path: a stopped run's inspection answers with the sanitized receipt.
@@ -1553,7 +1535,7 @@ fn every_guard_trigger_at_worst_case_values_keeps_every_fact_on_every_path() {
     // Break caught (#1936 third review): `trigger=sustained_memavailable_exhaustion`
     // is a 41-character opaque-charset run, so the sanitizer redacted it and
     // the commonest guard kill reached the Controller with no trigger.
-    let vectors: serde_json::Value = serde_json::from_str(include_str!(
+    let vectors: Value = serde_json::from_str(include_str!(
         "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/host-memory-guard-summary-v1.json"
     ))
     .unwrap();
@@ -1597,17 +1579,12 @@ fn every_guard_trigger_at_worst_case_values_keeps_every_fact_on_every_path() {
                 .unwrap(),
             )
             .unwrap();
-        let error = crate::host_runtime::runtime_rejection(
-            &response,
-            vonk_agent_protocol::HostRuntimeAction::RunInspect,
-        );
+        let error =
+            crate::host_runtime::runtime_rejection(&response, HostRuntimeAction::RunInspect);
         let ExecutionResult::Failed(failure) = runtime_observation_failure(&error) else {
             panic!("expected failure");
         };
-        let value = crate::failure_evidence::from_failure(
-            &vonk_agent_protocol::generated::AgentOperation::RecipeStart,
-            &failure,
-        );
+        let value = crate::failure_evidence::from_failure(&AgentOperation::RecipeStart, &failure);
         assert_eq!(kept(&value.preflight), written, "{summary}");
     }
 }

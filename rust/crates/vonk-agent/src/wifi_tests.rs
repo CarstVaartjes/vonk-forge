@@ -33,7 +33,7 @@ fn station_blob() -> Vec<u8> {
     // The extended rate wins when both encodings are present.
     tx.extend(attr(5, &8667u32.to_ne_bytes()));
     info.extend(attr(8 | 0x8000, &tx));
-    info.extend(attr(14 | 0x8000, &attr(1, &65u16.to_ne_bytes())));
+    info.extend(attr(0x000e | 0x8000, &attr(1, &65u16.to_ne_bytes())));
     info.extend(attr(255, &[1, 2, 3])); // future kernel extension
     attr(STA_INFO | 0x8000, &info)
 }

@@ -10,6 +10,10 @@ pub fn canonical_json<T: Serialize>(value: &T) -> Result<Vec<u8>, ProtocolError>
     Ok(passthrough::WireDocument::of(value)?.canonical_bytes()?)
 }
 
+#[expect(
+    clippy::format_collect,
+    reason = "builds a small string; a fold would read worse"
+)]
 pub fn hex_sha256(value: &[u8]) -> String {
     Sha256::digest(value)
         .iter()
@@ -17,6 +21,10 @@ pub fn hex_sha256(value: &[u8]) -> String {
         .collect()
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 pub(super) fn valid_node_id(value: &str) -> bool {
     value.len() == 36
         && value.starts_with("spk_")

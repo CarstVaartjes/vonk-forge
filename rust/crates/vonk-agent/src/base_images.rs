@@ -84,7 +84,11 @@ impl BaseImageStore {
         }
         let data_root_file = OpenOptions::new()
             .read(true)
-            .custom_flags((OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC).bits() as i32)
+            .custom_flags(
+                (OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC)
+                    .bits()
+                    .cast_signed(),
+            )
             .open(data_root)
             .map_err(BaseImageError::Io)?;
         let after = data_root_file.metadata().map_err(BaseImageError::Io)?;
@@ -100,7 +104,10 @@ impl BaseImageStore {
         })
     }
 
-    #[allow(clippy::too_many_arguments)] // One immutable transfer budget and its cancellation travel together.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one immutable transfer budget and its cancellation travel together"
+    )]
     pub(crate) fn materialize_cancellable<R: ProcessRunner + ?Sized>(
         &self,
         runner: &R,
@@ -366,6 +373,10 @@ impl<'a> TemporaryAt<'a> {
 impl Drop for TemporaryAt<'_> {
     fn drop(&mut self) {
         if !self.retained {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = unlinkat(self.parent, self.name.as_str(), AtFlags::empty());
         }
     }
@@ -379,6 +390,10 @@ struct RegistrySource {
     resolve: String,
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn registry_source<R: ProcessRunner + ?Sized>(
     runner: &R,
     image: &RecipeBuildBaseImage,
@@ -736,7 +751,13 @@ fn manifest_evidence_error(error: BaseImageError) -> BaseImageError {
     match error {
         BaseImageError::Limit => BaseImageError::Limit,
         BaseImageError::Io(error) => BaseImageError::Io(error),
-        _ => BaseImageError::ManifestEvidence,
+        BaseImageError::Invalid
+        | BaseImageError::ManifestTransfer
+        | BaseImageError::ManifestProcess(_)
+        | BaseImageError::ManifestEvidence
+        | BaseImageError::BlobTransfer
+        | BaseImageError::BlobEvidence
+        | BaseImageError::ArchiveEvidence => BaseImageError::ManifestEvidence,
     }
 }
 
@@ -744,7 +765,13 @@ fn blob_evidence_error(error: BaseImageError) -> BaseImageError {
     match error {
         BaseImageError::Limit => BaseImageError::Limit,
         BaseImageError::Io(error) => BaseImageError::Io(error),
-        _ => BaseImageError::BlobEvidence,
+        BaseImageError::Invalid
+        | BaseImageError::ManifestTransfer
+        | BaseImageError::ManifestProcess(_)
+        | BaseImageError::ManifestEvidence
+        | BaseImageError::BlobTransfer
+        | BaseImageError::BlobEvidence
+        | BaseImageError::ArchiveEvidence => BaseImageError::BlobEvidence,
     }
 }
 
@@ -752,7 +779,13 @@ fn base_archive_error(error: BaseImageError) -> BaseImageError {
     match error {
         BaseImageError::Limit => BaseImageError::Limit,
         BaseImageError::Io(error) => BaseImageError::Io(error),
-        _ => BaseImageError::ArchiveEvidence,
+        BaseImageError::Invalid
+        | BaseImageError::ManifestTransfer
+        | BaseImageError::ManifestProcess(_)
+        | BaseImageError::ManifestEvidence
+        | BaseImageError::BlobTransfer
+        | BaseImageError::BlobEvidence
+        | BaseImageError::ArchiveEvidence => BaseImageError::ArchiveEvidence,
     }
 }
 
@@ -975,7 +1008,7 @@ fn read_archive_entry<R: Read + Seek>(
             if entry.size() > maximum_bytes {
                 return Err(BaseImageError::Limit);
             }
-            let mut value = Vec::with_capacity(entry.size() as usize);
+            let mut value = Vec::with_capacity(usize::try_from(entry.size()).unwrap_or_default());
             entry.read_to_end(&mut value)?;
             return Ok(value);
         }
@@ -1036,7 +1069,7 @@ fn read_bounded(file: &File, maximum_bytes: u64) -> Result<Vec<u8>, BaseImageErr
     }
     let mut source = file.try_clone()?;
     source.seek(SeekFrom::Start(0))?;
-    let mut value = Vec::with_capacity(size as usize);
+    let mut value = Vec::with_capacity(usize::try_from(size).unwrap_or_default());
     source
         .take(maximum_bytes.saturating_add(1))
         .read_to_end(&mut value)?;

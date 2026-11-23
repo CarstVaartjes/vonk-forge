@@ -48,7 +48,7 @@ impl Executor for LongExecutor {
     async fn observe(
         &self,
         _claim: &AgentClaim,
-    ) -> Option<crate::executor::operation_observation::OperationObservation> {
+    ) -> Option<operation_observation::OperationObservation> {
         None
     }
 

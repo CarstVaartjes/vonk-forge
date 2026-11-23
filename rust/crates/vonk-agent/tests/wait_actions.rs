@@ -14,6 +14,10 @@
 //!   outcome to a state word.
 //!
 //! Operator stop actions are restricted to named job outcomes with reasons.
+#![expect(
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 
 use std::{
     collections::BTreeSet,
@@ -131,6 +135,10 @@ fn sources() -> Vec<(String, String)> {
 }
 
 /// The `WaitReason::Name` members a piece of code names.
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn wait_reasons_named(code: &str) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     let mut rest = code;

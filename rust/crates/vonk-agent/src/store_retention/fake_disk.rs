@@ -18,7 +18,7 @@ static MOUNTED: Mutex<Vec<(PathBuf, u64)>> = Mutex::new(Vec::new());
 fn mounted() -> MutexGuard<'static, Vec<(PathBuf, u64)>> {
     MOUNTED
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// A short disk mounted over a directory until dropped.

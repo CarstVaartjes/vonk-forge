@@ -93,12 +93,11 @@ pub(super) fn ensure(host: &mut impl Host, uid: u32) -> Result<(), String> {
             MINIMUM_COUNT,
         )
         .max(MINIMUM_COUNT);
-        let file = match host.lstat(kind.file) {
-            Some(_) => host.read(kind.file)?,
-            None => {
-                host.write_file(kind.file, "", 0, 0, 0o644)?;
-                String::new()
-            }
+        let file = if host.lstat(kind.file).is_some() {
+            host.read(kind.file)?
+        } else {
+            host.write_file(kind.file, "", 0, 0, 0o644)?;
+            String::new()
         };
         if holds(&file, uid, count) {
             continue;

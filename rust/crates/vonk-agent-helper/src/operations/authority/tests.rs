@@ -28,7 +28,7 @@ fn a_request_document_between_the_retired_private_cap_and_the_exchange_ceiling_i
         start_plan: None,
         stop_plan: None,
     };
-    let body = vonk_agent_protocol::canonical_json(&request).unwrap();
+    let body = canonical_json(&request).unwrap();
     assert!(
         body.len() > 64 * 1024,
         "this document must exceed the retired private cap, got {} bytes",
@@ -55,7 +55,7 @@ fn a_request_document_between_the_retired_private_cap_and_the_exchange_ceiling_i
 
 /// The canonical job claim re-placed as `rank` of `world_size` (a pair of
 /// Sparks sharing a fabric when `world_size` is 2).
-fn job_rank(rank: u64, world_size: u64) -> vonk_agent_protocol::RecipeJobRunRequest {
+fn job_rank(rank: u64, world_size: u64) -> RecipeJobRunRequest {
     let claim: vonk_agent_protocol::generated::AgentClaim = serde_json::from_str(include_str!(
         "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
     ))
@@ -76,8 +76,8 @@ fn job_rank(rank: u64, world_size: u64) -> vonk_agent_protocol::RecipeJobRunRequ
             "master_port": 29500,
             "endpoint_address": null,
             "port": null,
-            "memory_floor_bytes": 2147483648_u64,
-            "reserved_memory_bytes": 34359738368_u64,
+            "memory_floor_bytes": 2_147_483_648_u64,
+            "reserved_memory_bytes": 34_359_738_368_u64,
         });
         plan["topology"] = serde_json::json!({"name": "dual", "node_count": world_size});
         plan["security"]["network_mode"] = serde_json::json!("host");
@@ -101,7 +101,7 @@ fn every_rank_of_a_multi_rank_job_is_authorized_and_a_rank_beyond_the_world_is_n
         None,
     )
     .unwrap();
-    let authorize = |job: &vonk_agent_protocol::RecipeJobRunRequest| {
+    let authorize = |job: &RecipeJobRunRequest| {
         let arguments = executor
             .projected_runtime_arguments(
                 &job.compiled_execution_plan,

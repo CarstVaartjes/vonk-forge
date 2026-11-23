@@ -62,6 +62,10 @@ impl Executor for CompilingExecutor {
         panic!("an executing order is settled by its executor, never probed")
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "any other value is the failure this code reports"
+    )]
     async fn execute(
         &self,
         claim: &AgentClaim,

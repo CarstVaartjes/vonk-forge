@@ -617,7 +617,20 @@ CI runs `npm run lint` (`biome ci .`, the whole tree, on pull requests and main 
 `npm run typecheck --prefix control/web` checks both the application and browser
 tests/configuration; `npm run build` also checks application types. Generated
 contracts remain owned by their generators. Rust hooks run pinned formatting and
-offline Clippy/compiler checks, using the Linux VM on macOS. Commit checks prepare missing or stale locked Python and TypeScript dependencies
+offline Clippy/compiler checks, using the Linux VM on macOS.
+
+Rust lint levels live in one place: `[workspace.lints]` in the root `Cargo.toml`
+(rustc lints, `unsafe_code = "forbid"`, clippy pedantic minus ten threshold or
+taste lints, and twelve restriction lints for behaviour), inherited by every
+crate through `[lints] workspace = true`, with `clippy.toml` holding the lint
+configuration (unwrap, expect and panic allowed inside tests; raw `flock`
+disallowed outside `held_lock.rs`). The hook and every CI clippy step run the
+identical `cargo clippy --workspace --all-targets --frozen -- -D warnings`
+(CI runs it after `cargo fetch --locked`; the hook is offline), so a new
+warning fails both. Silence a lint only
+with a narrow `#[expect(lint, reason = "...")]` at the item or statement; a
+test, example, build-script or generator crate root may carry one crate-level
+`#![expect]` for unwrap, expect and panic. `#[allow]` is itself linted. Commit checks prepare missing or stale locked Python and TypeScript dependencies
 automatically, with serialized preparation and a ten-minute deadline.
 
 When acceptance inputs are available, run the actual harness through the same
