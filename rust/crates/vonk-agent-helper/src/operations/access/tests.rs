@@ -193,7 +193,7 @@ fn runtime_tmp_reset_rejects_fifo_without_waiting_for_a_writer() {
     // Run the real open/fstat boundary in another process so the wrong
     // blocking open fails this test within a deadline rather than hanging
     // the suite indefinitely on a FIFO with no writer.
-    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+    let mut child = Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
             "operations::access::tests::runtime_tmp_reset_rejects_fifo_without_waiting_for_a_writer",

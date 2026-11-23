@@ -37,7 +37,7 @@ impl CommandRunner for IntentRunner {
             success: !missing,
             stdout,
             stderr: Vec::new(),
-            exit_code: Some(if missing { 1 } else { 0 }),
+            exit_code: Some(i32::from(missing)),
         })
     }
 }
@@ -352,6 +352,6 @@ fn signed_cleanup_fences_never_executed_start_and_newer_intent_launches_after_re
             .iter()
             .filter(|args| args.first().map(String::as_str) == Some("run"))
             .count();
-        assert_eq!(launched, generation as usize);
+        assert_eq!(launched, usize::try_from(generation).unwrap());
     }
 }

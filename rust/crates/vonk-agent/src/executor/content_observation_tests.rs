@@ -23,7 +23,11 @@ pub(super) fn prepare_effect(root: &Path, claim: &AgentClaim) {
     fs::create_dir_all(&source).unwrap();
     for artifact in &request.compiled_execution_plan.artifacts {
         let path = source.join(&artifact.sha256);
-        fs::write(&path, vec![0; artifact.size_bytes as usize]).unwrap();
+        fs::write(
+            &path,
+            vec![0; usize::try_from(artifact.size_bytes).unwrap()],
+        )
+        .unwrap();
         fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
     }
     let runtime = OciRuntime {
@@ -112,9 +116,17 @@ async fn process_death_at_four_boundaries_recovers_on_an_idle_tick_without_execu
             let found = BufReader::new(stdout)
                 .lines()
                 .any(|line| line.is_ok_and(|text| text.contains("content-ready")));
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the receiving side may already be gone; nobody is waiting for the value"
+            )]
             let _ = ready.send(found);
         });
         let reached = observed.recv_timeout(deadline.saturating_duration_since(Instant::now()));
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = child.kill();
         while child.try_wait().unwrap().is_none() {
             assert!(Instant::now() < deadline, "child must exit after kill");
@@ -194,7 +206,7 @@ async fn every_dispatched_kind_reaches_its_real_probe_and_preserves_unknown() {
     let AgentClaimPayload::RecipeInstallPayload(install) = &base.payload else {
         panic!("install");
     };
-    let vector: serde_json::Value = serde_json::from_str(include_str!(
+    let vector: Value = serde_json::from_str(include_str!(
         "../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-build-claim-v1.json"
     ))
     .unwrap();
@@ -328,12 +340,12 @@ async fn refused_content_probe_stays_unconfirmed_instead_of_failing_the_distribu
     fs::create_dir_all(&models).unwrap();
     for object in &request.assignment.objects {
         let path = models.join(&object.sha256);
-        fs::write(&path, vec![0; object.bytes as usize]).unwrap();
+        fs::write(&path, vec![0; usize::try_from(object.bytes).unwrap()]).unwrap();
         fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
     }
     let socket = root.path().join("helper.sock");
     let listener = UnixListener::bind(&socket).unwrap();
-    let peer = std::thread::spawn(move || {
+    let peer = thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
         let mut prefix = [0; 4];
         stream.read_exact(&mut prefix).unwrap();
@@ -356,7 +368,7 @@ async fn refused_content_probe_stays_unconfirmed_instead_of_failing_the_distribu
         };
         let body = super::canonical_json(&response).unwrap();
         stream
-            .write_all(&(body.len() as u32).to_be_bytes())
+            .write_all(&u32::try_from(body.len()).unwrap().to_be_bytes())
             .unwrap();
         stream.write_all(&body).unwrap();
     });

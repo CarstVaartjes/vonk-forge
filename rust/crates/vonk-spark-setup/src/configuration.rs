@@ -32,6 +32,10 @@ pub(super) fn install_configuration(
 
 /// Rewrite the validated `agent.toml` in the current canonical form so keys
 /// retired by newer releases disappear, and drop files left by removed features.
+#[expect(
+    clippy::match_same_arms,
+    reason = "the arms stay apart on purpose: each names a distinct case of the state machine"
+)]
 pub(super) fn refresh_configuration(
     paths: &InstallPaths,
     config: &WrittenConfig,
@@ -181,6 +185,10 @@ pub(super) fn write_setup_state(
     write_generated_projection(&setup_state_path(paths), state, owner, 0o644)
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 pub(super) fn pair_agent(
     paths: &InstallPaths,
     runner: &mut dyn CommandRunner,

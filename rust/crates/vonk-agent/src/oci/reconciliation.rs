@@ -222,7 +222,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             .read(true)
             .write(true)
             .create(true)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
             .mode(0o600)
             .open(path)?;
         if !trusted_receipt_metadata(&file.metadata()?) {
@@ -253,6 +253,10 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         // Retirement is bookkeeping: failure cannot veto current admission.
         // Preserve non-file records without following them when possible.
         if fs::rename(path, retired).is_ok() {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = File::open(root).and_then(|directory| directory.sync_all());
         }
         Ok(())
@@ -331,7 +335,11 @@ pub(super) fn read_reconciliation_checkpoint(
     }
     let file = match OpenOptions::new()
         .read(true)
-        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
+        .custom_flags(
+            (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                .bits()
+                .cast_signed(),
+        )
         .open(path)
     {
         Ok(file) => file,
@@ -344,7 +352,7 @@ pub(super) fn read_reconciliation_checkpoint(
     {
         return Ok(None);
     }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    let mut bytes = Vec::with_capacity(usize::try_from(metadata.len()).unwrap_or_default());
     file.take(MAX_INSTALLATION_RECONCILIATION_RECEIPT_BYTES + 1)
         .read_to_end(&mut bytes)?;
     if bytes.len() as u64 > MAX_INSTALLATION_RECONCILIATION_RECEIPT_BYTES {
@@ -366,7 +374,7 @@ pub(super) fn write_reconciliation_checkpoint(
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
-        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
         .mode(0o600)
         .open(&temporary)?;
     let result = (|| {
@@ -388,6 +396,10 @@ pub(super) fn write_reconciliation_checkpoint(
     })();
     drop(file);
     if result.is_err() {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+        )]
         let _ = fs::remove_file(&temporary);
     }
     result

@@ -87,7 +87,9 @@ fn run_inner(command: &mut Command, timeout: Duration) -> Result<Output, String>
     let mut child = command
         .spawn()
         .map_err(|e| format!("package command could not start: {e}"))?;
-    let group = rustix::process::Pid::from_raw(child.id() as i32);
+    let group = i32::try_from(child.id())
+        .ok()
+        .and_then(rustix::process::Pid::from_raw);
     let result = (|| {
         let mut stdout = child
             .stdout
@@ -97,10 +99,8 @@ fn run_inner(command: &mut Command, timeout: Duration) -> Result<Output, String>
             .stderr
             .take()
             .ok_or("package error custody unavailable")?;
-        for pipe in [
-            &stdout as &dyn std::os::fd::AsFd,
-            &stderr as &dyn std::os::fd::AsFd,
-        ] {
+        let pipes: [&dyn std::os::fd::AsFd; 2] = [&stdout, &stderr];
+        for pipe in pipes {
             let flags = rustix::fs::fcntl_getfl(pipe).map_err(|e| e.to_string())?;
             rustix::fs::fcntl_setfl(pipe, flags | rustix::fs::OFlags::NONBLOCK)
                 .map_err(|e| e.to_string())?;
@@ -162,7 +162,15 @@ fn run_inner(command: &mut Command, timeout: Duration) -> Result<Output, String>
     let cleanup_deadline = settlement_deadline.min(Instant::now() + Duration::from_secs(1));
     let stopped = stop_group(group);
     if result.is_err() {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = child.kill();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = child.wait_timeout(cleanup_deadline.saturating_duration_since(Instant::now()));
     }
     stopped?;

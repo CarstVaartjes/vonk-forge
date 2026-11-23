@@ -56,7 +56,7 @@ use crate::protocol::{ContainerRuntimeAction, HostOperation, artifact_signing_by
 const MAX_ARTIFACT_BYTES: u64 = 1024 * 1024 * 1024;
 
 /// A first pull of a large runtime image over the Spark's link.
-const RUNTIME_IMAGE_PULL_TIMEOUT: Duration = Duration::from_secs(3 * 60 * 60);
+const RUNTIME_IMAGE_PULL_TIMEOUT: Duration = Duration::from_hours(3);
 
 const MAX_COMMAND_OUTPUT_BYTES: u64 = 4096;
 
@@ -459,13 +459,17 @@ struct NativeFabric {
 type RuntimeImageInspection = (String, String, String, String, String);
 
 mod arguments;
-use arguments::*;
+use arguments::{
+    lower_hex, numeric_non_root_user, parse_local_image_reference, parse_numeric_user,
+    parse_publication, runtime_generation_fence_filename, valid_artifact_id, valid_entrypoint,
+    valid_environment, valid_local_image_reference, valid_loopback_registry, valid_oci_digest,
+};
 mod commands;
 mod compile_cache;
 pub use commands::CommandFailure;
 mod inspection;
+use inspection::bounded_container_wait_exit_code;
 pub(crate) use inspection::process_exited;
-use inspection::*;
 mod access;
 mod authority;
 mod dispatch;
@@ -476,10 +480,10 @@ mod job_exits;
 mod packages;
 mod reconciliation;
 mod reobserve;
-use reobserve::*;
+use reobserve::Reobserved;
 mod job_progress;
 mod start;
-use access::*;
+use access::exact_runtime_acl;
 mod exited_serving;
 mod gpu_clock;
 mod host_settings;
@@ -490,12 +494,25 @@ pub use host_settings::HOST_SETTINGS_INTERVAL;
 mod unused_images;
 pub use unused_images::UNUSED_IMAGE_SWEEP_INTERVAL;
 mod validation;
-use validation::*;
+#[cfg(test)]
+use validation::validate_docker_run;
+use validation::{
+    runtime_plan_prefix, validate_docker_run_with_archive, validate_runtime_invocation,
+    validate_runtime_job_plan, validate_runtime_start_plan, validate_runtime_stop_plan,
+};
 mod model_paths;
-use model_paths::*;
+use model_paths::{
+    canonical_model_root, collect_model_tree, require_safe_model_path, valid_model_mount,
+};
 mod storage;
 use crate::held_lock::HeldLock;
-use storage::*;
+use storage::{
+    artifact_identity, ensure_private_directory, ensure_runtime_directory, errno_io,
+    read_helper_reconciliation_receipt, remove_directory_contents, remove_directory_contents_last,
+    require_agent_artifact, require_exact_directory, require_runtime_directory,
+    require_safe_directory, safe_custody_file, stable_identity, sync_directory,
+    valid_runtime_cache_mount, write_helper_reconciliation_receipt,
+};
 
 #[cfg(test)]
 mod test_support;

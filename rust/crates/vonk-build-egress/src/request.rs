@@ -123,6 +123,10 @@ pub fn parse_request(header: &[u8], hosts: &BTreeSet<String>) -> Result<Request,
     })
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn absolute_http(value: &str) -> Result<(String, u16, String), u16> {
     let rest = value.strip_prefix("http://").ok_or(403_u16)?;
     if rest.contains('@') || rest.contains('#') {
@@ -256,6 +260,10 @@ mod tests {
     /// Invariant for any input: no panic, and an accepted request names an
     /// allowlisted host on port 80 or 443.
     #[test]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "a pseudo-random byte takes the low 8 bits by intent"
+    )]
     fn accepted_requests_stay_inside_the_allowlist() {
         let hosts = BTreeSet::from(["pypi.org".to_owned(), "files.pythonhosted.org".to_owned()]);
         let seeds: [&[u8]; 4] = [

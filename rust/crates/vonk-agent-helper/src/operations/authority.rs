@@ -3,6 +3,14 @@
 use super::*;
 
 impl<R: CommandRunner> OperationExecutor<R> {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "borrowed to match the sibling signatures that take the operation by reference"
+    )]
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "every other error passes through unchanged"
+    )]
     pub(super) fn execute_runtime_request(
         &self,
         action: &ContainerRuntimeAction,
@@ -258,8 +266,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     || !grant.stop_plan_sha256.is_some_and(|digest| {
                         lower_hex(digest, 64)
                             && canonical_json(plan)
-                                .ok()
-                                .is_some_and(|encoded| hex_sha256(&encoded) == digest)
+                                .is_ok_and(|encoded| hex_sha256(&encoded) == digest)
                     })
                 {
                     return Err(OperationError::InvalidOperation);
@@ -279,7 +286,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     cancel_pending_start: plan.cancel_pending_start,
                 }))
             }
-            _ => {
+            HostRuntimeAction::RuntimePreflight
+            | HostRuntimeAction::ImagePull
+            | HostRuntimeAction::ImageInspect
+            | HostRuntimeAction::RunInspect
+            | HostRuntimeAction::InstallationCleanup => {
                 if request.start_plan.is_some()
                     || request.job_plan.is_some()
                     || request.stop_plan.is_some()

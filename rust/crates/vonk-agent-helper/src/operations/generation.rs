@@ -49,14 +49,17 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let mut file = OpenOptions::new()
             .read(true)
             .custom_flags(
-                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                    .bits()
+                    .cast_signed(),
             )
             .open(&path)?;
         let opened = file.metadata()?;
         if artifact_identity(&opened) != artifact_identity(&path_metadata) {
             return Err(OperationError::InvalidArtifact);
         }
-        let mut bytes = Vec::with_capacity(path_metadata.len() as usize);
+        let mut bytes =
+            Vec::with_capacity(usize::try_from(path_metadata.len()).unwrap_or_default());
         Read::by_ref(&mut file)
             .take(MAX_RUNTIME_GENERATION_FENCE_BYTES + 1)
             .read_to_end(&mut bytes)?;
@@ -107,7 +110,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             let mut file = OpenOptions::new()
                 .write(true)
                 .create_new(true)
-                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
                 .mode(0o600)
                 .open(&temporary)?;
             file.write_all(&bytes)?;
@@ -116,6 +119,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             sync_directory(&root)
         })();
         if result.is_err() {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = fs::remove_file(&temporary);
         }
         result
@@ -180,6 +187,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             Ok(()) => {
                 // Never traverse an unsafe stored object. Ordinary files and
                 // symlinks can be unlinked; directories remain inert.
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+                )]
                 let _ = fs::remove_file(&isolated);
                 sync_directory(&root)
                     .map_err(|_| OperationError::InstallationReconciliationStorageUnavailable)
@@ -197,21 +208,20 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if identity.run_generation == 0 || identity.run_generation > i64::MAX as u64 {
             return Err(OperationError::InvalidOperation);
         }
-        let current = match self
-            .read_runtime_generation_fence(identity.installation_id, identity.runtime_id)
+        let current = if let Ok(current) =
+            self.read_runtime_generation_fence(identity.installation_id, identity.runtime_id)
         {
-            Ok(current) => current,
-            Err(_) => {
-                // Exact STOP remains usable after local fence loss. Rotating
-                // START authority fences every outstanding launch, including
-                // those with a higher generation than the surviving effects.
-                let challenge = self.invalidate_runtime_start_authority(identity)?;
-                self.retire_damaged_runtime_fence(identity)?;
-                if matches!(use_kind, RuntimeGenerationFenceUse::Start) {
-                    return Err(challenge);
-                }
-                None
+            current
+        } else {
+            // Exact STOP remains usable after local fence loss. Rotating
+            // START authority fences every outstanding launch, including
+            // those with a higher generation than the surviving effects.
+            let challenge = self.invalidate_runtime_start_authority(identity)?;
+            self.retire_damaged_runtime_fence(identity)?;
+            if matches!(use_kind, RuntimeGenerationFenceUse::Start) {
+                return Err(challenge);
             }
+            None
         };
         if let Some(mut current) = current {
             if identity.run_generation < current.highest_generation {
@@ -276,7 +286,7 @@ impl JobCancellationFence {
         let mut state = self
             .state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if state.cancelled.contains(&identity) || !state.active_starts.insert(identity) {
             return Err(CommandFailure::StartFenced.into());
         }
@@ -286,17 +296,25 @@ impl JobCancellationFence {
         })
     }
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "the Result keeps the signature shared with its sibling operations"
+    )]
     pub(super) fn cancel(&self, identity: RuntimeEffectIdentity) -> Result<(), OperationError> {
         let mut state = self
             .state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if state.active_starts.contains(&identity) {
             state.cancelled.insert(identity);
         }
         Ok(())
     }
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "the Result keeps the signature shared with its sibling operations"
+    )]
     pub(super) fn is_active(
         &self,
         identity: RuntimeEffectIdentity,
@@ -304,11 +322,15 @@ impl JobCancellationFence {
         Ok(self
             .state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .active_starts
             .contains(&identity))
     }
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "the Result keeps the signature shared with its sibling operations"
+    )]
     pub(super) fn was_cancelled(
         &self,
         identity: RuntimeEffectIdentity,
@@ -316,7 +338,7 @@ impl JobCancellationFence {
         Ok(self
             .state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .cancelled
             .contains(&identity))
     }
@@ -344,7 +366,7 @@ impl Drop for ActiveJobStart<'_> {
             .fence
             .state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.active_starts.remove(&self.identity);
         state.cancelled.remove(&self.identity);
     }

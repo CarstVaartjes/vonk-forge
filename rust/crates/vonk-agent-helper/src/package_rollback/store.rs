@@ -73,7 +73,9 @@ impl Store {
             .append(true)
             .mode(0o600)
             .custom_flags(
-                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                    .bits()
+                    .cast_signed(),
             )
             .open(&path)
             .map_err(|e| e.to_string())?;
@@ -181,7 +183,9 @@ impl Store {
         let mut input = OpenOptions::new()
             .read(true)
             .custom_flags(
-                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                    .bits()
+                    .cast_signed(),
             )
             .open(source)
             .map_err(|e| e.to_string())?;

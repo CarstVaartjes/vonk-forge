@@ -41,13 +41,21 @@ pub(super) fn run_process(command: Command, timeout: Duration) -> Result<Command
     // Own nonblocking descriptors in this thread: inherited pipes cannot leave
     // detached readers/writers behind after the immutable command deadline.
     let settlement = TERMINATION_GRACE.min(timeout / 10);
-    let result = capture_process(&mut child, &command.stdin, deadline - settlement);
+    let result = capture_process(
+        &mut child,
+        &command.stdin,
+        deadline.checked_sub(settlement).unwrap_or(deadline),
+    );
     terminate_process_group_until(&mut child, deadline);
     result.map_err(|_| program.display().to_string())
 }
 
 /// Retry read-only process observations within one immutable budget. Effects
-/// (APT, pairing and the root handoff) continue to use run_process directly.
+/// (APT, pairing and the root handoff) continue to use `run_process` directly.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 pub(super) fn observe_process(
     command: Command,
     timeout: Duration,
@@ -182,6 +190,10 @@ fn capture_process(
 
 impl SystemCommandRunner {
     #[cfg(test)]
+    #[expect(
+        clippy::unused_self,
+        reason = "a method so it stays beside its siblings behind the same type"
+    )]
     pub(super) fn run_with_deadline_for_test(
         &mut self,
         command: Command,
@@ -200,16 +212,34 @@ pub(super) fn command_timeout(program: &Path) -> Duration {
 }
 
 fn terminate_process_group_until(child: &mut std::process::Child, deadline: Instant) {
-    let process_group = rustix::process::Pid::from_raw(child.id() as i32);
+    let process_group = i32::try_from(child.id())
+        .ok()
+        .and_then(rustix::process::Pid::from_raw);
     if let Some(process_group) = process_group {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = rustix::process::kill_process_group(process_group, rustix::process::Signal::TERM);
     }
     // The leader may already have exited while descendants still hold pipes.
     // Always escalate the owned group; never use an unbounded final wait.
     if let Some(process_group) = process_group {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = rustix::process::kill_process_group(process_group, rustix::process::Signal::KILL);
     }
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "best-effort stop of a process that may already have ended"
+    )]
     let _ = child.kill();
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "best-effort stop of a process that may already have ended"
+    )]
     let _ = child
         .wait_timeout(TERMINATION_GRACE.min(deadline.saturating_duration_since(Instant::now())));
 }

@@ -70,6 +70,10 @@ pub(super) fn write_request(
             return Ok(destination);
         }
         Err(error) => {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = fs::remove_file(&temporary);
             return Err(error.into());
         }
@@ -81,7 +85,7 @@ pub(super) fn write_request(
 fn stored_request_matches(path: &Path, body: &[u8]) -> bool {
     let Ok(file) = OpenOptions::new()
         .read(true)
-        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
         .open(path)
     else {
         return false;
@@ -120,7 +124,10 @@ pub(crate) fn inspect_helper<T: serde::de::DeserializeOwned>(
     body: &[u8],
     reply: &Inactivity,
 ) -> Result<T, HostRuntimeError> {
-    if body.is_empty() || body.len() > MAX_HELPER_MESSAGE_BYTES {
+    let length = u32::try_from(body.len())
+        .ok()
+        .filter(|_| !body.is_empty() && body.len() <= MAX_HELPER_MESSAGE_BYTES);
+    let Some(length) = length else {
         // Report the ceiling and the observed length; the body itself is
         // engine-owned content and never travels into the evidence.
         return Err(HostRuntimeError::HelperProtocolBound {
@@ -128,10 +135,10 @@ pub(crate) fn inspect_helper<T: serde::de::DeserializeOwned>(
             limit: Some(MAX_HELPER_MESSAGE_BYTES as u64),
             observed: body.len() as u64,
         });
-    }
+    };
     let mut stream = UnixStream::connect(socket)?;
     stream.set_write_timeout(Some(Duration::from_secs(10)))?;
-    stream.write_all(&(body.len() as u32).to_be_bytes())?;
+    stream.write_all(&length.to_be_bytes())?;
     stream.write_all(body)?;
     stream.flush()?;
     let mut prefix = [0_u8; 4];

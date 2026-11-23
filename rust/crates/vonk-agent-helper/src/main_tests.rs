@@ -19,6 +19,10 @@ fn image_collection_ticks_without_requests_and_stops_with_its_owner() {
     let (observed, ticks) = channel();
     let lifetime = super::spawn_image_collection(
         move || {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the receiving side may already be gone; nobody is waiting for the value"
+            )]
             let _ = observed.send(());
         },
         Duration::from_millis(20),
@@ -60,7 +64,7 @@ fn runtime_command_rejection_retains_stderr_and_numeric_exit_in_frame() {
         uuid::Uuid::new_v4().to_string(),
         false,
         OperationError::CommandFailed {
-            cause: vonk_agent_helper::operations::CommandFailure::Exit {
+            cause: CommandFailure::Exit {
                 code: Some(125),
                 stderr: "opaque runtime failure".into(),
             },
@@ -238,7 +242,7 @@ fn package_failure_evidence_redacts_details_and_bounds_exit_codes() {
                     helper_sha256: "d".repeat(64),
                 },
                 attempt_nonce: "e".repeat(64),
-                activation_deadline: 2100000000,
+                activation_deadline: 2_100_000_000,
             },
             package_sha256: "a".repeat(64),
             package_signature: "b".repeat(128),

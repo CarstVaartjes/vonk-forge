@@ -16,12 +16,12 @@ fn signed_endpoint_placement_is_not_vetoed_by_stale_firewall_observation() {
     struct EndpointRunner(Answer);
     impl CommandRunner for EndpointRunner {
         fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
-            assert_eq!(executable, Path::new(super::DOCKER_FIREWALL));
+            assert_eq!(executable, Path::new(DOCKER_FIREWALL));
             if arguments[2] == "apply" {
                 return match self.0 {
                     Answer::Missing => Err("compiled command could not start".to_owned()),
                     Answer::ApplyFailed => Ok(docker_output(false, "", 1)),
-                    _ => Ok(docker_output(true, "", 0)),
+                    Answer::Policy | Answer::Unapplied => Ok(docker_output(true, "", 0)),
                 };
             }
             assert_eq!(arguments[2], "check-endpoint-port");
@@ -102,7 +102,7 @@ fn firewall_unknown_ends_boundedly_then_kernel_repair_admits_fresh_binding() {
     struct FirewallRunner(Behavior, Arc<std::sync::atomic::AtomicUsize>);
     impl CommandRunner for FirewallRunner {
         fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
-            assert_eq!(executable, Path::new(super::DOCKER_FIREWALL));
+            assert_eq!(executable, Path::new(DOCKER_FIREWALL));
             if arguments[2] == "apply" {
                 self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 return Ok(docker_output(true, "", 0));
@@ -207,6 +207,28 @@ fn firewall_unknown_ends_boundedly_then_kernel_repair_admits_fresh_binding() {
 
 #[test]
 fn native_fabric_requires_complete_bounded_shape_without_publications() {
+    impl CommandRunner for FabricRunner {
+        fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+            assert_eq!(executable, Path::new(DOCKER_FIREWALL));
+            assert_eq!(
+                &arguments[2..],
+                [
+                    "check-fabric-run",
+                    "192.168.100.10",
+                    "192.168.100.10",
+                    "29500",
+                    "8000"
+                ]
+            );
+            Ok(CommandOutput {
+                success: true,
+                stdout: b"enp1s0f1np1\n".to_vec(),
+                exit_code: Some(0),
+                stderr: Vec::new(),
+            })
+        }
+    }
+    struct FabricRunner;
     let (temp, roots) = runtime_fixture();
     let model = artifact_path(&roots, 'a');
     fs::create_dir_all(&model).unwrap();
@@ -328,28 +350,6 @@ fn native_fabric_requires_complete_bounded_shape_without_publications() {
     ] {
         assert!(validate_docker_run(&with_peers(wrong), &roots, None).is_err());
     }
-    struct FabricRunner;
-    impl CommandRunner for FabricRunner {
-        fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
-            assert_eq!(executable, Path::new(super::DOCKER_FIREWALL));
-            assert_eq!(
-                &arguments[2..],
-                [
-                    "check-fabric-run",
-                    "192.168.100.10",
-                    "192.168.100.10",
-                    "29500",
-                    "8000"
-                ]
-            );
-            Ok(CommandOutput {
-                success: true,
-                stdout: b"enp1s0f1np1\n".to_vec(),
-                exit_code: Some(0),
-                stderr: Vec::new(),
-            })
-        }
-    }
     let sysfs = temp.path().join("sysfs");
     crate::runtime_fabric::tests::gid(
         &sysfs,
@@ -396,7 +396,7 @@ fn native_fabric_requires_complete_bounded_shape_without_publications() {
         "::ffff:192.168.101.10",
         "RoCE v2",
     );
-    std::fs::write(
+    fs::write(
         sysfs.join("roceP2p1s0f1/ports/1/gid_attrs/ndevs/3"),
         "enP2p1s0f1np1\n",
     )
@@ -422,7 +422,7 @@ fn native_fabric_requires_complete_bounded_shape_without_publications() {
             .iter()
             .any(|arg| arg == "/dev/infiniband:/dev/infiniband")
     );
-    std::fs::remove_dir_all(sysfs.join("roceP2p1s0f1")).unwrap();
+    fs::remove_dir_all(sysfs.join("roceP2p1s0f1")).unwrap();
     let compiled = started.docker_arguments().unwrap();
     assert_eq!(compiled[started.image_index], started.local_image_reference);
     assert_eq!(

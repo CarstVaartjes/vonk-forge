@@ -12,6 +12,11 @@
 //!
 //! Passthrough modules name the external boundary and its reason. Every other
 //! module must use declared types. `json!` is never allowed in non-test code.
+#![expect(
+    clippy::string_slice,
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 
 use std::{
     collections::BTreeMap,
@@ -177,37 +182,33 @@ fn strip_test_items(source: &str) -> String {
     while let Some(position) = rest.find(MARKER) {
         output.push_str(&rest[..position]);
         let item = &rest[position + MARKER.len()..];
-        let end = item
-            .find(['{', ';'])
-            .map(|open| {
-                if item.as_bytes()[open] == b';' {
-                    open + 1
-                } else {
-                    let mut depth = 0;
-                    let mut close = open;
-                    for (offset, byte) in item.bytes().enumerate().skip(open) {
-                        match byte {
-                            b'{' => depth += 1,
-                            b'}' => {
-                                depth -= 1;
-                                if depth == 0 {
-                                    close = offset + 1;
-                                    break;
-                                }
+        let end = item.find(['{', ';']).map_or(item.len(), |open| {
+            if item.as_bytes()[open] == b';' {
+                open + 1
+            } else {
+                let mut depth = 0;
+                let mut close = open;
+                for (offset, byte) in item.bytes().enumerate().skip(open) {
+                    match byte {
+                        b'{' => depth += 1,
+                        b'}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                close = offset + 1;
+                                break;
                             }
-                            _ => {}
                         }
+                        _ => {}
                     }
-                    close
                 }
-            })
-            .unwrap_or(item.len());
+                close
+            }
+        });
         rest = &item[end..];
     }
     output.push_str(rest);
     output
 }
-
 fn identifiers(code: &str) -> Vec<(&str, bool)> {
     let bytes = code.as_bytes();
     let mut found = Vec::new();

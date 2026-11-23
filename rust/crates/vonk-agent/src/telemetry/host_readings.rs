@@ -46,7 +46,7 @@ const MAX_TEMPERATURE_C: u32 = 150;
 const MAX_FAN_RPM: u32 = 100_000;
 const MAX_FABRIC_PORTS: u32 = 16;
 const MAX_DIRECTORY_ENTRIES: usize = 256;
-/// `/proc/stat` counts in USER_HZ, which is 100 on every Linux ABI we run.
+/// `/proc/stat` counts in `USER_HZ`, which is 100 on every Linux ABI we run.
 const CLOCK_TICKS_PER_SECOND: f64 = 100.0;
 
 pub fn read_host(roots: &HostRoots, store: &Path) -> HostReadings {
@@ -78,6 +78,10 @@ pub fn read_host(roots: &HostRoots, store: &Path) -> HostReadings {
 
 /// (busy, total) seconds from the aggregate `cpu` line: user nice system idle
 /// iowait irq softirq steal. Busy is all of it except idle and I/O wait.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "clock ticks converted to seconds; f64 precision is ample"
+)]
 fn parse_cpu(text: &str) -> Option<(f64, f64)> {
     let line = text.lines().find(|line| line.starts_with("cpu "))?;
     let ticks = line
@@ -254,7 +258,7 @@ struct Hwmon {
 }
 
 /// Sensors are chosen by the chip `name`: the ACPI thermal zones (the hottest
-/// is the board sensor), the NVMe composite, the NIC ASICs and the ACPI fans.
+/// is the board sensor), the `NVMe` composite, the NIC ASICs and the ACPI fans.
 fn read_hwmon(root: &Path) -> Hwmon {
     let mut found = Hwmon::default();
     for chip in sorted_entries(root).unwrap_or_default() {
@@ -275,7 +279,7 @@ fn read_hwmon(root: &Path) -> Hwmon {
                 found.fan_rpm = number("fan1_input")
                     .and_then(|rpm| u32::try_from(rpm).ok())
                     .filter(|rpm| *rpm <= MAX_FAN_RPM)
-                    .max(found.fan_rpm)
+                    .max(found.fan_rpm);
             }
             _ => {}
         }

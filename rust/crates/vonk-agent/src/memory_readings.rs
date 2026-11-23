@@ -63,7 +63,7 @@ impl Ledger {
         let mut readings = self
             .readings
             .lock()
-            .unwrap_or_else(|error| error.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let first = match readings.as_ref() {
             Some(saved) if saved.boot_id == boot => saved.idle_stop_first_bytes,
             _ => sec_page_tables_bytes,
@@ -88,7 +88,7 @@ impl Ledger {
     pub fn snapshot(&self) -> Option<MemoryFragmentation> {
         self.readings
             .lock()
-            .unwrap_or_else(|error| error.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 }

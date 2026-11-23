@@ -8,7 +8,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let directory = OpenOptions::new()
             .read(true)
             .custom_flags(
-                (rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::NOFOLLOW).bits() as i32,
+                (rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::NOFOLLOW)
+                    .bits()
+                    .cast_signed(),
             )
             .open(&self.roots.runtime_image_receipts)?;
         HeldLock::try_exclusive(directory).map_err(|error| OperationError::Io(errno_io(error)))

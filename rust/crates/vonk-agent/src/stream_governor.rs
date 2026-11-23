@@ -13,7 +13,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 
-/// Streams a lone transfer is known to sustain on a 2.5 GbE NAS.
+/// Streams a lone transfer is known to sustain on a 2.5 `GbE` NAS.
 pub(crate) const INITIAL_STREAMS: usize = 4;
 /// Most streams one agent opens, however well throughput keeps growing.
 pub(crate) const MAX_STREAMS: usize = 8;
@@ -79,6 +79,10 @@ impl State {
 
     /// Close the measuring window once it has elapsed. Returns whether the
     /// limit changed, so waiting streams can be woken.
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a rate or ratio in floating point, not an exact count; f64 precision is ample"
+    )]
     fn evaluate(&mut self, now: Instant) -> bool {
         let elapsed = now.saturating_duration_since(self.window_started);
         if elapsed < WINDOW {
@@ -188,6 +192,10 @@ impl StreamGovernor {
                     self.changed.notify_waiters();
                 }
             }
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "waits for a task to end; its outcome is observed elsewhere"
+            )]
             let _ = tokio::time::timeout(WAIT_SLICE, notified).await;
         }
     }

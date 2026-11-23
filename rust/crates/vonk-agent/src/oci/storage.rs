@@ -135,7 +135,9 @@ pub(super) fn visit_files(
             let expected_bytes = file.metadata()?.len();
             let mut remaining_bytes = expected_bytes;
             while remaining_bytes > 0 {
-                let wave_bytes = remaining_bytes.min(buffer.len() as u64) as usize;
+                let wave_bytes = usize::try_from(remaining_bytes)
+                    .unwrap_or(usize::MAX)
+                    .min(buffer.len());
                 let read = file.read(&mut buffer[..wave_bytes])?;
                 if read == 0 {
                     return Err(OciError::Artifact);
@@ -172,6 +174,10 @@ pub(super) fn atomic_write(root: &Path, name: &str, value: &[u8]) -> Result<(), 
     // Only this invocation's exclusive temporary file may be unlinked. A stale
     // partial never owns the next invocation's publication path.
     if written.is_err() {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+        )]
         let _ = fs::remove_file(&temporary);
     }
     written
@@ -209,13 +215,17 @@ pub(super) fn ensure_runtime_tmp(outputs: &Path) -> Result<(), OciError> {
 pub(crate) fn read_regular_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, OciError> {
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
+        .custom_flags(
+            (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                .bits()
+                .cast_signed(),
+        )
         .open(path)?;
     let metadata = file.metadata()?;
     if !metadata.file_type().is_file() || metadata.len() > maximum_bytes {
         return Err(OciError::Artifact);
     }
-    let mut value = Vec::with_capacity(metadata.len() as usize);
+    let mut value = Vec::with_capacity(usize::try_from(metadata.len()).unwrap_or_default());
     Read::by_ref(&mut file)
         .take(maximum_bytes.saturating_add(1))
         .read_to_end(&mut value)?;

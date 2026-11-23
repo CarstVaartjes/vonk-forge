@@ -33,19 +33,19 @@ fn helper_unavailable_or_invalid_is_unknown_and_the_next_inventory_recovers() {
             let request: DisplayMemoryInspectionRequest = serde_json::from_slice(&request).unwrap();
             assert_eq!(request.kind, DisplayMemoryInspectionKind::DisplayMemory);
             stream
-                .write_all(&(body.len() as u32).to_be_bytes())
+                .write_all(&u32::try_from(body.len()).unwrap().to_be_bytes())
                 .unwrap();
             stream.write_all(&body).unwrap();
         }
         done.send(()).unwrap();
     });
     let observed = observe(&socket, Some(123)).unwrap();
-    assert_eq!(observed.carveout_bytes, Some(0x20000000));
+    assert_eq!(observed.carveout_bytes, Some(0x2000_0000));
     assert_eq!(observed.memory_total_bytes, Some(123));
     assert!(observe(&socket, Some(123)).is_none());
     assert_eq!(
         observe(&socket, Some(123)).unwrap().carveout_bytes,
-        Some(0x80000000)
+        Some(0x8000_0000)
     );
     completed.recv_timeout(Duration::from_secs(5)).unwrap();
 }

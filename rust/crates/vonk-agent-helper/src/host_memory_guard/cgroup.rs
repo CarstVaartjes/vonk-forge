@@ -8,13 +8,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const ROOT: &str = "/sys/fs/cgroup";
+pub(super) const ROOT: &str = "/sys/fs/cgroup";
 
 /// Docker names a container's cgroup after its full id:
 /// `system.slice/docker-<id>.scope` (systemd driver) or `docker/<id>`
 /// (cgroupfs driver). The id is exactly 64 lowercase hex characters, so no
 /// candidate can leave `root`, and no other container's cgroup can match.
-pub fn directory(root: &Path, id: &str) -> Option<PathBuf> {
+pub(super) fn directory(root: &Path, id: &str) -> Option<PathBuf> {
     if !super::valid_id(id) {
         return None;
     }
@@ -27,7 +27,7 @@ pub fn directory(root: &Path, id: &str) -> Option<PathBuf> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Outcome {
+pub(super) enum Outcome {
     /// `cgroup.kill` accepted: the kernel SIGKILLs every member, forks included.
     Killed,
     /// Fallback without `cgroup.kill`: each listed member was sent SIGKILL.
@@ -39,7 +39,10 @@ pub enum Outcome {
 /// SIGKILL every process in `directory`, a cgroup recorded by [`directory`].
 /// Pure kernel I/O: no daemon, lock, or child process is involved, so nothing
 /// here can wait on dockerd.
-pub fn kill(directory: &Path, signal: impl Fn(i32) -> io::Result<()>) -> io::Result<Outcome> {
+pub(super) fn kill(
+    directory: &Path,
+    signal: impl Fn(i32) -> io::Result<()>,
+) -> io::Result<Outcome> {
     let written = OpenOptions::new()
         .write(true)
         .open(directory.join("cgroup.kill"))
@@ -77,7 +80,7 @@ pub fn kill(directory: &Path, signal: impl Fn(i32) -> io::Result<()>) -> io::Res
 }
 
 /// SIGKILL one process; a process that already exited counts as stopped.
-pub fn sigkill(pid: i32) -> io::Result<()> {
+pub(super) fn sigkill(pid: i32) -> io::Result<()> {
     let pid = rustix::process::Pid::from_raw(pid).ok_or_else(|| io::Error::other("pid"))?;
     match rustix::process::kill_process(pid, rustix::process::Signal::KILL) {
         Ok(()) | Err(rustix::io::Errno::SRCH) => Ok(()),

@@ -23,6 +23,10 @@ impl TemporaryArtifact {
 impl Drop for TemporaryArtifact {
     fn drop(&mut self) {
         if !self.retained {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = fs::remove_file(&self.path);
         }
     }

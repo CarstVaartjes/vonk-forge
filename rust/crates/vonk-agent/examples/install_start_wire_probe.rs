@@ -1,9 +1,7 @@
-#![forbid(unsafe_code)]
-
 //! Stdin/stdout probe for the connected schema-2 recipe install/start wire.
 //!
-//! Each input line is a Controller AgentClaim.  The probe validates the claim,
-//! invokes the production RecipeOperationRequest parser, projects the typed
+//! Each input line is a Controller `AgentClaim`.  The probe validates the claim,
+//! invokes the production `RecipeOperationRequest` parser, projects the typed
 //! compiled plan through the production OCI argument builder, and emits the
 //! exact success body used by the production executor. Uninstall operations
 //! are structural wire probes: they do not mutate the probe filesystem.
@@ -123,7 +121,11 @@ fn result_for(claim: &AgentClaim, timings: &mut StageTimings) -> Result<AgentRes
         RecipeOperationRequest::Uninstall(_request) => {
             ExecutionResult::done(vonk_agent_protocol::generated::RecipeUninstallResult::default())
         }
-        _ => return Err(
+        RecipeOperationRequest::RuntimePreflight(_)
+        | RecipeOperationRequest::Build(_)
+        | RecipeOperationRequest::BuildCleanup(_)
+        | RecipeOperationRequest::JobRun(_)
+        | RecipeOperationRequest::Reconcile(_) => return Err(
             "probe only accepts recipe.install, recipe.start, recipe.stop, and recipe.uninstall"
                 .to_owned(),
         ),

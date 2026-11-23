@@ -31,7 +31,7 @@ fn twin_ndev(root: &Path, device: &str, index: &str, interface: &str) {
     .unwrap();
 }
 
-/// A cabled QSFP port that reaches the host over two PCIe links.
+/// A cabled QSFP port that reaches the host over two `PCIe` links.
 fn spark(root: &Path) {
     gid(root, "rocep1s0f1", "3", "::ffff:192.168.100.10", "RoCE v2");
     gid(

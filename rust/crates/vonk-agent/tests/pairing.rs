@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use std::{fs, os::unix::fs::PermissionsExt};
 
 use chrono::{TimeZone, Utc};

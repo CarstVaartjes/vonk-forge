@@ -83,10 +83,11 @@ def check_noexit(ctx: CheckContext) -> None:
         if path.endswith(".rs"):
             patterns.extend(
                 [
+                    # Clippy's panic, expect_used and unwrap_used cover the rest. Its
+                    # exit skips `fn main` and impl methods, so exit stays here.
                     r"(?:std::)?process::(?:exit|abort)\s*\(",
                     r"ExitCode::(?:from|FAILURE)",
-                    r"\b(?:panic!|unreachable!)\s*\(",
-                    r"\.expect\s*\(",
+                    r"\bunreachable!\s*\(",
                 ]
             )
         if path.startswith(("packaging/", "deploy/")):

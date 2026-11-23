@@ -129,7 +129,7 @@ fn open_observation_directory(
 ) -> Result<File, OciError> {
     let file = OpenOptions::new()
         .read(true)
-        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
         .open(path)?;
     let metadata = file.metadata()?;
     let opened = stamp_of_metadata(&metadata);
@@ -251,10 +251,21 @@ pub fn start_arguments_for_paths(
     projected_start_arguments_for_paths(spec, paths, run_id).map_err(|_| OciError::Runtime)
 }
 
-use materialization::*;
+#[cfg(test)]
+use materialization::materialize_compiled_models_observed;
+use materialization::{materialize_compiled_models, materialize_compiled_models_controlled};
 pub(crate) use metadata::exact_runtime_file_acl;
-use metadata::*;
-use storage::*;
+use metadata::{
+    SharedInode, installation_metadata_entry, linkable_model_bytes, materialized_model_bytes,
+    metadata_matches_receipt, open_trusted_model_file, read_installation_metadata,
+    receipt_matches_plan, resumable_partial_bytes, shared_store_inode, sort_metadata_entries,
+    store_object_path, timestamp_ns, trusted_model_file, trusted_receipt_metadata,
+    unique_plan_artifacts, write_installation_metadata,
+};
+use storage::{
+    atomic_write, canonical_uuid, ensure_runtime_tmp, lower_hex, spec_references_model,
+    sync_parent, visit_files,
+};
 
 #[cfg(test)]
 pub(crate) mod test_support;

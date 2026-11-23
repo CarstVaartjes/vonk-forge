@@ -36,7 +36,7 @@ impl Meter {
         let mut previous = self
             .previous
             .lock()
-            .unwrap_or_else(|error| error.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let before = previous.replace((now, totals));
         let Some((then, before)) = before else {
             return Vec::new();

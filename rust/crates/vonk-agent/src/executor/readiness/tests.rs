@@ -5,11 +5,11 @@ use super::*;
 
 #[test]
 fn readiness_identity_uses_controller_digest_forms() {
-    let value: serde_json::Value = serde_json::from_str(include_str!(
+    let value: Value = serde_json::from_str(include_str!(
         "../../../../../../control/tests/fixtures/compiled_workload_v2.json"
     ))
     .unwrap();
-    let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+    let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
     let (image_digest, model_identity) = readiness_identity(&plan);
     assert_eq!(image_digest, plan.runtime_image.image_digest);
     let artifact = &plan.artifacts[0];

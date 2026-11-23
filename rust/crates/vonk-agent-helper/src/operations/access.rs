@@ -25,7 +25,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             | rustix::fs::OFlags::CLOEXEC;
         let root: std::os::fd::OwnedFd = OpenOptions::new()
             .read(true)
-            .custom_flags(flags.bits() as i32)
+            .custom_flags(flags.bits().cast_signed())
             .open(&self.roots.agent_data)?
             .into();
         let metadata_root =
@@ -192,7 +192,11 @@ pub(super) fn exact_runtime_read_acl(
     let Some(value) = xattr::get(path, "system.posix_acl_access")? else {
         return Ok(false);
     };
-    if value.len() != 44 || u32::from_le_bytes(value[..4].try_into().unwrap()) != 2 {
+    if value.len() != 44
+        || value
+            .first_chunk::<4>()
+            .is_none_or(|head| u32::from_le_bytes(*head) != 2)
+    {
         return Err(OperationError::InvalidArtifact);
     }
     let mut user_object = None;
@@ -200,7 +204,7 @@ pub(super) fn exact_runtime_read_acl(
     let mut group_object = None;
     let mut mask = None;
     let mut other = None;
-    for entry in value[4..].as_chunks::<8>().0.iter() {
+    for entry in value[4..].as_chunks::<8>().0 {
         let (tag, permissions, identifier) = acl_entry(entry);
         match tag {
             0x0001 if identifier == u32::MAX && user_object.replace(permissions).is_none() => {}
@@ -244,7 +248,10 @@ pub(super) fn exact_runtime_acl(path: &Path, runtime_uid: u32) -> bool {
     let Ok(Some(value)) = xattr::get(path, "system.posix_acl_access") else {
         return false;
     };
-    if value.len() < 4 || u32::from_le_bytes(value[..4].try_into().unwrap()) != ACL_VERSION {
+    if value
+        .first_chunk::<4>()
+        .is_none_or(|head| u32::from_le_bytes(*head) != ACL_VERSION)
+    {
         return false;
     }
     let entries = &value[4..];
@@ -256,7 +263,7 @@ pub(super) fn exact_runtime_acl(path: &Path, runtime_uid: u32) -> bool {
     let mut group_object = false;
     let mut mask = false;
     let mut other = false;
-    for entry in entries.as_chunks::<8>().0.iter() {
+    for entry in entries.as_chunks::<8>().0 {
         let (tag, permissions, identifier) = acl_entry(entry);
         match tag {
             USER_OBJ => user_object = permissions == 0o7,
@@ -271,6 +278,10 @@ pub(super) fn exact_runtime_acl(path: &Path, runtime_uid: u32) -> bool {
 }
 
 /// Split one eight-byte POSIX ACL entry into its tag, permissions, and id.
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "borrowed to match the sibling signatures that take the operation by reference"
+)]
 pub(super) fn acl_entry(entry: &[u8; 8]) -> (u16, u16, u32) {
     let [tag, permissions, low, high] = entry.as_chunks::<2>().0 else {
         unreachable!("an eight-byte entry yields four two-byte fields")

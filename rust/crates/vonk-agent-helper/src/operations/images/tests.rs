@@ -567,7 +567,7 @@ impl CommandRunner for NoImages {
             success: answered,
             stdout: if answered { Vec::new() } else { b"\n".to_vec() },
             stderr: Vec::new(),
-            exit_code: Some(if answered { 0 } else { 1 }),
+            exit_code: Some(i32::from(!answered)),
         })
     }
 }

@@ -12,7 +12,7 @@ impl<'runtime, 'data, R: ProcessRunner> JobScopeCleanup<'runtime, 'data, R> {
         }
     }
 
-    pub(super) fn finish(mut self) -> Result<(), crate::oci::OciError> {
+    pub(super) fn finish(mut self) -> Result<(), OciError> {
         let result = self.runtime.cleanup_job_scope(self.job_scope);
         self.active = result.is_err();
         result
@@ -96,6 +96,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
 
     /// What the helper answered for the dispatched job, settled into the
     /// job's exit account or the result that ends this request.
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "every other error passes through unchanged"
+    )]
     pub(super) async fn settle_job_dispatch(
         &self,
         job: &DispatchedJob<'_>,
@@ -115,6 +119,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     && let Some(refused) = refused_job_start(error)
                 {
                     // Nothing started, so no stop: release the scope.
+                    #[expect(
+                        clippy::let_underscore_must_use,
+                        reason = "best-effort cleanup: the next reconciliation pass repeats it"
+                    )]
                     let _ = JobScopeCleanup::new(&self.runtime, job.job_scope).finish();
                     return Err(Box::new(refused));
                 }
@@ -169,7 +177,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             .diagnostic
             .as_deref()
             .and_then(ExitCause::of_summary);
-        let reason = if code as u32 == JOB_CANCEL_EXIT_CODE {
+        let reason = if code.cast_unsigned() == JOB_CANCEL_EXIT_CODE {
             Some("job adapter exited after interruption")
         } else if cause == Some(ExitCause::HostMemoryExhausted) {
             Some("the host memory guard stopped the job: host memory exhausted")
@@ -178,7 +186,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         };
         let mut receipt = job_receipt(
             job.request,
-            code as u32,
+            code.cast_unsigned(),
             job.started,
             empty_job_output_manifest(),
             reason,
@@ -473,7 +481,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                             return temporary_preparation_failure(
                                 FailureStage::JobInputs,
                                 "job input download",
-                                super::installation::attempt_end_cause(&lease_deadline),
+                                installation::attempt_end_cause(&lease_deadline),
                             );
                         }
                     }
@@ -680,7 +688,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     }
 }
 
-/// The one Stop of a JobRun, sent for cancellation and for cleanup alike: it
+/// The one Stop of a `JobRun`, sent for cancellation and for cleanup alike: it
 /// fences any pending Start of the same job and targets the job's container.
 pub(super) fn job_run_stop_plan(
     claim: &AgentClaim,
@@ -692,6 +700,10 @@ pub(super) fn job_run_stop_plan(
 pub(super) async fn wait_for_cancellation(cancellation: &mut tokio::sync::watch::Receiver<bool>) {
     // The enclosing operation owns the deadline and drops this observer at
     // completion. Losing its cancellation owner ends observation promptly.
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "waits for a task to end; its outcome is observed elsewhere"
+    )]
     let _ = cancellation.wait_for(|cancelled| *cancelled).await;
 }
 
@@ -727,6 +739,7 @@ where
         () = wait_for_cancellation(cancellation) => {
             let stopped = stop().await.is_ok();
             if stopped {
+                #[expect(clippy::let_underscore_must_use, reason = "waits for a task to end; its outcome is observed elsewhere")]
                 let _ = tokio::time::timeout(JOB_CANCEL_DRAIN_TIMEOUT, &mut job).await;
             }
             InterruptibleJob::Cancelled { stopped }
@@ -748,7 +761,7 @@ pub(super) fn job_placement(
 
 pub fn recipe_job_input_manifest(
     request: &vonk_agent_protocol::RecipeJobRunRequest,
-) -> Result<Vec<u8>, vonk_agent_protocol::ProtocolError> {
+) -> Result<Vec<u8>, ProtocolError> {
     canonical_json(&vonk_agent_protocol::generated::RecipeJobInputManifest {
         schema_version: 1,
         total_bytes: request.input_total_bytes,
@@ -811,7 +824,7 @@ pub(super) fn job_failure(receipt: RecipeJobRunResult) -> ExecutionResult {
     } else {
         FailureCode::RecipeJobRunFailed
     };
-    let logs = outputs::process_logs(&receipt);
+    let logs = process_logs(&receipt);
     ExecutionResult::Failed(
         Failure::new(reason)
             .code(code)
@@ -862,7 +875,12 @@ pub(super) fn refused_job_start(
                 "job start was refused by the Controller",
             ))
         }
-        _ => None,
+        crate::host_runtime::HostRuntimeError::Io(_)
+        | crate::host_runtime::HostRuntimeError::Controller(_)
+        | crate::host_runtime::HostRuntimeError::HelperProtocol(_)
+        | crate::host_runtime::HostRuntimeError::HelperProtocolBound { .. }
+        | crate::host_runtime::HostRuntimeError::StopUncertain
+        | crate::host_runtime::HostRuntimeError::HelperRejected { .. } => None,
     }
 }
 
@@ -871,7 +889,7 @@ pub(super) fn refused_job_start(
 pub(super) fn local_step(
     fallback: FailureStage,
     step: &str,
-    error: &crate::oci::OciError,
+    error: &OciError,
 ) -> (FailureStage, String) {
     let (stage, category) = error.safe_start_context();
     let stage = if matches!(stage, FailureStage::Unknown) {
@@ -894,6 +912,10 @@ pub(super) fn output_manifest_with_digest(
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the empty manifest is a constant that always canonicalises"
+)]
 pub(super) fn empty_job_output_manifest() -> RecipeJobOutputManifest {
     output_manifest_with_digest(
         vonk_agent_protocol::generated::RecipeJobOutputManifestContent {
@@ -937,10 +959,11 @@ pub(super) fn job_receipt(
 }
 
 mod endings;
-use endings::*;
+use endings::{bounded_job_result, out_of_range_exit};
 mod outputs;
 #[cfg(test)]
 pub(super) use outputs::*;
+use outputs::{OutputRefusal, collect_job_outputs, process_logs};
 mod reobserve;
 
 #[cfg(test)]
@@ -961,7 +984,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         claim: &AgentClaim,
         request: &vonk_agent_protocol::RecipeJobRunRequest,
         mut receipt: RecipeJobRunResult,
-    ) -> super::operation_observation::OperationObservation {
+    ) -> operation_observation::OperationObservation {
         use super::operation_observation::{OperationObservation, PendingObservation};
         let unknown = |stage, cause: String, receipt: RecipeJobRunResult| {
             OperationObservation::confirmed(ExecutionResult::Unknown(crate::outcome::Unconfirmed {
@@ -976,16 +999,16 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             Err(error) => return unknown(FailureStage::OutputStorage, error.to_string(), receipt),
         };
         if receipt.output_manifest.files.is_empty() && request.is_endpoint_owner() {
-            receipt.output_manifest = match outputs::collect_job_outputs(
+            receipt.output_manifest = match collect_job_outputs(
                 Some(&root),
                 &request.output_limits,
                 &request.output_mappings,
             ) {
                 Ok(manifest) => manifest,
-                Err(outputs::OutputRefusal::Breach(breach)) => {
+                Err(OutputRefusal::Breach(breach)) => {
                     return OperationObservation::confirmed(breach.failure(&receipt));
                 }
-                Err(outputs::OutputRefusal::Unreadable { cause, .. }) => {
+                Err(OutputRefusal::Unreadable { cause, .. }) => {
                     return OperationObservation::Unknown(PendingObservation::new(
                         claim,
                         WaitReason::ObservationUnavailable,
@@ -1016,7 +1039,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         claim: &AgentClaim,
         request: &vonk_agent_protocol::RecipeJobRunRequest,
         outcome: HostRuntimeOutcome,
-    ) -> super::operation_observation::OperationObservation {
+    ) -> operation_observation::OperationObservation {
         use super::operation_observation::OperationObservation;
         let Some(stop_plan) = job_run_stop_plan(claim, request) else {
             return OperationObservation::confirmed(failed("job observation identity is invalid"));

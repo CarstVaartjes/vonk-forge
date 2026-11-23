@@ -110,9 +110,7 @@ async fn artifact_job_heartbeat_cancellation_is_preserved_as_terminal_cancelled(
         let results = client.results.lock().unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].state, AgentResultState::Cancelled);
-        let vonk_agent_protocol::generated::AgentResultResult::OutcomeFailed(outcome) =
-            &results[0].result
-        else {
+        let AgentResultResult::OutcomeFailed(outcome) = &results[0].result else {
             panic!("expected a typed cancelled outcome");
         };
         // The initial heartbeat cancels before execution. No job ran, so
@@ -171,7 +169,7 @@ async fn journal_finish_failure_ends_unknown_then_a_fresh_fence_executes_once() 
         async fn observe(
             &self,
             _claim: &AgentClaim,
-        ) -> Option<crate::executor::operation_observation::OperationObservation> {
+        ) -> Option<operation_observation::OperationObservation> {
             None
         }
 

@@ -258,6 +258,10 @@ pub(super) async fn execute_claimed<C: LoopClient, E: Executor>(
             }
         },
     };
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the receiving side may already be gone; nobody is waiting for the value"
+    )]
     let _ = stop_heartbeat.send(());
     let heartbeat_result = heartbeat_task
         .await

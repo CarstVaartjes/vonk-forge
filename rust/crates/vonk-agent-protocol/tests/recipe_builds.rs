@@ -1,3 +1,9 @@
+#![expect(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 use chrono::DateTime;
 use serde::Deserialize;
 use serde_json::json;
@@ -33,7 +39,7 @@ fn build_payload() -> serde_json::Value {
             "reference": format!("ghcr.io/vonkforge/base@sha256:{}", "d".repeat(64)),
             "manifest_digest": format!("sha256:{}", "d".repeat(64))
         }],
-        "base_image_storage_bytes": 68719476736_u64,
+        "base_image_storage_bytes": 68_719_476_736_u64,
         "capabilities": [],
         "dockerfile": "Dockerfile",
         "network": {"hosts": []},
@@ -43,17 +49,17 @@ fn build_payload() -> serde_json::Value {
             "jobs": 1, "labels": [], "layer_compression": "disabled",
             "layer_labels": [], "layers": true, "no_hostname": false,
             "no_hosts": false, "omit_history": false, "os_features": [],
-            "os_version": null, "shm_bytes": 67108864,
+            "os_version": null, "shm_bytes": 67_108_864,
             "skip_unused_stages": true, "squash": "none", "timestamp": null,
             "unset_environment": [], "unset_labels": []
         },
         "limits": {
             "cpu_cores": 8,
-            "memory_bytes": 8589934592_u64,
-            "temporary_bytes": 68719476736_u64,
+            "memory_bytes": 8_589_934_592_u64,
+            "temporary_bytes": 68_719_476_736_u64,
             "processes": 4096,
             "timeout_seconds": 3600,
-            "output_bytes": 67108864
+            "output_bytes": 67_108_864
         }
     })
 }
@@ -90,9 +96,14 @@ fn apply_change(payload: &mut serde_json::Value, change: &SharedVectorChange) {
                 .expect("object vector path"),
             serde_json::Value::Number(index) => target
                 .as_array_mut()
-                .and_then(|value| value.get_mut(index.as_u64().expect("array index") as usize))
+                .and_then(|value| {
+                    value.get_mut(usize::try_from(index.as_u64().expect("array index")).unwrap())
+                })
                 .expect("array vector path"),
-            _ => panic!("invalid vector path component"),
+            serde_json::Value::Null
+            | serde_json::Value::Bool(_)
+            | serde_json::Value::Array(_)
+            | serde_json::Value::Object(_) => panic!("invalid vector path component"),
         };
     }
     match (change.op.as_str(), last) {
@@ -104,7 +115,7 @@ fn apply_change(payload: &mut serde_json::Value, change: &SharedVectorChange) {
         }
         ("set", serde_json::Value::Number(index)) => {
             target.as_array_mut().expect("array vector target")
-                [index.as_u64().expect("array index") as usize] =
+                [usize::try_from(index.as_u64().expect("array index")).unwrap()] =
                 change.value.clone().expect("set value");
         }
         ("remove", serde_json::Value::String(key)) => {

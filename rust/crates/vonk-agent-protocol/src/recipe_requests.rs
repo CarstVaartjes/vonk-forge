@@ -50,8 +50,7 @@ impl RecipeJobRunResult {
                 == Some(u64::from(self.output_manifest.total_bytes))
             && self.output_manifest.total_bytes <= 2 * 1024 * 1024 * 1024
             && canonical_json(&manifest)
-                .ok()
-                .is_some_and(|bytes| hex_sha256(&bytes) == self.output_manifest.manifest_sha256)
+                .is_ok_and(|bytes| hex_sha256(&bytes) == self.output_manifest.manifest_sha256)
             && self.evidence.elapsed_milliseconds <= 7 * 24 * 60 * 60 * 1000
             && self
                 .evidence
@@ -124,6 +123,10 @@ impl RecipeOperationRequest {
         Ok(request)
     }
 
+    #[expect(
+        clippy::match_same_arms,
+        reason = "the arms stay apart on purpose: each names a distinct case of the state machine"
+    )]
     pub(super) fn validate(&self) -> Result<(), ProtocolError> {
         let valid = match self {
             Self::RuntimePreflight(_) => true,
@@ -231,7 +234,14 @@ pub(super) mod recipe_start_tests {
     fn parsed_start(payload: Value) -> Result<RecipeStartRequest, ProtocolError> {
         match RecipeOperationRequest::parse(&claim(payload)?)? {
             RecipeOperationRequest::Start(request) => Ok(request),
-            _ => unreachable!(),
+            RecipeOperationRequest::RuntimePreflight(_)
+            | RecipeOperationRequest::Build(_)
+            | RecipeOperationRequest::BuildCleanup(_)
+            | RecipeOperationRequest::JobRun(_)
+            | RecipeOperationRequest::Install(_)
+            | RecipeOperationRequest::Stop(_)
+            | RecipeOperationRequest::Uninstall(_)
+            | RecipeOperationRequest::Reconcile(_) => unreachable!(),
         }
     }
 
@@ -261,7 +271,14 @@ pub(super) mod recipe_start_tests {
         let claim = claim_for(generated::AgentOperation::RecipeStop, payload)?;
         match RecipeOperationRequest::parse(&claim)? {
             RecipeOperationRequest::Stop(request) => Ok(request),
-            _ => unreachable!(),
+            RecipeOperationRequest::RuntimePreflight(_)
+            | RecipeOperationRequest::Build(_)
+            | RecipeOperationRequest::BuildCleanup(_)
+            | RecipeOperationRequest::JobRun(_)
+            | RecipeOperationRequest::Install(_)
+            | RecipeOperationRequest::Start(_)
+            | RecipeOperationRequest::Uninstall(_)
+            | RecipeOperationRequest::Reconcile(_) => unreachable!(),
         }
     }
 
@@ -357,34 +374,31 @@ pub(super) mod recipe_start_tests {
             ContainerRunTarget, ContainerRunTargetKind, RunNameTarget, RunNameTargetKind,
         };
         let container = || {
-            Some(crate::RunInspectTarget::ContainerRunTarget(
-                ContainerRunTarget {
-                    kind: ContainerRunTargetKind::ContainerRun,
-                    archive_sha256: "a".repeat(64),
-                    registry_index_digest: format!("sha256:{}", "b".repeat(64)),
-                    platform_manifest_digest: format!("sha256:{}", "b".repeat(64)),
-                    image_reference: "vonk/image:test".to_owned(),
-                    command: vec!["run".to_owned()],
-                },
-            ))
+            Some(RunInspectTarget::ContainerRunTarget(ContainerRunTarget {
+                kind: ContainerRunTargetKind::ContainerRun,
+                archive_sha256: "a".repeat(64),
+                registry_index_digest: format!("sha256:{}", "b".repeat(64)),
+                platform_manifest_digest: format!("sha256:{}", "b".repeat(64)),
+                image_reference: "vonk/image:test".to_owned(),
+                command: vec!["run".to_owned()],
+            }))
         };
-        let request =
-            |action, target: Option<crate::RunInspectTarget>, generation| HostRuntimeRequest {
-                inspect_target: target.clone(),
-                action,
-                fence: Uuid::new_v4(),
-                arguments: if target.is_some() {
-                    Vec::new()
-                } else {
-                    vec!["run".to_owned()]
-                },
-                job_plan: None,
-                installation_id: None,
-                reconciliation_identity: None,
-                run_generation: generation,
-                start_plan: None,
-                stop_plan: None,
-            };
+        let request = |action, target: Option<RunInspectTarget>, generation| HostRuntimeRequest {
+            inspect_target: target.clone(),
+            action,
+            fence: Uuid::new_v4(),
+            arguments: if target.is_some() {
+                Vec::new()
+            } else {
+                vec!["run".to_owned()]
+            },
+            job_plan: None,
+            installation_id: None,
+            reconciliation_identity: None,
+            run_generation: generation,
+            start_plan: None,
+            stop_plan: None,
+        };
         for generation in [None, Some(1), Some(i64::MAX as u64)] {
             assert!(
                 request(HostRuntimeAction::RunInspect, container(), generation)
@@ -392,7 +406,7 @@ pub(super) mod recipe_start_tests {
                     .is_ok()
             );
         }
-        let by_name = Some(crate::RunInspectTarget::RunNameTarget(RunNameTarget {
+        let by_name = Some(RunInspectTarget::RunNameTarget(RunNameTarget {
             kind: RunNameTargetKind::RunName,
             run_id: Uuid::new_v4(),
         }));

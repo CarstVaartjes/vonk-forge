@@ -361,11 +361,11 @@ fn newer_generation_survives_failed_start_and_old_exact_stop_without_rewinding_f
     executor
         .update_runtime_generation_fence(&current, RuntimeGenerationFenceUse::Start)
         .unwrap();
-    let nonce =
-        match executor.accept_installation_intent(current.installation_id, None, Some(1), false) {
-            Err(OperationError::InstallationIntentObservationRequired { nonce }) => nonce,
-            _ => panic!("current intent challenge was not issued"),
-        };
+    let Err(OperationError::InstallationIntentObservationRequired { nonce }) =
+        executor.accept_installation_intent(current.installation_id, None, Some(1), false)
+    else {
+        panic!("current intent challenge was not issued")
+    };
     // A new authorized Start reserves its generation before validating or
     // invoking Docker. Force it to fail at the malformed launch boundary,
     // then prove the old named container can still be removed: it is this
@@ -467,13 +467,13 @@ fn exact_cancel_stop_waits_for_active_start_then_blocks_late_start() {
         .update_runtime_generation_fence(&identity, RuntimeGenerationFenceUse::Start)
         .unwrap();
     let active = executor.job_cancellation.begin(identity).unwrap();
-    std::thread::scope(|scope| {
+    thread::scope(|scope| {
         let stop = scope
             .spawn(|| executor.runtime_stop_authorized(identity, identity.runtime_id, 1, true));
         let deadline = Instant::now() + Duration::from_secs(2);
         while !executor.job_cancellation.was_cancelled(identity).unwrap() {
             assert!(Instant::now() < deadline);
-            std::thread::yield_now();
+            thread::yield_now();
         }
         assert!(!stop.is_finished(), "stop acknowledged an active START");
         drop(active);
@@ -531,7 +531,7 @@ fn exact_stop_repairs_unsafe_generation_custody_without_touching_its_target() {
         identity.installation_id,
         identity.runtime_id,
     ));
-    std::os::unix::fs::symlink(&outside, &fence).unwrap();
+    symlink(&outside, &fence).unwrap();
     executor
         .runtime_stop_authorized(identity, identity.runtime_id, 1, true)
         .unwrap();
@@ -563,6 +563,10 @@ fn poisoned_cancellation_bookkeeping_releases_the_owner_and_admits_fresh_work() 
     let fence = JobCancellationFence::default();
     let identity = runtime_effect_identity(1);
     let active = fence.begin(identity).unwrap();
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the panic is the behaviour under test"
+    )]
     let _ = std::panic::catch_unwind(|| {
         let _guard = fence.state.lock().unwrap();
         panic!("interrupted bookkeeping");

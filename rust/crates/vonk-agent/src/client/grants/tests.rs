@@ -6,9 +6,7 @@ use super::*;
 #[tokio::test]
 async fn host_runtime_grant_ttl_fits_inside_renewed_operation_lease() {
     let payload = ArtifactDistributionPayload {
-        assignment: serde_json::from_str::<
-            vonk_agent_protocol::generated::ArtifactDistributionPayload,
-        >(include_str!(concat!(
+        assignment: serde_json::from_str::<ArtifactDistributionPayload>(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../../agent_protocol/fixtures/artifact-distribution-payload.json"
         )))
@@ -48,7 +46,7 @@ async fn host_runtime_grant_ttl_fits_inside_renewed_operation_lease() {
         .position(|value| value == b"\r\n\r\n")
         .map(|index| &request[index + 4..])
         .unwrap();
-    let body: serde_json::Value = serde_json::from_slice(body).unwrap();
+    let body: Value = serde_json::from_slice(body).unwrap();
 
     assert_eq!(body["expires_in_seconds"], 10);
     for field in [

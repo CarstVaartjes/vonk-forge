@@ -16,14 +16,7 @@ fn model_path(installation: &Path, artifact: &crate::workloads::CompiledModelArt
 
 /// An installation made before files were shared: a private copy of each
 /// model file, receipted, and the store's own object of each digest.
-fn before_sharing(
-    data: &Path,
-) -> (
-    String,
-    PathBuf,
-    crate::workloads::CompiledExecutionPlan,
-    Vec<PathBuf>,
-) {
+fn before_sharing(data: &Path) -> (String, PathBuf, CompiledExecutionPlan, Vec<PathBuf>) {
     let (id, installation, plan) = persisted_installation(data);
     let store = data.join("distribution/models");
     fs::create_dir_all(&store).unwrap();
@@ -184,7 +177,7 @@ fn a_copy_a_workload_once_read_relinks_with_its_access_intact() {
     // A start granted the runtime user read access on both copies and
     // recorded them again.
     for artifact in &artifacts {
-        crate::oci::test_support::apply_acl(
+        test_support::apply_acl(
             &model_path(&installation, artifact),
             &[
                 (0x0001, 0o6, u32::MAX),

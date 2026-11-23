@@ -56,7 +56,7 @@ fn unclassified_commands_keep_exit_status_and_bounded_stderr_in_wire_evidence() 
             logs: Box::new(sanitized_process_logs(&output)),
         },
         command_failure(FailureStage::ImageVerification, &output),
-        super::network_boundary_error(FailureStage::EgressImageImport, &output),
+        network_boundary_error(FailureStage::EgressImageImport, &output),
     ];
     for error in errors {
         let body = error.failure_evidence();
@@ -73,7 +73,7 @@ fn unclassified_commands_keep_exit_status_and_bounded_stderr_in_wire_evidence() 
 
 #[test]
 fn podman_failure_retains_sanitized_final_ring_output() {
-    let output = crate::process::ProcessOutput {
+    let output = ProcessOutput {
         exit_code: None,
         success: false,
         stdout: Vec::new(),
@@ -86,9 +86,9 @@ fn podman_failure_retains_sanitized_final_ring_output() {
     let errors = [
         RecipeBuildError::ImageBuild {
             diagnostic: podman_build_diagnostic(&output),
-            logs: Box::new(super::sanitized_process_logs(&output)),
+            logs: Box::new(sanitized_process_logs(&output)),
         },
-        super::network_boundary_error(FailureStage::EgressNetworkCreate, &output),
+        network_boundary_error(FailureStage::EgressNetworkCreate, &output),
     ];
     for error in errors {
         let body = error.failure_evidence();
@@ -567,14 +567,14 @@ fn import_host_disk_pressure_is_retryable_storage_not_a_plan_violation() {
     use crate::process::{ProcessDiskReserve, ProcessRunner, Program, SystemProcessRunner};
 
     let root = tempfile::tempdir().unwrap();
-    let archive = std::fs::File::create(root.path().join("base-image.tar")).unwrap();
+    let archive = File::create(root.path().join("base-image.tar")).unwrap();
     // Exercise the import's real free-space guard before Podman starts.
     // This is host pressure, not an oversized recipe working directory.
     let error = SystemProcessRunner
         .run_with_input_disk_reserve_cancellable(
             Program::Podman,
             &["load".to_owned()],
-            std::time::Duration::from_secs(1),
+            Duration::from_secs(1),
             &archive,
             ProcessDiskReserve::new(root.path(), u64::MAX),
             &|| false,

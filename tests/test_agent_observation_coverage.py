@@ -38,7 +38,7 @@ def observation_gaps(source: str) -> set[str]:
         # The handler must reach an owner probe. Native tests additionally
         # exercise the effect and custody rather than just these call sites.
         if not re.search(
-            r"self\.(?:runtime|client|observe_)|crate::|super::upgrade_observation::observe_upgrade",
+            r"self\.(?:runtime|client|observe_)|crate::|(?:super::)?upgrade_observation::observe_upgrade",
             body,
         ):
             missing.add(kind.value)
@@ -58,10 +58,9 @@ def test_observation_gate_rejects_new_kind_missing_and_placeholder_handlers() ->
     )
     assert observation_gaps(
         re.sub(
-            r"ObservationKind::Upgrade => \{.*?\n            \}",
+            r"ObservationKind::Upgrade => Ok\(upgrade_observation::observe_upgrade\(claim, upgrade\)\),",
             "ObservationKind::Upgrade => Ok(unknown(String::new())),",
             source,
             count=1,
-            flags=re.DOTALL,
         )
     )

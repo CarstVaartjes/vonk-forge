@@ -102,7 +102,7 @@ pub(super) async fn run_heartbeats<C: LoopClient>(
     loop {
         tokio::select! {
             _ = &mut stop => return Ok(cancellation_observed),
-            _ = tokio::time::sleep(delay.min(observation_end().saturating_duration_since(tokio::time::Instant::now()))) => {}
+            () = tokio::time::sleep(delay.min(observation_end().saturating_duration_since(tokio::time::Instant::now()))) => {}
         }
         // Every renewal carries the order's progress, so the Controller's
         // stall window advances on the same bytes, items and phases as ours.

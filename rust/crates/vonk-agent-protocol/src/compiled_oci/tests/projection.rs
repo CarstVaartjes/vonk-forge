@@ -76,7 +76,7 @@ fn a_many_artifact_runtime_command_is_framed() {
         .collect();
     // Its 29 recipe environment entries plus the platform ones.
     invocation.environment = (0..38)
-        .map(|index| super::CompiledEnvironmentEntry {
+        .map(|index| CompiledEnvironmentEntry {
             name: format!("VONK_ENV_{index:02}"),
             value: "1".to_owned(),
         })

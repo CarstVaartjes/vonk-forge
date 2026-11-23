@@ -153,7 +153,7 @@ fn launch(
 
 /// The agent-side tree an accepted `plan` launches from, with its image
 /// archive digest made consistent with its manifest.
-fn start_fixture(plan: &mut RecipeStartPayload) -> (tempfile::TempDir, ManagedRoots) {
+fn start_fixture(plan: &mut RecipeStartPayload) -> (TempDir, ManagedRoots) {
     let image = &mut plan.compiled_execution_plan.runtime_image;
     image.oci_layout_sha256 = image
         .image_digest

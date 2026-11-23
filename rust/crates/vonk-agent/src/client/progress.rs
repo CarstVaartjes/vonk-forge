@@ -5,7 +5,7 @@ use super::*;
 #[derive(Debug, Clone)]
 pub struct DistributionDownloadEvidence {
     pub model_digests: Vec<String>,
-    pub model_paths: Vec<std::path::PathBuf>,
+    pub model_paths: Vec<PathBuf>,
     pub oci_image_digest: String,
     pub oci_image_config_digest: String,
     pub downloaded_bytes: u64,
@@ -56,7 +56,7 @@ impl<F: FnMut(DistributionProgress)> DistributionProgressTracker<F> {
             completed_items: self.completed_items,
             total_items: self.object_bytes.len() as u64,
             object_sha256: object.sha256.clone(),
-            kind: object.kind.to_string(),
+            kind: object.kind.clone(),
             bytes: self.bytes,
             total_bytes: Some(self.total_bytes),
             fetched,

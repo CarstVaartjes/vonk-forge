@@ -56,6 +56,10 @@ pub(super) const UNITS: [Unit; 6] = [
     },
 ];
 
+#[expect(
+    clippy::match_same_arms,
+    reason = "the arms stay apart on purpose: each names a distinct case of the state machine"
+)]
 pub(super) fn enable(host: &mut impl Host) -> Result<(), String> {
     for unit in &UNITS {
         match unit.enablement {

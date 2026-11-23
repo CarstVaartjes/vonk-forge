@@ -59,6 +59,10 @@ impl AgentConfig {
         Ok(config)
     }
 
+    #[expect(
+        clippy::string_slice,
+        reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+    )]
     fn validate(&self) -> Result<(), ConfigError> {
         validate_origin(&self.enrollment_url, "enrollment_url")?;
         validate_origin(&self.controller_url, "controller_url")?;

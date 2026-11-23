@@ -148,6 +148,10 @@ impl ArtifactDistributionRequest {
 }
 
 impl AgentUpgradeRequest {
+    #[expect(
+        clippy::string_slice,
+        reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+    )]
     pub fn parse(claim: &AgentClaim) -> Result<Self, ProtocolError> {
         if claim.operation != generated::AgentOperation::AgentUpgradeV1 {
             return Err(ProtocolError::Identity("agent upgrade operation"));

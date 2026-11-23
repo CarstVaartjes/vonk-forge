@@ -208,6 +208,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     /// the restart, so the deadline counts from the later of the job's last
     /// progress and the lease deadline, never earlier than the helper's own.
     /// `None` while the job is within that bound.
+    #[expect(
+        clippy::unused_self,
+        reason = "a method so it stays beside its siblings behind the same type"
+    )]
     pub(in crate::executor) fn job_past_its_bound(
         &self,
         claim: &AgentClaim,

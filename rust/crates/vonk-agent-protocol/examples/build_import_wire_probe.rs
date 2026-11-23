@@ -1,3 +1,8 @@
+#![expect(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "example program: a failed unwrap ends the demonstration"
+)]
 use std::io::{self, BufRead};
 
 use serde_json::{Value, json};
@@ -35,7 +40,13 @@ fn main() {
                 "image_digest": format!("sha256:{}", "a".repeat(64)),
                 "oci_layout_sha256": "b".repeat(64),
             }),
-            _ => panic!("unexpected operation"),
+            RecipeOperationRequest::RuntimePreflight(_)
+            | RecipeOperationRequest::JobRun(_)
+            | RecipeOperationRequest::Install(_)
+            | RecipeOperationRequest::Start(_)
+            | RecipeOperationRequest::Stop(_)
+            | RecipeOperationRequest::Uninstall(_)
+            | RecipeOperationRequest::Reconcile(_) => panic!("unexpected operation"),
         };
         println!(
             "{}",

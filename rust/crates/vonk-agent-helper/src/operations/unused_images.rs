@@ -18,7 +18,7 @@
 use super::*;
 
 /// How long an image no installation names stays after its last pull.
-pub const UNUSED_IMAGE_GRACE: Duration = vonk_agent_protocol::store_retention::GRACE;
+pub(super) const UNUSED_IMAGE_GRACE: Duration = vonk_agent_protocol::store_retention::GRACE;
 /// How often the helper looks for unused images.
 pub const UNUSED_IMAGE_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 /// One `docker image rm` of a large image.
@@ -134,6 +134,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
 
     /// Discover images from Docker itself, including leftovers with no receipt.
     /// Keep aliases of any protected content, and every image a container names.
+    #[expect(
+        clippy::string_slice,
+        reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+    )]
     fn collect_unreceipted_images(
         &self,
         named: &HashSet<String>,
@@ -210,6 +214,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     .filter(|config| lower_hex(config, 64))
                     && !configs.contains(format!("sha256:{config}").as_str())
                 {
+                    #[expect(
+                        clippy::let_underscore_must_use,
+                        reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+                    )]
                     let _ = fs::remove_file(entry.path());
                 }
             }
@@ -241,12 +249,20 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 .runtime_image_receipts
                 .join(format!(".untracked-{}", &id[7..]));
             if kept.contains(id) {
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+                )]
                 let _ = fs::remove_file(&marker);
                 continue;
             }
             match self.image_has_no_containers(id) {
                 Some(true) => {}
                 Some(false) => {
+                    #[expect(
+                        clippy::let_underscore_must_use,
+                        reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+                    )]
                     let _ = fs::remove_file(&marker);
                     continue;
                 }
@@ -346,7 +362,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(
-                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                    .bits()
+                    .cast_signed(),
             )
             .open(self.roots.agent_data.join("store-retention.json"))
             .ok()?;
@@ -414,6 +432,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             );
             return;
         }
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+        )]
         let _ = fs::remove_file(&receipt);
         if let (Some(before), Some(after)) = (before, disk())
             && after > before
@@ -468,9 +490,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
             return;
         };
         for address in plan_image_addresses(&plan) {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort cleanup: the next reconciliation pass repeats it"
+            )]
             let _ = OpenOptions::new()
                 .write(true)
-                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
                 .open(self.roots.runtime_image_receipts.join(address))
                 .and_then(|receipt| receipt.set_modified(std::time::SystemTime::now()));
         }
@@ -498,7 +524,11 @@ fn read_plan(path: &Path) -> std::io::Result<Option<CompiledExecutionPlan>> {
     let limit = vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES as u64;
     let file = match OpenOptions::new()
         .read(true)
-        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
+        .custom_flags(
+            (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                .bits()
+                .cast_signed(),
+        )
         .open(path)
     {
         Ok(file) => file,

@@ -15,7 +15,7 @@ use std::{
 /// Preserve original JSON kinds before schema validation. Serde's
 /// arbitrary-precision Value visitor recognizes a private number-object marker;
 /// a real input object must remain an object rather than acquire numeric authority.
-/// RawValue also works for nested/from_value deserializers, so there is one path.
+/// `RawValue` also works for `nested/from_value` deserializers, so there is one path.
 fn deserialize_original_value<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<WireInstance, D::Error> {
@@ -69,7 +69,12 @@ pub(crate) fn deserialize_integer_number<'de, D: Deserializer<'de>>(
                 number
             })
         }
-        _ => Err(D::Error::custom("expected an integer token")),
+        Value::Null
+        | Value::Bool(_)
+        | Value::Number(_)
+        | Value::String(_)
+        | Value::Array(_)
+        | Value::Object(_) => Err(D::Error::custom("expected an integer token")),
     }
 }
 
@@ -121,11 +126,19 @@ impl<'de> Visitor<'de> for OriginalObject {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the generated wire schema is valid JSON or the build is broken"
+)]
 static SCHEMA: LazyLock<Value> = LazyLock::new(|| {
     serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/wire.json")))
         .expect("generated wire schema must be valid JSON")
 });
 const SCHEMA_URI: &str = "urn:vonk:agent-wire";
+#[expect(
+    clippy::expect_used,
+    reason = "the generated wire schema registers or the build is broken"
+)]
 static REGISTRY: LazyLock<jsonschema::Registry<'static>> = LazyLock::new(|| {
     jsonschema::Registry::new()
         .add(SCHEMA_URI, SCHEMA.clone())
@@ -177,6 +190,10 @@ pub(crate) fn may_match_wire_model_shape(name: &str, object_keys: Option<&[&str]
     may_match_object_shape(&format!("#/$defs/{name}"), object_keys)
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "required keys are strings by the generated schema"
+)]
 fn may_match_object_shape(pointer: &str, object_keys: Option<&[&str]>) -> bool {
     let Some(keys) = object_keys else {
         return true;
@@ -202,10 +219,7 @@ fn may_match_object_shape(pointer: &str, object_keys: Option<&[&str]>) -> bool {
         schema
     };
     if schema.get("type").and_then(|value| value.as_str()) != Some("object")
-        || schema
-            .get("additionalProperties")
-            .and_then(|value| value.as_bool())
-            != Some(false)
+        || schema.get("additionalProperties").and_then(Value::as_bool) != Some(false)
         || [
             "$ref",
             "$dynamicRef",
@@ -241,10 +255,7 @@ fn may_match_object_shape(pointer: &str, object_keys: Option<&[&str]>) -> bool {
     {
         return false;
     }
-    schema
-        .get("x-vonk-ignore-unknown")
-        .and_then(|value| value.as_bool())
-        == Some(true)
+    schema.get("x-vonk-ignore-unknown").and_then(Value::as_bool) == Some(true)
         || keys.iter().all(|key| properties.contains_key(*key))
 }
 
@@ -325,7 +336,7 @@ fn strict_numbers(pointer: &str, value: &Value) -> Result<(), String> {
                 )?;
             } else if schema
                 .get("additionalProperties")
-                .is_some_and(|value| value.is_object())
+                .is_some_and(Value::is_object)
             {
                 strict_numbers(&format!("{pointer}/additionalProperties"), child)?;
             }
@@ -415,7 +426,7 @@ fn materialize_float_numbers(pointer: &str, value: &mut Value) -> Result<(), Str
                 )?;
             } else if schema
                 .get("additionalProperties")
-                .is_some_and(|value| value.is_object())
+                .is_some_and(Value::is_object)
             {
                 materialize_float_numbers(&format!("{pointer}/additionalProperties"), child)?;
             }

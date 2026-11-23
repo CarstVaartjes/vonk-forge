@@ -5,7 +5,7 @@ use super::*;
 pub(super) fn podman_import_diagnostic(
     output: &crate::process::ProcessOutput,
 ) -> PodmanImportDiagnostic {
-    let logs = super::diagnostics::sanitized_process_logs(output);
+    let logs = sanitized_process_logs(output);
     if logs.stdout.text.trim().is_empty() && logs.stderr.text.trim().is_empty() {
         return PodmanImportDiagnostic::NonzeroWithoutOutput;
     }
@@ -46,6 +46,10 @@ pub(super) fn podman_import_diagnostic(
 /// line, or a goroutine dump line (`goroutine 61 [running]:`), with no closing
 /// `Error: building at STEP` line. That line means the crash lines belong to the
 /// RUN's own program, which is an ordinary failed step. `stderr` is lowercase.
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn podman_crashed(stderr: &str) -> bool {
     !stderr.contains("error: building at step ")
         && stderr.lines().any(|line| {
@@ -87,7 +91,7 @@ pub(crate) fn podman_build_diagnostic(
     // A RUN's own failure exits its step; real host denials arrive before any
     // step exit or name the OCI runtime. Words a RUN printed are not denials.
     let denial_visible = !step_exited || causes.contains("crun:") || causes.contains("runc:");
-    let logs = super::diagnostics::sanitized_process_logs(output);
+    let logs = sanitized_process_logs(output);
     if logs.stdout.text.trim().is_empty() && logs.stderr.text.trim().is_empty() {
         PodmanBuildDiagnostic::NonzeroWithoutOutput
     } else if evidence.contains("no space left on device")
@@ -166,6 +170,10 @@ pub(crate) fn podman_build_diagnostic(
     }
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 pub(super) fn podman_import_process_error(error: ProcessError) -> RecipeBuildError {
     let diagnostic = match error {
         // Import uses the filesystem free-space guard, not a directory-size

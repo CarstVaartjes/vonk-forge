@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use std::{
     future::Future,
     io::{self, Read},
@@ -141,6 +139,7 @@ async fn agent_main() -> Result<(), Box<dyn std::error::Error>> {
             fabric_address,
             fabric_bandwidth_mbps,
         } => {
+            use std::io::Write;
             let inventory = InventoryCollector {
                 runner: &SystemProcessRunner,
                 meminfo_path: Path::new("/proc/meminfo"),
@@ -152,8 +151,7 @@ async fn agent_main() -> Result<(), Box<dyn std::error::Error>> {
             .collect()?;
             let request = inventory.to_request(chrono::Utc::now().into());
             let bytes = vonk_agent_protocol::canonical_json(&request)?;
-            use std::io::Write;
-            std::io::stdout().write_all(&bytes)?;
+            io::stdout().write_all(&bytes)?;
         }
         Command::SelfTest => {
             let config = AgentConfig::load(&cli.config)?;
@@ -179,7 +177,7 @@ async fn agent_main() -> Result<(), Box<dyn std::error::Error>> {
                 &receipt,
                 &identity,
                 pid,
-                std::time::Duration::from_secs(max_age_seconds),
+                Duration::from_secs(max_age_seconds),
             )?;
         }
         Command::Pair {
@@ -273,7 +271,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     let memory = std::sync::Arc::new(vonk_agent::memory_readings::Ledger::open(
         Path::new("/"),
         &config.data_dir,
-        rustix::param::page_size() as u32,
+        u32::try_from(rustix::param::page_size()).unwrap_or(u32::MAX),
     ));
     let control = run_control_lane(
         config,
@@ -303,6 +301,10 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     )
     .await;
     inventory.abort();
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "waits for a task to end; its outcome is observed elsewhere"
+    )]
     let _ = inventory.await;
     vonk_agent::inventory::stop_process().await;
     match outcome {
@@ -326,9 +328,9 @@ struct CustodyExecutor<'a, E> {
 
 /// Seconds after a completed `recipe.stop` at which an inventory is collected.
 /// The Controller counts an inventory as proof the stop is reflected only when
-/// observed_at > stopped_at + MAX_INVENTORY_FUTURE_SKEW (30 s,
-/// control/src/vonk_control/inventory/repository.py:32), so 31 s is the first
-/// instant one can count. A multi-Spark run's stopped_at is set when its LAST
+/// `observed_at` > `stopped_at` + `MAX_INVENTORY_FUTURE_SKEW` (30 s,
+/// `control/src/vonk_control/inventory/repository.py:32`), so 31 s is the first
+/// instant one can count. A multi-Spark run's `stopped_at` is set when its LAST
 /// rank's result is projected, up to about 60 s after this Spark's stop, so the
 /// collection repeats at +46, +61 and +91 s (covering a peer up to ~60 s later)
 /// and then stops; the regular 120 s cadence covers anything longer.
@@ -349,13 +351,17 @@ struct PostStopInventory(std::sync::Arc<std::sync::Mutex<Option<(tokio::time::In
 
 impl PostStopInventory {
     fn stopped(&self) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some((tokio::time::Instant::now(), 0));
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some((tokio::time::Instant::now(), 0));
     }
 
     fn due(&self, now: tokio::time::Instant) -> bool {
         self.0
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .is_some_and(|(stopped_at, next)| {
                 now >= stopped_at + Duration::from_secs(POST_STOP_INVENTORY_SECONDS[next])
             })
@@ -364,7 +370,10 @@ impl PostStopInventory {
     /// A stop-triggered collection was reported: skip every offset already
     /// passed; the schedule ends after the last one.
     fn collected(&self, now: tokio::time::Instant) {
-        let mut pending = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let mut pending = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some((stopped_at, next)) = pending.as_mut() {
             while *next < POST_STOP_INVENTORY_SECONDS.len()
                 && now >= *stopped_at + Duration::from_secs(POST_STOP_INVENTORY_SECONDS[*next])
@@ -697,7 +706,7 @@ async fn claim_lane<'a>(
                         // The claim is journaled: the observation pass and the
                         // Controller's lease reconcile it like a lost response.
                         Err(error) => {
-                            eprintln!("vonk-agent: off-lane order {fence} not started: {error}")
+                            eprintln!("vonk-agent: off-lane order {fence} not started: {error}");
                         }
                     }
                 }
@@ -732,7 +741,9 @@ async fn claim_lane<'a>(
                         Duration::from_secs(POLL_MIN_SECONDS),
                         Duration::from_secs(POLL_MAX_SECONDS),
                     ),
-                    _ => jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS),
+                    LoopError::State(_) | LoopError::HeartbeatTask | LoopError::Readiness(_) => {
+                        jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS)
+                    }
                 };
                 eprintln!(
                     "vonk-agent: control loop degraded ({error}); retrying in {} seconds",
@@ -749,7 +760,7 @@ async fn claim_lane<'a>(
 // gate stop/reconciliation claims; admission remains with the Controller.
 /// One bounded store retention pass; returns when the next one is due.
 async fn collect_stores(
-    data_root: std::path::PathBuf,
+    data_root: PathBuf,
     untracked: Option<vonk_agent::store_retention::Untracked>,
 ) -> Instant {
     const PASS: Duration = Duration::from_secs(60);
@@ -816,6 +827,7 @@ async fn run_inventory_lane(
             let memory = memory.clone();
             let traffic = traffic.clone();
             async move {
+                use vonk_agent_protocol::generated::HostHelperResponseStatus as Reply;
                 let evidence = vonk_agent::network::collect_optional(config.controller_url).await;
                 inventory.network_interfaces = evidence.interfaces;
                 inventory.nas_route_interface = evidence.nas_route_interface;
@@ -827,7 +839,6 @@ async fn run_inventory_lane(
                 let installations = inventory.installations.clone().unwrap_or_default();
                 let runs = inventory.runs.clone().unwrap_or_default();
                 let answer = client.report_inventory_request(inventory).await?;
-                use vonk_agent_protocol::generated::HostHelperResponseStatus as Reply;
                 let grants = answer.as_ref().map(|answer| {
                     [
                         (answer.gpu_clock_grant.clone(), Reply::GpuClockReconciled, "GPU clock", Duration::from_secs(30)),
@@ -1009,7 +1020,7 @@ where
 fn jittered_backoff(failures: u32, minimum: u64, maximum: u64) -> Duration {
     let entropy = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |value| value.subsec_nanos() as u64);
+        .map_or(0, |value| u64::from(value.subsec_nanos()));
     let minimum = minimum.max(1);
     backoff_delay(failures, entropy, minimum, maximum.max(minimum))
 }
@@ -1058,6 +1069,10 @@ where
     };
     if !matches!(outcome, LaneExitWithRotation::Rotation(_)) {
         rotation.abort();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "waits for a task to end; its outcome is observed elsewhere"
+        )]
         let _ = rotation.await;
     }
     outcome

@@ -6,6 +6,7 @@
 use super::*;
 use crate::operations::commands::{MAX_LISTED_LINE_BYTES, captures_stdout};
 use crate::operations::reobserve::REOBSERVE_FORMAT;
+use std::fmt::Write as _;
 
 pub(in crate::operations) const INSTALLATION: &str = "50000000-0000-4000-8000-000000000005";
 pub(in crate::operations) const STOP_REFUSAL: &str =
@@ -97,7 +98,7 @@ impl CommandRunner for Host {
         if !captures_stdout(executable) {
             output.stdout.clear();
         }
-        if output.stdout.len() > MAX_COMMAND_OUTPUT_BYTES as usize {
+        if output.stdout.len() > usize::try_from(MAX_COMMAND_OUTPUT_BYTES).unwrap() {
             return Err("compiled command output exceeded its bound".to_owned());
         }
         Ok(output)
@@ -124,6 +125,10 @@ impl CommandRunner for Host {
 
 impl Host {
     /// What Docker answers, before the runner's capture rules apply.
+    #[expect(
+        clippy::format_collect,
+        reason = "builds a small string; a fold would read worse"
+    )]
     fn answer(&self, executable: &Path, args: &[String]) -> Result<CommandOutput, String> {
         assert_eq!(executable, Path::new("/usr/bin/docker"));
         self.calls.lock().unwrap().push(args.to_vec());
@@ -302,18 +307,20 @@ impl Host {
                     match find(id) {
                         Some(index) if !uninspectable.iter().any(|bad| bad == id) => {
                             let container = &containers[index];
-                            records.push_str(&format!(
-                                "{}\t{INSTALLATION}\t{}\n",
+                            writeln!(
+                                records,
+                                "{}\t{INSTALLATION}\t{}",
                                 container.id(),
                                 container.target
-                            ));
+                            )
+                            .unwrap();
                             for file in 0..self.mounts_per_container {
-                                records.push_str(&format!(
-                                    "\"/var/lib/vonk-forge/models/sha256/{:064x}/snapshots/{:040x}/model-{file:05}-of-{:05}.safetensors\"\n",
+                                writeln!(records,
+                                    "\"/var/lib/vonk-forge/models/sha256/{:064x}/snapshots/{:040x}/model-{file:05}-of-{:05}.safetensors\"",
                                     index,
                                     file,
                                     self.mounts_per_container
-                                ));
+                                ).unwrap();
                             }
                             records.push_str("--\n");
                         }

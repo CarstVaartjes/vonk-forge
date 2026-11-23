@@ -60,13 +60,25 @@ async fn serve(body: Option<String>) -> u16 {
             let body = body.clone();
             tokio::spawn(async move {
                 let mut request = [0_u8; 1024];
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "waits for a task to end; its outcome is observed elsewhere"
+                )]
                 let _ = socket.read(&mut request).await;
                 // No body means an engine that accepts and never answers.
                 let Some(body) = body else {
                     return std::future::pending::<()>().await;
                 };
                 let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "waits for a task to end; its outcome is observed elsewhere"
+                )]
                 let _ = socket.write_all(head.as_bytes()).await;
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "waits for a task to end; its outcome is observed elsewhere"
+                )]
                 let _ = socket.write_all(body.as_bytes()).await;
             });
         }

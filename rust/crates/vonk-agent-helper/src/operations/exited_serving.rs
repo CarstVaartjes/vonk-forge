@@ -19,6 +19,10 @@ use super::*;
 
 /// An exited container stays this long after its process ended, for anyone
 /// who wants to read it with Docker's own tools.
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "a grace of a few days in seconds fits i64; `try_from` is not const"
+)]
 const GRACE: chrono::TimeDelta =
     chrono::TimeDelta::seconds(vonk_agent_protocol::store_retention::GRACE.as_secs() as i64);
 

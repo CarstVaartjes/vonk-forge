@@ -24,7 +24,7 @@ use crate::{
 };
 
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
-const PAIRING_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const PAIRING_TIMEOUT: Duration = Duration::from_mins(10);
 const MACHINE_EVIDENCE_PATH: &str = "/var/lib/vonk-forge-agent/machine-evidence";
 
 #[derive(Debug, Error)]
@@ -141,16 +141,15 @@ async fn observe_enrollment(
             );
             attempt = attempt.saturating_add(1);
             // One enrollment exchange: a small request and response.
-            let response = match client
+            let Ok(response) = client
                 .post(endpoint.clone())
                 .timeout(Duration::from_secs(30))
                 .header("content-type", "application/json")
                 .body(body.clone())
                 .send()
                 .await
-            {
-                Ok(response) => response,
-                Err(_) => continue,
+            else {
+                continue;
             };
             let status = response.status().as_u16();
             let verdict = if status == 200 {
@@ -179,12 +178,11 @@ async fn observe_enrollment(
                 Some(_) => continue,
                 None => {}
             }
-            let observed = match bounded_pairing_body(response).await {
-                Ok(observed) => observed,
-                Err(_) => continue,
+            let Ok(observed) = bounded_pairing_body(response).await else {
+                continue;
             };
             match validate_enrollment_response(status, &observed, node_id) {
-                Err(PairingError::Response) => continue,
+                Err(PairingError::Response) => {}
                 result => return result,
             }
         }

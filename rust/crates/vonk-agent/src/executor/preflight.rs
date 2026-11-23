@@ -12,7 +12,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         use crate::runtime_preflight::{
             PROBE_BINARY, RuntimePreflight, finding, host_fingerprint_until,
         };
-        let worker_owner = super::build::BuildWorkerOwner::new();
+        use RuntimePreflightFindingCode as Finding;
+        let worker_owner = build::BuildWorkerOwner::new();
         let deadline = Instant::now()
             + Duration::from_secs(60.min(u64::from(claim.observation_budget_seconds)));
         // Each attempt's cause is kept: the unknown outcome names the last one.
@@ -79,7 +80,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         let Some(fingerprint) = fingerprint else {
             return unavailable(&last_cause);
         };
-        last_cause = "no probe ran before cancellation or the preflight deadline".to_owned();
+        "no probe ran before cancellation or the preflight deadline".clone_into(&mut last_cause);
         // Fabric bandwidth is declared inventory, not measured NCCL acceptance.
         // The configured fabric address must actually be bindable on this host.
         let fabric =
@@ -140,7 +141,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             };
             let observed = match observed {
                 Ok(observed) => {
-                    last_cause = "runtime probe findings stayed unknown".to_owned();
+                    "runtime probe findings stayed unknown".clone_into(&mut last_cause);
                     Some(observed)
                 }
                 Err(cause) => {
@@ -167,8 +168,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         let Some(mut result) = result else {
             return unavailable(&last_cause);
         };
-        last_cause =
-            "no signed helper run before cancellation or the preflight deadline".to_owned();
+        "no signed helper run before cancellation or the preflight deadline"
+            .clone_into(&mut last_cause);
         let mut outcome = None;
         for attempt in 0..3 {
             if *cancellation.borrow() || Instant::now() >= deadline {
@@ -225,7 +226,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         let Some(outcome) = outcome else {
             return unavailable(&last_cause);
         };
-        use RuntimePreflightFindingCode as Finding;
         let (passed, code) = match outcome.exit_code {
             Some(0) => (true, Finding::PreflightFindingAvailable),
             Some(21) => (false, Finding::PreflightFindingHelperProcUnavailable),

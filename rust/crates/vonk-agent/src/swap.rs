@@ -19,7 +19,7 @@ fn meminfo_bytes(text: &str, key: &str) -> Option<u64> {
 
 /// None only when the kernel names no swap figures; a missing or unreadable
 /// receipt is reported with its cause, never guessed.
-pub fn observe(meminfo: &str, helper_root: &Path) -> Option<SwapObservation> {
+pub(crate) fn observe(meminfo: &str, helper_root: &Path) -> Option<SwapObservation> {
     let total_bytes = meminfo_bytes(meminfo, "SwapTotal:")?;
     let free_bytes = meminfo_bytes(meminfo, "SwapFree:")?.min(total_bytes);
     let path = helper_root.join(vonk_agent_protocol::swap::OBSERVATION_FILE);
