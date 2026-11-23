@@ -5,12 +5,11 @@ from fastapi import Depends, FastAPI
 from pydantic import ValidationError
 from vonk_agent_protocol.state_machines import CatalogSyncState
 from vonk_control.auth import Actor
-from vonk_control.catalog.api import (
+from vonk_control.catalog.api import ManagedCatalogSyncResponse, install_catalog_routes
+from vonk_control.catalog.sync_contract import (
+    CatalogSyncTrigger,
     ManagedCatalogSyncProblem,
-    ManagedCatalogSyncResponse,
-    install_catalog_routes,
 )
-from vonk_control.catalog.sync_contract import CatalogSyncTrigger
 
 
 def _administrator() -> Actor:

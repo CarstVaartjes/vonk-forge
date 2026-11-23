@@ -15,6 +15,8 @@ from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 
+from vonk_control.recovery_policy import RECOVERY
+
 from ..admission_locking import (
     admission_attempts,
     admission_wait_exhausted,
@@ -22,7 +24,6 @@ from ..admission_locking import (
 from ..jobs import states as job_states
 from ..jobs.documents import controller_recipe_document
 from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.core import RECOVERY
 from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,

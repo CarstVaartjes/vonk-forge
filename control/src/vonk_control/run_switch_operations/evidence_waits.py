@@ -20,6 +20,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
+from vonk_control.run_switch_operations.results import _persisted_result
+
 from ..jobs import states as job_states
 from ..models.jobs import Job
 from ..models.telemetry import NodeInventorySnapshot
@@ -28,7 +30,7 @@ from ..stored.json_values import read_row_column
 from .constants import _OPERATION_KINDS
 from .errors import RunSwitchPostStopEvidencePending
 from .planning_helpers import _aware
-from .result_helpers import _parse_persisted_result, _persisted_result
+from .result_helpers import _parse_persisted_result
 
 
 class RunSwitchPostStopInventoryPending(RunSwitchPostStopEvidencePending):

@@ -16,12 +16,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import object_session
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
+from vonk_control.owner_liveness import Owner, OwnerKind, OwnerRef, owner
+
 from ..admission_locking import AdmissionLockBusy
 from ..install_admission.contracts import InstallAdmissionBusy
 from ..models.jobs import Job
 from ..recipe_builds.common import RecipeBuildAdmissionBusy
 from ..recipe_operations.lifecycle_contract import START_CHILD_KINDS
-from ..reservation_owners import Owner, OwnerKind, OwnerRef, owner
 from ..run_admission import (
     RETRYABLE_PLAN_BLOCKERS,
     RUN_ADMISSION_WAIT_CODES,

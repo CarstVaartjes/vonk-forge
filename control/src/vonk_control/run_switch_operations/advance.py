@@ -18,6 +18,8 @@ from vonk_agent_protocol.contracts import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
+from vonk_control.run_switch_operations.results import _persisted_result
+
 from ..admission_locking import (
     admission_attempts,
 )
@@ -96,7 +98,6 @@ from .result_helpers import (
     _child_failure_kind,
     _child_progress_payload,
     _child_result,
-    _persisted_result,
     _phase_result,
     _progress_damaged,
     _read_progress,

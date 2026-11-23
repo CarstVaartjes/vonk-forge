@@ -22,6 +22,7 @@ from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     LifecycleState,
+    ProgressAlarmCode,
     WaitReason,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
@@ -39,7 +40,6 @@ from vonk_control.operation_api.responses import (
     _job_operation_response,
     operation_detail_response,
 )
-from vonk_control.operations.blockers import ProgressAlarmCode
 from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
 from cluster_profiles.cli_render.progress import progress_line

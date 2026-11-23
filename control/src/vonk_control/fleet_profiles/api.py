@@ -10,6 +10,8 @@ from vonk_agent_protocol.outcome import InvalidRequestError
 from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN
 from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
+from vonk_control.operator_receipt_contract import ReceiptPolicy
+
 from ..api_availability import AVAILABILITY_ERRORS
 from ..auth import MUTATION_ROLES, Actor
 from ..endpoint_contract import inference_gateway_api_base
@@ -30,11 +32,7 @@ from ..fleet_profile_contract.review import (
     FleetProfilePreviewRequest,
 )
 from ..operation_api.contracts import bounded_error_responses
-from ..operator_acceptance import (
-    OperatorReceiptResolver,
-    ReceiptPolicy,
-    operator_acceptance,
-)
+from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
 from .contracts import FleetProfileConflict, FleetProfilePermissionDenied
 from .service import FleetProfileService
 

@@ -338,7 +338,7 @@ def test_safe_current_intent_recovers_after_repeated_faults(
     # Wrong implementation: a repetition count ends still-authorized intent,
     # so clearing the fault cannot recover the same operation.
     from vonk_agent_protocol.contracts import AgentFailureKind
-    from vonk_control.lifecycle.core import RECOVERY
+    from vonk_control.recovery_policy import RECOVERY
 
     adapter = FakeAdapter(is_irreversible=irreversible)
     row = _row(state=State.OBSERVING, effect=effect)
@@ -401,7 +401,7 @@ def test_an_exhausted_unknown_irreversible_effect_is_lost_not_failed(
     # Observed again at the bounded backoff's ceiling: never at once, even past
     # the deadline, and less often than a short wait re-check (a lost row may
     # last for hours and each look rewrites it).
-    from vonk_control.lifecycle.core import RECOVERY, WAIT_STEP
+    from vonk_control.recovery_policy import RECOVERY, WAIT_STEP
 
     wait = RECOVERY.next_attempt(row.id, WAIT_STEP, NOW, ongoing_intent=True)
     assert wait is not None and decision.row.next_action_at is not None
@@ -760,7 +760,7 @@ def test_a_retry_never_starts_before_the_kinds_safety_fence() -> None:
 def test_persistent_unknown_keeps_its_durable_count_until_the_fault_clears() -> None:
     # Wrong implementation: repeated unknowns end the same current intent, or
     # a reload forgets its evidence and starts a fresh backoff window.
-    from vonk_control.lifecycle.core import RECOVERY
+    from vonk_control.recovery_policy import RECOVERY
 
     adapter = FakeAdapter()
     row = _row(state=State.RUNNING)
@@ -793,7 +793,7 @@ def test_persistent_unknown_keeps_its_durable_count_until_the_fault_clears() -> 
 def test_persisted_deadline_bounds_retries_and_releases_fresh_work() -> None:
     # Wrong merge: the fallback failure count ends a deadline-owned request
     # early, or adapter-only scheduling lets it retry beyond its stored deadline.
-    from vonk_control.lifecycle.core import RECOVERY
+    from vonk_control.recovery_policy import RECOVERY
 
     adapter = FakeAdapter(fence_until=LATER)
     deadline = NOW + timedelta(seconds=1)

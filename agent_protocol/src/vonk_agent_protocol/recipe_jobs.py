@@ -27,7 +27,6 @@ from .job_limits import (
     MAX_OUTPUT_FILE_BYTES,
     MAX_OUTPUT_FILES,
     MAX_OUTPUT_TOTAL_BYTES,
-    MAX_TIMEOUT_SECONDS,
 )
 from .wire_model import MAX_RUN_GENERATION, WireModel
 
@@ -416,13 +415,6 @@ class RecipeJobRunResult(_RecipeJobModel):
 
 
 __all__ = [
-    "MAX_INPUT_FILES",
-    "MAX_INPUT_FILE_BYTES",
-    "MAX_INPUT_TOTAL_BYTES",
-    "MAX_OUTPUT_FILES",
-    "MAX_OUTPUT_FILE_BYTES",
-    "MAX_OUTPUT_TOTAL_BYTES",
-    "MAX_TIMEOUT_SECONDS",
     "RecipeJobEnding",
     "RecipeJobEvidence",
     "RecipeJobFile",

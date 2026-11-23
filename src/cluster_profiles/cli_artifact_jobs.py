@@ -17,20 +17,19 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol, cast, runtime_checkable
 
-from .cli_files import read_json_document
-from .cli_json_contract import Word
-from .cli_render.artifact_jobs import Knob
-from .cli_select import SelectorError
-from .cli_states import (
-    ARTIFACT_JOB_STATES,
+from cluster_profiles.cli_states_generated import (
     CANCELLED,
-    ENDED_WITHOUT_RESULT,
     FAILED,
     NEEDS_OPERATOR,
     READY,
     SUCCEEDED,
-    preparation,
 )
+
+from .cli_files import read_json_document
+from .cli_json_contract import Word
+from .cli_render.artifact_jobs import Knob
+from .cli_select import SelectorError
+from .cli_states import ARTIFACT_JOB_STATES, ENDED_WITHOUT_RESULT, preparation
 from .cli_states_generated import RUN_RUNNING, JobContractState
 from .control_client.errors import (
     ControlClientError,

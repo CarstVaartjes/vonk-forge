@@ -19,12 +19,10 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
-from vonk_control.gateway.route_runtime import (
-    ActivationMarker,
-    AtomicRouteBundlePublisher,
-)
+from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.models.execution import RecipeRun, RunNode
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job

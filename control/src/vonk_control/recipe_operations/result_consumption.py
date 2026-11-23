@@ -60,9 +60,6 @@ from .lifecycle_contract import (
 )
 from .orphan_cleanup import consume_orphan_cleanup
 from .progress import (
-    _cancel_requested as _cancel_requested,  # noqa: PLC0414 -- shared helper export
-)
-from .progress import (
     _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
 )
 from .progress import (

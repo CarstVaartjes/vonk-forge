@@ -370,7 +370,7 @@ def order_recovery_deadline(
     """
 
     # reservation_owners reaches this module through the profile contracts.
-    from .reservation_owners import OwnerKind, OwnerRef, owner
+    from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
 
     if operation.recovery_deadline is None:
         return None

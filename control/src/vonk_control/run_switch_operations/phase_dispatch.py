@@ -21,6 +21,8 @@ from vonk_agent_protocol.reason_codes.vocabulary import run_switch_code
 from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_agent_protocol.wire_model import OperationProgress
 
+from vonk_control.run_switch_operations.results import _persisted_result
+
 from ..admission_locking import (
     AdmissionLockBusy,
     busy_detail,
@@ -91,12 +93,7 @@ from .observation_window import checkpoint_verdict
 from .ownership import _checkpoint_matches, _complete_cancellation
 from .planning_helpers import _aware, _refused_retries, _start_parent, _stored_job_plan
 from .provider import _ADAPTER
-from .result_helpers import (
-    _observe_progress,
-    _persisted_result,
-    _phase_result,
-    _read_progress,
-)
+from .result_helpers import _observe_progress, _phase_result, _read_progress
 
 if TYPE_CHECKING:
     from .service import RunSwitchOperationService

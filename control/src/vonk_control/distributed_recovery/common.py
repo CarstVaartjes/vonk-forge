@@ -27,6 +27,8 @@ from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_agent_protocol.state_machines import ReservationState, RouteState, RunState
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
+from vonk_control.owner_liveness import run_has_live_operation
+
 from ..agent_jobs.retirement import release_owned_reservations_in_session
 from ..categorized_errors import UnsettledOutcome
 from ..distributed_lifecycle import DistributedRecoveryInvalid
@@ -59,7 +61,6 @@ from ..recipe_operations.execution_contract import (
 )
 from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
 from ..recovery_policy import DISTRIBUTED_RECOVERY, schedule
-from ..reservation_owners import run_has_live_operation
 from ..stored.json_values import read_row_column
 from ..stored.states import CatalogRevisionState
 

@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from ..fleet_qualification import (
+from cluster_profiles.fleet_qualification_observation import (
     QualificationError,
     QualificationObservationUnknown,
 )
+
 from .contracts import Batch, Campaign, Lane
 from .profiles import _alias, _profile
 

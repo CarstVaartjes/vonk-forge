@@ -7,7 +7,11 @@ from sqlalchemy import delete, select
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    ProgressAlarmCode,
+    WaitReason,
+)
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
@@ -23,11 +27,7 @@ from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
-from vonk_control.operations.blockers import (
-    BlockingOperation,
-    ProgressAlarmCode,
-    make_blocker,
-)
+from vonk_control.operations.blockers import BlockingOperation, make_blocker
 from vonk_control.persisted_waits import read_wait
 from vonk_control.runtime.preflight import mandatory_capabilities
 

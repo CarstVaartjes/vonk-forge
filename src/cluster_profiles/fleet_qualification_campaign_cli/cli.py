@@ -25,14 +25,15 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from ..cli_states import FAILED
-from ..control_client.errors import ControlClientError
-from ..control_client.transfers import ControlClient
-from ..fleet_qualification import (
+from cluster_profiles.cli_states_generated import FAILED
+from cluster_profiles.fleet_qualification_observation import (
     QualificationError,
     QualificationObservationUnknown,
     _observe,
 )
+
+from ..control_client.errors import ControlClientError
+from ..control_client.transfers import ControlClient
 from ..qualification_fixtures.contracts import FixtureError
 from .application import load
 from .contracts import ResultsLog, load_campaign

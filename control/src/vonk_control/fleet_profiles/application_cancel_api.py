@@ -6,6 +6,8 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Path, status
 
+from vonk_control.operator_receipt_contract import ReceiptPolicy
+
 from ..api_availability import AVAILABILITY_ERRORS
 from ..auth import MUTATION_ROLES, Actor
 from ..fleet_profile_contract.review import (
@@ -13,11 +15,7 @@ from ..fleet_profile_contract.review import (
     FleetProfileApplicationView,
 )
 from ..operation_api.contracts import bounded_error_responses
-from ..operator_acceptance import (
-    OperatorReceiptResolver,
-    ReceiptPolicy,
-    operator_acceptance,
-)
+from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
 from .api import raise_profile_conflict
 from .contracts import FleetProfileConflict, FleetProfilePermissionDenied
 

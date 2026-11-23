@@ -10,13 +10,15 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationWire
 from vonk_agent_protocol.state_machines import RouteState, RunState
 
+from vonk_control.enrollment.responses import _now
+
 from ..logging import log_event
 from ..models.execution import RecipeRun, RunNode
 from ..owner_liveness import run_has_live_operation
 from ..persisted_waits import schedule_wait
 from ..recipe_operations.stop_payloads import durable_run_stop_payloads
 from ..run_states import ENDED_RUN_STATES
-from .common import _LOGGER, _now
+from .common import _LOGGER
 
 
 def reopen_ended_runs_still_running(

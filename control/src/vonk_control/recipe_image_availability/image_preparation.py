@@ -18,6 +18,8 @@ from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_forge_contracts import RecipeDefinition
 
+from vonk_control.lifecycle.evidence import Residue
+
 from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     require_reference_open,
@@ -34,7 +36,6 @@ from ..runtime_image_preparation.contracts import (
 )
 from ..runtime_image_preparation.preparation import prepare_runtime_image
 from ..stall_window import last_progress_at, latest_progress
-from ..stored.json_values import Residue
 from ..stored.states import RecipeBuildState
 from ..strict_json import serialize_json_value
 from .availability_contract import (

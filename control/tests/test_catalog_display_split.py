@@ -16,9 +16,9 @@ from typing import cast
 import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol.reason_codes.catalog import CatalogCode
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.entities import (
-    CatalogCode,
     CatalogEntityService,
     CatalogValidationError,
     _parse,

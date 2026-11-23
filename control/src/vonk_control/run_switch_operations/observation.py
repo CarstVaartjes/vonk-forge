@@ -12,6 +12,8 @@ from sqlalchemy import String, and_, cast, func, literal, or_, select
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
+from vonk_control.run_switch_operations.results import _persisted_result
+
 from ..bounded_json import require_integer
 from ..failure_classification import error_code, error_detail, is_definite
 from ..jobs import states as job_states
@@ -29,12 +31,7 @@ from .errors import RunSwitchOperationConflict
 from .evidence_waits import wake_evidence_waits
 from .planning_helpers import _now
 from .provider import _ADAPTER
-from .result_helpers import (
-    _persisted_result,
-    _progress_damaged,
-    _read_progress,
-    _wait_blockers,
-)
+from .result_helpers import _progress_damaged, _read_progress, _wait_blockers
 
 if TYPE_CHECKING:
     from .provider import RunSwitchOperationProvider

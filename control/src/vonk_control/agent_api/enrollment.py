@@ -16,6 +16,9 @@ from vonk_agent_protocol.enrollment import (
 )
 from vonk_agent_protocol.outcome import UnknownError
 
+from vonk_control.enrollment.responses import _issued_response, _json_response
+from vonk_control.operator_receipt_contract import ReceiptPolicy
+
 from ..contract_graph import raw_json_body
 from ..enrollment.body import _bounded_enrollment_body, _scan_enrollment_grants
 from ..enrollment.responses import unknown_response
@@ -25,12 +28,10 @@ from ..enrollment.types import (
     RenewalIssuanceUncertain,
 )
 from ..operation_api.contracts import bounded_error_responses
-from ..operator_acceptance import ReceiptPolicy, operator_acceptance
+from ..operator_acceptance import operator_acceptance
 from .common import (
     AgentApiServices,
     EnrollmentRateLimiter,
-    _issued_response,
-    _json_response,
     _require_enrollment,
     _require_services,
     contract_verdict_or_wait,

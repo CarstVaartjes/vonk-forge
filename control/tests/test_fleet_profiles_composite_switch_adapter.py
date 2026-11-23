@@ -564,7 +564,7 @@ def test_completed_switch_child_keeps_its_run_switch_receipt(tmp_path: Path) -> 
     it and any later restart.
     """
 
-    from vonk_control.run_switch_operations.result_helpers import _persisted_result
+    from vonk_control.run_switch_operations.results import _persisted_result
     from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     from .recipe_operations_support import setup_services
@@ -689,7 +689,7 @@ def test_waiting_switch_child_keeps_the_profile_running(tmp_path: Path) -> None:
     fail the whole load with "Run/Switch child returned waiting".
     """
 
-    from vonk_control.run_switch_operations.result_helpers import _persisted_result
+    from vonk_control.run_switch_operations.results import _persisted_result
     from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     from .recipe_operations_support import setup_services

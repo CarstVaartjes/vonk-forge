@@ -7,15 +7,13 @@ from typing import Annotated, Any
 from fastapi import FastAPI, HTTPException, Path, status
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 
+from vonk_control.operator_receipt_contract import ReceiptPolicy
+
 from .auth import MUTATION_ROLES, Actor
 from .logging import redact_text
 from .operation_api.constants import _ADMIN_OPERATION_IDS
 from .operation_api.contracts import bounded_error_responses
-from .operator_acceptance import (
-    OperatorReceiptResolver,
-    ReceiptPolicy,
-    operator_acceptance,
-)
+from .operator_acceptance import OperatorReceiptResolver, operator_acceptance
 from .run_switch_contract.operations import RunSwitchOperation
 from .run_switch_contract.plans import RunSwitchPlan
 from .run_switch_contract.requests import (

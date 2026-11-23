@@ -36,11 +36,12 @@ from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.auth import AgentIdentity, AgentSource
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment.contract import (
+    EnrollmentGrant,
     EnrollmentGrantStatus,
     EnrollmentObservationOutcome,
 )
 from vonk_control.enrollment.service import EnrollmentService
-from vonk_control.enrollment.types import EnrollmentDenied, EnrollmentGrant
+from vonk_control.enrollment.types import EnrollmentDenied
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import (
     AgentCertificate,

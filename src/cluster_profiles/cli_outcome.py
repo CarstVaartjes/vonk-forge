@@ -10,11 +10,9 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal, cast
 
-from .cli_states import (
-    CANCEL_ACCEPTED_STATES,
-    NEEDS_OPERATOR,
-    PARTIAL_FIELD,
-)
+from cluster_profiles.cli_states_generated import NEEDS_OPERATOR
+
+from .cli_states import CANCEL_ACCEPTED_STATES, PARTIAL_FIELD
 
 OutcomeContext = Literal["read", "preview", "mutation", "await"]
 
