@@ -26,7 +26,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import Any, NamedTuple, Protocol, Self
@@ -422,7 +422,7 @@ class CanonicalCanaryFixture(NamedTuple):
 
 
 @contextmanager
-def _library_contracts(library_root: Path | None) -> Iterator[Any]:
+def _library_contracts(library_root: Path | None) -> Generator[Any, None, None]:
     """Import ``vonk_forge_contracts`` as the given library ships it, for one block.
 
     The carry lane drives two releases whose libraries carry different

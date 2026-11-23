@@ -31,7 +31,7 @@ def _stored(blobs: Path) -> dict[str, int]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("references", nargs="+", metavar="REFERENCE")
     parser.add_argument("--store", type=Path, help="keep the layout here")
     parser.add_argument("--skopeo", default=shutil.which("skopeo") or "skopeo")

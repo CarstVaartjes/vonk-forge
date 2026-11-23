@@ -10,7 +10,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from copy import deepcopy
@@ -97,7 +97,7 @@ def observation_clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
 
 
 @contextmanager
-def _not_adopted() -> Iterator[list[Exception]]:
+def _not_adopted() -> Generator[list[Exception], None, None]:
     failures: list[Exception] = []
     try:
         yield failures
