@@ -1618,7 +1618,7 @@ def test_preflight_failure_reports_only_projected_receipt_comparison_fields() ->
         return [[json.dumps(evidence)]] if "receipt_fingerprint" in query else []
 
     run._psql = psql
-    operation = _failed_profile_application("runtime.preflight.retry_exhausted")
+    operation = _failed_profile_application("runtime_preflight.retry_exhausted")
     with pytest.raises(lifecycle.LifecycleError) as failure:
         run._await_profile_application(
             operation, label="canary", node_id=evidence["node_id"]

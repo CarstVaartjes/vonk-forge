@@ -209,27 +209,27 @@ RETAINED: dict[str, tuple[Retained, str]] = {
     ),
     "catalog_document_revisions": (
         Retained.OWNED_ELSEWHERE,
-        "catalog.revision_collection.CatalogRevisionCollector",
+        "catalog_revision_collection.CatalogRevisionCollector",
     ),
     "recipe_source_bundles": (
         Retained.OWNED_ELSEWHERE,
-        "catalog.revision_collection.CatalogRevisionCollector",
+        "catalog_revision_collection.CatalogRevisionCollector",
     ),
     "source_bundle_archives": (
         Retained.OWNED_ELSEWHERE,
-        "catalog.revision_collection.CatalogRevisionCollector",
+        "catalog_revision_collection.CatalogRevisionCollector",
     ),
     "recipe_builds": (
         Retained.OWNED_ELSEWHERE,
-        "catalog.revision_collection.CatalogRevisionCollector",
+        "catalog_revision_collection.CatalogRevisionCollector",
     ),
     "cluster_mappings": (
         Retained.OWNED_ELSEWHERE,
-        "catalog.revision_collection.CatalogRevisionCollector",
+        "catalog_revision_collection.CatalogRevisionCollector",
     ),
     "cluster_mapping_nodes": (
         Retained.OWNED_ELSEWHERE,
-        "catalog.revision_collection.CatalogRevisionCollector",
+        "catalog_revision_collection.CatalogRevisionCollector",
     ),
     "artifact_jobs": (Retained.OWNED_ELSEWHERE, "artifact_jobs.ArtifactJobService"),
     "artifact_job_files": (

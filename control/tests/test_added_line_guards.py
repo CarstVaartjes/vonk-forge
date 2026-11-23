@@ -3734,17 +3734,17 @@ def _lifecycle_sets(
     [
         # The shape that left a backing-off load out of "live".
         (
-            "jobs.states.words(\n    LifecycleState.QUEUED,\n"
+            "job_states.words(\n    LifecycleState.QUEUED,\n"
             "    LifecycleState.RUNNING,\n    LifecycleState.NEEDS_OPERATOR,\n)"
         ),
         "{LifecycleState.QUEUED.value, LifecycleState.RUNNING.value}",
         "(State.RUNNING, State.OBSERVING)",
-        "jobs.states.means(row.state, LifecycleState.QUEUED, LifecycleState.BACKOFF)",
+        "job_states.means(row.state, LifecycleState.QUEUED, LifecycleState.BACKOFF)",
         "frozenset({aos.QUEUED, aos.RUNNING})",
         "('queued', 'running')",
         # An "ended" set that counted a wait for a person as ended.
         "{LifecycleState.FAILED, LifecycleState.CANCELLED, LifecycleState.NEEDS_OPERATOR}",
-        "jobs.states.words(LifecycleState.SUCCEEDED, LifecycleState.FAILED)",
+        "job_states.words(LifecycleState.SUCCEEDED, LifecycleState.FAILED)",
         "(LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.FAILED)",
         # Stored words: the same fleet-removal set, string-spelled.
         "child.state in {'failed', 'cancelled', 'needs-operator'}",
@@ -3756,7 +3756,7 @@ def _lifecycle_sets(
             " *job_states.words(LifecycleState.RUNNING))"
         ),
         (
-            "jobs.states.words(LifecycleState.QUEUED)"
+            "job_states.words(LifecycleState.QUEUED)"
             " + job_states.words(LifecycleState.BACKOFF)"
         ),
         # A comparison chain on one subject.
@@ -3776,7 +3776,7 @@ def test_a_hand_spelled_open_state_set_is_flagged(spelled: str) -> None:
     "named",
     [
         "fleet_profile_states.LIVE",
-        "jobs.states.words(LifecycleState.NEEDS_OPERATOR)",
+        "job_states.words(LifecycleState.NEEDS_OPERATOR)",
         # Every lifecycle state: the vocabulary itself.
         "tuple(LifecycleState)",
         "(\n    "
