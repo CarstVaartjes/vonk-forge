@@ -40,7 +40,7 @@ from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.distribution.wiring import build_distribution_service_from_components
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.distribution_executor import children as executor_module
-from vonk_control.distribution_executor import durable as durable_executor_module
+from vonk_control.distribution_executor import receipts as receipts_module
 from vonk_control.distribution_executor.durable import DurableDistributionPhaseExecutor
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
@@ -2055,7 +2055,7 @@ def test_child_persistence_retains_in_place_default_members(
     initial,
 ):
     """Both child writers must retain mutations nested in their typed receipt."""
-    writer_module = executor_module if initial else durable_executor_module
+    writer_module = executor_module if initial else receipts_module
     original = writer_module._child_receipt
     member = OperationMemberProgress(member_id=NODE_A, phase=ProgressPhase.TRANSFER)
     writes = []
