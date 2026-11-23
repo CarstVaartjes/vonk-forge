@@ -177,18 +177,18 @@ class CatalogMixin:
         raw_bytes = value.download_bytes
         roles = value.roles
         if (
-            not isinstance(raw_id, str)
-            or not isinstance(raw_path, str)
-            or not isinstance(raw_kind, str)
+            not isinstance(raw_id, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+            or not isinstance(raw_path, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+            or not isinstance(raw_kind, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         ):
             raise ModelCacheResolutionInvalid(
                 ModelCacheCode.ARTIFACT_INVALID,
                 "catalog artifact identity is incomplete",
             )
         if (
-            not isinstance(raw_digest, str)
-            or not isinstance(raw_bytes, int)
-            or not isinstance(roles, list)
+            not isinstance(raw_digest, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+            or not isinstance(raw_bytes, int)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+            or not isinstance(roles, list)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
         ):
             raise ModelCacheResolutionInvalid(
                 ModelCacheCode.ARTIFACT_INVALID,
@@ -209,7 +209,7 @@ class CatalogMixin:
             artifact_id=raw_id,
             path=raw_path,
             kind=raw_kind,
-            repository=(None if value.repository is None else str(value.repository)),
+            repository=(None if value.repository is None else str(value.repository)),  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
             source=source,
             revision=revision,
             sha256=raw_digest,

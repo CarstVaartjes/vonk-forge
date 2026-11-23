@@ -164,7 +164,7 @@ def operation_start_deadline(operation: StoredOperation) -> datetime | None:
     would widen the fence without a fact to bound it.
     """
 
-    payload = operation.payload if isinstance(operation.payload, Mapping) else {}
+    payload = operation.payload if isinstance(operation.payload, Mapping) else {}  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
     value = payload.get("start_deadline")
     if not isinstance(value, str):
         return None

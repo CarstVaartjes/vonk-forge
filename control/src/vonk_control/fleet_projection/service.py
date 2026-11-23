@@ -509,7 +509,7 @@ class FleetProjection:
             .where(FleetProfileApplication.state == LifecycleState.RUNNING)
             .order_by(FleetProfileApplication.id)
         ):
-            raw = progress.get("blockers") if isinstance(progress, Mapping) else None
+            raw = progress.get("blockers") if isinstance(progress, Mapping) else None  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             for blocker in read_blockers(raw):
                 if blocker.code != PHASE_RETRY_CODE:
                     continue

@@ -40,7 +40,7 @@ def _check_literal_type(value: object, expected: tuple[Any, ...]) -> object:
 
 
 def _wrap_numeric_literals(schema: CoreSchema) -> CoreSchema:
-    if not isinstance(schema, dict):
+    if not isinstance(schema, dict):  # pyright: ignore[reportUnnecessaryIsInstance]  # the walk recurses into every nested dict, not only core schemas
         return schema
     if schema.get("type") == "literal":
         expected = tuple(schema.get("expected", ()))
@@ -79,7 +79,7 @@ def _bind_string_enum_values(schema: CoreSchema) -> CoreSchema:
     difference without weakening the contract.
     """
 
-    if not isinstance(schema, dict):
+    if not isinstance(schema, dict):  # pyright: ignore[reportUnnecessaryIsInstance]  # the walk recurses into every nested dict, not only core schemas
         return schema
     if schema.get("type") == "enum" and schema.get("sub_type") == "str":
         enum_type = cast(type[StrEnum], schema.get("cls"))
@@ -123,13 +123,13 @@ def _bind_json_string_scalars(schema: CoreSchema) -> CoreSchema:
     does; any other value reaches Pydantic's own error unchanged.
     """
 
-    if not isinstance(schema, dict):
+    if not isinstance(schema, dict):  # pyright: ignore[reportUnnecessaryIsInstance]  # the walk recurses into every nested dict, not only core schemas
         return schema
     metadata = schema.get("metadata")
     if isinstance(metadata, dict) and metadata.get(JSON_STRING_BOUND):
         return schema
     scalar = schema.get("type")
-    if isinstance(scalar, str) and scalar in JSON_STRING_SCALARS:
+    if isinstance(scalar, str) and scalar in JSON_STRING_SCALARS:  # pyright: ignore[reportUnnecessaryIsInstance]  # the walk recurses into every nested dict, not only core schemas
         json_mode = SchemaValidator(deepcopy(schema))
 
         def bind_string(value: object) -> object:

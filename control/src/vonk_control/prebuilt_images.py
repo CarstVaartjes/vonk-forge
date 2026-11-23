@@ -438,7 +438,7 @@ def _bundle_relative(dockerfile: str, context: str) -> str:
 def prebuilt_reference(job: Job) -> str | None:
     """The pinned image a Controller-executed build job pulls, if any."""
 
-    payload = job.payload if isinstance(job.payload, Mapping) else {}
+    payload = job.payload if isinstance(job.payload, Mapping) else {}  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
     reference = payload.get("prebuilt_image")
     if isinstance(reference, str) and _REFERENCE.fullmatch(reference):
         return reference

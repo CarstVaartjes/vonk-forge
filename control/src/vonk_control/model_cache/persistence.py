@@ -156,7 +156,7 @@ def _rebuild_operation_payload(
     # Only the repair boundary inspects a damaged raw copy, after the canonical
     # column reader has reported it. The repaired candidate is validated below.
     raw = operation.payload
-    if not isinstance(raw, Mapping):
+    if not isinstance(raw, Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
         return None
     candidate = dict(raw)
     if not isinstance(candidate.get("retry"), Mapping):

@@ -312,7 +312,7 @@ class HostHelperGrantIssuer:
                 "host helper authority clock is unavailable"
             ) from error
         if (
-            not isinstance(now, datetime)
+            not isinstance(now, datetime)  # pyright: ignore[reportUnnecessaryIsInstance]  # an injected clock's result is checked
             or now.tzinfo is None
             or now.utcoffset() is None
         ):

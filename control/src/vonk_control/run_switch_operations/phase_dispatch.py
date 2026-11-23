@@ -312,7 +312,7 @@ class PhaseDispatchMixin:
                 fail(
                     str(error),
                     failure_code=code,
-                    replan=phase.kind != ProfileChildPhase.FINAL_VERIFY,
+                    replan=phase.kind != ProfileChildPhase.FINAL_VERIFY,  # pyright: ignore[reportUnnecessaryComparison]  # a StrEnum member equals its string value at run time
                     definite=error.definite,
                     cause=error,
                 )
@@ -475,7 +475,7 @@ class PhaseDispatchMixin:
                     started = progress.final_verify_started_at
                     if (
                         isinstance(started, bool)
-                        or not isinstance(started, (int, float))
+                        or not isinstance(started, (int, float))  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                         or now.timestamp() < started
                     ):
                         service._mark_failed(

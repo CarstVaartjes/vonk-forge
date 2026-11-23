@@ -45,11 +45,11 @@ def _source_for_catalog_artifact(
     repository = artifact.repository
     path = artifact.path
     revision = artifact.revision
-    if not isinstance(repository, str) or not repository:
+    if not isinstance(repository, str) or not repository:  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         raise ModelCacheResolutionInvalid(
             ModelCacheCode.SOURCE_INVALID, "catalog artifact repository is invalid"
         )
-    if not isinstance(path, str) or not path:
+    if not isinstance(path, str) or not path:  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         raise ModelCacheResolutionInvalid(
             ModelCacheCode.ARTIFACT_INVALID, "catalog artifact path is invalid"
         )
@@ -114,7 +114,7 @@ def _recipe_model_content_digests(
     for selection in raw_models:
         digest = selection.model.content_sha256
         if (
-            not isinstance(digest, str)
+            not isinstance(digest, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             or not _is_hex(digest)
             or len(digest) != _DIGEST_LENGTH
         ):
@@ -166,7 +166,7 @@ def _canonical_model_artifacts(row: CatalogDocumentRevision) -> list[CatalogArti
         release_id = None
         assets = {}
         provider_kind = ProviderKind.GITHUB_LFS_OBJECT
-    elif isinstance(source, ModelSource):
+    elif isinstance(source, ModelSource):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         repository = source.repository
         revision = source.revision
         release_id = None

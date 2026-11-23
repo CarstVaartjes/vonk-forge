@@ -113,9 +113,9 @@ class CancellationMixin:
             )
             if already_invalidated:
                 if (
-                    not isinstance(actor, str)
+                    not isinstance(actor, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # request values are re-checked on the invalidated-retry path
                     or not 1 <= len(actor) <= 256
-                    or not isinstance(request_id, str)
+                    or not isinstance(request_id, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # request values are re-checked on the invalidated-retry path
                 ):
                     raise RecipeRequestInvalid(
                         "cancellation request identity is invalid"

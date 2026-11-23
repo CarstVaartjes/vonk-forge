@@ -115,7 +115,7 @@ def _lineage(session: Session, application_id: str) -> set[str]:
     current = session.get(FleetProfileApplication, application_id)
     while current is not None and current.id not in lineage:
         lineage.add(current.id)
-        progress = current.progress if isinstance(current.progress, dict) else {}
+        progress = current.progress if isinstance(current.progress, dict) else {}  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
         parent = progress.get("retry_of_application_id")
         current = session.get(FleetProfileApplication, parent) if parent else None
     return lineage

@@ -24,7 +24,7 @@ def _stored_field[T: BaseModel](
     """
 
     document = (
-        parent.payload.get(field) if isinstance(parent.payload, Mapping) else None
+        parent.payload.get(field) if isinstance(parent.payload, Mapping) else None  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
     )
     if key is not None:
         document = document.get(key) if isinstance(document, Mapping) else None
@@ -47,7 +47,7 @@ def _stored_source(parent: Job, node_id: str) -> AgentPackageSource | None:
 def _stored_node_order(parent: Job) -> list[str] | None:
     order = (
         parent.payload.get("node_order")
-        if isinstance(parent.payload, Mapping)
+        if isinstance(parent.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
         else None
     )
     if not isinstance(order, list) or not all(isinstance(node, str) for node in order):

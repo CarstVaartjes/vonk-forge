@@ -76,7 +76,7 @@ def _phase_start_deadline(operation: AgentOperation) -> str | None:
     formatted timestamp's spelling rather than rewriting it.
     """
 
-    payload = operation.payload if isinstance(operation.payload, Mapping) else {}
+    payload = operation.payload if isinstance(operation.payload, Mapping) else {}  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
     value = payload.get("start_deadline")
     return value if isinstance(value, str) and value else None
 
@@ -415,7 +415,7 @@ class AgentFailureLogProvider:
         entries: list[FleetLogEntry] = []
         for operation, attempt in rows:
             payload = (
-                operation.payload if isinstance(operation.payload, Mapping) else {}
+                operation.payload if isinstance(operation.payload, Mapping) else {}  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             )
             # Only the agent's own receipt may name an error code; a lease lapse
             # arrived with no receipt, so the fallback narrative is the

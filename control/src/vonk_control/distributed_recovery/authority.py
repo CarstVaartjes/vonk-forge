@@ -349,7 +349,7 @@ def _recovery_authority(
     ):
         return _unproven(run.id, _DAMAGED, "distributed recovery order is invalid")
     owner_role = owner.role
-    if not isinstance(owner_role, str) or owner_role not in start_payloads:
+    if not isinstance(owner_role, str) or owner_role not in start_payloads:  # pyright: ignore[reportUnnecessaryIsInstance]  # an unexpected value is treated as unknown, not trusted
         return _unproven(run.id, _DAMAGED, "distributed recovery endpoint is invalid")
     owner_node_id, owner_payload = start_payloads[owner_role]
     if type(stop_run_generation) is not int or stop_run_generation < 1:

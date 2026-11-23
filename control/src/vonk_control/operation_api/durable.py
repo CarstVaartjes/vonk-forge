@@ -815,7 +815,7 @@ class _DurableOperationProjection:
     ) -> list[str] | None:
         raw = (
             _advertised_actions(operation.payload.get("supported_actions"))
-            if isinstance(operation.payload, Mapping)
+            if isinstance(operation.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             else None
         )
         actions = (

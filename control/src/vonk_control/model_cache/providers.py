@@ -200,7 +200,7 @@ def _huggingface_catalog_source(artifact: CatalogArtifact) -> tuple[str, str | N
             ModelCacheCode.SOURCE_INVALID,
             "catalog Hugging Face repository is invalid",
         )
-    if not isinstance(revision, str) or not re.fullmatch(_REVISION_PATTERN, revision):
+    if not isinstance(revision, str) or not re.fullmatch(_REVISION_PATTERN, revision):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         raise ModelCacheResolutionInvalid(
             ModelCacheCode.REVISION_INVALID,
             "catalog artifact revision is not immutable",

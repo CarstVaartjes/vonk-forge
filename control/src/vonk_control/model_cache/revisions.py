@@ -245,7 +245,7 @@ class RevisionsMixin:
                 .group_by(ModelCacheOperation.artifact_set_sha256, content)
             ).all()
             for operation_id, set_digest, digest in proofs:
-                if set_digest is None or operation_id is None or digest is None:
+                if set_digest is None or operation_id is None or digest is None:  # pyright: ignore[reportUnnecessaryComparison]  # grouped query columns can be NULL
                     continue
                 row, held = stored.get(set_digest, (None, None))
                 if (

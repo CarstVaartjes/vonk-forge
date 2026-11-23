@@ -145,7 +145,7 @@ class AcceptanceMixin:
         if (
             job.kind != "agent-upgrade"
             or job.actor != actor
-            or not isinstance(job.payload, Mapping)
+            or not isinstance(job.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             or "request_intent" not in job.payload
         ):
             raise AgentUpgradeInvalid(

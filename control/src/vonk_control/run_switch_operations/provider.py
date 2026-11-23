@@ -67,13 +67,13 @@ class RunSwitchOperationProvider:
                 reason=InvalidRequestReason.OUT_OF_RANGE,
             )
         state = query.state
-        if state is not None and not isinstance(state, str):
+        if state is not None and not isinstance(state, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # operation query values from a caller are checked
             raise InvalidValue("operation provider state filter is invalid")
         node_id = query.node_id
-        if node_id is not None and not isinstance(node_id, str):
+        if node_id is not None and not isinstance(node_id, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             raise InvalidValue("operation provider node filter is invalid")
         request_id = query.request_id
-        if request_id is not None and not isinstance(request_id, str):
+        if request_id is not None and not isinstance(request_id, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             raise InvalidValue("operation provider request filter is invalid")
         after = query.after
         with self._service._sessions() as session:
@@ -85,10 +85,10 @@ class RunSwitchOperationProvider:
             if node_id is not None:
                 base_filters.append(cast(Job.targets, String).contains(f'"{node_id}"'))
             if after is not None and (
-                not isinstance(after, tuple)
+                not isinstance(after, tuple)  # pyright: ignore[reportUnnecessaryIsInstance]  # operation query values from a caller are checked
                 or len(after) != 2
-                or not isinstance(after[0], datetime)
-                or not isinstance(after[1], str)
+                or not isinstance(after[0], datetime)  # pyright: ignore[reportUnnecessaryIsInstance]  # operation query values from a caller are checked
+                or not isinstance(after[1], str)  # pyright: ignore[reportUnnecessaryIsInstance]  # operation query values from a caller are checked
             ):
                 raise InvalidValue("operation provider cursor is invalid")
             filters = list(base_filters)
@@ -129,10 +129,10 @@ class RunSwitchOperationProvider:
         # Malformed stored targets read as an unreadable row (shown below), the
         # same as a plan that does not parse.
         readable = not (
-            not isinstance(job.targets, list)
+            not isinstance(job.targets, list)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             or not job.targets
             or any(
-                not isinstance(node_id, str)
+                not isinstance(node_id, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                 or re.fullmatch(r"spk_[0-9a-f]{32}", node_id) is None
                 for node_id in job.targets
             )

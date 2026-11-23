@@ -246,7 +246,7 @@ class WorkerHeartbeatRecorder:
 
         completed_at = self._clock()
         if (
-            not isinstance(completed_at, datetime)
+            not isinstance(completed_at, datetime)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             or completed_at.tzinfo is None
             or completed_at.utcoffset() is None
         ):

@@ -415,7 +415,7 @@ def _merge_environment(
         **_environment_defaults(slug),
         **dict(telemetry_contract(slug).environment),
     }
-    if defaults is None:
+    if defaults is None:  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
         raise _compile_error(f"runtime writable-path contract is unavailable: {slug}")
     supplied_map: dict[str, str] = {}
     for name, value in supplied:

@@ -117,7 +117,7 @@ class RunSwitchFleetProfileAdapter:
             return reviewed
         if kind == ProfileChildPhase.CLEANUP.value:
             installation_id = item.id
-            if not isinstance(installation_id, str):
+            if not isinstance(installation_id, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # an unexpected value is treated as unknown, not trusted
                 return retire_as_unknown(
                     "profile-child",
                     application_id,
@@ -140,7 +140,7 @@ class RunSwitchFleetProfileAdapter:
             )
         if kind == ProfileChildPhase.STOP.value:
             run_id = item.id
-            if not isinstance(run_id, str):
+            if not isinstance(run_id, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # an unexpected value is treated as unknown, not trusted
                 return retire_as_unknown(
                     "profile-child",
                     application_id,
@@ -344,7 +344,7 @@ class RunSwitchFleetProfileAdapter:
             if job is None:
                 return None
             kind = item.kind
-            if not isinstance(kind, str):
+            if not isinstance(kind, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # an unexpected value is treated as unknown, not trusted
                 return unknown(
                     BookkeepingReason.ROW_INCOMPLETE, "the queue item names no kind"
                 )

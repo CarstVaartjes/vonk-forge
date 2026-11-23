@@ -184,7 +184,7 @@ class RunObservationMixin:
             exact_ranks = (
                 not isinstance(accepted, Residue)
                 and len(accepted[0]) == len(nodes)
-                and accepted[0]
+                and accepted[0]  # pyright: ignore[reportUnnecessaryComparison]  # a set and a frozenset compare equal by content
                 == {(node.node_id, node.rank, node.role) for node in nodes}
             )
             recovery_jobs = tuple(

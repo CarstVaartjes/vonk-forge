@@ -153,7 +153,7 @@ def _fresh(evidence: FreshnessEvidence) -> bool:
 def _disk_admitted(session: Session, inventory: PlanInventory, node_id: str) -> bool:
     """Disk is judged against a current sample only, as every disk admission is."""
     snapshot, evidence = inventory.read(node_id)
-    if snapshot is None or not _fresh(evidence) or snapshot.disk_free_bytes is None:
+    if snapshot is None or not _fresh(evidence) or snapshot.disk_free_bytes is None:  # pyright: ignore[reportUnnecessaryComparison]  # NodeInventorySnapshot columns are nullable (single-table snapshot kinds)
         return False
     committed = sum(
         charge.amount_bytes
@@ -215,13 +215,13 @@ def _memory_admitted(
         kind,
         host=(snapshot.host_memory_total_bytes, snapshot.host_memory_free_bytes)
         if snapshot is not None
-        and snapshot.host_memory_total_bytes is not None
-        and snapshot.host_memory_free_bytes is not None
+        and snapshot.host_memory_total_bytes is not None  # pyright: ignore[reportUnnecessaryComparison]  # NodeInventorySnapshot columns are nullable (single-table snapshot kinds)
+        and snapshot.host_memory_free_bytes is not None  # pyright: ignore[reportUnnecessaryComparison]  # NodeInventorySnapshot columns are nullable (single-table snapshot kinds)
         else None,
         accelerator=(snapshot.gpu_memory_total_bytes, snapshot.gpu_memory_free_bytes)
         if snapshot is not None
-        and snapshot.gpu_memory_total_bytes is not None
-        and snapshot.gpu_memory_free_bytes is not None
+        and snapshot.gpu_memory_total_bytes is not None  # pyright: ignore[reportUnnecessaryComparison]  # NodeInventorySnapshot columns are nullable (single-table snapshot kinds)
+        and snapshot.gpu_memory_free_bytes is not None  # pyright: ignore[reportUnnecessaryComparison]  # NodeInventorySnapshot columns are nullable (single-table snapshot kinds)
         else None,
         reservations=memory_reservations(
             session,

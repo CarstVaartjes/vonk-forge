@@ -85,7 +85,7 @@ def _stop_binding_is_exact(
         job is None
         or job.kind != ProfileChildJobKind.STOP.value
         or job.request_id != request_key
-        or not isinstance(job.payload, dict)
+        or not isinstance(job.payload, dict)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
         or job.payload_digest != _digest(job.payload)
     ):
         return False

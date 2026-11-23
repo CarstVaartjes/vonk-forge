@@ -238,7 +238,7 @@ def _prove(
     if (
         runtime_plan is None
         or runtime_plan.installation_id != child_parent.owner_id
-        or runtime_plan.mapping_id is None
+        or runtime_plan.mapping_id is None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
     ):
         return None
     RecipeLifecyclePhaseExecutor._bound_installation(
@@ -266,7 +266,7 @@ def _prove(
             operation.authority_revision != child.authority_revision
             or operation.workload_intent_ordinal != parent.workload_intent_ordinal
             or operation.payload_digest != _digest(operation.payload)
-            or (operation.current_attempt > 0 and attempt is None)
+            or (operation.current_attempt > 0 and attempt is None)  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
         ):
             return None
     # Measurement repair requires every current sample field/freshness.
@@ -280,7 +280,7 @@ def _prove(
         return None
     witnesses = []
     for operation, attempt in rows:
-        if attempt is None:
+        if attempt is None:  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
             continue
         sample = stored_progress(attempt)
         # Without a retained parent attempt witness, a later native attempt

@@ -423,7 +423,7 @@ class FleetProfileService:
                         if not isinstance(assessment, RunSwitchAssessment):
                             raise BookkeepingUnknown(
                                 assessment.note
-                                if isinstance(assessment, Residue)
+                                if isinstance(assessment, Residue)  # pyright: ignore[reportUnnecessaryIsInstance]  # an unexpected value is treated as unknown, not trusted
                                 else "The planner returned an invalid assessment.",
                                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
                             )
@@ -521,7 +521,7 @@ class FleetProfileService:
                                 ),
                             )
                         )
-                    if preparation is not None and not isinstance(
+                    if preparation is not None and not isinstance(  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                         preparation, RolloutPreparation
                     ):
                         reasons.append(

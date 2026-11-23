@@ -118,7 +118,7 @@ class DownloadMixin:
                             chunk = next(stream, b"")
                         if not chunk:
                             break
-                        if not isinstance(chunk, bytes):
+                        if not isinstance(chunk, bytes):  # pyright: ignore[reportUnnecessaryIsInstance]  # streamed download chunks come from the network
                             chunk = bytes(chunk)
                         next_received = received + len(chunk)
                         if next_received > spec.expected_bytes:

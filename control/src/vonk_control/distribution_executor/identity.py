@@ -171,7 +171,7 @@ class DistributionIdentity:
                 build_id = build_id or receipt.build_id
                 break
         if (
-            (build_id is not None and not isinstance(build_id, str))
+            (build_id is not None and not isinstance(build_id, str))  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             or not isinstance(image_digest, str)
             or not isinstance(layout_digest, str)
             or type(image_bytes) is not int

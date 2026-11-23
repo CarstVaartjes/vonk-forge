@@ -165,7 +165,7 @@ def _parse_assertion(key: str, raw: object) -> dict[str, object]:
     elif kind == "media-type-counts":
         counts = _object(assertion.get("counts"), "media type counts")
         if not counts or any(
-            not isinstance(name, str)
+            not isinstance(name, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             or not _MEDIA_TYPE.fullmatch(name)
             or not isinstance(count, int)
             or isinstance(count, bool)

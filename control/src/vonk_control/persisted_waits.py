@@ -277,7 +277,7 @@ def wait_due(owner: ScheduledWaitOwner) -> datetime | None:
     elif isinstance(owner, FleetProfileApplication):
         document = owner.progress
         cancellation = (
-            document.get("cancellation") if isinstance(document, dict) else None
+            document.get("cancellation") if isinstance(document, dict) else None  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
         )
         if isinstance(cancellation, dict):
             due = _adopt_wait_instant(cancellation.get("observation_due_at"))

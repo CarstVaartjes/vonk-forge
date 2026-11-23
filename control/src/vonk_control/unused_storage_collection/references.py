@@ -377,7 +377,7 @@ def _spark_settling(session: Session, node_id: str, received_at: datetime) -> bo
             or_(Job.state.not_in(_FINISHED_JOBS), Job.updated_at >= received_at),
         )
     ):
-        if isinstance(targets, list) and node_id in targets:
+        if isinstance(targets, list) and node_id in targets:  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             return True
     return False
 

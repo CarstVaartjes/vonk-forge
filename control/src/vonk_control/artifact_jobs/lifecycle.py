@@ -53,7 +53,7 @@ class ArtifactIdentity:
                 "artifact lifecycle kind is invalid",
                 reason=InvalidRequestReason.UNSUPPORTED,
             )
-        if not isinstance(self.sha256, str) or _DIGEST.fullmatch(self.sha256) is None:
+        if not isinstance(self.sha256, str) or _DIGEST.fullmatch(self.sha256) is None:  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             raise InvalidValue(
                 "artifact lifecycle digest is invalid",
                 reason=InvalidRequestReason.MALFORMED,

@@ -357,7 +357,7 @@ class DistributedRecoveryCoordinator:
                         start_phases = authority.start_phases
                         workload_intent_ordinal = authority.workload_intent_ordinal
                         if (
-                            not isinstance(deadline, str)
+                            not isinstance(deadline, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                             or not start_phases
                             or type(workload_intent_ordinal) is not int
                             or workload_intent_ordinal < 1

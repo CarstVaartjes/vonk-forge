@@ -72,6 +72,6 @@ class RecipeLifecyclePhaseExecutor(
                 child = None
             if child is not None:
                 return child
-        if self._lifecycle is not None:
+        if self._lifecycle is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
             return self._lifecycle.get(operation_id)
         raise MissingRecord(operation_id)

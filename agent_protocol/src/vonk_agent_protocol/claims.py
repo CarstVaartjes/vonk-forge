@@ -66,7 +66,7 @@ class ClaimRequest(OptionalEvidenceModel, WireModel):
         # error instead of a list of unknown fields.
         if isinstance(value, Mapping):
             version = value.get("protocol_version")
-            if version != AGENT_PROTOCOL_VERSION or isinstance(version, bool):
+            if version != AGENT_PROTOCOL_VERSION or isinstance(version, bool):  # pyright: ignore[reportUnnecessaryIsInstance]  # a bool equals an int protocol version such as 1
                 raise ValueError(
                     f"agent protocol {version} is not supported by this "
                     "Controller; reinstall the Spark agent"

@@ -97,7 +97,7 @@ class CancellationMixin:
                 select(ModelCacheOperation)
                 .where(
                     ModelCacheOperation.id == operation_id
-                    if operation_id is not None
+                    if operation_id is not None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
                     else true()
                 )
                 .where(ModelCacheOperation.id == operation_id)

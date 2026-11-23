@@ -152,7 +152,7 @@ def unowned_never_installed(
         member_nodes = {member.node_id for member in members}
         if (
             members
-            and (wanted is None or member_nodes == wanted)
+            and (wanted is None or member_nodes == wanted)  # pyright: ignore[reportUnnecessaryComparison]  # a set and a frozenset compare equal by content
             and all(
                 member.state == InstallationNodeState.PLANNED
                 and not member.installed_bytes
@@ -316,9 +316,9 @@ class AttemptResidueReconciler:
                 Job.kind.in_(_OWNER_JOB_KINDS), Job.state.in_(job_states.LIVE)
             )
         ):
-            nodes.update(job.targets if isinstance(job.targets, list) else ())
+            nodes.update(job.targets if isinstance(job.targets, list) else ())  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             plans.add(job.authority_revision)
-            payload = job.payload if isinstance(job.payload, dict) else {}
+            payload = job.payload if isinstance(job.payload, dict) else {}  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             digest = payload.get("plan_digest")
             if isinstance(digest, str):
                 plans.add(digest)

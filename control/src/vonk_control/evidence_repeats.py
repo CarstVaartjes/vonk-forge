@@ -57,7 +57,8 @@ def owner_evidence(row: EvidenceOwner) -> list[RepeatedEvidence] | None:
     if value is None:
         return []
     if not isinstance(value, list) or any(
-        not isinstance(item, RepeatedEvidence) for item in value
+        not isinstance(item, RepeatedEvidence)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+        for item in value
     ):
         _LOGGER.warning(
             "Repeated evidence on its owner is unreadable: %s", type(row).__name__

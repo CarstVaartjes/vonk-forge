@@ -240,8 +240,8 @@ class CatalogService:
     ) -> dict[tuple[str, str], RecipeCatalogLocalRevision]:
         requested = sorted(set(identities))
         if any(
-            not isinstance(publisher, str)
-            or not isinstance(slug, str)
+            not isinstance(publisher, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+            or not isinstance(slug, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             or not _SLUG.fullmatch(publisher)
             or not _SLUG.fullmatch(slug)
             for publisher, slug in requested

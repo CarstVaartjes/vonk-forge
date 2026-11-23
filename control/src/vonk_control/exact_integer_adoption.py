@@ -184,7 +184,7 @@ def _sqlite_extensions(
     # declaration; unsupported column collation must not silently disappear.
     for check in inspect(connection).get_check_constraints(table_name):
         expression = check["sqltext"]
-        if isinstance(expression, str):
+        if isinstance(expression, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # reflected check constraints differ by dialect
             table_sql = table_sql.replace(expression, "")
     if re.search(r"\bCOLLATE\b", table_sql, flags=re.IGNORECASE):
         raise ValueError(
@@ -343,7 +343,7 @@ def adopt_exact_integer_columns(connection: Connection) -> None:
                 if check["name"] in _OWNED_CHECKS[table_name]:
                     continue
                 expression = check["sqltext"]
-                if not isinstance(expression, str):
+                if not isinstance(expression, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # reflected check constraints differ by dialect
                     raise TypeError(f"unreadable check constraint in {table_name}")
                 if any(
                     re.search(

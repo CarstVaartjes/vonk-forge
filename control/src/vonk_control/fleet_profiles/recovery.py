@@ -413,7 +413,7 @@ class FleetProfileService:
             )
             if isinstance(child, Residue):
                 return child
-            if not isinstance(child, FleetProfileChildOperation):
+            if not isinstance(child, FleetProfileChildOperation):  # pyright: ignore[reportUnnecessaryIsInstance]  # an unexpected value is treated as unknown, not trusted
                 return retire_as_unknown(
                     ProfileProjectionKind.STEP.value,
                     application_id,

@@ -244,8 +244,8 @@ def _switch_stops_run_now(operation: Job | None, run_id: str) -> bool:
         return False
     phase_index, item_index = current.phase_index, current.item_index
     return (
-        phase_index is not None
-        and item_index is not None
+        phase_index is not None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+        and item_index is not None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
         and phase_index < len(plan.phases)
         and item_index < len(plan.stops)
         and plan.phases[phase_index].kind == ProfileChildPhase.STOP.value

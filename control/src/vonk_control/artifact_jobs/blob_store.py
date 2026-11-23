@@ -215,7 +215,7 @@ class ArtifactBlobStore:
             digest = hashlib.sha256()
             observed = 0
             async for chunk in chunks:
-                if not isinstance(chunk, bytes):
+                if not isinstance(chunk, bytes):  # pyright: ignore[reportUnnecessaryIsInstance]  # streamed upload chunks come from the network
                     raise ArtifactBlobInvalid(
                         "artifact upload chunk is invalid",
                         reason=InvalidRequestReason.MALFORMED,
@@ -253,7 +253,7 @@ class ArtifactBlobStore:
             stream = os.fdopen(descriptor, "wb")
             try:
                 async for chunk in chunks:
-                    if not isinstance(chunk, bytes):
+                    if not isinstance(chunk, bytes):  # pyright: ignore[reportUnnecessaryIsInstance]  # streamed upload chunks come from the network
                         raise ArtifactBlobInvalid(
                             "artifact upload chunk is invalid",
                             reason=InvalidRequestReason.MALFORMED,

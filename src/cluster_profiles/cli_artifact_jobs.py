@@ -1166,7 +1166,7 @@ def _download(
                 "state": "downloaded",
                 **(
                     {"transfer": dict(response)}
-                    if isinstance(response, Mapping)
+                    if isinstance(response, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
                     else {}
                 ),
             }

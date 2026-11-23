@@ -231,7 +231,7 @@ def _stalled_applications(session: Session, now: datetime) -> list[StalledApplic
     stalled: list[StalledApplication] = []
     for application_id, profile_id, state, progress in rows:
         stall = read_stall(
-            progress.get("stall") if isinstance(progress, Mapping) else None
+            progress.get("stall") if isinstance(progress, Mapping) else None  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
         )
         if is_stalled(stall, now=now):
             stalled.append(

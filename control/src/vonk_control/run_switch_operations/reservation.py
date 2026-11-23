@@ -348,7 +348,7 @@ class ReservationMixin:
                 refreshed = service.preview_stop(intent)
             elif isinstance(intent, RunSwitchCleanupIntent):
                 refreshed = service.preview_cleanup(intent)
-            elif isinstance(intent, RunSwitchProfileStopIntent):
+            elif isinstance(intent, RunSwitchProfileStopIntent):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                 refreshed = service.preview_stop(
                     intent.run_id,
                     profile_stop_scope=intent.profile_stop_scope,

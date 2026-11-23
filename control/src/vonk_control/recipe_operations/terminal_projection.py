@@ -356,7 +356,7 @@ class TerminalProjectionMixin:
                 )
                 if (
                     recovery_revision is None
-                    or recovery_revision.content_digest is None
+                    or recovery_revision.content_digest is None  # pyright: ignore[reportUnnecessaryComparison]  # NOT NULL column; removing it needs a reviewed refresh of this pinned write verdict
                 ):
                     # Without the recipe's accepted authority the restart
                     # cannot be queued: the Stop completes as a plain Stop.
@@ -370,7 +370,7 @@ class TerminalProjectionMixin:
             if (
                 recovery is not None
                 and recovery_revision is not None
-                and recovery_revision.content_digest is not None
+                and recovery_revision.content_digest is not None  # pyright: ignore[reportUnnecessaryComparison]  # NOT NULL column; removing it needs a reviewed refresh of this pinned write verdict
                 and recovery_intent is not None
                 and not failed
                 and _intent_is_current(session, recovery_intent, job.targets)

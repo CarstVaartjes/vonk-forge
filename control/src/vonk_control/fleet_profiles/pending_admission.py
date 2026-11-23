@@ -66,7 +66,7 @@ from .projection_support import (
 def _raw_pending(row: FleetProfileApplication) -> bool:
     """Whether the stored document, readable or not, says admission is pending."""
     stored = row.progress
-    return isinstance(stored, dict) and stored.get("admission_pending") is True
+    return isinstance(stored, dict) and stored.get("admission_pending") is True  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
 
 
 if TYPE_CHECKING:

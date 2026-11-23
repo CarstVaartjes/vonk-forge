@@ -170,7 +170,7 @@ class AgentSource:
     management_address: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.identity, AgentIdentity):
+        if not isinstance(self.identity, AgentIdentity):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             raise AuthError("invalid proxy-observed agent source")
         try:
             address = ipaddress.ip_address(self.management_address)

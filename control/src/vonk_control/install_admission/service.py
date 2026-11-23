@@ -264,7 +264,7 @@ class InstallAdmissionService(InstallPlanningService):
             )
         plan = fresh
         if (
-            revision is None
+            revision is None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
             or revision.state != CatalogRevisionState.ACTIVE
             or revision.content_digest != plan.recipe_content_sha256
             or tuple((node.node_id, node.rank, node.role) for node in mapping_nodes)

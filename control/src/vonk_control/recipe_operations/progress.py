@@ -245,7 +245,7 @@ def _recipe_model_identities(
             )
             .limit(1)
         )
-        if revision is None or not isinstance(revision.document, Mapping):
+        if revision is None or not isinstance(revision.document, Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             return None
         try:
             model = read_model(revision.document)

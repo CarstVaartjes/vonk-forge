@@ -344,7 +344,7 @@ class ActionPlansMixin:
         immutable_membership_exact = (
             len(all_nodes) <= _MAX_ACTION_NODES
             and accepted_exact
-            and accepted_ranks == actual_identity
+            and accepted_ranks == actual_identity  # pyright: ignore[reportUnnecessaryComparison]  # a set and a frozenset compare equal by content
             and len(actual_identity) == len(nodes)
         )
         # The model that was installed is the installation row's own record; the

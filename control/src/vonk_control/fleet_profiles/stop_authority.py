@@ -93,7 +93,7 @@ def validate_profile_stop_owner(
             "current profile Stop owner is unavailable",
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
-    if application.profile_id is None:
+    if application.profile_id is None:  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
         raise ProfileStopAuthorityError("profile Stop has no saved profile owner")
     switch_stop = profile_operation.kind == ProfileChildJobKind.RUN_SWITCH.value
     if profile_operation.kind != ProfileChildJobKind.STOP.value and not switch_stop:
@@ -169,8 +169,8 @@ def validate_profile_stop_owner(
                 or current.workload_intent_ordinal
                 != authorization.workload_intent_ordinal
                 or current.cancellation is not None
-                or phase_index is None
-                or item_index is None
+                or phase_index is None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+                or item_index is None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
                 or phase_index >= len(run_switch_plan.phases)
                 or item_index >= len(run_switch_plan.stops)
             ):

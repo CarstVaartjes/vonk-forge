@@ -82,7 +82,7 @@ def _qualification_evidence(value: object) -> tuple[str, str] | None:
         count = record.platform.spark_count
         sparks = (
             f" on {count} Spark{'s' if count != 1 else ''}"
-            if isinstance(count, int)
+            if isinstance(count, int)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             else ""
         )
         return ("Last passed", f"{tested}{sparks}")

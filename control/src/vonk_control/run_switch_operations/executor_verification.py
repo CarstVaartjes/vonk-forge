@@ -294,7 +294,7 @@ class ExecutorVerificationMixin:
             else None
         )
         if plan.cleanup_mode == "reconcile" and plan.cleanup_disposition != "abandon":
-            if service._lifecycle is None or plan.reconciliation_authority is None:
+            if service._lifecycle is None or plan.reconciliation_authority is None:  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
                 raise RunSwitchRetryLater(
                     RunSwitchCode.RECONCILIATION_AUTHORITY_UNAVAILABLE,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,

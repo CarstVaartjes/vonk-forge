@@ -294,7 +294,7 @@ def _persisted_profile_scope(row: FleetProfileApplication) -> tuple[str, ...] | 
         return tuple(plan.scope.node_ids)
     # A damaged step list does not erase the independently typed frozen scope.
     # This projection never reconstructs or authorizes the unknown step effects.
-    if not isinstance(row.plan, dict):
+    if not isinstance(row.plan, dict):  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
         return None
     try:
         scope = FleetProfileScopePreview.model_validate_json(

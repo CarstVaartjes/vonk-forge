@@ -147,7 +147,7 @@ class JobAdapter:
             effect = Effect.ISSUED if job.current_attempt else Effect.NONE
         ordinal = (
             job.payload.get("workload_intent_ordinal")
-            if isinstance(job.payload, Mapping)
+            if isinstance(job.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             else None
         )
         return Lifecycle(

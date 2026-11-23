@@ -243,8 +243,9 @@ class ModelPartialsCollector:
             return _Ownership(live=False, last_update=None)
         with self._sessions() as session:
             count, last = session.execute(query).one()
-        if last is not None and last.tzinfo is None:
+        if last is not None and last.tzinfo is None:  # pyright: ignore[reportUnnecessaryComparison]  # an aggregate over no rows is NULL
             last = last.replace(tzinfo=UTC)
         return _Ownership(
-            live=bool(count), last_update=None if last is None else last.timestamp()
+            live=bool(count),
+            last_update=None if last is None else last.timestamp(),  # pyright: ignore[reportUnnecessaryComparison]  # an aggregate over no rows is NULL
         )

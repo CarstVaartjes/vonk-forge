@@ -49,7 +49,7 @@ def _release_cancelled_claim(
             or operation.kind != OPERATION_KIND
             or operation.state not in job_states.words(LifecycleState.OBSERVING)
             or operation.current_attempt != claim.execution_attempt
-            or not isinstance(operation.payload, Mapping)
+            or not isinstance(operation.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             or payload.claim_owner != claim.claim_owner
             or self._stored_cancellation(operation) is None
             or payload.removal_fence is not None
@@ -81,7 +81,7 @@ def _release_cancelled_claim(
                 or not isinstance(payload, AvailabilityJobPayload)
                 or operation.state not in job_states.words(LifecycleState.OBSERVING)
                 or operation.current_attempt != claim.execution_attempt
-                or not isinstance(operation.payload, Mapping)
+                or not isinstance(operation.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
                 or payload.claim_owner != claim.claim_owner
                 or payload.removal_fence is not None
                 or self._stored_cancellation(operation) is None
@@ -241,7 +241,7 @@ def _reconcile_cancellation_pass(
     now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
     owner = payload.claim_owner
     if owner is not None:
-        if not isinstance(owner, str):
+        if not isinstance(owner, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             return child_changed
         if payload.image_reference_intent is None:
             until = payload.claim_until
@@ -253,7 +253,7 @@ def _reconcile_cancellation_pass(
                 # the archive lock; expiry later fences callbacks in SQL.
                 return child_changed
         recipe_revision_id = operation.authority_revision
-        if not isinstance(recipe_revision_id, str):
+        if not isinstance(recipe_revision_id, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             return child_changed
         build_input_sha256 = payload.build_input_sha256
         claim = RecipeImageAvailabilityClaim(

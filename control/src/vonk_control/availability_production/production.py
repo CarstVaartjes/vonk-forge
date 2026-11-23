@@ -84,7 +84,7 @@ PREBUILT_PULL_KEY = "prebuilt_pull"
 def _pulls_prebuilt_image(job: Job) -> bool:
     """Whether a build job is a Controller pull of a prebuilt image."""
 
-    return isinstance(job.payload, Mapping) and isinstance(
+    return isinstance(job.payload, Mapping) and isinstance(  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
         job.payload.get("prebuilt_image"), str
     )
 
@@ -501,7 +501,7 @@ class _ImageAvailabilitySteps:
             if job.id == parent.id:
                 return True
             other = job.payload
-            if job.kind != "recipe.image.availability.v2" or not isinstance(
+            if job.kind != "recipe.image.availability.v2" or not isinstance(  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
                 other, Mapping
             ):
                 return False
@@ -547,7 +547,7 @@ class _ImageAvailabilitySteps:
                 )
                 or (
                     job.kind == "recipe.image.availability.v2"
-                    and isinstance(job.payload, Mapping)
+                    and isinstance(job.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
                     and job.payload.get(PREBUILT_PULL_KEY) is not True
                     and not isinstance(job.payload.get("image_result"), Mapping)
                     and isinstance(

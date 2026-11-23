@@ -439,23 +439,23 @@ class _StandaloneJobActivityProjection:
         request_id = _activity_owner_request_id(job.request_id)
         try:
             if (
-                not isinstance(job.id, str)
+                not isinstance(job.id, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                 or not 1 <= len(activity_id) <= 128
                 or request_id is None
-                or not isinstance(job.kind, str)
+                or not isinstance(job.kind, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                 or not 1 <= len(job.kind) <= 80
-                or not isinstance(job.state, str)
+                or not isinstance(job.state, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                 or not 1 <= len(job.state) <= 80
                 or type(job.current_attempt) is not int
                 or job.current_attempt < 0
-                or not isinstance(job.created_at, datetime)
-                or not isinstance(job.updated_at, datetime)
+                or not isinstance(job.created_at, datetime)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+                or not isinstance(job.updated_at, datetime)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             ):
                 raise ValueError("stored job activity is malformed")
             node_ids = _activity_node_ids(job.targets, limit=100)
             status_reason = job.status_reason
             if status_reason is not None and (
-                not isinstance(status_reason, str) or len(status_reason) > 1024
+                not isinstance(status_reason, str) or len(status_reason) > 1024  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             ):
                 raise ValueError("stored job status reason is malformed")
         except (AttributeError, TypeError, ValueError, ValidationError):
@@ -478,7 +478,7 @@ class _StandaloneJobActivityProjection:
                 wait.blockers
                 if (wait := read_wait(job)) is not None
                 else read_blockers(job.payload.get("blockers"))
-                if isinstance(job.payload, Mapping)
+                if isinstance(job.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
                 else None
             ),
             next_attempt_at=(

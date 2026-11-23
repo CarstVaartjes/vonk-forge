@@ -227,7 +227,7 @@ class ControllerExecutionPlanService:
         if (
             revision.kind != "recipe"
             or revision.state != CatalogRevisionState.ACTIVE
-            or revision.content_digest is None
+            or revision.content_digest is None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
         ):
             raise ExecutionPlanCompilationError("recipe revision digest is unavailable")
         try:
@@ -378,7 +378,7 @@ def _build_package(build: RecipeBuild) -> dict[str, object]:
     if (
         build.state != RecipeBuildState.SUCCEEDED
         or not isinstance(build.image_digest, str)
-        or not isinstance(build.build_input_sha256, str)
+        or not isinstance(build.build_input_sha256, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
     ):
         raise ExecutionPlanEvidenceUnknown(
             "successful Controller build receipt is unavailable"

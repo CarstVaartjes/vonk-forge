@@ -360,7 +360,7 @@ class RecipeOperationWorker:
                     # A job that already ended keeps its outcome: the run's
                     # route state and error are the evidence of the failure.
                     if (
-                        isinstance(job.payload, Mapping)
+                        isinstance(job.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
                         and job.payload.get("recovery") is not None
                         and not job_states.means(job.state, *TERMINAL_LIFECYCLE_STATES)
                     ):

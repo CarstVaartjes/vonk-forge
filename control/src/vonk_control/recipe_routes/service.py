@@ -552,7 +552,7 @@ class RecipeRouteService:
             (
                 job
                 for job in jobs
-                if isinstance(job.payload, Mapping)
+                if isinstance(job.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
                 and job.payload.get("recovery") is not None
             ),
             None,

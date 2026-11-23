@@ -239,7 +239,7 @@ class InstallPlanningService:
             # archive is provenance, not the recipe allowed to consume it now.
             # Bind that authorized receipt back to the exact selected result so
             # reuse cannot silently select a different build or archive.
-            if build is not None and any(
+            if build is not None and any(  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
                 not _compiled_build_matches(value, build, revision.content_digest)
                 for value in compiled_plan_by_node.values()
             ):
@@ -356,7 +356,7 @@ class InstallPlanningService:
                         )
                     )
             actual_artifact_bytes = sum(artifact_sizes.values())
-            if image_bytes is None:
+            if image_bytes is None:  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
                 blockers.append(
                     AdmissionReason(
                         InstallAdmissionCode.COMPILED_PLAN_UNAVAILABLE,
@@ -421,7 +421,7 @@ class InstallPlanningService:
             # never prunes it); any other is charged, as it may be pruned.
             reused_image = (
                 image_bytes
-                if image_bytes is not None
+                if image_bytes is not None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
                 and image_digest in named_images_by_node[mapping_node.node_id]
                 else 0
             )

@@ -964,7 +964,7 @@ def test_a_backlog_larger_than_one_pass_resumes_from_its_cursor(
     assert collector._cursor is not None
     removed = first.revisions
     passes = 1
-    while collector._cursor is not None and passes < 5:
+    while collector._cursor is not None and passes < 5:  # pyright: ignore[reportUnnecessaryComparison]  # pyright keeps the narrowing across the call that moves the cursor
         result = collector.collect()
         assert result.revisions > 0 or collector._cursor is None
         removed += result.revisions

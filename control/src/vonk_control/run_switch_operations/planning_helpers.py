@@ -91,7 +91,7 @@ def _refused_retries(progress: RunSwitchOperationResult) -> int:
 def _now(clock: Callable[[], datetime]) -> datetime:
     value = clock()
     if (
-        not isinstance(value, datetime)
+        not isinstance(value, datetime)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         or value.tzinfo is None
         or value.utcoffset() is None
     ):
@@ -379,7 +379,7 @@ def _latest_inventory(
         maximum_age_seconds=maximum_age_seconds,
         evidence_digest=(
             snapshot.evidence_digest
-            if isinstance(snapshot.evidence_digest, str)
+            if isinstance(snapshot.evidence_digest, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             and len(snapshot.evidence_digest) == 64
             else None
         ),

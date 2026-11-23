@@ -360,7 +360,7 @@ def _proves_fresh_absence(run: RecipeRun, node: RunNode, now: datetime) -> bool:
         or run_nodes[0].endpoint_owner is not True
     ):
         return False
-    if node.observation_endpoint_ready is not False or not isinstance(
+    if node.observation_endpoint_ready is not False or not isinstance(  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         node.observation_observed_at, datetime
     ):
         return False
@@ -596,9 +596,9 @@ def _decode_phases(
         not isinstance(value, list)
         or not value
         or any(
-            not isinstance(group, list)
+            not isinstance(group, list)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             or not group
-            or any(not isinstance(item, RecoveryStartItem) for item in group)
+            or any(not isinstance(item, RecoveryStartItem) for item in group)  # pyright: ignore[reportUnnecessaryIsInstance]  # an unexpected value is treated as unknown, not trusted
             for group in value
         )
     ):

@@ -222,9 +222,9 @@ def outstanding_disk_charges(
         materialized = 0
         if (
             inventory_observed_at is not None
-            and installation is not None
+            and installation is not None  # pyright: ignore[reportUnnecessaryComparison]  # outer-joined rows can be missing
             and installation.state == InstallationState.INSTALLED
-            and node is not None
+            and node is not None  # pyright: ignore[reportUnnecessaryComparison]  # outer-joined rows can be missing
             and rank_installed(node.state)
             and _aware(inventory_observed_at)
             > _aware(node.updated_at) + MAX_INVENTORY_FUTURE_SKEW

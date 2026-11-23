@@ -797,7 +797,7 @@ class TerminalHistoryCollector:
         self._pending = tuple(
             (identity, observed_at)
             for identity, observed_at in candidates
-            if observed_at is not None
+            if observed_at is not None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
         )
         if not candidates:
             self._after.pop(rule.table, None)

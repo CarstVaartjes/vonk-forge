@@ -342,7 +342,7 @@ class RunSwitchAdapter:
             reason=job.status_reason,
             recovery_deadline=(
                 None
-                if job.created_at is None
+                if job.created_at is None  # pyright: ignore[reportUnnecessaryComparison]  # an unflushed Job has no created_at yet
                 else checkpoint_deadline(job, progress, now)
             ),
         )
@@ -356,7 +356,7 @@ class RunSwitchAdapter:
             return None, None
         requested = aware(cancellation.requested_at)
         key = cancellation.request_key
-        return requested, key if isinstance(key, str) else None
+        return requested, key if isinstance(key, str) else None  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
 
     # ----------------------------------------------------- the kind's facts
 
@@ -620,7 +620,7 @@ class RunSwitchAdapter:
             given
             if explicit
             else cancellation.reason
-            if cancellation is not None and isinstance(cancellation.reason, str)
+            if cancellation is not None and isinstance(cancellation.reason, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             else None
         )
         if after.effect is Effect.UNKNOWN and not explicit:

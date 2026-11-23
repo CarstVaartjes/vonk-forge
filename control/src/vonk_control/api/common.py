@@ -136,7 +136,7 @@ def _invalid_login_content() -> bytes:
 def _catalog_error_content(request: Request, error: StarletteHTTPException) -> bytes:
     """Serialize catalog HTTP errors through the route's public model."""
 
-    detail = error.detail if isinstance(error.detail, str) else "catalog request failed"
+    detail = error.detail if isinstance(error.detail, str) else "catalog request failed"  # pyright: ignore[reportUnnecessaryIsInstance]  # an HTTPException detail can carry a document
     response = CatalogProblem(
         code=_CATALOG_HTTP_ERROR_CODES.get(
             error.status_code, CatalogCode.REQUEST_FAILED

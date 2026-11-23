@@ -226,7 +226,7 @@ class RecoveryMixin:
                         Job.state.in_(_ACTIVE_ROLLOUT_STATES),
                     )
                 )
-                if isinstance(targets, list) and node_id in targets
+                if isinstance(targets, list) and node_id in targets  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             ]
             for job_id in job_ids:
                 parent = session.scalar(

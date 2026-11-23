@@ -463,7 +463,7 @@ def _model_child_cancellation_pending(
         if getattr(error.orig, "sqlstate", None) == "55P03":
             return True, False
         raise
-    if cancelled_child_id is not None:
+    if cancelled_child_id is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
         cache = cast(ModelCacheCancellationOwner, self._model_cache)
         cache.signal_cancelled_operation(cancelled_child_id)
         # The child may still hold an artifact lock in another process.
@@ -528,7 +528,7 @@ def _build_child_cancellation_pending(
                 locked = lock_build_dependency(
                     session,
                     recipe_revision_id=recipe_revision_id
-                    if isinstance(recipe_revision_id, str)
+                    if isinstance(recipe_revision_id, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                     else None,
                     builder_node_id=build.builder_node_id,
                     build_input_sha256=build_input_sha256
@@ -571,7 +571,7 @@ def _build_child_cancellation_pending(
                 not isinstance(child_payload, RecipeBuildParent)
                 or child_payload.owner_id != locked.id
                 or (
-                    not isinstance(operation_id, str)
+                    not isinstance(operation_id, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                     and child.request_id != request_key
                 )
             ):

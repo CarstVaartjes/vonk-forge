@@ -181,7 +181,7 @@ def _snapshot(world: World) -> _Snapshot:
                 FleetProfileApplication.created_at, FleetProfileApplication.request_key
             )
         ):
-            progress = row.progress if isinstance(row.progress, dict) else {}
+            progress = row.progress if isinstance(row.progress, dict) else {}  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             attempt = (
                 progress.get("attempt"),
                 progress.get("admission_attempt"),

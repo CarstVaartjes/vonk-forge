@@ -290,7 +290,7 @@ def runtime_image_reference_findings(
         .execution_options(yield_per=64)
     ):
         payload = operation.payload
-        if not isinstance(payload, Mapping):
+        if not isinstance(payload, Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             raise ArtifactReferenceUnverified(
                 ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
                 "active artifact operation payload is malformed; removal was deferred",

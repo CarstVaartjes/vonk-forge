@@ -345,7 +345,7 @@ def observe_application_progress(
     if not any(
         item.history.has_changes()
         for item in (attrs.progress, attrs.wait_evidence, attrs.next_action_at)
-    ) or not isinstance(current, dict):
+    ) or not isinstance(current, dict):  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
         return
     progress = _read_progress(current)
     if progress is None:
@@ -372,12 +372,12 @@ def observe_application_progress(
         target.wait_evidence if isinstance(target.wait_evidence, WaitEvidence) else None
     )
     observed_at = target.updated_at or target.created_at
-    if observed_at is not None and wait is not None:
+    if observed_at is not None and wait is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
         # A wait written without touching the row's time began when it says.
         observed_at = max(_aware(observed_at), _aware(wait.first_blocked_at))
     stall = (
         None
-        if observed_at is None
+        if observed_at is None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
         else next_stall(
             previous,
             progress,

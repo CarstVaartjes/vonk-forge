@@ -132,7 +132,7 @@ def _claim_operation(
         or operation.kind != OPERATION_KIND
         or operation.state not in allowed_states
         or operation.current_attempt != claim.execution_attempt
-        or not isinstance(operation.payload, Mapping)
+        or not isinstance(operation.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
         or not isinstance(payload, AvailabilityJobPayload)
         or payload.claim_owner != claim.claim_owner
         or payload.removal_fence is not None
@@ -432,7 +432,7 @@ def _current_model_child(
             and isinstance(operation.artifact_set_sha256, str)
         ):
             recipe_revision_id = payload.recipe_revision_id
-            if not isinstance(recipe_revision_id, str):
+            if not isinstance(recipe_revision_id, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                 raise RecipeImageAvailabilityUnknown(
                     RecipeImageCode.MODEL_CACHE_INVALID,
                     "availability operation lacks its exact recipe revision",
@@ -495,7 +495,7 @@ def _update_model_progress(
     child_id = child.id
     with self._sessions.begin() as session:
         model_operation = None
-        if isinstance(child_id, str):
+        if isinstance(child_id, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             model_operation = session.scalar(
                 select(ModelCacheOperation)
                 .where(ModelCacheOperation.id == child_id)
@@ -521,7 +521,7 @@ def _update_model_progress(
             operation is None
             or not isinstance(payload, AvailabilityJobPayload)
             or operation.current_attempt != claim.execution_attempt
-            or not isinstance(operation.payload, Mapping)
+            or not isinstance(operation.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             or payload.claim_owner != claim.claim_owner
         ):
             raise _AvailabilityClaimLost

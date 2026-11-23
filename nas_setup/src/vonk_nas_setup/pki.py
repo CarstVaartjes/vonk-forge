@@ -497,7 +497,7 @@ def validate_pki_material(
             files[paths.controller_server_private_key]
         )
         if (
-            not isinstance(server_key, ed25519.Ed25519PrivateKey)
+            not isinstance(server_key, ed25519.Ed25519PrivateKey)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             or server_key.public_key() != server.public_key()
         ):
             raise _invalid(

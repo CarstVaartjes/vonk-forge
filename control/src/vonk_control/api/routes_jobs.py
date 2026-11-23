@@ -286,7 +286,7 @@ def register_job_routes(
             action=disposition,
             content_digest=current_job.payload_digest,
         )
-        if disposition == OperatorActionName.RETIRE:
+        if disposition == OperatorActionName.RETIRE:  # pyright: ignore[reportUnnecessaryComparison]  # a StrEnum member equals its string value at run time
             if operations.retire_job is None:
                 raise HTTPException(
                     status_code=503, detail="job retirement unavailable"
