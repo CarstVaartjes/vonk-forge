@@ -36,6 +36,7 @@ from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime.preflight import mandatory_capabilities
 
 from .agent_fences import fenced_operation
+from .fleet_profiles_support import _uuid
 from .recipe_operations_support import installed_recipe, setup_services
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
@@ -46,7 +47,6 @@ from .runtime_identity_support import (
     claim_agent,
     set_inventory_fingerprint,
 )
-from .test_fleet_profiles import _uuid
 
 
 def _result(claim, *, state: str, evidence: dict[str, object]) -> AgentResult:

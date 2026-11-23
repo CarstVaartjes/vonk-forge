@@ -32,12 +32,12 @@ from vonk_control.operations.blockers import make_blocker
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .display_fixtures import reword
+from .fleet_profiles_support import _uuid
 from .recipe_operations_support import setup_services
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )
-from .test_fleet_profiles import _uuid
 
 
 def _failed_profile(

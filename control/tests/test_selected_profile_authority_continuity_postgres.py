@@ -59,6 +59,7 @@ from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime.preflight import mandatory_capabilities
 from vonk_control.terminal_history_collection import TerminalHistoryCollector
 
+from .fleet_profiles_support import _node_id, _uuid
 from .preflight_fixtures import record_passing_preflight
 from .recipe_operations_support import (
     NOW,
@@ -75,7 +76,6 @@ from .runtime_identity_support import (
     claim_agent,
     inventory_items_fixture,
 )
-from .test_fleet_profiles import _node_id, _uuid
 from .test_terminal_history_collection import _job
 
 

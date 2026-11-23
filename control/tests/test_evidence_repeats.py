@@ -35,8 +35,8 @@ from .agent_api_support import (
     make_agent_system,
     parent,
 )
+from .fleet_profiles_support import _uuid
 from .test_fleet_profile_recovery_current import _failed_profile
-from .test_fleet_profiles import _uuid
 from .test_host_runtime_grant_answers import _BODY
 
 LIMIT = RECOVERY.max_failures

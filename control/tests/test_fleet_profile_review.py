@@ -39,10 +39,7 @@ from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
 
 from cluster_profiles.cli_render import render_payload
 
-from .non_blocking import assert_ended_without_blocking
-from .recipe_operations_support import started_recipe
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
-from .test_fleet_profiles import (
+from .fleet_profiles_support import (
     NOW,
     _assessment,
     _database,
@@ -53,6 +50,9 @@ from .test_fleet_profiles import (
     _seed,
     _SwitchAdapter,
 )
+from .non_blocking import assert_ended_without_blocking
+from .recipe_operations_support import started_recipe
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 
 
 def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(

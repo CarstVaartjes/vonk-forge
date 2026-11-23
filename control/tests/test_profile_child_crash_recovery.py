@@ -17,13 +17,13 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+from .fleet_profiles_support import _uuid
 from .recipe_operations_support import installed_recipe, setup_services
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _child_operation_id,
 )
-from .test_fleet_profiles import _uuid
 
 
 @pytest.mark.parametrize(

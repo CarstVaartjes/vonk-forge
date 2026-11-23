@@ -8,8 +8,8 @@ import pytest
 from sqlalchemy import select
 from vonk_control.lifecycle.evidence import Residue
 
+from .fleet_profiles_support import _uuid
 from .test_fleet_profile_recovery_current import _failed_profile
-from .test_fleet_profiles import _uuid
 
 
 def test_profile_edit_does_not_replace_accepted_retry_snapshot(
