@@ -49,7 +49,7 @@ from ..recipe_operations.availability_intent import (
     RecipeSelectorIntent,
 )
 from ..revision_images import revision_archives
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..stored.states import CatalogRevisionState
 from ..strict_json import serialize_json_value
 from .contracts import (

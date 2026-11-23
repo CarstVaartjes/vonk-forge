@@ -20,7 +20,7 @@ from ..lifecycle.recipe_operation import RecipeOperationAdapter
 from ..models.execution import RecipeInstallation, RecipeRun, ResourceReservation
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .lifecycle_contract import (
     LifecycleNodeResult,

@@ -31,7 +31,7 @@ from ..models.fleet import AgentNode, FleetProfileApplication, FleetProfileSelec
 from ..models.jobs import Job
 from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..settings import DATABASE_WAIT_BUDGETS
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from . import states as fleet_profile_states
 from .contracts import (
     FleetProfileConflict,

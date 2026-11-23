@@ -18,7 +18,7 @@ from ..categorized_errors import BookkeepingUnknown
 from ..lifecycle.evidence import Residue
 from ..models.catalog import CatalogDocumentRevision
 from ..models.execution import RecipeInstallation, RecipeRun, RunNode
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import read_stored_model
 from .execution_contract import (
     RecipeExecutionContractError,

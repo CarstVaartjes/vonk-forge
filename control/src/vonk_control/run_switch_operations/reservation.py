@@ -48,7 +48,7 @@ from ..recipe_builds.cancellation import (
 )
 from ..run_switch_contract.operations import RunSwitchOperation
 from ..run_switch_contract.plans import RunSwitchPlan
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import (
     serialize_json_value,
 )

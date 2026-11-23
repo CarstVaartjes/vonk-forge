@@ -45,7 +45,7 @@ from ..models.operations import AgentOperation
 from ..persisted_waits import schedule_wait
 from ..recipe_routes.shared import RecipeRouteError, route_publication_transaction
 from ..run_admission import RunAdmissionBusy
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .constants import _STOP_WITHDRAWAL_ATTEMPTS
 from .errors import (
     RecipeArtifactJobCancellationPending,

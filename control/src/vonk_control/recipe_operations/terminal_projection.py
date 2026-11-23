@@ -39,7 +39,7 @@ from ..models.execution import RecipeInstallation, RecipeRun, RunNode
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
 from ..persisted_waits import schedule_wait
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import serialize_json_value
 from .intent import _intent_is_current, _job_workload_intent, _shared_workload_intent
 from .lifecycle_contract import (

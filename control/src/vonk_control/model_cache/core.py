@@ -20,7 +20,7 @@ from ..lifecycle.types import Lifecycle, State
 from ..logging import log_event
 from ..models.cache import ModelCacheOperation, ModelCacheSet
 from ..operations.contract import AvailabilityOperationFailure
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from . import states as model_cache_states
 from .artifacts import ArtifactSetManifest, _unique_artifacts
 from .constants import _LOGGER

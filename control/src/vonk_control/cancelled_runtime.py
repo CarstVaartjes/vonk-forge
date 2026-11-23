@@ -26,7 +26,7 @@ from .models.jobs import Job
 from .models.operations import AgentOperation
 from .recipe_operations.errors import RecipeRequestInvalid
 from .recipe_operations.stop_payloads import stop_payload_from_job_run
-from .stored.json_values import read_row_column
+from .stored.rows import read_row_column
 
 if TYPE_CHECKING:
     from .recipe_operations.service import RecipeOperationService

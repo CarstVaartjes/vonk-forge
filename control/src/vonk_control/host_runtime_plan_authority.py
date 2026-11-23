@@ -39,7 +39,7 @@ from .recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_plan,
 )
-from .stored.json_values import read_row_column
+from .stored.rows import read_row_column
 from .stored.states import ClusterMappingState
 from .strict_json import read_stored_model, serialize_json_value
 

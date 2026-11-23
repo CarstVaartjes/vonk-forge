@@ -69,7 +69,7 @@ from ..source_bundles import (
     generate_source_bundle,
 )
 from ..source_policy import SourcePolicyReport, inspect_build_source_policy
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..stored.states import RecipeBuildState
 
 """Durable source-build planning and exact OCI result recording."""

@@ -47,7 +47,7 @@ from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImagePreparationError,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_control.stored.json_values import read_row_column
+from vonk_control.stored.rows import read_row_column
 
 from .fleet_profiles_support import NOW, _node_id
 from .recipe_operations_support import setup_services

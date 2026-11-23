@@ -28,7 +28,7 @@ from ..model_cache.contract import ModelCacheDownloadPreviewResponse
 from ..model_cache.service import ModelCacheService
 from ..models.jobs import Job
 from ..run_switch_contract.evidence import RunSwitchReason
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .interfaces import ArtifactInspection
 from .planning_helpers import (
     _as_reason,

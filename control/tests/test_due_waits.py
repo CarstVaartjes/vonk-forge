@@ -603,7 +603,7 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
             RecipeOperationProgressResult,
             RecipeOperationResult,
         )
-        from vonk_control.stored.json_values import read_row_column
+        from vonk_control.stored.rows import read_row_column
 
         with sessions.begin() as session:
             parent = session.get(Job, started.id)

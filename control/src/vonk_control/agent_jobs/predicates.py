@@ -35,7 +35,7 @@ from ..models.jobs import Job
 from ..models.operations import AgentOperation as StoredOperation
 from ..models.operations import AgentOperationAttempt
 from ..own_cleanup import CLEANUP_KINDS
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .contracts import (
     _CLAIM_NOTE_PREFIX,
     _CLAIM_REFUSAL_PREFIX,

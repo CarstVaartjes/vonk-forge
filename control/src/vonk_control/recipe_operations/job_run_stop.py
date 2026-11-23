@@ -46,7 +46,7 @@ from ..models.execution import ArtifactJob, RecipeInstallation, RecipeRun, RunNo
 from ..models.fleet import AgentNode
 from ..models.jobs import Job
 from ..run_admission import RunAdmissionBusy
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from ..workload_intent import allocate_workload_intent
 from .errors import (

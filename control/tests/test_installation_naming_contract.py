@@ -18,7 +18,7 @@ from pydantic import BaseModel
 
 from vonk_agent_protocol.inventory import InstallationId
 from vonk_control.owner_liveness import INSTALLATION_PAYLOAD_PATHS
-from vonk_control.stored.json_values import bindings
+from vonk_control.stored.rows import bindings
 
 _EXCLUDED_OWNER_FIELDS = "owner_id"
 

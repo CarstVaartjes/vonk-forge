@@ -42,7 +42,7 @@ from ..run_switch_contract.progress_view import (
     _merge_progress_evidence,
 )
 from ..stall_window import Verdict, stall_deadline
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .awaited_children import start_request_key
 from .errors import RunSwitchOperationConflict
 from .observation_window import checkpoint_deadline, checkpoint_verdict

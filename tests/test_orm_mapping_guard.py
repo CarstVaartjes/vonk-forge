@@ -26,12 +26,8 @@ from vonk_control import models
 from vonk_control.inventory.items_contract import AgentInventoryItems
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentNodeContact
-from vonk_control.stored.json_values import (
-    ContractJSON,
-    JsonColumn,
-    bindings,
-    column_violations,
-)
+from vonk_control.stored.json_values import ContractJSON, JsonColumn, column_violations
+from vonk_control.stored.rows import bindings
 
 SNAPSHOT = Path(__file__).resolve().parents[1] / "tools/orm-mapping-snapshot.txt"
 

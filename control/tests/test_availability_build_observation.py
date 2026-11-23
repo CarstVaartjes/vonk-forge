@@ -34,7 +34,7 @@ from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityError,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_control.stored.json_values import read_row_column
+from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import read_stored_model, serialize_json_value
 
 from .recipe_builds_support import _write_controller_build_receipt

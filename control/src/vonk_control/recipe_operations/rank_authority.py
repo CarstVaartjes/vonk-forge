@@ -22,7 +22,7 @@ from ..models.catalog import CatalogDocumentRevision
 from ..models.execution import RecipeInstallation, RecipeRun
 from ..models.jobs import Job
 from ..models.mapping import ClusterMapping, ClusterMappingNode
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import read_stored_model
 from .execution_contract import (
     StoredInstallationPlan,

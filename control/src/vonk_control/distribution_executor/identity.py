@@ -16,7 +16,6 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.wire_model import canonical_message
 
-from ..agent_jobs.service import AgentJobService
 from ..content_identity import ImageContent, same_image
 from ..distribution.service import DistributionService
 from ..distribution.types import content_objects, plan_objects
@@ -27,6 +26,7 @@ from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )
+from ..recipe_operations.interfaces import AgentJobQueue
 from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_contract.phase_results import (
     RunSwitchRuntimeImageResult,
@@ -47,7 +47,7 @@ class DistributionIdentity:
     def __init__(
         self,
         sessions: sessionmaker[Session],
-        operations: AgentJobService,
+        operations: AgentJobQueue,
         distribution: DistributionService,
         *,
         clock: Any,

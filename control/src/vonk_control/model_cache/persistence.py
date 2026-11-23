@@ -30,7 +30,7 @@ from ..logging import redact_text
 from ..models.cache import ModelCacheOperation, ModelCacheSet
 from ..operations.blockers import OperationBlocker, bound_blockers, make_blocker
 from ..operations.contract import AvailabilityOperationFailure
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .artifacts import ArtifactSetManifest, _sha256_json
 from .constants import _CREDENTIAL_FAILURE_PUBLIC_CODES, _LOGGER, SCHEMA_VERSION

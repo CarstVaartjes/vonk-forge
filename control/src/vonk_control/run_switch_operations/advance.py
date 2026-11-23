@@ -63,7 +63,7 @@ from ..run_switch_journal_repair.observation import (
     try_repair_zero_transfer_journal,
 )
 from ..stall_window import stall_deadline
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .artifact_validation import _validate_artifact_execution
 from .constants import (
     _OBSERVING,

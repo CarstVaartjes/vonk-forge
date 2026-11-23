@@ -38,7 +38,7 @@ from ..models.execution import ArtifactJob, RunNode
 from ..models.jobs import Job
 from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..offline_stops import deferred_stop_nodes
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .progress import _parent_execution_mode
 from .rank_authority import _profile_jobrun_parent
 

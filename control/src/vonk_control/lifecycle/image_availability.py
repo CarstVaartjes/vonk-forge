@@ -78,7 +78,7 @@ from ..recipe_image_availability.clocks_contract import StoredAvailabilityClocks
 from ..recipe_image_availability.removal_contract import RECIPE_CACHE_REMOVE_KIND
 from ..recipe_update_batches.contract import UPDATE_KIND
 from ..stall_window import stall_deadline
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import serialize_json_value
 from ..wait_contract import typed_wait_reason
 from .adapter import Dispatch

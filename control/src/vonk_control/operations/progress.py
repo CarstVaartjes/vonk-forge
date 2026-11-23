@@ -29,7 +29,7 @@ from .. import agent_operation_states
 from ..jobs import states as job_states
 from ..lifecycle.evidence import Residue
 from ..stall_window import progress_advanced
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import read_stored_model
 from .contract import same_progress_attempt
 

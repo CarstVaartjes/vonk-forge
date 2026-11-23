@@ -17,7 +17,7 @@ from vonk_agent_protocol.state_machines import InstallationState
 from .fleet_projection.common import ProjectionReason
 from .models.execution import RecipeInstallation
 from .models.operations import AgentOperation, AgentOperationAttempt
-from .stored.json_values import read_row_column
+from .stored.rows import read_row_column
 
 
 def model_layout_notices(

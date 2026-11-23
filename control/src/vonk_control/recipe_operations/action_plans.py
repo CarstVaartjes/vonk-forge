@@ -33,7 +33,7 @@ from ..models.execution import (
 )
 from ..models.fleet import AgentNode
 from ..models.jobs import Job
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .constants import _MAX_ACTION_NODES, _MAX_ACTIVE_RUNS, _MEMORY_RESERVATION_KINDS
 from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .impact_plans import (

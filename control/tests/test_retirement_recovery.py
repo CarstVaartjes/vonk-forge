@@ -36,7 +36,7 @@ from vonk_control.recipe_operations.operation_worker import RecipeOperationWorke
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.run_admission import RunAdmissionBusy
-from vonk_control.stored.json_values import read_row_column
+from vonk_control.stored.rows import read_row_column
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .non_blocking import assert_ended_without_blocking
