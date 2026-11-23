@@ -283,7 +283,7 @@ export function LibraryCacheAction({
         {confirming && review && <CacheRemovalReviewDetails review={review} />}
         {confirming && !review && !busy && (
           <button type="button" className="button secondary" onClick={() => void reviewRemoval()}>
-            Review again
+            Retry
           </button>
         )}
         {error && (

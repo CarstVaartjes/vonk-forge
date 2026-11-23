@@ -386,9 +386,14 @@ const LIVE_JOB_STATES = new Set<string>([
   "waiting",
 ]);
 
+/** The one decision "this card polls itself": live work needs no Refresh button. */
+function stateUpdatesItself(state: string): boolean {
+  return LIVE_JOB_STATES.has(state);
+}
+
 function jobUpdatesAutomatically(detail: JobDetail): boolean {
   return (
-    LIVE_JOB_STATES.has(detail.state) ||
+    stateUpdatesItself(detail.state) ||
     (isOperatorWait(detail.state) &&
       (detail.agent_upgrade_diagnostics?.targets.some((target) => target.retry_queued) ?? false))
   );
@@ -622,14 +627,16 @@ function JobProgressDetails({
                 <span>Current state</span>
                 <strong>{detail.summary}</strong>
               </div>
-              <button
-                type="button"
-                className="button secondary"
-                disabled={loading || resuming}
-                onClick={() => void loadDetail()}
-              >
-                {loading ? "Refreshing…" : "Refresh details"}
-              </button>
+              {(!jobUpdatesAutomatically(detail) || error) && (
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={loading || resuming}
+                  onClick={() => void loadDetail()}
+                >
+                  {loading ? "Refreshing…" : "Refresh details"}
+                </button>
+              )}
             </header>
             {jobUpdatesAutomatically(detail) && (
               <p className="activity-job-live" role="status">
@@ -1107,13 +1114,7 @@ function CanonicalOperationDetails({
         );
     }
   }, [api, detail.id, onUpdate]);
-  const active = [
-    LifecycleState.QUEUED,
-    LifecycleState.RUNNING,
-    LifecycleState.BACKOFF,
-    "pending",
-    "planned",
-  ].includes(detail.state);
+  const active = stateUpdatesItself(detail.state);
   useEffect(() => {
     if (!active) return;
     let loading = false;

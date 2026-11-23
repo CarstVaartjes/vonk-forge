@@ -560,9 +560,7 @@ test("polls a safety-delayed helper retry and shows specific recovery guidance",
   expect(
     screen.queryByRole("button", { name: "Queue retry after inspection" }),
   ).not.toBeInTheDocument();
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Refresh details" })).toBeEnabled(),
-  );
+  expect(screen.queryByRole("button", { name: "Refresh details" })).toBeNull();
   expect(intervalCallback).toBeDefined();
   await act(async () => {
     await intervalCallback?.();
@@ -990,7 +988,7 @@ it("shows unknown job observations without invented progress counts and refreshe
     .mockResolvedValueOnce({
       id: "operation-1",
       kind: "recipe-install",
-      state: "running",
+      state: "needs-operator",
       authority_revision: "a".repeat(64),
       targets: [TARGET_ID],
       target_total: 1,
