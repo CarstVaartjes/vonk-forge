@@ -18,6 +18,7 @@ import sys
 import zipfile
 from pathlib import Path
 from time import monotonic, sleep
+from typing import TypedDict, cast
 
 ROOT = Path(__file__).resolve().parents[1]
 SELECTOR = runpy.run_path(str(ROOT / "scripts/select-ci-areas"))
@@ -70,6 +71,43 @@ def command(*args: str, deadline: float | None = None) -> bytes:
     return completed.stdout
 
 
+class Receipt(TypedDict):
+    """The source-check receipt a tested run uploads (validated by ``receipt``)."""
+
+    schema_version: int
+    event: str
+    repository: str
+    run_id: int
+    run_attempt: int
+    source_sha: str
+    tree_sha: str
+    base_sha: str
+    merge_base_sha: str
+    head_sha: str
+    selected: dict[str, bool]
+    pr_number: int
+
+
+class Artifact(TypedDict):
+    """The GitHub Actions artifact fields this script reads."""
+
+    id: int
+    size_in_bytes: int
+
+
+class WorkflowRun(TypedDict):
+    """The GitHub Actions run fields this script reads."""
+
+    id: int
+    run_attempt: int
+
+
+class PullRequest(TypedDict):
+    """The GitHub pull request fields this script reads."""
+
+    number: int
+
+
 def api(endpoint: str, *, deadline: float | None = None):
     return json.loads(command("gh", "api", endpoint, deadline=deadline))
 
@@ -92,7 +130,7 @@ def json_document(raw: bytes):
     return json.loads(raw, object_pairs_hook=pairs)
 
 
-def receipt(raw: bytes) -> dict:
+def receipt(raw: bytes) -> Receipt:
     document = json_document(raw)
     fields = {
         "schema_version",
@@ -131,10 +169,11 @@ def receipt(raw: bytes) -> dict:
         or any(type(value) is not bool for value in selected.values())
     ):
         raise EvidenceError("invalid source check selection")
-    return document
+    # Every field was checked above: the document is a Receipt.
+    return cast(Receipt, document)
 
 
-def selected_for(base: str, source: str) -> dict:
+def selected_for(base: str, source: str) -> dict[str, bool]:
     paths = git("diff", "--name-only", "--no-renames", base, source).splitlines()
     return SELECTOR["select"](paths, "pull_request")
 
@@ -146,7 +185,7 @@ def remote_paths(
     if base_commit.get("sha") != base or not SHA.fullmatch(base_commit["tree"]["sha"]):
         raise EvidenceError("invalid tested base commit")
 
-    def entries(tree: str) -> dict:
+    def entries(tree: str) -> dict[str, tuple[str, str, str]]:
         document = api(f"repos/{repo}/git/trees/{tree}?recursive=1", deadline=deadline)
         if document.get("truncated") is not False:
             raise UnavailableEvidence("GitHub did not return the complete tree")
@@ -241,7 +280,7 @@ def write_receipt(output: Path) -> None:
     output.write_bytes(raw)
 
 
-def artifact_receipt(repo: str, artifact: dict, *, deadline: float) -> dict:
+def artifact_receipt(repo: str, artifact: Artifact, *, deadline: float) -> Receipt:
     if (
         type(artifact.get("size_in_bytes")) is not int
         or not 0 < artifact["size_in_bytes"] <= MAX_ARCHIVE_BYTES
@@ -270,7 +309,9 @@ def artifact_receipt(repo: str, artifact: dict, *, deadline: float) -> dict:
         return receipt(archive.read(entries[0]))
 
 
-def _run_receipt(repo: str, run_id: int, head: str, *, deadline: float) -> dict | None:
+def _run_receipt(
+    repo: str, run_id: int, head: str, *, deadline: float
+) -> Receipt | None:
     """The one receipt a run uploaded, bound to that run, or None without one."""
     artifacts = []
     artifact_page = 1
@@ -301,7 +342,7 @@ def _run_receipt(repo: str, run_id: int, head: str, *, deadline: float) -> dict 
 
 def _successful_run(
     repo: str, run_id: int, event: str, head: str, *, deadline: float
-) -> dict | None:
+) -> WorkflowRun | None:
     record = api(f"repos/{repo}/actions/runs/{run_id}", deadline=deadline)
     if (
         record.get("id") != run_id
@@ -318,7 +359,7 @@ def _successful_run(
 
 def _proven_run(
     repo: str,
-    pull: dict,
+    pull: PullRequest,
     event: str,
     head: str,
     source: str,

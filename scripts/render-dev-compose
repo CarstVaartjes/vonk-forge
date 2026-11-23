@@ -11,7 +11,9 @@ import posixpath
 import re
 import sys
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
+from typing import TypedDict
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import yaml
@@ -169,7 +171,23 @@ def bundle_digest(template: Path) -> str:
     return hashlib.sha256(document.encode("utf-8")).hexdigest()
 
 
-def _declared_networks(services: dict[str, dict], networks: dict) -> str:
+class ComposeService(TypedDict, total=False):
+    """A Compose service: the fields this script reads or writes."""
+
+    networks: Iterable[str]
+    network_mode: str
+    environment: dict[str, str]
+
+
+class ComposeNetwork(TypedDict, total=False):
+    """A Compose network: the field this script reads."""
+
+    internal: bool
+
+
+def _declared_networks(
+    services: dict[str, ComposeService], networks: dict[str, ComposeNetwork | None]
+) -> str:
     """Per service, the networks it joins; and which networks are internal.
 
     The janitor heals against this, not against a container's own record. A
@@ -178,9 +196,9 @@ def _declared_networks(services: dict[str, dict], networks: dict) -> str:
     return json.dumps(
         {
             "services": {
-                name: sorted(service["networks"])
+                name: sorted(joined)
                 for name, service in services.items()
-                if "network_mode" not in service and service.get("networks")
+                if "network_mode" not in service and (joined := service.get("networks"))
             },
             "internal": sorted(
                 name
@@ -194,7 +212,9 @@ def _declared_networks(services: dict[str, dict], networks: dict) -> str:
 
 
 def _stamp_bundle_digest(
-    services: dict[str, dict], digest: str, networks: dict
+    services: dict[str, ComposeService],
+    digest: str,
+    networks: dict[str, ComposeNetwork | None],
 ) -> None:
     if not isinstance(services, dict):  # pyright: ignore[reportUnnecessaryIsInstance]  # Compose YAML is re-checked as a mapping
         raise TypeError("Compose services are invalid")
@@ -206,12 +226,9 @@ def _stamp_bundle_digest(
         environment[COMPOSE_BUNDLE_DIGEST] = digest
     # The janitor retires project containers of services this bundle no longer
     # defines (an upgrade does not remove them).
-    services["image-janitor"].setdefault("environment", {})[COMPOSE_SERVICES] = (
-        ",".join(sorted(services))
-    )
-    services["image-janitor"]["environment"][COMPOSE_NETWORKS] = _declared_networks(
-        services, networks
-    )
+    janitor = services["image-janitor"].setdefault("environment", {})
+    janitor[COMPOSE_SERVICES] = ",".join(sorted(services))
+    janitor[COMPOSE_NETWORKS] = _declared_networks(services, networks)
 
 
 def _replace_image_tokens(value: object, replacements: dict[str, str]) -> object:

@@ -10,6 +10,7 @@ import re
 import sys
 from collections.abc import Iterable
 from pathlib import Path
+from typing import TypedDict
 
 AREAS = (
     "rust",
@@ -257,7 +258,13 @@ INTEGRATION_HEAD = "integration/"
 ACCEPTANCE_LABEL = "release-acceptance"
 
 
-def full_suites(event: str, payload: dict | None) -> bool:
+class EventPayload(TypedDict, total=False):
+    """The GitHub event payload field this script reads (checked where read)."""
+
+    pull_request: object
+
+
+def full_suites(event: str, payload: EventPayload | None) -> bool:
     """Whether this run carries every suite rather than the member tier."""
     pull = (payload or {}).get("pull_request")
     if event != "pull_request" or not isinstance(pull, dict):
