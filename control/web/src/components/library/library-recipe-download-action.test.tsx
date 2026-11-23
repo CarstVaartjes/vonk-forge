@@ -60,7 +60,7 @@ test("a download that outlives the observation deadline stays running, not faile
   expect(screen.getByText("Waiting for space", { exact: false })).toBeVisible();
   expect(screen.getByRole("button", { name: /Cancel/ })).toBeVisible();
   recipeCacheOperation.mockResolvedValue({ ...running, state: "succeeded" });
-  await act(async () => screen.getByRole("button", { name: "Check status" }).click());
+  await act(async () => screen.getByRole("button", { name: "Refresh status" }).click());
   await advance(1_000);
   expect(screen.getByText("Recipe downloaded.")).toBeVisible();
   expect(screen.getByRole("button", { name: "Download recipe" })).toBeEnabled();

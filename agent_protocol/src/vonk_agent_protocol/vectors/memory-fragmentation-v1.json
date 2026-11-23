@@ -1,0 +1,66 @@
+{
+  "comment": "MemoryFragmentation as the agent reports it in HostSettings, and whether the Controller advises a reboot (host.memory-fragmented). Page size 4096: the margin is 512 leftover page-table pages (2 MiB), each of which can pin one 2 MiB block (1 GiB); grown_bytes is the latest idle-stop SecPageTables minus the first, never negative. The Rust agent test reads every readings value through the generated contract; the Controller test projects each case onto a node.",
+  "cases": [
+    {
+      "name": "no idle stop yet",
+      "readings": null,
+      "grown_bytes": null,
+      "fragmented": false
+    },
+    {
+      "name": "one idle stop only",
+      "readings": {
+        "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
+        "page_size_bytes": 4096,
+        "idle_stop_first_bytes": 251658240,
+        "idle_stop_latest_bytes": 251658240
+      },
+      "grown_bytes": 0,
+      "fragmented": false
+    },
+    {
+      "name": "idle stops leave about what they found",
+      "readings": {
+        "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
+        "page_size_bytes": 4096,
+        "idle_stop_first_bytes": 251658240,
+        "idle_stop_latest_bytes": 252706816
+      },
+      "grown_bytes": 1048576,
+      "fragmented": false
+    },
+    {
+      "name": "exactly the margin is not past it",
+      "readings": {
+        "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
+        "page_size_bytes": 4096,
+        "idle_stop_first_bytes": 251658240,
+        "idle_stop_latest_bytes": 253755392
+      },
+      "grown_bytes": 2097152,
+      "fragmented": false
+    },
+    {
+      "name": "page tables grew past the margin",
+      "readings": {
+        "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
+        "page_size_bytes": 4096,
+        "idle_stop_first_bytes": 251658240,
+        "idle_stop_latest_bytes": 257949696
+      },
+      "grown_bytes": 6291456,
+      "fragmented": true
+    },
+    {
+      "name": "page tables shrank",
+      "readings": {
+        "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
+        "page_size_bytes": 4096,
+        "idle_stop_first_bytes": 257949696,
+        "idle_stop_latest_bytes": 251658240
+      },
+      "grown_bytes": 0,
+      "fragmented": false
+    }
+  ]
+}

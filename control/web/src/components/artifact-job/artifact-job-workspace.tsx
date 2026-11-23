@@ -1549,7 +1549,7 @@ export function ArtifactJobWorkspace({
               <strong>Submission needs recovery</strong>
               <p>{submitError}</p>
               <button type="button" className="button secondary" onClick={() => setSubmitError("")}>
-                Review and try again
+                Retry
               </button>
             </div>
           )}

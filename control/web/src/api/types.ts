@@ -122,6 +122,7 @@ export type LibraryViewModel = {
   model_bytes: WireNumber | null;
   cache_usage?: components["schemas"]["ModelCacheUsage"] | null | undefined;
   local: components["schemas"]["LibraryLocalState"];
+  actions: components["schemas"]["LibraryModelProjection"]["actions"];
   // Projected facets, named exactly as the CLI filter flags and the
   // /api/model/library query parameters: --usage --family --version
   // --quantization. The family is the display lineage's (null for a helper).

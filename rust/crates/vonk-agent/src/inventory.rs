@@ -562,6 +562,8 @@ fn host_settings<R: ProcessRunner>(
             .and_then(|output| vonk_agent_protocol::gpu_clock::supported_range(&output.stdout)),
         swap: None,
         tuning: None,
+        memory_fragmentation: None,
+        fabric_devices: Vec::new(),
     })
 }
 

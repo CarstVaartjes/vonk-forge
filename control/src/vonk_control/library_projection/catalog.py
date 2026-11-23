@@ -24,6 +24,7 @@ from ..library.contract import (
     LibraryRelease,
     LibraryResourceProjection,
     _utc,
+    model_actions,
 )
 from ..model_cache.contract import (
     CacheManifest,
@@ -122,6 +123,7 @@ def _model_projection(
         ),
         cache_usage=usage,
         local=local,
+        actions=model_actions(local, usage),
         updated_at=_utc(revision.created_at),
         alignment=sorted(set(alignment)),
     )

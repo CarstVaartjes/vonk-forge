@@ -467,6 +467,14 @@ button:disabled {
   background: var(--raised);
   color: var(--ink);
 }
+/* Compact row actions: desktop pointers only; touch keeps the 44px target. */
+@media (pointer: fine) and (min-width: 54rem) {
+  .button.compact {
+    min-height: 1.75rem;
+    padding: 0.2rem 0.65rem;
+    font-size: 0.78rem;
+  }
+}
 a:focus-visible,
 button:focus-visible,
 input:focus-visible,
@@ -926,7 +934,7 @@ progress {
   color: var(--muted);
   font-size: 0.78rem;
 }
-.activity-overview > div:not(.activity-outcome-bar) {
+.activity-overview > div {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -943,33 +951,6 @@ progress {
 .activity-overview strong {
   font-size: 1.4rem;
   font-variant-numeric: tabular-nums;
-}
-.activity-outcome-bar {
-  display: flex;
-  grid-column: 1 / -1;
-  height: 0.45rem;
-  overflow: hidden;
-  border-radius: var(--r-pill);
-  background: var(--panel);
-}
-.activity-outcome-bar span {
-  height: 100%;
-  min-width: 0;
-}
-.activity-outcome-bar .is-recorded {
-  background: var(--green);
-}
-.activity-outcome-bar .is-in-progress {
-  background: var(--info);
-}
-.activity-outcome-bar .is-attention {
-  background: var(--warn);
-}
-.activity-outcome-bar .is-unsuccessful {
-  background: var(--bad);
-}
-.activity-outcome-bar .is-unknown {
-  background: var(--faint);
 }
 .activity-controls {
   display: grid;
@@ -1108,7 +1089,7 @@ progress {
 }
 .activity-marker {
   position: absolute;
-  top: 1.25rem;
+  top: 0.95rem;
   left: -1.8rem;
   width: 0.75rem;
   height: 0.75rem;
@@ -1134,37 +1115,37 @@ progress {
   box-shadow: 0 0 0 2px var(--line-control);
 }
 .activity-event article {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 1rem;
   min-width: 0;
-  padding: 1rem 1.1rem;
+  padding: 0.65rem 0.9rem;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-card);
   background: var(--panel);
 }
 .activity-event article > header {
   display: flex;
-  align-items: flex-start;
+  flex: 1 1 18rem;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
 }
-.activity-category {
-  color: var(--green-text);
-  font-size: 0.68rem;
-  font-weight: 850;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
+.activity-event article > :not(header):not(.activity-event-meta) {
+  flex: 1 0 100%;
 }
 .activity-event h2 {
-  margin: 0.2rem 0 0;
-  font-size: 1.05rem;
+  margin: 0;
+  font-size: 1rem;
 }
 .activity-event-meta {
   display: flex;
-  align-items: flex-end;
+  flex: 1 1 18rem;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  margin-top: 0.8rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--line-strong);
+  gap: 0.25rem 1rem;
   color: var(--muted);
   font-size: 0.8rem;
 }
@@ -1196,7 +1177,7 @@ progress {
   width: max-content;
   max-width: 100%;
   cursor: pointer;
-  color: var(--green-text);
+  color: var(--muted);
   font-weight: 750;
 }
 .activity-technical dl {
@@ -1252,7 +1233,7 @@ progress {
   width: max-content;
   max-width: 100%;
   cursor: pointer;
-  color: var(--green-text);
+  color: var(--muted);
   font-size: 0.78rem;
   font-weight: 750;
 }
@@ -1522,7 +1503,7 @@ progress {
   width: max-content;
   max-width: 100%;
   cursor: pointer;
-  color: var(--green-text);
+  color: var(--muted);
   font-size: 0.72rem;
 }
 .activity-upgrade-diagnostics details code {
@@ -1572,7 +1553,7 @@ progress {
   min-width: 12rem;
 }
 .activity-table td > small {
-  color: var(--green-text);
+  color: var(--muted);
 }
 .activity-table .activity-time {
   min-width: 11rem;
@@ -1846,7 +1827,7 @@ progress {
     --muted: light-dark(#3d3a33, #c8c3b6);
     --faint: light-dark(#46433b, #bcb6a8);
   }
-  .activity-overview > div:not(.activity-outcome-bar),
+  .activity-overview > div,
   .activity-event article,
   .activity-table-wrap {
     border-width: 2px;
@@ -1865,8 +1846,7 @@ progress {
   .status,
   .status-pill,
   .status-mark,
-  .activity-marker,
-  .activity-outcome-bar span {
+  .activity-marker {
     forced-color-adjust: none;
   }
   .mark {
@@ -1907,13 +1887,6 @@ progress {
     background: Highlight;
     border-color: Canvas;
     box-shadow: 0 0 0 2px CanvasText;
-  }
-  .activity-outcome-bar {
-    border: 1px solid CanvasText;
-  }
-  .activity-outcome-bar span {
-    background: Highlight !important;
-    border-right: 1px solid Canvas;
   }
   a:focus-visible,
   button:focus-visible,
@@ -2143,15 +2116,6 @@ progress {
   }
 }
 
-.library-page a:not(.button) {
-  color: var(--green-text);
-}
-
-.library-page a:not(.button):hover,
-.library-page a:not(.button):focus-visible {
-  color: var(--ink);
-}
-
 @media (max-width: 42rem) {
   .fleet-enrollment {
     grid-template-columns: minmax(0, 1fr);
@@ -2179,22 +2143,18 @@ progress {
 }
 .library-profile-saved > header {
   display: flex;
-  align-items: start;
+  align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
   min-width: 0;
 }
-.library-profile-saved > header > div {
-  display: grid;
+.library-profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
   min-width: 0;
-  gap: 0.15rem;
-}
-.library-profile-saved > header span {
-  color: var(--faint);
-  font-size: 0.65rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 .library-profile-saved h3 {
   margin: 0;
@@ -2206,9 +2166,6 @@ progress {
   font-size: 0.72rem;
   line-height: 1.4;
   overflow-wrap: anywhere;
-}
-.library-profile-saved > header .button {
-  flex: 0 0 auto;
 }
 .library-profile-saved > dl {
   display: grid;
@@ -2340,11 +2297,10 @@ progress {
   .library-profile-saved {
     padding: 0.75rem;
   }
-  .library-profile-saved > header {
-    align-items: stretch;
-    flex-direction: column;
+  .library-profile-actions {
+    width: 100%;
   }
-  .library-profile-saved > header .button {
+  .library-profile-actions > .button:not(.secondary):not(.quiet) {
     width: 100%;
   }
   .library-profile-saved > dl {
@@ -2854,7 +2810,7 @@ progress {
 .fleet-empty,
 .fleet-discovery,
 .fleet-enrollment,
-.activity-overview > div:not(.activity-outcome-bar),
+.activity-overview > div,
 .activity-controls,
 .activity-state,
 .activity-event article,

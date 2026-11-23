@@ -904,9 +904,6 @@ export function LibraryProfilesView({
           </p>
         </div>
         <div className="library-profile-header-actions">
-          <button type="button" className="button secondary" onClick={startNew}>
-            New profile
-          </button>
           <a
             className="button secondary"
             href="/library?view=models"
@@ -1295,31 +1292,32 @@ export function LibraryProfilesView({
             aria-label={`Profile ${formatWire(selectedProfile.number)} saved profile`}
           >
             <header>
-              <div>
-                <span>Saved profile</span>
-                <h3>{selectedProfile.name}</h3>
-              </div>
-              <div>
-                <ProfileExport api={api} number={selectedProfile.number} />
+              <h3>{selectedProfile.name}</h3>
+              <div className="library-profile-actions">
                 <button
                   type="button"
-                  className="button secondary"
-                  onClick={() => setConfirmingDelete(true)}
-                >
-                  Delete profile
-                </button>
-                <button type="button" className="button secondary" onClick={() => setEditing(true)}>
-                  Edit profile
-                </button>
-                <button
-                  type="button"
-                  className="button"
+                  className="button compact"
                   disabled={
                     loadingProfile || applicationRunning || (!loadable(preview) && !pendingLoad)
                   }
                   onClick={() => void load()}
                 >
                   {loadingProfile ? "Loading…" : "Load profile"}
+                </button>
+                <button
+                  type="button"
+                  className="button compact secondary"
+                  onClick={() => setEditing(true)}
+                >
+                  Edit profile
+                </button>
+                <ProfileExport api={api} number={selectedProfile.number} />
+                <button
+                  type="button"
+                  className="button compact quiet"
+                  onClick={() => setConfirmingDelete(true)}
+                >
+                  Delete profile
                 </button>
                 {preview && (
                   <small className="library-profile-stops">
@@ -1347,7 +1345,7 @@ export function LibraryProfilesView({
             <ul>
               {selectedProfile.assignments.map((assignment) => (
                 <li key={assignment.selector}>
-                  <strong>{assignment.display_name}</strong>
+                  <strong>{assignment.display_name}</strong>{" "}
                   <span>
                     {assignment.recipe_selector} ·{" "}
                     {assignment.spark_ids.map((id) => names[id] ?? id).join(" + ")} ·{" "}

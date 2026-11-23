@@ -21,13 +21,18 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.reason_codes.model_cache import ModelAccessReason
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.auth import TokenCodec
-from vonk_control.library.contract import LibraryLocalState
+from vonk_control.library.contract import (
+    LibraryLocalProgress,
+    LibraryLocalState,
+    model_actions,
+)
 from vonk_control.library_projection import local_state
 from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.model_cache.contract import (
     CacheManifest,
     CacheOperationKind,
     ModelCacheOperationProgress,
+    ModelCacheUsage,
 )
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
@@ -498,3 +503,32 @@ def test_local_state_read_work_is_linear_in_history_sets_and_digests(
     rows = history + 2 * len(digests)
     # A product shape does >= 64 x 640 = 40,960 evaluations on its own.
     assert work < 12 * rows, work
+
+
+def test_model_actions_follow_cache_state_and_held_files():
+    held = ModelCacheUsage(disk_bytes=5, unique_bytes=5, shared_bytes=0)
+    shared = ModelCacheUsage(disk_bytes=0, unique_bytes=0, shared_bytes=5)
+    none = ModelCacheUsage(disk_bytes=0, unique_bytes=0, shared_bytes=0)
+    download, remove = CacheOperationKind.DOWNLOAD, CacheOperationKind.REMOVE
+
+    def actions(controller, usage=None, **local):
+        return model_actions(LibraryLocalState(controller=controller, **local), usage)
+
+    def preparation(state):
+        return LibraryLocalProgress(state=state)
+
+    assert actions("not_cached", none) == [download]
+    assert actions("cached", held) == [remove]
+    assert actions("not_cached", held) == [download, remove]
+    assert actions("not_cached", shared) == [download, remove]
+    assert actions("failed", held) == [download, remove]
+    assert actions("not_cached", none, installed_on_sparks=True) == [download, remove]
+    assert actions("unknown") == []
+    # A live preparation owns the row; an idle partial set is still partial.
+    assert actions("preparing", held, preparation=preparation("running")) == []
+    assert actions("preparing", held, preparation=preparation("failed")) == [
+        download,
+        remove,
+    ]
+    assert actions("preparing", held) == [download, remove]
+    assert actions("cached", held, preparation=preparation("succeeded")) == [remove]

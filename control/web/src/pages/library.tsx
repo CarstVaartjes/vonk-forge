@@ -88,6 +88,7 @@ function viewModel(
     model_bytes: model.resources.disk_bytes ?? null,
     cache_usage: model.cache_usage,
     local: model.local,
+    actions: model.actions,
     family: model.family,
     version: model.version,
     quantization: model.quantization,
@@ -399,7 +400,7 @@ export function LibraryPage({
         actions={
           view !== "profiles" ? (
             <a
-              className="button"
+              className="button secondary"
               href="/library/profiles"
               onClick={(event) => contextualNavigate(event, "/library/profiles")}
             >

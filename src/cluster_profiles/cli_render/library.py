@@ -5,11 +5,20 @@ from __future__ import annotations
 import shlex
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import quote
 
-from ..cli_states_generated import QualificationOutcome, QualificationStatus
+from ..cli_states_generated import (
+    ACTION_DOWNLOAD,
+    ACTION_REMOVE,
+    CACHE_FAILED,
+    CACHE_NOT_CACHED,
+    UNKNOWN,
+    QualificationOutcome,
+    QualificationStatus,
+)
 from ..cli_telemetry_render import size as _size
+from ..control_client.errors import ControlMalformedResponse
 from ..generated_control.models.library_resource_projection import (
     LibraryResourceProjection,
 )
@@ -170,11 +179,22 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
                 "Next",
                 f"vonkctl {noun} progress {shlex.quote(str(preparation['operation_id']))} --follow",
             )
-    elif local.get("controller") in {"not_cached", "failed"} and isinstance(
-        selector, str
+    if noun == LibraryNoun.MODEL and isinstance(selector, str):
+        # The Controller decides which actions apply; the web UI reads the same field.
+        actions = item.get("actions")
+        if not isinstance(actions, list):
+            raise ControlMalformedResponse("actions observation is unavailable")
+        if ACTION_DOWNLOAD in actions:
+            _field("Next", f"vonkctl model download {shlex.quote(selector)}")
+        if ACTION_REMOVE in actions:
+            _field("Remove", f"vonkctl model remove {shlex.quote(selector)} --fleet")
+    elif (
+        not preparation
+        and local.get("controller") in {CACHE_NOT_CACHED, CACHE_FAILED}
+        and isinstance(selector, str)
     ):
         _field("Next", f"vonkctl {noun} download {shlex.quote(selector)}")
-    elif local.get("controller") == "unknown":
+    if local.get("controller") == UNKNOWN:
         print(
             "Cache availability is unknown; inspect the Controller before preparing assets."
         )
@@ -407,6 +427,56 @@ def _model_counts(rows: Sequence[Any]) -> tuple[int, int]:
     return len(models), len(variants)
 
 
+#: ``vonkctl recipe`` prints this many rows unless ``--all`` or ``--wide`` asks for more.
+COMPACT_RECIPE_ROWS = 20
+
+
+def recipe_cut_note(loaded: int, printed: int) -> None:
+    """Say how many loaded recipes the bare listing did not print."""
+    if loaded > printed:
+        print(f"Showing {printed} of {loaded}; --all lists every one.")
+
+
+class _Row(Protocol):
+    def get(self, key: str, /) -> object: ...
+
+
+def top_recipes(rows: Sequence[_Row]) -> list[_Row]:
+    """The bare ``vonkctl recipe`` rows: running first, then preparing, then Working."""
+
+    def flags(item: _Row) -> tuple[bool, bool, bool]:
+        local = _object(item.get("local"), "local")
+        preparation = _optional(local.get("preparation"), "preparation")
+        return (
+            bool(local.get("running_on")),
+            preparation.get("state") in _ACTIVE_PREPARATION,
+            _qualification_status(item.get("qualification"))
+            == QualificationStatus.WORKING,
+        )
+
+    ranked = sorted(rows, key=lambda row: tuple(not flag for flag in flags(row)))
+    return ranked[:COMPACT_RECIPE_ROWS]
+
+
+def _compact_table(labels: list[str], rows: list[list[object]]) -> None:
+    """A table without the shared publisher prefix and without columns that never differ."""
+    rendered = [[_text(value) for value in row] for row in rows]
+    prefixes = {value.split("/", 1)[0] for value in (row[0] for row in rendered)}
+    if len(prefixes) == 1 and all("/" in row[0] for row in rendered):
+        print(f"Publisher: {prefixes.pop()}")
+        for row in rendered:
+            row[0] = row[0].split("/", 1)[1]
+    same = [
+        index
+        for index in range(1, len(labels))
+        if len(rendered) > 1 and len({row[index] for row in rendered}) == 1
+    ]
+    for index in same:
+        _field(labels[index].title(), rendered[0][index])
+    keep = [index for index in range(len(labels)) if index not in same]
+    _table([labels[i] for i in keep], [[row[i] for i in keep] for row in rendered])
+
+
 def _library(
     payload: Mapping[str, object], noun: str, *, detail: bool, wide: bool
 ) -> None:
@@ -472,7 +542,10 @@ def _library(
             labels.extend(["READY", "QUALIFICATION"])
         if noun == LibraryNoun.MODEL:
             labels.extend(["UNIQUE", "SHARED"])
-        _table(labels, [_library_row(item, noun) for item in rows])
+        if noun == LibraryNoun.RECIPE:
+            _compact_table(labels, [_library_row(item, noun) for item in rows])
+        else:
+            _table(labels, [_library_row(item, noun) for item in rows])
         if noun == LibraryNoun.MODEL:
             for item in rows:
                 raw_usage = _optional(item.get("cache_usage"), "cache_usage")
