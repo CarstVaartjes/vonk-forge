@@ -72,7 +72,8 @@ from vonk_agent_protocol.reason_codes.evidence import RunDegradedReason
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 
 from .. import agent_operation_states as aos
-from ..agent_operation_facts import aware
+from ..agent_jobs.supersession import _cancel_order
+from ..agent_operation_facts import aware, job_attempt_did_not_launch
 from ..artifact_jobs import states as ajs
 from ..artifact_jobs.evidence import (
     ArtifactJobResultEvidence,
@@ -949,9 +950,6 @@ class ArtifactJobAdapter:
         if (owner_ended or settled) and any(
             order.state in aos.LIVE for order in orders
         ):
-            # imported here: agent_jobs reads this package's lifecycle.
-            from ..agent_jobs.supersession import _cancel_order
-
             _cancel_order(
                 AgentOperationAdapter(session),
                 parent,
@@ -991,9 +989,6 @@ class ArtifactJobAdapter:
             receipt = None if attempt is None else _RECEIPT_STATES.get(attempt.state)
             if receipt is Effect.STOPPED:
                 return Effect.STOPPED
-            # imported here: agent_jobs reads this package's lifecycle.
-            from ..agent_operation_facts import job_attempt_did_not_launch
-
             # An attempt that reported it stopped before launch left nothing
             # for the cancel to stop (a damaged report proves nothing).
             report = None if attempt is None else read_row_column(attempt, "result")

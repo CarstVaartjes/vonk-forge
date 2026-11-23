@@ -30,9 +30,6 @@ def assert_speech(headers: Mapping[str, str], body: bytes) -> WavFacts:
     The WAV reader and the minimum length are the recipe contract's own.
     """
 
-    # Imported here: the platform's CLI imports this package without the recipe
-    # contracts, which only a recipe's own checks need.
-
     content_type = next(
         (value for key, value in headers.items() if key.lower() == "content-type"), ""
     )
@@ -62,9 +59,6 @@ def multipart_body(
     the contract's largest audio upload before it is encoded. The boundary is
     random, so it cannot occur in the content by design.
     """
-
-    # Imported here: the platform's CLI imports this package without the recipe
-    # contracts, which only a recipe's own checks need.
 
     content = fixtures.get(fixture)
     if content is None:

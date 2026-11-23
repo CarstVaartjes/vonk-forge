@@ -58,6 +58,12 @@ from ..wait_redrive import wait_sources
 if TYPE_CHECKING:
     from ..catalog.sync import ManagedRecipeCatalogSyncService
     from ..enrollment.service import EnrollmentService
+from ..availability_production.production import build_recipe_image_availability
+from ..catalog.sync import AutomaticCatalogSync
+from ..image_store_collection import ImageStoreCollector
+from ..model_cache.partials_collection import ModelPartialsCollector
+from ..prebuilt_images import PrebuiltImageImporter
+from ..settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
 from .loop import Worker
 
 
@@ -242,9 +248,6 @@ def assemble_production_worker(
     worker_background_services = tuple(background_services)
     automatic_catalog = None
     if catalog_sync is not None:
-        from ..catalog.sync import AutomaticCatalogSync
-        from ..settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
-
         # The one automatic catalog sync; the API only reads what it applied.
         automatic_catalog = AutomaticCatalogSync(
             catalog_sync, interval_seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
@@ -261,9 +264,6 @@ def assemble_production_worker(
     image_production = None
     image_store_collector = None
     if image_cache_root is not None:
-        from ..image_store_collection import ImageStoreCollector
-        from ..prebuilt_images import PrebuiltImageImporter
-
         # Builds planned from a catalog prebuilt image are executed here, by
         # pulling the pinned digest into the same image cache.
         prebuilt_importer = PrebuiltImageImporter(
@@ -281,8 +281,6 @@ def assemble_production_worker(
         )
         worker_background_closers += (prebuilt_importer.close,)
     if recipe_image_artifact_root is not None:
-        from ..availability_production.production import build_recipe_image_availability
-
         assert runtime_archive_storage is not None  # the root implies the cache
 
         image_production = build_recipe_image_availability(
@@ -339,8 +337,6 @@ def assemble_production_worker(
         ).tick,
     )
     if model_cache is not None:
-        from ..model_cache.partials_collection import ModelPartialsCollector
-
         # An unfinished download is not a model file: its partials go a day
         # after the last live operation stopped writing them.
         worker_background_services += (

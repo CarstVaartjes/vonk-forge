@@ -82,9 +82,6 @@ def validate_profile_stop_owner(
 ) -> tuple[RecipeRun, tuple[RunNode, ...]]:
     """Prove the exact accepted profile step still owns this Run Stop."""
 
-    # Imports are local because FleetProfileService composes this module's
-    # lifecycle owner through RunSwitch.
-
     application = session.get(
         FleetProfileApplication, authorization.profile_application_id
     )

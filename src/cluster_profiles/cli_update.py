@@ -39,6 +39,7 @@ from .control_client.errors import (
 )
 from .control_client.transfers import ControlClient
 from .control_transport import open_https
+from .generated_control.models.cli_update_contract import CliUpdateContract
 from .runtime_identity import (
     installed_content_identity,
     verified_wheel_identity,
@@ -391,7 +392,6 @@ def run_update(
                 .read_text()
             )
             Draft202012Validator(installed_schema).validate(deployed)
-            from .generated_control.models.cli_update_contract import CliUpdateContract
 
             if not isinstance(deployed, dict):
                 raise TypeError("controller compatibility document is not an object")

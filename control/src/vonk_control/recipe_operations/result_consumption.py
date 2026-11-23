@@ -35,9 +35,11 @@ from ..admission_locking import (
     admission_attempts,
     admission_wait_exhausted,
 )
+from ..cancelled_runtime import cancellation_stop_current
 from ..installed_bytes import demote_ranks_on_lost_image
 from ..jobs.documents import RecipeBuildCleanupParent
 from ..lifecycle.agent_operation import AgentOperationAdapter
+from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
@@ -45,7 +47,13 @@ from ..lifecycle.evidence import (
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
 from ..lifecycle.types import Outcome
 from ..models.cache import RecipeBuild
-from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun, RunNode
+from ..models.execution import (
+    ArtifactJob,
+    InstallationNode,
+    RecipeInstallation,
+    RecipeRun,
+    RunNode,
+)
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
 from ..recipe_builds.cancellation import build_cancellation
@@ -169,10 +177,6 @@ class ResultConsumptionMixin:
             job.kind == WireAgentOperation.RECIPE_STOP
             and _parent_identity(job, "owner_kind") == WaitOwnerKind.ARTIFACT_JOB
         ):
-            from ..cancelled_runtime import cancellation_stop_current
-            from ..lifecycle.artifact_job import ArtifactJobAdapter
-            from ..models.execution import ArtifactJob
-
             artifact = session.get(ArtifactJob, _parent_identity(job, "owner_id"))
             if (
                 artifact is not None

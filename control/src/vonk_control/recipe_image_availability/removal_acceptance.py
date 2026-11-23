@@ -42,6 +42,7 @@ from .contracts import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityInvalid,
 )
+from .persistence import removal_status
 from .removal_contract import (
     RecipeCacheRemovalCheckpoint,
     RecipeCacheRemovalIntent,
@@ -166,7 +167,6 @@ def remove_selector(
             )
             session.add(operation)
             session.flush()
-            from .persistence import removal_status
 
             return removal_status(self, operation, owner)
     except ConstraintReplay as duplicate:

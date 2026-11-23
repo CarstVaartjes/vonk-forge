@@ -25,6 +25,7 @@ from ..auth import (
     CursorCodec,
     TokenCodec,
 )
+from ..auth_api import install_auth_routes
 from ..browser_auth import BrowserAuthService
 from ..capabilities import RecoveringService
 from ..catalog.api import install_catalog_routes
@@ -148,8 +149,6 @@ def create_app(
     authenticated_actor = Depends(actor)
 
     if browser_auth is not None:
-        from ..auth_api import install_auth_routes
-
         install_auth_routes(
             app,
             browser_auth,

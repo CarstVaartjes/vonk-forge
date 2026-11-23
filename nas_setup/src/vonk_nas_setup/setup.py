@@ -36,6 +36,13 @@ from .filesystem import (
     sync_directory,
     write_member,
 )
+from .pki import (
+    generate_pki,
+    normalize_controller_key,
+    normalize_intermediate_key,
+    renew_controller_leaf,
+    validate_pki_material,
+)
 from .prompts import PromptIo
 from .secrets import (
     apply_secret_group,
@@ -102,8 +109,6 @@ def fresh(
         }
         generate_missing(payload, members)
         if payload.step_ca_controller:
-            from .pki import generate_pki, validate_pki_material
-
             request = payload.step_ca_controller
             members.update(retry(lambda: generate_pki(request, environment)))
             validate_pki_material(request, environment, members)
@@ -192,13 +197,6 @@ def upgrade_credentials(
     for request in requests.ed25519_pkcs8_pem:
         validate_ed25519(members[request.file], request.file)
     if payload.step_ca_controller:
-        from .pki import (
-            normalize_controller_key,
-            normalize_intermediate_key,
-            renew_controller_leaf,
-            validate_pki_material,
-        )
-
         request = payload.step_ca_controller
         validated = validate_pki_material(
             request, environment, members, allow_expired_controller=True

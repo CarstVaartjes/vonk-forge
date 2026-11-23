@@ -890,9 +890,6 @@ def accepted_profile_runtime_image(
     Missing managed bytes may require repair; they never erase the accepted
     image identity or authorize replacement with a different build result.
     """
-    # Keep intent/reference validation with its existing owner. Import at the
-    # call boundary because profile orchestration also consumes capacity helpers.
-
     application = session.get(FleetProfileApplication, application_id)
     if application is None:
         raise UnknownOutcomeError(

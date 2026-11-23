@@ -18,12 +18,20 @@ from vonk_agent_protocol.contracts import (
     AgentResult,
 )
 from vonk_agent_protocol.enrollment import ActivateRequest, IssuedCertificateResponse
+from vonk_agent_protocol.grant_requests import (
+    HostHelperGrantResponse,
+    PackageActivationGrantRequest,
+)
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 from vonk_agent_protocol.state_machines import CertificateRecordState
 from vonk_agent_protocol.telemetry import TelemetryRequest
 from vonk_agent_protocol.wire_model import canonical_message
 
+from . import agent_operation_states
+from .agent_jobs.evidence import sanitized_failure_report
+from .agent_jobs.stored import column_message, column_value
 from .agent_operation_facts import aware
+from .agent_outcome import stored_report
 from .auth import agent_identity_from_scope
 from .inventory.items import inventory_items, runtime_value
 from .models.cache import RecipeBuild
@@ -274,7 +282,6 @@ def resolve_agent_receipt(
         elif policy == ReceiptPolicy.AGENT_GRANT:
             # Grants read an already accepted authority and mint a signed,
             # short-lived capability. No new execution intent is accepted.
-            from vonk_agent_protocol.grant_requests import HostHelperGrantResponse
 
             _require(isinstance(result, Response))
             grant = HostHelperGrantResponse.model_validate_json(
@@ -284,10 +291,6 @@ def resolve_agent_receipt(
             # Package activation is bound by its existing upgrade payload nonce.
             fence = getattr(body, "fence", None)
             if fence is None:
-                from vonk_agent_protocol.grant_requests import (
-                    PackageActivationGrantRequest,
-                )
-
                 _require(isinstance(body, PackageActivationGrantRequest))
                 assert isinstance(body, PackageActivationGrantRequest)
                 owned = session.execute(
@@ -326,8 +329,6 @@ def resolve_agent_receipt(
         attempt, operation = saved
         _require(operation.node_id == identity.node_id)
         if policy == ReceiptPolicy.AGENT_CLAIM:
-            from .agent_jobs.stored import column_value
-
             _require(
                 attempt.agent_certificate_serial == identity.certificate_serial
                 and operation.current_attempt == attempt.attempt
@@ -341,11 +342,6 @@ def resolve_agent_receipt(
                 and aware(attempt.lease_deadline) >= directive.deadline
             )
         elif policy == ReceiptPolicy.AGENT_RESULT:
-            from . import agent_operation_states
-            from .agent_jobs.evidence import sanitized_failure_report
-            from .agent_jobs.stored import column_message
-            from .agent_outcome import stored_report
-
             assert isinstance(body, AgentResult)
             report, _outcome = stored_report(operation.kind, body)
             if report.state in agent_operation_states.FAILURE_REPORT:

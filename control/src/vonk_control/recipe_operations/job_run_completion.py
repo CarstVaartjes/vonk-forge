@@ -25,6 +25,7 @@ from ..fleet_profiles.stop_contract import (
     jobrun_stop_key,
 )
 from ..jobs import states as job_states
+from ..jobs.documents import RecipeStopParent
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import (
@@ -74,8 +75,6 @@ class JobRunCompletionMixin:
                 return parent
             authorization: JobRunStopScope = parent.profile_stop_authorization
         else:
-            from ..jobs.documents import RecipeStopParent
-
             try:
                 direct = RecipeStopParent.model_validate_json(
                     canonical_message(read_row_column(job, "payload")), strict=True

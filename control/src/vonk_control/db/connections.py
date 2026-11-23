@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .. import (
     models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
 )
+from ..exact_integer_adoption import reconcile_exact_integer_schema
 from ..fleet_events import FleetEventRecorder
 from ..logging import redact_text
 from ..model_primitives import Base
@@ -147,7 +148,6 @@ def build_engine(database_url: str, *, component: str = "control") -> Engine:
     if engine.dialect.name == "sqlite":
         # The engine has not escaped to a service or worker. Adopt historical
         # owning projections on one exclusive checkout before any mapped read.
-        from ..exact_integer_adoption import reconcile_exact_integer_schema
 
         try:
             reconcile_exact_integer_schema(engine)

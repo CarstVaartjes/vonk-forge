@@ -329,7 +329,6 @@ def prepare_exact_recipe_run_observation_nodes(
     loss; each in-flight job is judged by its own order.
     """
 
-    # Imported here: rank authority reads this module's revision helper.
     assigned = tuple(
         session.execute(
             select(RunNode, RecipeRun)

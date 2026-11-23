@@ -40,6 +40,7 @@ from ..security.enrollment import (
     validate_renewal_result,
 )
 from ..step_ca import StepCAIssuancePending
+from .ending import retain_ended_effect
 from .issuance import EnrollmentCore
 from .persistence import (
     _certificate_issued,
@@ -247,8 +248,6 @@ class RotationService(EnrollmentCore):
                     or _issuance_binding(intent.provider_request) is None
                     or not intent.csr_pem.isascii()
                 ):
-                    from .ending import retain_ended_effect
-
                     retain_ended_effect(
                         session,
                         _issuance_binding(intent.provider_request),
@@ -273,8 +272,6 @@ class RotationService(EnrollmentCore):
                         intent.state != CertificateRotationState.REVOCATION_PENDING
                         or intent.source_serial != serial
                     ):
-                        from .ending import retain_ended_effect
-
                         retain_ended_effect(
                             session,
                             _issuance_binding(intent.provider_request),
@@ -547,7 +544,6 @@ class RotationService(EnrollmentCore):
                     )
                 # No renewal owns the other intent any more: end it now (its
                 # binding can only be observed and revoked) and admit this one.
-                from .ending import retain_ended_effect
 
                 retain_ended_effect(
                     session,

@@ -22,6 +22,7 @@ from ..auth import CursorError
 from ..evidence_repeats import repeating_evidence
 from ..fleet_event_contract import NodeProfilePayload
 from ..fleet_events import FleetEventDraft, FleetEventRepository
+from ..gpu.clock import selected_gpu_clocks
 from ..inventory.items import inventory_items
 from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS, newest_snapshot_ids
 from ..model_layout_notice import model_layout_notices
@@ -47,6 +48,7 @@ from ..operations.blockers import PHASE_RETRY_CODE, read_blockers
 from ..recipe_update_batches.notice import newest_active_revisions
 from ..run_states import ENDED_RUN_STATES
 from ..stored.states import CatalogRevisionState
+from ..swap import selected_swaps
 from ..telemetry.samples import CPU_LOW_CLOCK_MIN_SECONDS, TelemetryRepository
 from .common import (
     _AUTHORITY_REVISION,
@@ -186,7 +188,6 @@ class FleetProjection:
             stalls = self._stalled_loads(session, node_ids)
             repeating = repeating_evidence(session, node_ids, current)
             layout_notices = model_layout_notices(session, node_ids)
-            from ..gpu.clock import selected_gpu_clocks
 
             try:
                 clocks = selected_gpu_clocks(session, node_ids)
@@ -195,7 +196,6 @@ class FleetProjection:
                 }
             except ValueError:
                 clock_desired = dict.fromkeys(node_ids)
-            from ..swap import selected_swaps
 
             swap_desired = selected_swaps(session, node_ids)
             slow_nas = slow_nas_transfers(

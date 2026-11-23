@@ -381,7 +381,6 @@ def job_run_bound(session: Session, operation: StoredOperation) -> datetime | No
     )
     if not isinstance(payload, RecipeJobRunRequest) or attempt is None:
         return None
-    # imported here: agent_jobs reads this module's facts.
     result = read_row_column(attempt, "result")
     if job_attempt_did_not_launch(result):
         # The attempt reported a wait before it dispatched the job: no job is

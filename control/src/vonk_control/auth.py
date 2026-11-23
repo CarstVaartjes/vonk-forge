@@ -18,6 +18,7 @@ from starlette.types import Scope
 
 from vonk_agent_protocol.outcome import InvalidRequestError, SecurityRefusalError
 
+from .capabilities import CapabilityUnavailableError
 from .cursor_contract import MAX_CURSOR_LENGTH
 
 # The one definition of the administrator role. Browser sessions and their
@@ -258,8 +259,6 @@ class TrustedProxyAgentIdentityMiddleware:
         if callable(proxy_auth):
             # Ordinary admin reads do not depend on the agent ingress secret.
             if supplied_proxy_auth:
-                from .capabilities import CapabilityUnavailableError
-
                 try:
                     proxy_auth = await asyncio.to_thread(proxy_auth)
                 except CapabilityUnavailableError as error:

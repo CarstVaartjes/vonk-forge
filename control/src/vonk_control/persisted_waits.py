@@ -19,7 +19,21 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
 
 from .agent_operation_facts import aware
+from .agent_upgrades.contract import AgentUpgradeRolloutPayload
 from .jobs import states as job_states
+from .jobs.documents import (
+    AvailabilityJobPayload,
+    RecipeBuildCleanupParent,
+    RecipeBuildParent,
+    RecipeInstallParent,
+    RecipeJobActivateParent,
+    RecipeJobRunParent,
+    RecipeReconcileParent,
+    RecipeStartParent,
+    RecipeStopParent,
+    RecipeUninstallParent,
+    RunSwitchJobPayload,
+)
 from .models.cache import (
     ArtifactLifecycleGate,
     ModelCacheOperation,
@@ -38,6 +52,8 @@ from .models.operations import AgentOperation
 from .models.routes import RoutePublicationOwner
 from .models.waits import ScheduledWaitOwner
 from .operations.blockers import BlockingOperation, OperationBlocker, make_blocker
+from .recipe_image_availability.removal_contract import RecipeCacheRemovalOwner
+from .recipe_update_batches.contract import RecipeUpdateDocument
 from .stored.json_values import binding_for
 from .strict_json import warn_unreadable_once
 from .wait_contract import QueueWait, WaitEvidence, typed_wait_reason
@@ -244,10 +260,6 @@ def wait_due(owner: ScheduledWaitOwner) -> datetime | None:
     paths: tuple[tuple[str, ...], ...] = ()
     document: object = None
     if isinstance(owner, Job):
-        from .jobs.documents import AvailabilityJobPayload, RunSwitchJobPayload
-        from .recipe_image_availability.removal_contract import RecipeCacheRemovalOwner
-        from .recipe_update_batches.contract import RecipeUpdateDocument
-
         if _job_owns_contract(owner, RunSwitchJobPayload):
             document = owner.result
             paths = (("observation_due_at",),)
@@ -297,25 +309,6 @@ def owner_identity(
         previous = read_wait(owner)
         kind = previous.owner_kind if previous else WaitOwnerKind.JOB
         if previous is None:
-            from .agent_upgrades.contract import AgentUpgradeRolloutPayload
-            from .jobs.documents import (
-                AvailabilityJobPayload,
-                RecipeBuildCleanupParent,
-                RecipeBuildParent,
-                RecipeInstallParent,
-                RecipeJobActivateParent,
-                RecipeJobRunParent,
-                RecipeReconcileParent,
-                RecipeStartParent,
-                RecipeStopParent,
-                RecipeUninstallParent,
-                RunSwitchJobPayload,
-            )
-            from .recipe_image_availability.removal_contract import (
-                RecipeCacheRemovalOwner,
-            )
-            from .recipe_update_batches.contract import RecipeUpdateDocument
-
             for model, candidate in (
                 (AgentUpgradeRolloutPayload, WaitOwnerKind.AGENT_UPGRADE),
                 *(

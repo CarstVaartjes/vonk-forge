@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from functools import partial
 from typing import (
     TYPE_CHECKING,
 )
@@ -511,7 +512,6 @@ class ExecutorPhasesMixin:
                     plan.alias,
                     profile_application_id=profile_application_id,
                 )
-                from functools import partial
 
                 start = (
                     service._lifecycle.activate_job_run

@@ -28,7 +28,9 @@ from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStop
 from vonk_agent_protocol.state_machines import InstallationState, RunState
 from vonk_agent_protocol.wire_model import canonical_message
 
+from .cancelled_runtime import cancellation_stop_current
 from .categorized_errors import InvalidType
+from .jobs.documents import RecipeStopParent
 from .models.catalog import CatalogDocumentRevision
 from .models.execution import ArtifactJob, RecipeInstallation, RecipeRun, RunNode
 from .models.jobs import Job
@@ -109,9 +111,6 @@ def derive_runtime_plan_binding(
     if action not in {ContainerRuntimeAction.START, ContainerRuntimeAction.STOP}:
         return RuntimePlanBinding()
     if action is ContainerRuntimeAction.STOP:
-        from .cancelled_runtime import cancellation_stop_current
-        from .jobs.documents import RecipeStopParent
-
         if not cancellation_stop_current(session, parent, operation):
             # The cancellation's runtime owner moved on: this order can never
             # be its Stop again. A definite answer, never a refusal.

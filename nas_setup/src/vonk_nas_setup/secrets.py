@@ -20,6 +20,7 @@ from vonk_agent_protocol.installer_setup import (
 )
 
 from .filesystem import ObservationUnavailable, SetupError, read_member, retry
+from .pki import load_ed25519_private_key, normalize_intermediate_key
 
 
 def generated(payload: NasInstallTemplate) -> NasGeneratedSecrets:
@@ -142,8 +143,6 @@ def repair_stored_members(
                 except ValueError:
                     damaged.add(name)
         if paths.controller_server_private_key in members:
-            from .pki import load_ed25519_private_key
-
             try:
                 load_ed25519_private_key(members[paths.controller_server_private_key])
             except (ValueError, TypeError):
@@ -163,8 +162,6 @@ def repair_stored_members(
             raise ObservationUnavailable
         members[name] = retained[name]
     if payload.step_ca_controller:
-        from .pki import normalize_intermediate_key
-
         request = payload.step_ca_controller
         paths = payload.step_ca_controller.files
         try:
