@@ -7,7 +7,9 @@ from pathlib import Path
 
 import pytest
 from vonk_agent_protocol import LifecycleState
-from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
+from vonk_control.recipe_image_availability.availability_contract import (
+    AvailabilityBuildReceipt,
+)
 from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImagePreparationError,
     _atomic_json_replace,

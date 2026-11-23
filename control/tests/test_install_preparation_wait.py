@@ -11,13 +11,15 @@ from vonk_control.install_admission.contracts import InstallAdmissionBusy
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import RecipeInstallation
+from vonk_control.recipe_image_availability.availability_contract import (
+    AvailabilityBuildReceipt,
+)
 from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityInvalid,
 )
 from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
-from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .test_recipe_operations import _CanonicalImageTransport, read_recipe

@@ -12,13 +12,15 @@ from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.jobs import Job
 from vonk_control.operations.blockers import IdentityConflict
+from vonk_control.recipe_image_availability.availability_contract import (
+    AvailabilityBuildReceipt,
+)
 from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityInvalid,
 )
 from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
-from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
 from vonk_control.run_switch_contract.progress_view import RECOVERY_STALL_WINDOW
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 

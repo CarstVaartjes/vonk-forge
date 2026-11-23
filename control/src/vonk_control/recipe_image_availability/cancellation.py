@@ -29,12 +29,6 @@ from ..recipe_builds.cancellation import (
     lock_build_dependency,
     request_build_cancellation,
 )
-from ..recipe_image_availability_reader_contract import (
-    StoredAvailabilityIdentity,
-)
-from ..recipe_image_availability_view_contract import (
-    RecipeImageAvailabilityView,
-)
 from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
 from ..recipe_update_batches.contract import UPDATE_KIND, RecipeUpdateResponse
 from ..stored.json_values import Residue, read_row_column
@@ -46,6 +40,12 @@ from .contracts import (
     RecipeImageAvailabilityUnknown,
     _canonical_cancellation_id,
     _read,
+)
+from .reader_contract import (
+    StoredAvailabilityIdentity,
+)
+from .view_contract import (
+    RecipeImageAvailabilityView,
 )
 
 if TYPE_CHECKING:

@@ -29,11 +29,8 @@ from ..operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
-from ..recipe_image_availability_contract import (
+from .availability_contract import (
     RecipeImageAvailabilityArtifact,
-)
-from ..recipe_image_availability_reader_contract import (
-    AvailabilityDownloadPreview,
 )
 from .contracts import (
     ModelCacheOperationHandle,
@@ -44,6 +41,9 @@ from .contracts import (
     _ModelQueueFailed,
     _progress,
     _read,
+)
+from .reader_contract import (
+    AvailabilityDownloadPreview,
 )
 
 if TYPE_CHECKING:

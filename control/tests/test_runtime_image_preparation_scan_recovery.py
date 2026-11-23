@@ -94,7 +94,9 @@ def test_unknown_receipt_attempt_ends_without_blocking_fresh_preparation(
     from vonk_control.model_primitives import Base
     from vonk_control.models.cache import RecipeBuild
     from vonk_control.models.jobs import Job
-    from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
+    from vonk_control.recipe_image_availability.availability_contract import (
+        AvailabilityBuildReceipt,
+    )
 
     from .test_recipe_image_availability import (
         ARCHIVE_SHA,

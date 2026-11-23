@@ -19,7 +19,7 @@ from vonk_control.library.contract import (
 )
 from vonk_control.model_cache.contract import ModelCacheOperatorRequest
 from vonk_control.operations.contract import AvailabilityOperationFailure
-from vonk_control.recipe_image_availability_api import RecipeOperatorRequest
+from vonk_control.recipe_image_availability.api import RecipeOperatorRequest
 from vonk_control.strict_json import (
     ControllerAPIRoute,
     StrictJSONModel,

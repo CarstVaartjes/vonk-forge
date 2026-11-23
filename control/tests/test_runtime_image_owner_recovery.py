@@ -11,11 +11,13 @@ from vonk_agent_protocol import LifecycleState, WaitReason
 from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import Job
 from vonk_control.oci_image_store import OciImageStore, StoredImage
+from vonk_control.recipe_image_availability.availability_contract import (
+    AvailabilityBuildReceipt,
+)
 from vonk_control.recipe_image_availability.contracts import BuildUnsettled
 from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
-from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
 from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.runtime_image_preparation.transport import OciLayoutImageTransport

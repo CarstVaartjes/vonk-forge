@@ -25,7 +25,7 @@ from vonk_control.operations.item_contract import operation_item
 from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityError,
 )
-from vonk_control.recipe_image_availability_view_contract import (
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeImageAvailabilityView,
 )
 from vonk_control.recipe_update_batches.contract import RecipeUpdateResponse
@@ -601,7 +601,7 @@ def test_registered_update_route_cli_recovers_lost_receipt_and_follows_same_pare
     from fastapi import Depends, FastAPI
     from fastapi.testclient import TestClient
     from vonk_control.auth import Actor
-    from vonk_control.recipe_image_availability_api import (
+    from vonk_control.recipe_image_availability.api import (
         install_recipe_operator_routes,
     )
 

@@ -201,7 +201,7 @@ def test_recipe_scan_unknown_is_accepted_and_never_blocks_fresh_preparation(
         removal_execution as image_execution,
     )
     from vonk_control.recipe_image_availability import removal_review as image_review
-    from vonk_control.recipe_image_availability_view_contract import (
+    from vonk_control.recipe_image_availability.view_contract import (
         RecipeCacheRemovalStatus,
         RecipeImageAvailabilityView,
     )
@@ -593,7 +593,7 @@ def test_recipe_receipt_observation_is_request_owned(
         service.advance_removals(limit=1)
     if not repair:
         waiting = service.get_operator_request(request_key, actor="operator")
-        from vonk_control.recipe_image_availability_view_contract import (
+        from vonk_control.recipe_image_availability.view_contract import (
             RecipeCacheRemovalStatus,
         )
 

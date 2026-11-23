@@ -175,7 +175,7 @@ def test_total_knowledge_can_be_explicitly_withdrawn_without_losing_bytes():
 
 
 def test_image_availability_boundary_preserves_canonical_measurements():
-    from vonk_control.recipe_image_availability_api import _progress
+    from vonk_control.recipe_image_availability.api import _progress
 
     original = sample(
         completed_bytes=10,

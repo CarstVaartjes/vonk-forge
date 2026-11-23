@@ -48,9 +48,6 @@ from ..recipe_builds.cancellation import (
     BuildConsumerError,
     lock_availability_build_dependency,
 )
-from ..recipe_image_availability_view_contract import (
-    RecipeImageAvailabilityView,
-)
 from ..revision_images import revision_archives
 from ..stored.json_values import read_row_column
 from ..stored.states import CatalogRevisionState
@@ -70,6 +67,9 @@ from .contracts import (
     _progress,
     _read,
     _retry_after,
+)
+from .view_contract import (
+    RecipeImageAvailabilityView,
 )
 
 REQUEST_OBSERVATION_BUDGET_SECONDS = 0.25

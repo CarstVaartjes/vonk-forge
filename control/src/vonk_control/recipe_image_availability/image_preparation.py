@@ -28,9 +28,6 @@ from ..jobs.documents import AvailabilityJobPayload, AvailabilityRuntime
 from ..models.cache import RecipeBuild
 from ..models.jobs import Job
 from ..operations.blockers import OperationBlocker, bound_blockers
-from ..recipe_image_availability_contract import (
-    AvailabilityBuildReceipt,
-)
 from ..runtime_image_preparation.contracts import (
     RuntimeImageReceipt,
     RuntimeImageReferenceIntent,
@@ -40,6 +37,9 @@ from ..stall_window import last_progress_at, latest_progress
 from ..stored.json_values import Residue
 from ..stored.states import RecipeBuildState
 from ..strict_json import serialize_json_value
+from .availability_contract import (
+    AvailabilityBuildReceipt,
+)
 from .contracts import (
     _LOGGER,
     SCHEMA_VERSION,

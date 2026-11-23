@@ -73,8 +73,8 @@ from ..persisted_waits import (
     typed_wait_reason,
     wait_due,
 )
-from ..recipe_image_availability_clocks_contract import StoredAvailabilityClocks
-from ..recipe_image_removal_contract import RECIPE_CACHE_REMOVE_KIND
+from ..recipe_image_availability.clocks_contract import StoredAvailabilityClocks
+from ..recipe_image_availability.removal_contract import RECIPE_CACHE_REMOVE_KIND
 from ..recipe_update_batches.contract import UPDATE_KIND
 from ..stall_window import stall_deadline
 from ..stored.json_values import read_row_column

@@ -40,11 +40,6 @@ from ..persisted_waits import schedule_wait, wait_due
 from ..recipe_availability_intent import (
     RecipeRetryIntent,
 )
-from ..recipe_image_availability_reader_contract import (
-    AvailabilityDownloadPreview,
-    StoredAvailabilityIdentity,
-    StoredModelChildCancellation,
-)
 from ..stored.json_values import Residue, read_row_column
 from ..strict_json import serialize_json_value
 from ..worker.memory_contract import WorkerMemoryComponent
@@ -57,6 +52,11 @@ from .contracts import (
     _AvailabilityClaimLost,
     _known_total,
     _read,
+)
+from .reader_contract import (
+    AvailabilityDownloadPreview,
+    StoredAvailabilityIdentity,
+    StoredModelChildCancellation,
 )
 
 if TYPE_CHECKING:

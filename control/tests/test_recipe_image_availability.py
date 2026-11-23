@@ -79,24 +79,24 @@ from vonk_control.operations.contract import (
 )
 from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_availability_intent import RecipeRevisionIntent
-from vonk_control.recipe_image_availability.contracts import (
-    RecipeImageAvailabilityError,
-    RecipeImageAvailabilityUnknown,
-)
-from vonk_control.recipe_image_availability.service import (
-    RecipeImageAvailabilityService,
-)
-from vonk_control.recipe_image_availability_api import (
+from vonk_control.recipe_image_availability.api import (
     _recipe_error,
     _view_document,
     install_recipe_operator_routes,
 )
-from vonk_control.recipe_image_availability_view_contract import (
+from vonk_control.recipe_image_availability.contracts import (
+    RecipeImageAvailabilityError,
+    RecipeImageAvailabilityUnknown,
+)
+from vonk_control.recipe_image_availability.removal_contract import (
+    RecipeCacheRemovalOwner,
+)
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
+)
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeCacheRemovalStatus,
     RecipeImageAvailabilityView,
-)
-from vonk_control.recipe_image_removal_contract import (
-    RecipeCacheRemovalOwner,
 )
 from vonk_control.runtime_image_preparation.contracts import (
     PulledImageEvidence,
@@ -3220,7 +3220,7 @@ def test_model_child_and_image_complete_through_one_sql_operation(
         require_mapping(completed.result["model_child"], "model child")["id"]
         == child.id
     )
-    from vonk_control.recipe_image_availability_api import _view_document
+    from vonk_control.recipe_image_availability.api import _view_document
 
     response = _view_document(completed)
     assert response.result is not None

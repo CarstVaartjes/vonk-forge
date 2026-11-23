@@ -223,12 +223,12 @@ module defines its own.
 | `control/src/vonk_control/recipe_availability_intent.py` | declared | 4 | Original requests, distinct from resolved preparation and worker effects. |
 | `control/src/vonk_control/recipe_builds/cancellation.py` | declared | 1 | The lifecycle job owns cancellation of an exact build attempt. |
 | `control/src/vonk_control/recipe_execution_contract.py` | controller-contract | 10 | Strict persisted contracts for recipe execution and source builds. |
-| `control/src/vonk_control/recipe_image_availability_api.py` | declared | 9 | Authenticated, typed HTTP routes for Recipe Make available. |
-| `control/src/vonk_control/recipe_image_availability_contract.py` | controller-contract | 2 | Shared recipe-image state, artifact and builder receipt identity. |
-| `control/src/vonk_control/recipe_image_availability_clocks_contract.py` | controller-contract | 5 | Tolerant typed lifecycle clock projection independent of job-document imports. |
-| `control/src/vonk_control/recipe_image_availability_reader_contract.py` | controller-contract | 4 | Typed adoption and exact-catalog recovery of damaged availability bookkeeping. |
-| `control/src/vonk_control/recipe_image_availability_view_contract.py` | controller-contract | 2 | Typed availability and removal read projections with canonical JSON egress. |
-| `control/src/vonk_control/recipe_image_removal_contract.py` | controller-contract | 6 | The current persisted intent for one recipe cache removal request. |
+| `control/src/vonk_control/recipe_image_availability/api.py` | declared | 9 | Authenticated, typed HTTP routes for Recipe Make available. |
+| `control/src/vonk_control/recipe_image_availability/availability_contract.py` | controller-contract | 2 | Shared recipe-image state, artifact and builder receipt identity. |
+| `control/src/vonk_control/recipe_image_availability/clocks_contract.py` | controller-contract | 5 | Tolerant typed lifecycle clock projection independent of job-document imports. |
+| `control/src/vonk_control/recipe_image_availability/reader_contract.py` | controller-contract | 4 | Typed adoption and exact-catalog recovery of damaged availability bookkeeping. |
+| `control/src/vonk_control/recipe_image_availability/view_contract.py` | controller-contract | 2 | Typed availability and removal read projections with canonical JSON egress. |
+| `control/src/vonk_control/recipe_image_availability/removal_contract.py` | controller-contract | 6 | The current persisted intent for one recipe cache removal request. |
 | `control/src/vonk_control/recipe_lifecycle_contract.py` | controller-contract | 9 | Typed response contracts for recipe lifecycle operations. |
 | `control/src/vonk_control/recipe_operations/contracts.py` | controller-contract | 2 | Typed recipe operation context and installation disposal receipt. |
 | `control/src/vonk_control/recipe_packages/contracts.py` | declared | 2 | Schema-2 recipe package reader for the Controller catalog sync. |

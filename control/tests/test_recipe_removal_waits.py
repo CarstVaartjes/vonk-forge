@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import Job
-from vonk_control.recipe_image_availability_view_contract import (
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeCacheRemovalStatus,
 )
 from vonk_control.recovery_policy import RecoveryPolicy

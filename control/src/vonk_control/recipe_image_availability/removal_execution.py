@@ -44,10 +44,6 @@ from ..operations.contract import (
     AvailabilityOperationFailure,
     sanitize_failure_evidence,
 )
-from ..recipe_image_removal_contract import (
-    RecipeCacheRemovalModelChild,
-    RecipeCacheRemovalOwner,
-)
 from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
 from ..stored.json_values import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
@@ -60,6 +56,10 @@ from .contracts import (
     _iso,
     _removal_retry_is_due,
     availability_disposition,
+)
+from .removal_contract import (
+    RecipeCacheRemovalModelChild,
+    RecipeCacheRemovalOwner,
 )
 
 REMOVAL_PASS_BUDGET_SECONDS = 0.25

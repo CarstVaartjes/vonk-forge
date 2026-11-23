@@ -25,14 +25,6 @@ from ..recipe_availability_intent import (
     RecipeAvailabilityIntent,
     RecipeRetryIntent,
 )
-from ..recipe_image_availability_view_contract import (
-    RecipeCacheRemovalStatus,
-    RecipeImageAvailabilityView,
-)
-from ..recipe_image_removal_contract import (
-    RecipeRemovalProjectionIssue,
-    RecipeRemovalUnavailableView,
-)
 from ..recipe_update_batches.contract import UPDATE_KIND, RecipeUpdateResponse
 from ..stored.json_values import Residue
 from ..strict_json import serialize_json_value
@@ -42,6 +34,14 @@ from .contracts import (
     RecipeImageAvailabilityInvalid,
     RecipeImageAvailabilityUnknown,
     _iso,
+)
+from .removal_contract import (
+    RecipeRemovalProjectionIssue,
+    RecipeRemovalUnavailableView,
+)
+from .view_contract import (
+    RecipeCacheRemovalStatus,
+    RecipeImageAvailabilityView,
 )
 
 if TYPE_CHECKING:

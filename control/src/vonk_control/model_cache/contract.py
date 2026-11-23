@@ -29,7 +29,7 @@ from ..cursor_contract import MAX_CURSOR_LENGTH
 from ..machine_states import ModelFileStateField
 from ..operations.blockers import OperationBlocker
 from ..operations.contract import AvailabilityOperationFailure, OperationProgress
-from ..recipe_image_availability_clocks_contract import readable_or_none
+from ..recipe_image_availability.clocks_contract import readable_or_none
 from ..settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
 from ..strict_json import StrictJSONModel, StrictModel, read_stored_model
 from ..wait_contract import QueueWait

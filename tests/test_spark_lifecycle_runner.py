@@ -1657,7 +1657,7 @@ def test_recipe_download_consumes_typed_terminal_receipt() -> None:
     lifecycle = _module()
     from vonk_agent_protocol import OperationProgress
     from vonk_control.recipe_availability_intent import RecipeSelectorIntent
-    from vonk_control.recipe_image_availability_api import (
+    from vonk_control.recipe_image_availability.api import (
         RecipeImageAvailabilityResponse,
         RecipeImageAvailabilityResult,
     )
@@ -1733,7 +1733,7 @@ def test_recipe_download_timeout_preserves_durable_progress(monkeypatch, state) 
         AvailabilityRecoveryAction,
     )
     from vonk_control.recipe_availability_intent import RecipeSelectorIntent
-    from vonk_control.recipe_image_availability_api import (
+    from vonk_control.recipe_image_availability.api import (
         RecipeImageAvailabilityAction,
         RecipeImageAvailabilityResponse,
     )

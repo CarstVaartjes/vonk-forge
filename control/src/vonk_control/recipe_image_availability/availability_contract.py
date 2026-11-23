@@ -8,7 +8,7 @@ from pydantic import ConfigDict, Field
 from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.build_import import RecipeBuildEvidence
 
-from .strict_json import StrictJSONModel
+from ..strict_json import StrictJSONModel
 
 RecipeImageAvailabilityState = Literal[
     LifecycleState.QUEUED,

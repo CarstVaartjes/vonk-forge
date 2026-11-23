@@ -13,7 +13,7 @@ from pydantic import (
 )
 from vonk_agent_protocol import OperationProgress
 
-from ..recipe_image_availability_clocks_contract import readable_or_none
+from ..recipe_image_availability.clocks_contract import readable_or_none
 from ..recipe_lifecycle_contract import LifecycleNodeResult
 from ..runtime_image_preparation.contracts import RuntimeImageReceipt
 from .identity import RunSwitchCancellation

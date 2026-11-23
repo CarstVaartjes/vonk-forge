@@ -59,14 +59,14 @@ from ..models.jobs import Job
 from ..operations.blockers import OperationBlocker
 from ..operations.contract import AvailabilityOperationFailure
 from ..persisted_waits import wait_due
-from ..recipe_image_removal_contract import (
-    RECIPE_CACHE_REMOVE_KIND,
-)
 from ..runtime_image_preparation.contracts import (
     RuntimeImagePreparationUnknown,
     RuntimeImageStorage,
 )
 from ..stored.json_values import JsonColumn, read_column
+from .removal_contract import (
+    RECIPE_CACHE_REMOVE_KIND,
+)
 
 _LOGGER = logging.getLogger(__package__)
 #: The progress ``activity`` of an operation: working now, or waiting for its turn.

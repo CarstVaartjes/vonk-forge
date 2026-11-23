@@ -32,16 +32,6 @@ from ..model_cache.errors import ModelCacheConflict
 from ..models.cache import ArtifactLifecycleGate, ModelCacheOperation
 from ..models.catalog import CatalogDocumentRevision
 from ..models.jobs import Job
-from ..recipe_image_availability_view_contract import (
-    RecipeCacheRemovalStatus,
-)
-from ..recipe_image_removal_contract import (
-    RecipeCacheRemovalCheckpoint,
-    RecipeCacheRemovalIntent,
-    RecipeCacheRemovalModelChild,
-    RecipeCacheRemovalOwner,
-    RecipeCacheRemovalPlan,
-)
 from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
 from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value
@@ -52,6 +42,16 @@ from .contracts import (
     ModelCacheRemovalCoordinator,
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityInvalid,
+)
+from .removal_contract import (
+    RecipeCacheRemovalCheckpoint,
+    RecipeCacheRemovalIntent,
+    RecipeCacheRemovalModelChild,
+    RecipeCacheRemovalOwner,
+    RecipeCacheRemovalPlan,
+)
+from .view_contract import (
+    RecipeCacheRemovalStatus,
 )
 
 REMOVAL_PASS_BUDGET_SECONDS = 0.25

@@ -188,7 +188,7 @@ def create_app(
         actor_dependency=authenticated_actor,
         service=model_cache,
     )
-    from ..recipe_image_availability_api import install_recipe_operator_routes
+    from ..recipe_image_availability.api import install_recipe_operator_routes
 
     install_recipe_operator_routes(
         app,

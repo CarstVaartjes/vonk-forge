@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from importlib import resources
 
-from vonk_control.recipe_image_availability_reader_contract import (
+from vonk_control.recipe_image_availability.reader_contract import (
     StoredAvailabilityIdentity,
 )
 from vonk_forge_contracts import read_recipe

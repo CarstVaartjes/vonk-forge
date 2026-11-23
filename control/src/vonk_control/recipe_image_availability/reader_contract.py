@@ -16,15 +16,15 @@ from pydantic import (
 from vonk_agent_protocol import OperationProgress
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
-from .jobs.documents import AvailabilityJobPayload
-from .model_cache.contract import (
+from ..jobs.documents import AvailabilityJobPayload
+from ..model_cache.contract import (
     ModelCacheCancellation,
     ModelCacheDownloadPreviewResponse,
 )
-from .recipe_availability_intent import RecipeAvailabilityIntent
-from .recipe_image_availability_clocks_contract import readable_or_none
-from .recipe_lifecycle_contract import RecipeOperationCancellationResult
-from .strict_json import read_stored_document
+from ..recipe_availability_intent import RecipeAvailabilityIntent
+from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
+from ..strict_json import read_stored_document
+from .clocks_contract import readable_or_none
 
 
 class StoredAvailabilityIdentity(BaseModel):

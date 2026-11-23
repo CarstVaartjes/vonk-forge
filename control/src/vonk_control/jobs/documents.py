@@ -54,7 +54,7 @@ from ..profile_stop_authority import (
 )
 from ..recipe_availability_intent import RecipeAvailabilityIntent, RecipeBuildDependency
 from ..recipe_builds.cancellation import RecipeBuildIntent
-from ..recipe_image_availability_contract import (
+from ..recipe_image_availability.availability_contract import (
     RecipeImageAvailabilityArtifact,
     RecipeImageAvailabilityState,
 )

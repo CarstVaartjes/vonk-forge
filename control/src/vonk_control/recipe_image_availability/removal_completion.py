@@ -24,10 +24,6 @@ from ..artifact_jobs.lifecycle import (
 from ..artifact_reference_scan.image_references import runtime_image_reference_reasons
 from ..jobs import states as job_states
 from ..models.jobs import Job
-from ..recipe_image_removal_contract import (
-    RecipeCacheRemovalOwner,
-    RecipeCacheRemovalResult,
-)
 from ..strict_json import serialize_json_value
 from .contracts import (
     REMOVE_OPERATION_KIND,
@@ -36,6 +32,10 @@ from .contracts import (
     RecipeImageAvailabilityUnknown,
     _removal_retry_is_due,
     availability_disposition,
+)
+from .removal_contract import (
+    RecipeCacheRemovalOwner,
+    RecipeCacheRemovalResult,
 )
 
 if TYPE_CHECKING:

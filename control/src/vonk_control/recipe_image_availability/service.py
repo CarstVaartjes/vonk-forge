@@ -46,21 +46,6 @@ from ..recipe_availability_intent import (
     RecipeRevisionIntent,
     RecipeSelectorIntent,
 )
-from ..recipe_image_availability_reader_contract import (
-    StoredAvailabilityIdentity,
-)
-from ..recipe_image_availability_view_contract import (
-    RecipeCacheRemovalStatus,
-    RecipeImageAvailabilityView,
-)
-from ..recipe_image_removal_contract import (
-    RecipeCacheRemovalIntent,
-    RecipeCacheRemovalModelChild,
-    RecipeCacheRemovalOwner,
-    RecipeCacheRemovalPlan,
-    RecipeCacheRemovalResult,
-    RecipeRemovalUnavailableView,
-)
 from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
 from ..recipe_update_batches.contract import RecipeUpdateResponse
 from ..runtime_image_preparation.contracts import (
@@ -94,6 +79,21 @@ from .contracts import (
     RecipeImageAvailabilityClaim,
     RuntimeImageCacheStorage,
     _RecipeRemovalSelection,
+)
+from .reader_contract import (
+    StoredAvailabilityIdentity,
+)
+from .removal_contract import (
+    RecipeCacheRemovalIntent,
+    RecipeCacheRemovalModelChild,
+    RecipeCacheRemovalOwner,
+    RecipeCacheRemovalPlan,
+    RecipeCacheRemovalResult,
+    RecipeRemovalUnavailableView,
+)
+from .view_contract import (
+    RecipeCacheRemovalStatus,
+    RecipeImageAvailabilityView,
 )
 
 if TYPE_CHECKING:

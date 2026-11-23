@@ -223,12 +223,14 @@ class OperatorReceiptResolver:
         from .model_cache.contract import ModelCacheOperatorResponse
         from .operation_api.contracts import JobResumeResponse
         from .operator_projection_api.contracts import FleetActionResponse
-        from .recipe_image_availability_api import (
+        from .recipe_image_availability.api import (
             RecipeImageAvailabilityResponse,
             RecipeOperatorResponse,
         )
-        from .recipe_image_availability_view_contract import RecipeCacheRemovalStatus
-        from .recipe_image_removal_contract import RecipeRemovalUnavailableView
+        from .recipe_image_availability.removal_contract import (
+            RecipeRemovalUnavailableView,
+        )
+        from .recipe_image_availability.view_contract import RecipeCacheRemovalStatus
         from .recipe_update_batches.contract import RecipeUpdateResponse
         from .run_switch_contract.operations import RunSwitchOperation
 

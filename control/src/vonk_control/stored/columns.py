@@ -116,7 +116,7 @@ from ..recipe_execution_contract import (
     StoredRunEndpoint,
     StoredRunPlan,
 )
-from ..recipe_image_removal_contract import (
+from ..recipe_image_availability.removal_contract import (
     RecipeCacheRemovalOwner,
     RecipeCacheRemovalResult,
 )

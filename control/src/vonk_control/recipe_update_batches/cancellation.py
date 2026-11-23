@@ -66,7 +66,7 @@ class CancellationMixin:
         service = cast("RecipeUpdateBatches", self)
 
         from ..recipe_image_availability.contracts import RecipeImageAvailabilityError
-        from ..recipe_image_availability_view_contract import (
+        from ..recipe_image_availability.view_contract import (
             RecipeImageAvailabilityView,
         )
 

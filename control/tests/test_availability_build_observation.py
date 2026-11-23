@@ -31,11 +31,13 @@ from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.oci_image_store import OciImageStore
 from vonk_control.operations.contract import AvailabilityOperationFailure
 from vonk_control.prebuilt_images import PrebuiltImageImporter
+from vonk_control.recipe_image_availability.availability_contract import (
+    AvailabilityBuildReceipt,
+)
 from vonk_control.recipe_image_availability.contracts import (
     BuildUnsettled,
     RecipeImageAvailabilityError,
 )
-from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.stored.json_values import read_row_column
 from vonk_control.strict_json import read_stored_model, serialize_json_value

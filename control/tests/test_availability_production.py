@@ -54,6 +54,10 @@ from vonk_control.recipe_builds.common import (
 )
 from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_image_availability import requests as availability_requests
+from vonk_control.recipe_image_availability.api import install_recipe_operator_routes
+from vonk_control.recipe_image_availability.availability_contract import (
+    AvailabilityBuildReceipt,
+)
 from vonk_control.recipe_image_availability.contracts import (
     SOURCE_POLICY_REFUSED_CODE,
     BuildUnsettled,
@@ -64,8 +68,6 @@ from vonk_control.recipe_image_availability.contracts import (
 from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
-from vonk_control.recipe_image_availability_api import install_recipe_operator_routes
-from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
 from vonk_control.revision_images import revision_images
 from vonk_control.runtime_image_preparation.contracts import PulledImageEvidence
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage

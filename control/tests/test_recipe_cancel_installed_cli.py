@@ -23,7 +23,7 @@ from vonk_control.models.fleet import User
 from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
-from vonk_control.recipe_image_availability_view_contract import (
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeImageAvailabilityView,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage

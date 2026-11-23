@@ -7329,10 +7329,12 @@ def test_installation_requests_exact_receipt_repair_before_any_agent_effect(
     tmp_path: Path,
     fault: str,
 ) -> None:
+    from vonk_control.recipe_image_availability.availability_contract import (
+        AvailabilityBuildReceipt,
+    )
     from vonk_control.recipe_image_availability.service import (
         RecipeImageAvailabilityService,
     )
-    from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
     from vonk_control.runtime_image_preparation.preparation import (
         stored_runtime_image_resolver,
     )

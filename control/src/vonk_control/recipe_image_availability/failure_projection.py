@@ -35,12 +35,6 @@ from ..operations.contract import (
 )
 from ..operations.progress import aggregate_progress
 from ..persisted_waits import read_wait, schedule_wait
-from ..recipe_image_availability_reader_contract import (
-    StoredAvailabilityIdentity,
-)
-from ..recipe_image_availability_view_contract import (
-    RecipeImageAvailabilityView,
-)
 from ..stored.json_values import Residue, read_row_column
 from ..strict_json import serialize_json_value
 from .contracts import (
@@ -57,6 +51,12 @@ from .contracts import (
     _recovery_actions,
     _retry_after,
     availability_disposition,
+)
+from .reader_contract import (
+    StoredAvailabilityIdentity,
+)
+from .view_contract import (
+    RecipeImageAvailabilityView,
 )
 
 if TYPE_CHECKING:

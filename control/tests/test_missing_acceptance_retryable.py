@@ -41,7 +41,7 @@ from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityUnknown,
     RecipeImageCode,
 )
-from vonk_control.recipe_image_availability_view_contract import (
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeImageAvailabilityView,
 )
 

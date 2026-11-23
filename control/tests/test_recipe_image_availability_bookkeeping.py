@@ -30,7 +30,7 @@ from vonk_control.recipe_image_availability.contracts import (
 from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
-from vonk_control.recipe_image_availability_view_contract import (
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeCacheRemovalStatus,
     RecipeImageAvailabilityView,
 )
@@ -89,7 +89,9 @@ def test_public_availability_service_reuses_published_content_after_restart(
 def test_a_malformed_stored_retry_time_makes_the_removal_due_instead_of_failing(
     caplog,
 ) -> None:
-    from vonk_control.recipe_image_removal_contract import RECIPE_CACHE_REMOVE_KIND
+    from vonk_control.recipe_image_availability.removal_contract import (
+        RECIPE_CACHE_REMOVE_KIND,
+    )
 
     # A pre-contract row can retain a malformed progress clock. It is due for
     # owner reconciliation, while a valid scheduling column remains a bound.

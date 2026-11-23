@@ -22,42 +22,42 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 
-from .auth import MUTATION_ROLES
-from .bounded_json import require_integer, require_sequence
-from .cache_removal_review import CacheRemovalReview
-from .logging import redact_text
-from .model_cache.contract import UUID_PATTERN, Digest
-from .operation_api.contracts import bounded_error_responses
-from .operations.blockers import OperationBlocker
-from .operations.contract import (
+from ..auth import MUTATION_ROLES
+from ..bounded_json import require_integer, require_sequence
+from ..cache_removal_review import CacheRemovalReview
+from ..logging import redact_text
+from ..model_cache.contract import UUID_PATTERN, Digest
+from ..operation_api.contracts import bounded_error_responses
+from ..operations.blockers import OperationBlocker
+from ..operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
     OperationProgress,
 )
-from .operator_acceptance import (
+from ..operator_acceptance import (
     OperatorReceiptResolver,
     ReceiptPolicy,
     operator_acceptance,
 )
-from .recipe_availability_intent import RecipeAvailabilityIntent
-from .recipe_image_availability.contracts import (
-    SOURCE_POLICY_REFUSED_CODE,
-    RecipeImageAvailabilityError,
-)
-from .recipe_image_availability.service import RecipeImageAvailabilityService
-from .recipe_image_availability_contract import (
+from ..recipe_availability_intent import RecipeAvailabilityIntent
+from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
+from ..recipe_update_batches.contract import RecipeUpdateRequest, RecipeUpdateResponse
+from ..stored.json_values import Residue
+from ..strict_json import StrictJSONModel, read_stored_model
+from .availability_contract import (
     RecipeImageAvailabilityArtifact,
     RecipeImageAvailabilityState,
 )
-from .recipe_image_availability_view_contract import (
+from .contracts import (
+    SOURCE_POLICY_REFUSED_CODE,
+    RecipeImageAvailabilityError,
+)
+from .removal_contract import RecipeRemovalUnavailableView
+from .service import RecipeImageAvailabilityService
+from .view_contract import (
     RecipeCacheRemovalStatus,
     RecipeImageAvailabilityView,
 )
-from .recipe_image_removal_contract import RecipeRemovalUnavailableView
-from .recipe_lifecycle_contract import RecipeOperationCancellationResult
-from .recipe_update_batches.contract import RecipeUpdateRequest, RecipeUpdateResponse
-from .stored.json_values import Residue
-from .strict_json import StrictJSONModel, read_stored_model
 
 # One named type per closed set, shared by the contract field and every
 # helper that produces the value, so the vocabulary cannot drift apart.
@@ -430,7 +430,7 @@ def install_recipe_operator_routes(
 ) -> None:
     """Install current singular Recipe download/remove/update mutations."""
 
-    from .operation_api.constants import _ADMIN_OPERATION_IDS
+    from ..operation_api.constants import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS.update(RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS)
 
