@@ -88,9 +88,10 @@ class ExecutorPreflightMixin:
             document = revision.document
         nodes = {node.node_id: False for node in plan.spark_group.nodes}
         if (
-            phase.subphase == "container-build"
+            phase.subphase == ProfileChildPhase.CONTAINER_BUILD
             and plan.build.builder_node_id
-            or not progress.completed_phases
+        ) or (
+            not progress.completed_phases
             and plan.build.state in {"planned", "building"}
             and plan.build.builder_node_id
         ):

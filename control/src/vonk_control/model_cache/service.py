@@ -27,6 +27,7 @@ from .constants import (
     _DEFAULT_MAX_PARALLEL_DOWNLOADS,
     _MAX_PARALLEL_DOWNLOADS,
 )
+from .contract import CacheOperationKind
 from .core import CoreMixin
 from .download import DownloadMixin
 from .download_admission import DownloadAdmissionMixin
@@ -214,7 +215,7 @@ class ModelCacheService(
         )
         self._reconciler = Reconciler(
             ModelCacheStore(self._session, self._lifecycle, self),
-            {kind: self._lifecycle for kind in ("download", "repair", "remove")},
+            dict.fromkeys(CacheOperationKind, self._lifecycle),
             clock=lambda: self._clock(),
             enabled=True,
         )

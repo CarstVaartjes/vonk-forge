@@ -211,7 +211,7 @@ class JobAdapter:
         *,
         attempt: JobAttempt | None = None,
         result: Mapping[str, object] | None | object = None,
-        reason: str | None | object = None,
+        reason: str | object | None = None,
     ) -> None:
         """The only writer of ``Job.state`` and ``JobAttempt.state`` of a generic job."""
 

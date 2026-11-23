@@ -349,11 +349,8 @@ def _view(
     state = operation.state
     residue = observation_residue
     if (
-        state == "succeeded"
-        and (result is None or failure is not None)
-        or state == "failed"
-        and failure is None
-    ):
+        state == LifecycleState.SUCCEEDED and (result is None or failure is not None)
+    ) or (state == LifecycleState.FAILED and failure is None):
         # Missing terminal evidence is typed unknown, not confirmed success
         # or an assertion that this terminal row is executing again.
         residue = retire_as_unknown(

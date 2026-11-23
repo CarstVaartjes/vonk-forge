@@ -502,8 +502,9 @@ def _review_assets_for_selection(
         if (
             observed is None
             or observed.disposition != disposition
-            or expected_bytes is not None
-            and observed.expected_bytes != expected_bytes
+            or (
+                expected_bytes is not None and observed.expected_bytes != expected_bytes
+            )
         ):
             assets.append(
                 CacheRemovalAsset(

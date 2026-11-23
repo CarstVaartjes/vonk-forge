@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel, ValidationError
 
 from vonk_agent_protocol.agent_words import ProfileChildPhase
-from vonk_agent_protocol.lifecycle_vocabulary import OutcomeKind
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OutcomeKind
 from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 
 from ..lifecycle.evidence import (
@@ -307,7 +307,8 @@ def _progress_view(
                 else "running"
                 if state == "running" and node_id in current_nodes
                 else "pending"
-                if state == "queued" or state == "running" and raw.completed_phases
+                if state == LifecycleState.QUEUED
+                or (state == LifecycleState.RUNNING and raw.completed_phases)
                 else "unknown"
             )
         error = item.error if item is not None else None
