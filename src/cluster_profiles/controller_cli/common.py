@@ -101,6 +101,16 @@ def _add_output(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_show_all(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--all",
+        dest="show_all",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="List every recipe, not only the most relevant ones",
+    )
+
+
 def _add_verbose(parser: argparse.ArgumentParser) -> None:
     """``--verbose`` is the removal review's name for ``--wide``."""
     parser.add_argument(

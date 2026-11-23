@@ -269,7 +269,7 @@ export function LibraryCacheAction({
             className="button secondary compact"
             onClick={() => void reviewRemoval()}
           >
-            Review again
+            Retry
           </button>
         )}
         {error && (
