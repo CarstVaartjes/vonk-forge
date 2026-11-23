@@ -76,7 +76,7 @@ import os
 from datetime import UTC, datetime
 from sqlalchemy.orm import sessionmaker
 from vonk_control.db import build_engine
-from vonk_control.worker import WorkerHeartbeatRecorder
+from vonk_control.worker.liveness import WorkerHeartbeatRecorder
 engine = build_engine(os.environ['VONK_TEST_OBSERVATION_DATABASE_URL'], component='observation-worker-proof')
 try:
     recorder = WorkerHeartbeatRecorder(sessionmaker(engine, expire_on_commit=False),

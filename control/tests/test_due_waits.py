@@ -45,7 +45,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.jobs.queue import JobService
 from vonk_control.models import Job
 from vonk_control.persisted_waits import schedule_wait
-from vonk_control.worker import Worker
+from vonk_control.worker.loop import Worker
 sessions = sessionmaker(create_engine(os.environ['WAIT_TEST_DATABASE']))
 now = datetime.fromisoformat(os.environ['WAIT_TEST_NOW'])
 worker = Worker(JobService(sessions, clock=lambda: now), 'doomed-worker', {}, coordinator_failures=CoordinatorFailures(sessions, lambda: now, 'a' * 64))
