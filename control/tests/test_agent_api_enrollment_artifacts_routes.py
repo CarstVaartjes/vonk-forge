@@ -10,6 +10,7 @@ import os
 import stat
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from datetime import timedelta
 from email.message import Message as EmailMessage
 from threading import Event
@@ -842,10 +843,8 @@ def test_verified_upload_publication_repairs_or_preserves_exact_bytes(
         real_sync(descriptor)
 
     monkeypatch.setattr("vonk_control.agent_api.common.os.fsync", sync)
-    try:
+    with suppress(Exception):  # no unverified effect and fresh publication decide
         _commit_recipe_image_upload(temporary, destination, expected_bytes=len(payload))
-    except Exception:  # noqa: BLE001, S110 -- no unverified effect and fresh publication decide
-        pass
     assert outside.read_bytes() == payload
     if damage != "directory-sync":
         assert stat.S_ISREG(destination.lstat().st_mode)

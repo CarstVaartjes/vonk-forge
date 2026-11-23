@@ -10,6 +10,7 @@ import logging
 import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from datetime import UTC, timedelta
 from importlib.resources import files
 from threading import Event
@@ -488,10 +489,8 @@ def test_recipe_image_upload_lock_preserves_interrupted_bytes(tmp_path) -> None:
     try:
         os.write(descriptor, b"partial archive")
         competing = None
-        try:
+        with suppress(Exception):  # cursor preservation and fresh admission decide
             competing = _prepare_recipe_image_upload(tmp_path, "a" * 64)
-        except Exception:  # noqa: BLE001, S110 -- cursor preservation and fresh admission decide
-            pass
         if competing is not None:
             os.close(competing[0])
         assert competing is None

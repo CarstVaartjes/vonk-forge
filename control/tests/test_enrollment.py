@@ -7,6 +7,7 @@ import time
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -295,10 +296,8 @@ def test_grant_creation_rejects_ttl_outside_bounded_contract(
     service, ttl_seconds: int
 ) -> None:
     enrollment, sessions, _, authority = service
-    try:
+    with suppress(Exception):  # malformed input cannot create a grant or effect
         enrollment.create(NODE_ID, "admin", ttl_seconds)
-    except Exception:  # noqa: BLE001, S110 -- malformed input cannot create a grant or effect
-        pass
     assert authority.calls == []
     with sessions() as session:
         assert session.scalar(select(AgentEnrollmentGrant)) is None
@@ -444,10 +443,8 @@ def test_new_node_grant_still_rejects_existing_identity(service) -> None:
     grant = enrollment.create(None, "admin", 600)
     assert isinstance(grant, EnrollmentGrant)
 
-    try:
+    with suppress(Exception):  # the assertion is the unchanged credential effect
         enrollment.submit(grant.token, request, evidence(request))
-    except Exception:  # noqa: BLE001, S110 -- the assertion is the unchanged credential effect
-        pass
     assert len(authority.calls) == 1
     with sessions() as session:
         assert session.get(AgentCertificate, original.serial).revoked_at is None
@@ -471,10 +468,8 @@ def test_reenrollment_refuses_intentionally_retired_identity(service) -> None:
         NODE_ID, "admin", 600, request_key=str(uuid.uuid4())
     )
 
-    try:
+    with suppress(Exception):  # rejected authority must have no credential effect
         enrollment.submit(grant.token, request, evidence(request))
-    except Exception:  # noqa: BLE001, S110 -- rejected authority must have no credential effect
-        pass
     assert len(authority.calls) == 1
     with sessions() as session:
         assert session.get(AgentCertificate, original.serial).revoked_at is None
@@ -536,12 +531,10 @@ def test_csr_evidence_mismatch_has_no_effect_and_corrected_evidence_is_admitted(
     request = csr()
     grant = enrollment.create(NODE_ID, "admin", 600)
     assert isinstance(grant, EnrollmentGrant)
-    try:
+    with suppress(Exception):  # verify grant preservation and actual effects
         enrollment.submit(
             grant.token, request, evidence(request, csr_public_key_fingerprint="0" * 64)
         )
-    except Exception:  # noqa: BLE001, S110 -- verify grant preservation and actual effects
-        pass
     assert authority.calls == []
     with sessions() as session:
         assert session.get(AgentEnrollmentGrant, grant.id).consumed_at is None
@@ -623,10 +616,8 @@ def test_consumed_enrollment_grant_refuses_oversized_valid_csr_replay(service):
     assert isinstance(grant, EnrollmentGrant)
     issued = enrollment.submit(grant.token, request, evidence(request))
     oversized = request + b" " * MAX_CSR_BYTES
-    try:
+    with suppress(Exception):  # exact replay and effect count decide correctness
         enrollment.submit(grant.token, oversized, evidence(request))
-    except Exception:  # noqa: BLE001, S110 -- exact replay and effect count decide correctness
-        pass
     assert len(authority.calls) == 1
     assert enrollment.submit(grant.token, request, evidence(request)) == issued
 
@@ -666,10 +657,8 @@ def test_renewal_stages_once_then_activation_atomically_retires_older_identity(
     assert renewed.serial in authority.revocations
     renewed = replacement
     calls_before = len(authority.calls)
-    try:
+    with suppress(Exception):  # an inactive source cannot authorize another effect
         enrollment.renew(NODE_ID, renewed.serial, csr())
-    except Exception:  # noqa: BLE001, S110 -- an inactive source cannot authorize another effect
-        pass
     assert len(authority.calls) == calls_before
 
     enrollment.activate(NODE_ID, renewed.serial, renewed.generation)
@@ -688,10 +677,8 @@ def test_renewal_stages_once_then_activation_atomically_retires_older_identity(
         (OTHER_NODE_ID, csr(OTHER_NODE_ID)),
         (NODE_ID, b"not a csr"),
     ):
-        try:
+        with suppress(Exception):  # neither request can produce a credential
             enrollment.renew(node_id, renewed.serial, malformed)
-        except Exception:  # noqa: BLE001, S110 -- neither request can produce a credential
-            pass
         assert len(authority.calls) == calls_before
     fresh = enrollment.renew(NODE_ID, renewed.serial, csr())
     assert isinstance(fresh, IssuedCertificate)
@@ -701,10 +688,8 @@ def test_renewal_stages_once_then_activation_atomically_retires_older_identity(
         node = session.get(AgentNode, NODE_ID)
         assert node is not None
         node.state = "retired"
-    try:
+    with suppress(Exception):  # retired identity has no credential effect
         enrollment.renew(NODE_ID, fresh.serial, csr())
-    except Exception:  # noqa: BLE001, S110 -- retired identity has no credential effect
-        pass
     assert len(authority.calls) == calls_before
 
 
@@ -1094,10 +1079,10 @@ def test_process_death_observes_exact_committed_rotation_after_restart(service) 
     issued = enroll(enrollment)
     request = csr()
     authority.renew_error = SystemExit("simulated process death after provider request")
-    try:
+    with suppress(
+        BaseException
+    ):  # controlled death; exact adoption below decides correctness
         enrollment.renew(NODE_ID, issued.serial, request)
-    except BaseException:  # noqa: BLE001, S110 -- controlled death; exact adoption below decides correctness
-        pass
     assert len(authority.renew_request_ids) == 1
     authority.renew_error = None
     restarted = EnrollmentService(sessions, authority, clock=clock)
@@ -1183,10 +1168,8 @@ def test_revoked_identity_denies_renewal_immediately(service) -> None:
         assert certificate is not None
         certificate.revoked_at = clock.now
 
-    try:
+    with suppress(Exception):  # revoked source cannot cause a new effect
         enrollment.renew(NODE_ID, issued.serial, csr())
-    except Exception:  # noqa: BLE001, S110 -- revoked source cannot cause a new effect
-        pass
     assert len(authority.calls) == 1
     with sessions() as session:
         assert session.get(AgentCertificateRotation, NODE_ID) is None
@@ -1775,10 +1758,8 @@ def test_grant_identity_is_recoverable_without_reissuing_its_secret(service):
             session.scalar(select(func.count()).select_from(AgentEnrollmentGrant)) == 1
         )
     observed = None
-    try:
+    with suppress(Exception):  # no other actor's status is disclosed
         observed = enrollment.grant_status(identity, actor="another-admin")
-    except Exception:  # noqa: BLE001, S110 -- no other actor's status is disclosed
-        pass
     assert observed is None
     assert enrollment.grant_status(identity, actor="admin") == status
 
@@ -1788,18 +1769,14 @@ def test_revoking_an_undelivered_grant_prevents_certificate_issuance(service):
     identity = str(uuid.uuid4())
     request = csr()
     grant = enrollment.create_named("Atlas", "admin", 600, request_key=identity)
-    try:
+    with suppress(Exception):  # ownership is verified through unchanged status
         enrollment.revoke_grant(identity, actor="another-admin")
-    except Exception:  # noqa: BLE001, S110 -- ownership is verified through unchanged status
-        pass
     assert enrollment.grant_status(identity, actor="admin").revoked_at is None
     revoked = enrollment.revoke_grant(identity, actor="admin")
     assert revoked.state == "revoked"
     assert enrollment.revoke_grant(identity, actor="admin") == revoked
-    try:
+    with suppress(Exception):  # no issuance is the security assertion
         enrollment.submit(grant.token, request, evidence(request))
-    except Exception:  # noqa: BLE001, S110 -- no issuance is the security assertion
-        pass
     assert authority.calls == []
 
 
@@ -1808,10 +1785,8 @@ def test_expired_and_consumed_grants_have_distinct_recovery_outcomes(service):
     request = csr()
     expired = enrollment.create_named("Old", "admin", 1, request_key=str(uuid.uuid4()))
     clock.advance(seconds=2)
-    try:
+    with suppress(Exception):  # expired credentials cannot authorize effects
         enrollment.submit(expired.token, request, evidence(request))
-    except Exception:  # noqa: BLE001, S110 -- expired credentials cannot authorize effects
-        pass
     assert authority.calls == []
     assert (
         enrollment.grant_status(expired.id, actor="admin").state
@@ -2010,10 +1985,8 @@ def test_expired_renewal_refusals_do_not_issue_or_poison_fresh_enrollment(
         proof = proof.model_copy(update={"csr": csr().decode("ascii")})
     else:
         clock.now += timedelta(seconds=301)
-    try:
+    with suppress(Exception):  # no provider effect and fresh authorization decide
         enrollment.renew_expired(proof)
-    except Exception:  # noqa: BLE001, S110 -- no provider effect and fresh authorization decide
-        pass
     assert len(authority.calls) == 1
     if failure in {"wrong-key", "changed-csr", "stale"}:
         fresh = expired_proof(key, NODE_ID, issued.serial, csr(), clock.now)
