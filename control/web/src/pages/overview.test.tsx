@@ -166,6 +166,24 @@ test("Upgrade agents is disabled with no Sparks enrolled and enabled once one is
   nodes = [];
 });
 
+test("Upgrade agents is offered only while some Spark has an upgrade to take", () => {
+  nodes = [
+    { ...spark("Alpha", 40, 250), agent_upgrade_available: false },
+    { ...spark("Beta", 40, 250), agent_upgrade_available: false },
+  ];
+  const { unmount } = render(<OverviewPage api={api} />);
+  expect(screen.getByRole("button", { name: "Upgrade agents" })).toBeDisabled();
+  unmount();
+  // One that can take it, or one the Controller cannot tell yet, keeps it available.
+  nodes = [
+    { ...spark("Alpha", 40, 250), agent_upgrade_available: false },
+    { ...spark("Beta", 40, 250), agent_upgrade_available: true },
+  ];
+  render(<OverviewPage api={api} />);
+  expect(screen.getByRole("button", { name: "Upgrade agents" })).toBeEnabled();
+  nodes = [];
+});
+
 test("the upgrade notice links to Activity instead of printing the operation id", async () => {
   nodes = [spark("Alpha", 40, 250)];
   const upgradeFleet = vi

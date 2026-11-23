@@ -110,7 +110,7 @@ export function OverviewPage({
             <button
               type="button"
               className="button secondary"
-              disabled={fleet.snapshot?.nodes.length === 0}
+              disabled={!nodes.some((node) => node.agent_upgrade_available !== false)}
               onClick={() => setUpgrading(true)}
             >
               Upgrade agents

@@ -75,6 +75,7 @@ def _node(
     telemetry_unreadable: bool = False,
     gpu_clock_desired: GpuClockRange | None = None,
     swap_desired: SwapIntent | None = None,
+    agent_upgrade_available: bool | None = None,
 ) -> FleetNode:
     warnings: list[ProjectionReason] = list(layout_notices)
     contact = agent.contact
@@ -335,6 +336,7 @@ def _node(
     )
     return FleetNode(
         agent_runtime=agent_runtime,
+        agent_upgrade_available=agent_upgrade_available,
         gpu_clock_desired=gpu_clock_desired,
         swap_desired=swap_desired,
         id=node_id,

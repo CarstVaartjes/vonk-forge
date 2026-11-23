@@ -3334,6 +3334,18 @@
           ],
           "default": null
         },
+        "agent_upgrade_available": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Upgrade Available"
+        },
         "connection": {
           "$ref": "#/$defs/NodeConnection"
         },

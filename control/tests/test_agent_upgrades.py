@@ -2217,3 +2217,31 @@ def test_upgrade_dispatch_accepts_controller_contact_ahead_of_clock(tmp_path) ->
         request_id=str(uuid.uuid4()),
     )
     assert _operation_nodes(sessions, job.id) == [NODE_A]
+
+
+def _spark(
+    identity: Mapping[str, object] | None, *, state: str = "active"
+) -> AgentNode:
+    node = AgentNode(node_id=NODE_A, state=state)
+    if identity is not None:
+        set_inventory_identity(node, **identity)
+    return node
+
+
+def test_a_spark_has_an_upgrade_only_when_it_differs_and_can_take_it():
+    """The fleet read says 'upgrade available' by the rollout's own rule."""
+    from vonk_control.agent_upgrades.availability import UpgradeAvailability
+
+    availability = UpgradeAvailability(lambda: datetime(2026, 11, 23, tzinfo=UTC))
+    # Before the release is read the answer is unknown, never "nothing to upgrade".
+    assert availability.available(_spark(OLD_IDENTITY)) is None
+    availability.bind(lambda: PACKAGE_MODEL)
+    availability._refresh()
+
+    assert availability.available(_spark(OLD_IDENTITY)) is True
+    assert availability.available(_spark(NEW_IDENTITY)) is False
+    assert availability.available(_spark(OLD_IDENTITY, state="revoked")) is False
+    other_arch = {**OLD_IDENTITY, "architecture": "linux-amd64"}
+    assert availability.available(_spark(other_arch)) is False
+    # A Spark that has not reported what it runs is unknown, not current.
+    assert availability.available(_spark(None)) is None

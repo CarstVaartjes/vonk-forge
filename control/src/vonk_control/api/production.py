@@ -240,6 +240,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     capabilities = CapabilityRegistry()
     from sqlalchemy import func, select
 
+    from ..agent_upgrades.availability import UpgradeAvailability
     from ..agent_upgrades.service import AgentUpgradeService
     from ..availability_production.production import build_recipe_image_availability
     from ..db.connections import build_engine, session_factory
@@ -296,11 +297,13 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     database_bundles = DatabaseSourceBundleStore(sessions)
     telemetry_repository = TelemetryRepository(sessions, clock=clock)
     fleet_event_repository = FleetEventRepository(sessions, clock=clock)
+    upgrade_availability = UpgradeAvailability(clock)
     visual_fleet = FleetProjection(
         sessions,
         clock=clock,
         events=fleet_event_repository,
         telemetry=telemetry_repository,
+        agent_upgrade_available=upgrade_availability.available,
     )
     visual_fleet_stream = FleetStream(
         fleet_event_repository,
@@ -490,6 +493,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         channel=settings.install_channel,
         release_api_url=AGENT_RELEASE_API_URL,
     )
+    upgrade_availability.bind(agent_upgrades.current_package)
 
     agent_services.operations.set_result_consumer(
         controller_result_consumer(

@@ -77,6 +77,7 @@ class FleetProjection:
         agent_online_seconds: float = SPARK_PRESENCE_WINDOW.total_seconds(),
         inventory_fresh_seconds: float = INVENTORY_MAX_AGE_SECONDS,
         run_rank_fresh_seconds: float = 300,
+        agent_upgrade_available: Callable[[AgentNode], bool | None] | None = None,
     ) -> None:
         windows = (
             telemetry_live_seconds,
@@ -98,6 +99,7 @@ class FleetProjection:
         self._agent_online_seconds = agent_online_seconds
         self._inventory_fresh_seconds = inventory_fresh_seconds
         self._run_rank_fresh_seconds = run_rank_fresh_seconds
+        self._agent_upgrade_available = agent_upgrade_available
 
     def read(self) -> FleetSnapshot:
         return self.read_at(None)
@@ -232,6 +234,11 @@ class FleetProjection:
                     repeating=repeating.get(node_id, ()),
                     layout_notices=layout_notices.get(node_id, ()),
                     slow_nas=slow_nas.get(node_id),
+                    agent_upgrade_available=(
+                        None
+                        if self._agent_upgrade_available is None
+                        else self._agent_upgrade_available(agents[node_id])
+                    ),
                 )
                 for node_id in node_ids
             ],

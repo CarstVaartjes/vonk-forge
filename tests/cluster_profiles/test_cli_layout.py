@@ -482,3 +482,13 @@ def test_a_recipe_offers_the_actions_the_controller_lists(printed):
         _library_item, _model_item("not_cached", ["download"]), "recipe", detail=False
     )
     assert any("vonkctl recipe download p/m" in line for line in lines)
+
+
+def test_a_serving_model_row_names_the_sparks_it_runs_on():
+    item = _model_item("cached", ["remove"]) | {
+        "local": {"controller": "cached", "running_on": ["spk_1"], "preparation": None},
+        "resources": {},
+    }
+    row = library_render._library_row(item, "model")
+    assert "1 Spark" in row
+    assert "no" not in row
