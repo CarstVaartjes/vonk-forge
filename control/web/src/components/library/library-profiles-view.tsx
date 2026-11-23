@@ -16,6 +16,7 @@ import { ApiError } from "../../api/client";
 import {
   ProfileAction,
   ProfileDocumentState,
+  ProfileLoadAction,
   TERMINAL_LIFECYCLE_STATES,
 } from "../../api/vocabulary.generated";
 import { canonicalRecipeSelector, readableProfile } from "../../api/types";
@@ -272,9 +273,12 @@ function stoppedAliases(preview: FleetProfilePreview | undefined): string[] {
   return [...new Set(aliases)].sort();
 }
 
-/** A load is offered when it can be admitted now, or once the Controller has prepared what it lacks. */
+/** The Controller's one answer for the plan: load it, load it after confirming stops, nothing to change, or blocked. */
 const loadable = (preview: FleetProfilePreview | undefined) =>
-  preview?.allowed === true || preview?.waits_for_preparation === true;
+  preview?.next_action === ProfileLoadAction.LOAD ||
+  preview?.next_action === ProfileLoadAction.LOAD_STOPPING;
+const nothingToChange = (preview: FleetProfilePreview | undefined) =>
+  preview?.next_action === ProfileLoadAction.NOTHING_TO_CHANGE;
 
 const bytes = (value: unknown) =>
   isWireNumber(value) && compareWire(value, 0) >= 0 ? formatBytes(value) : undefined;
@@ -395,16 +399,18 @@ function ProfileReview({ preview }: { preview: FleetProfilePreview }) {
           ].join(" · ")}
         </p>
       )}
-      {!loadable(preview) && preview.reasons[0] && (
+      {preview.next_action === ProfileLoadAction.BLOCKED && preview.reasons[0] && (
         <p className="library-profile-plain-error" role="alert">
           {preview.reasons[0].detail}
         </p>
       )}
-      {(preview.reasons ?? []).slice(loadable(preview) ? 0 : 1).map((reason) => (
-        <p key={`${reason.code}:${reason.detail}`} className="library-profile-plain-note">
-          {reason.detail}
-        </p>
-      ))}
+      {(preview.reasons ?? [])
+        .slice(preview.next_action === ProfileLoadAction.BLOCKED ? 1 : 0)
+        .map((reason) => (
+          <p key={`${reason.code}:${reason.detail}`} className="library-profile-plain-note">
+            {reason.detail}
+          </p>
+        ))}
       {(preview.effects.gpu_clocks ?? []).map((effect) => (
         <p key={effect.node_id}>
           GPU range on {effect.node_id}: {formatWire(effect.desired.min_mhz)}–
@@ -1302,17 +1308,21 @@ export function LibraryProfilesView({
                 <button type="button" className="button secondary" onClick={() => setEditing(true)}>
                   Edit profile
                 </button>
-                <button
-                  type="button"
-                  className="button"
-                  disabled={
-                    loadingProfile || applicationRunning || (!loadable(preview) && !pendingLoad)
-                  }
-                  onClick={() => void load()}
-                >
-                  {loadingProfile ? "Loading…" : "Load profile"}
-                </button>
-                {preview && (
+                {nothingToChange(preview) && !pendingLoad ? (
+                  <small className="library-profile-stops">Loaded, nothing to change</small>
+                ) : (
+                  <button
+                    type="button"
+                    className="button"
+                    disabled={
+                      loadingProfile || applicationRunning || (!loadable(preview) && !pendingLoad)
+                    }
+                    onClick={() => void load()}
+                  >
+                    {loadingProfile ? "Loading…" : "Load profile"}
+                  </button>
+                )}
+                {preview && !nothingToChange(preview) && (
                   <small className="library-profile-stops">
                     {stoppedAliases(preview).length > 0
                       ? `Will stop: ${stoppedAliases(preview).join(", ")}`

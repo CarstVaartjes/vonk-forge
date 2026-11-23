@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -45,6 +46,19 @@ from .vocabulary import (
 )
 
 
+class ProfileLoadAction(StrEnum):
+    """What a load of the reviewed plan would do, decided once by the Controller."""
+
+    #: Applies changes and stops no workload.
+    LOAD = "load"
+    #: Applies changes that stop serving workloads: confirm them first.
+    LOAD_STOPPING = "load_stopping"
+    #: Everything already matches the saved profile.
+    NOTHING_TO_CHANGE = "nothing_to_change"
+    #: Cannot be loaded now; the reasons say why.
+    BLOCKED = "blocked"
+
+
 class FleetProfileReviewedDecision(StrictModel):
     """The reviewable semantic decision that owns the reconciliation digest."""
 
@@ -73,8 +87,38 @@ class FleetProfileReviewedDecision(StrictModel):
     reasons: list[FleetProfileReason] = Field(max_length=128)
 
 
+def profile_load_action(decision: FleetProfileReviewedDecision) -> ProfileLoadAction:
+    """The one rule for offering, confirming and describing a load.
+
+    A plan loads when it can be admitted now or once the Controller has prepared
+    what it lacks, and it changes something: a start, stop, install, uninstall,
+    placement, build or distribution. It needs a confirmation exactly when it
+    stops a workload.
+    """
+
+    summary = decision.summary
+    if not (decision.allowed or decision.waits_for_preparation):
+        return ProfileLoadAction.BLOCKED
+    if not any(
+        (
+            summary.starts,
+            summary.stops,
+            summary.installs,
+            summary.uninstalls,
+            summary.placements,
+            summary.builds,
+            summary.distributions,
+        )
+    ):
+        return ProfileLoadAction.NOTHING_TO_CHANGE
+    return ProfileLoadAction.LOAD_STOPPING if summary.stops else ProfileLoadAction.LOAD
+
+
 class FleetProfilePreview(FleetProfileReviewedDecision):
     generated_at: datetime
+    #: What loading this plan does; derived from its summary, so it never changes
+    #: the reviewed identity. A plan stored without it reads as a plain load.
+    next_action: ProfileLoadAction = ProfileLoadAction.LOAD
     assessments: list[FleetProfileAssignmentAssessment] = Field(max_length=64)
     preparations: list[FleetProfileAssignmentPreparation] = Field(
         default_factory=list, max_length=64

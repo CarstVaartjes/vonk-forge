@@ -55,6 +55,7 @@ def cli_words() -> str:
     from vonk_agent_protocol.state_machines import RouteState, RunState
     from vonk_control.artifact_jobs.job_contract import JobContractState
     from vonk_control.cache_removal_review import ArtifactKind, CacheAssetDisposition
+    from vonk_control.fleet_profile_contract.review import ProfileLoadAction
     from vonk_control.model_cache.contract import CacheOperationKind
     from vonk_forge_contracts.qualification_status import (
         QualificationOutcome,
@@ -95,6 +96,7 @@ def cli_words() -> str:
         "ASSET_RETAIN_SHARED": CacheAssetDisposition.RETAIN_SHARED,
         "ASSET_RETAIN_REFERENCED": CacheAssetDisposition.RETAIN_REFERENCED,
         "ASSET_RETAIN_OBSERVATION_UNAVAILABLE": CacheAssetDisposition.RETAIN_OBSERVATION_UNAVAILABLE,
+        "PROFILE_NOTHING_TO_CHANGE": ProfileLoadAction.NOTHING_TO_CHANGE,
         "ACTION_DOWNLOAD": CacheOperationKind.DOWNLOAD,
         "ACTION_REMOVE": CacheOperationKind.REMOVE,
         "ACTION_CANCEL": CacheOperationKind.CANCEL,

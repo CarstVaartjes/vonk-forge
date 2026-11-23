@@ -97,6 +97,7 @@ def typescript_vocabulary() -> str:
         FleetRemovalDisposition,
         FleetRemovalReason,
     )
+    from vonk_control.fleet_profile_contract.review import ProfileLoadAction
     from vonk_control.library.contract import LibraryCacheState
     from vonk_control.model_cache.contract import (
         CacheOperationKind,
@@ -119,6 +120,7 @@ def typescript_vocabulary() -> str:
             CacheAssetDisposition,
             CacheOperationKind,
             LibraryCacheState,
+            ProfileLoadAction,
             ModelStorageObservationReason,
             QualificationStatus,
             QualificationOutcome,

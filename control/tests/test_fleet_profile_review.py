@@ -12,7 +12,16 @@ from sqlalchemy import inspect, select
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
-from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profile_contract.assessment import FleetProfilePlanSummary
+from vonk_control.fleet_profile_contract.definitions import (
+    FleetProfileInput,
+    profile_load_due,
+)
+from vonk_control.fleet_profile_contract.review import (
+    FleetProfileReviewedDecision,
+    ProfileLoadAction,
+    profile_load_action,
+)
 from vonk_control.fleet_profiles.contracts import (
     FleetProfileConflict,
     FleetProfileReviewStale,
@@ -100,6 +109,14 @@ def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
     )
     reviewed = service.preview(profile.id)
     assert reviewed.allowed
+    # A never-loaded profile is offered for loading; the plan has work to do.
+    assert reviewed.next_action in (
+        ProfileLoadAction.LOAD,
+        ProfileLoadAction.LOAD_STOPPING,
+    )
+    assert service.get(profile.id).next_actions == [
+        f"vonkctl --profile {profile.number} profile load"
+    ]
     fit = reviewed.assessments[0].assessment.fit_current.nodes[0]
     assert fit.memory_available_bytes is not None
     assert fit.memory_required_bytes is not None
@@ -1008,3 +1025,51 @@ def test_deferred_target_builder_review_refreshes_inventory_before_admission(
     fresh_uncertainty = checked[0].fit_current.nodes[0].memory_usage_uncertainty
     assert fresh_uncertainty is not None
     assert fresh_uncertainty.inventory_evidence_digest == "b" * 64
+
+
+def _plan(*, allowed: bool = True, waits: bool = False, **counts: int):
+    summary = {
+        name: 0 for name in FleetProfilePlanSummary.model_fields if name != "blockers"
+    } | {"blockers": 0}
+    return FleetProfileReviewedDecision.model_construct(
+        allowed=allowed,
+        waits_for_preparation=waits,
+        summary=FleetProfilePlanSummary.model_validate(summary | counts),
+    )
+
+
+@pytest.mark.parametrize(
+    ("plan", "expected"),
+    [
+        (_plan(already_correct=2), ProfileLoadAction.NOTHING_TO_CHANGE),
+        (_plan(starts=1), ProfileLoadAction.LOAD),
+        (_plan(installs=1), ProfileLoadAction.LOAD),
+        (_plan(starts=1, stops=1), ProfileLoadAction.LOAD_STOPPING),
+        (_plan(allowed=False, waits=True, builds=1), ProfileLoadAction.LOAD),
+        (_plan(allowed=False, starts=1), ProfileLoadAction.BLOCKED),
+        (_plan(allowed=False, already_correct=1), ProfileLoadAction.BLOCKED),
+    ],
+)
+def test_a_plan_is_loaded_only_when_it_changes_something_and_confirmed_only_when_it_stops(
+    plan, expected
+):
+    """One rule for the Load button, its confirmation and the CLI hint."""
+
+    assert profile_load_action(plan) == expected
+
+
+@pytest.mark.parametrize(
+    ("revision", "loaded", "pending", "due"),
+    [
+        (7, 7, False, False),
+        (8, 7, False, True),
+        (1, None, False, True),
+        (7, 7, True, True),
+    ],
+)
+def test_loading_a_saved_profile_is_due_until_it_is_loaded_at_its_revision(
+    revision, loaded, pending, due
+):
+    assert (
+        profile_load_due(saved=revision, loaded=loaded, update_pending=pending) is due
+    )

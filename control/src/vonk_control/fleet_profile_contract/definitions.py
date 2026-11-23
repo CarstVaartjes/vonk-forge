@@ -326,6 +326,17 @@ class FleetProfileView(StrictModel):
     updated_at: datetime
 
 
+def profile_load_due(*, saved: int, loaded: int | None, update_pending: bool) -> bool:
+    """Whether loading this saved profile would apply something new.
+
+    The profile read answers it from what it knows without planning: the saved
+    number is not the loaded one, or a loaded workload runs an older recipe
+    version. The exact plan decides the rest (``ProfileLoadAction``).
+    """
+
+    return update_pending or loaded not in (saved,)
+
+
 class UnavailableFleetProfileView(StrictModel):
     """Keep an authorized saved identity visible without inventing its contents."""
 

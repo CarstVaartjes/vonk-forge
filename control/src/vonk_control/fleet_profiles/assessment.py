@@ -44,6 +44,7 @@ from ..fleet_profile_contract.definitions import (
 from ..fleet_profile_contract.review import (
     FleetProfilePreview,
     FleetProfileReviewedDecision,
+    profile_load_action,
 )
 from ..fleet_profile_contract.vocabulary import FleetProfileAction
 from ..lifecycle.evidence import Residue
@@ -757,6 +758,7 @@ class FleetProfileService:
                     for name in type(decision).model_fields
                 },
                 generated_at=now,
+                next_action=profile_load_action(decision),
                 assessments=ordered_assessments,
                 preparations=ordered_preparations,
                 plan_digest=_digest(decision),

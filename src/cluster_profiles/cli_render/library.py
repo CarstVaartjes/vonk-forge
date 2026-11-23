@@ -514,10 +514,8 @@ def _library(
                 _object(item.get("local"), "local").get("preparation"), "preparation"
             )
             operation = preparation.get("operation_id")
-            actions = item.get("actions")
-            if not isinstance(actions, list):
-                raise ControlMalformedResponse("actions observation is unavailable")
-            if operation and ACTION_FOLLOW in actions:
+            actions = item.get("actions") if operation else None
+            if isinstance(actions, list) and ACTION_FOLLOW in actions:
                 _field(
                     "Follow",
                     f"vonkctl model progress {shlex.quote(str(operation))} --follow",

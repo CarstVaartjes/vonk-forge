@@ -76,6 +76,7 @@ const profile = {
 const preview = {
   effects: { runs: [], installations: [], superseded: [], adopted: [] },
   allowed: true,
+  next_action: "load",
   plan_digest: "b".repeat(64),
   effects_digest: "c".repeat(64),
   steps: [{ index: 0, kind: "switch", label: "Switch to Qwen Code", node_ids: [nodeA] }],
@@ -817,4 +818,28 @@ test("a profile without a maintenance wait shows no waiting list", async () => {
   render(<LibraryProfilesView api={apiFor()} entries={[]} onNavigate={vi.fn()} />);
   expect((await screen.findAllByText("Profile 2 · Coding"))[0]).toBeVisible();
   expect(screen.queryByRole("list", { name: "Waiting for" })).toBeNull();
+});
+
+test("a loaded profile whose plan changes nothing offers no Load button", async () => {
+  const settled = {
+    ...preview,
+    next_action: "nothing_to_change",
+  } as unknown as FleetProfilePreview;
+  const api = apiFor({ previewProfile: vi.fn(async () => settled) });
+  render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()} />);
+  expect(await screen.findByText("Loaded, nothing to change")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Load profile" })).toBeNull();
+});
+
+test("a blocked plan cannot be loaded and says why", async () => {
+  const blocked = {
+    ...preview,
+    allowed: false,
+    next_action: "blocked",
+    reasons: [{ code: "profile.blocked", severity: "error", detail: "No Spark fits this recipe" }],
+  } as unknown as FleetProfilePreview;
+  const api = apiFor({ previewProfile: vi.fn(async () => blocked) });
+  render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()} />);
+  expect(await screen.findByRole("alert")).toHaveTextContent("No Spark fits this recipe");
+  expect(screen.getByRole("button", { name: "Load profile" })).toBeDisabled();
 });

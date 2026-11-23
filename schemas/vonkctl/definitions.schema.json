@@ -6131,6 +6131,10 @@
           "title": "Generated At",
           "type": "string"
         },
+        "next_action": {
+          "$ref": "#/$defs/ProfileLoadAction",
+          "default": "load"
+        },
         "plan_digest": {
           "pattern": "^[0-9a-f]{64}$",
           "title": "Plan Digest",
@@ -9754,6 +9758,20 @@
     "LibraryRecipeProjection": {
       "description": "One exact canonical recipe and its model/resource/local projections.",
       "properties": {
+        "actions": {
+          "items": {
+            "enum": [
+              "download",
+              "remove",
+              "cancel",
+              "follow"
+            ],
+            "type": "string"
+          },
+          "maxItems": 4,
+          "title": "Actions",
+          "type": "array"
+        },
         "alignment": {
           "anyOf": [
             {
@@ -9890,6 +9908,7 @@
         "usage",
         "resources",
         "local",
+        "actions",
         "updated_at",
         "node_count",
         "engine"
@@ -13134,6 +13153,17 @@
       "title": "PreparationReason",
       "type": "object"
     },
+    "ProfileLoadAction": {
+      "description": "What a load of the reviewed plan would do, decided once by the Controller.",
+      "enum": [
+        "load",
+        "load_stopping",
+        "nothing_to_change",
+        "blocked"
+      ],
+      "title": "ProfileLoadAction",
+      "type": "string"
+    },
     "ProfileReasonCode": {
       "description": "Reasons a fleet profile cannot be applied or is waiting.",
       "enum": [
@@ -14680,6 +14710,20 @@
     },
     "RecipeDetailResponseDocument": {
       "properties": {
+        "actions": {
+          "items": {
+            "enum": [
+              "download",
+              "remove",
+              "cancel",
+              "follow"
+            ],
+            "type": "string"
+          },
+          "maxItems": 4,
+          "title": "Actions",
+          "type": "array"
+        },
         "alignment": {
           "anyOf": [
             {
@@ -14805,7 +14849,7 @@
           "$ref": "#/$defs/LibraryResourceProjection"
         },
         "schema_version": {
-          "const": 3,
+          "const": 4,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -14840,6 +14884,7 @@
         "usage",
         "resources",
         "local",
+        "actions",
         "updated_at",
         "node_count",
         "engine",
@@ -15687,7 +15732,7 @@
           "type": "array"
         },
         "schema_version": {
-          "const": 3,
+          "const": 4,
           "title": "Schema Version",
           "type": "integer"
         }

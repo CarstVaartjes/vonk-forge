@@ -42,6 +42,10 @@
       "title": "Generated At",
       "type": "string"
     },
+    "next_action": {
+      "$ref": "definitions.schema.json#/$defs/ProfileLoadAction",
+      "default": "load"
+    },
     "plan_digest": {
       "pattern": "^[0-9a-f]{64}$",
       "title": "Plan Digest",
