@@ -1,13 +1,15 @@
 """Select the test files a patch touches: ``scripts/test changed``.
 
 Reads a unified diff (stdin or a file) and prints ``<suite> <test file>`` lines,
-suite being ``control`` (control/tests) or ``repository`` (tests/ and
-agent_protocol/tests). A test file is selected when the patch edits it, or when
+suite being ``control``, ``repository``, ``agent_protocol`` or ``compose`` (the test
+tree's owner). A test file is selected when the patch edits it, or when
 it imports, directly or through test support modules and conftests, a module the
 patch touches. Importing a package or submodule executes the package
 ``__init__`` files above it, so a touched ``__init__.py`` selects every
 importer of anything inside the package. The graph is static (``ast``) and
-covers only the test trees; source modules are not followed.
+covers only the test trees; source modules are not followed. A touched file that is
+not a Python module of the graph (a fixture, a script, a data file) selects the
+test files that name its repository path, or its quoted file name.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from __future__ import annotations
 import ast
 import sys
 from collections import defaultdict
+from functools import cache
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +53,18 @@ def is_test_file(path: str) -> bool:
     )
 
 
+def _statements(tree: ast.AST):
+    """Every statement, without descending into expressions (imports are statements)."""
+    pending = [tree]
+    while pending:
+        node = pending.pop()
+        yield node
+        for field in ("body", "orelse", "finalbody", "handlers"):
+            pending.extend(getattr(node, field, ()))
+        for case in getattr(node, "cases", ()):
+            pending.extend(case.body)
+
+
 def _imports(source: str, package: list[str]) -> set[str]:
     """Dotted names a module may import, relative ones made absolute."""
     names: set[str] = set()
@@ -57,7 +72,7 @@ def _imports(source: str, package: list[str]) -> set[str]:
         tree = ast.parse(source)
     except SyntaxError:
         return names
-    for node in ast.walk(tree):
+    for node in _statements(tree):
         if isinstance(node, ast.Import):
             names.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
@@ -72,11 +87,22 @@ def _imports(source: str, package: list[str]) -> set[str]:
     return names
 
 
+@cache
+def _top_level(root: Path, base: str) -> frozenset[str]:
+    directory = root / base
+    if not directory.is_dir():
+        return frozenset()
+    return frozenset(entry.name.removesuffix(".py") for entry in directory.iterdir())
+
+
 def _resolve(name: str, own_dir: str, root: Path) -> set[str]:
     """Repository files executed by importing ``name``: the module, or the longest
     existing prefix of it, plus every package ``__init__`` above it."""
     parts = name.split(".")
     for base in (own_dir, *IMPORT_BASES):
+        # Most imports are third-party: one listing per base rules them out.
+        if parts[0] not in _top_level(root, base):
+            continue
         for end in range(len(parts), 0, -1):
             relative = "/".join(parts[:end])
             for candidate in (f"{relative}.py", f"{relative}/__init__.py"):
@@ -104,10 +130,13 @@ def _tree_files(root: Path) -> list[str]:
 def select(touched: list[str], root: Path = ROOT) -> list[tuple[str, str]]:
     """``(suite, test file)`` for the touched repository paths, sorted."""
     dependents: dict[str, set[str]] = defaultdict(set)
+    sources: dict[str, str] = {}
     for path in _tree_files(root):
         own_dir = str(Path(path).parent)
         package = Path(path).with_suffix("").parts[:-1]
-        source = (root / path).read_text(encoding="utf-8", errors="ignore")
+        source = sources[path] = (root / path).read_text(
+            encoding="utf-8", errors="ignore"
+        )
         for name in _imports(source, list(package)):
             for target in _resolve(name, own_dir, root):
                 if target != path:
@@ -116,6 +145,15 @@ def select(touched: list[str], root: Path = ROOT) -> list[tuple[str, str]]:
             for other in _tree_files_under(root, own_dir):
                 dependents[path].add(other)
     selected: set[str] = set()
+    for path in touched:
+        if is_test_file(path):
+            continue
+        name = Path(path).name
+        for candidate, source in sources.items():
+            if is_test_file(candidate) and (
+                path in source or ("/" in path and f'"{name}"' in source)
+            ):
+                selected.add(candidate)
     seen: set[str] = set()
     pending = [path for path in touched if (root / path).is_file()]
     while pending:

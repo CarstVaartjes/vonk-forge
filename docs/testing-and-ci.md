@@ -28,7 +28,7 @@ Every change lands through an integration PR: a same-repository
 
 | Run | What runs |
 | --- | --- |
-| Member PR | The quick tier only, a few minutes on standard runners: `Ruff` (lint, format, Python types, the added-line guards), the web typecheck and Biome (`member-web`), and `cargo fmt` plus clippy (`rust-quality`) only when the change touches Rust or an input of the Rust build (`rust_changed` in `scripts/select-ci-areas`, which reads the input list from the wire crate's `build.rs`). A member push costs about 5-6 standard runner-minutes (Ruff, web, and Rust when it changed), which compete with batch CI for the concurrency limit. No full suite, proof or acceptance. The gate reports `CI gate (member PR)`, never the required `CI gate`, so a member PR cannot merge; it leaves no receipt for Release. The quick tier is a fast signal, not proof: check member work locally (targeted tests, `scripts/test-local --changed`, the fast guards); its integration PR proves it. |
+| Member PR | The quick tier only, a few minutes on standard runners: `Ruff` (lint, format, Python types, the added-line guards), the web typecheck and Biome (`member-web`), and `cargo fmt` plus clippy (`rust-quality`) only when the change touches Rust or an input of the Rust build (`rust_changed` in `scripts/select-ci-areas`, which reads the input list from the wire crate's `build.rs`). A member push costs about 5-6 standard runner-minutes (Ruff, web, and Rust when it changed), which compete with batch CI for the concurrency limit. No full suite, proof or acceptance. The gate reports `CI gate (member PR)`, never the required `CI gate`, so a member PR cannot merge; it leaves no receipt for Release. The quick tier is a fast signal, not proof: check member work locally (`scripts/test changed`); its integration PR proves it. |
 | Dependabot PR | Nothing, not even the selector or the gate: every job that could start on its own skips a PR authored by `dependabot[bot]`, so it uses no runner. Its skipped gate keeps the raw name expression, never the required `CI gate`. Fold it into an integration PR, which runs CI once (`tests/test_dependabot_updates.py`). |
 | Integration PR | The complete sharded Controller and repository suites, web tests, Rust tests/lint/platform, wire contracts, every selected integration, candidate acceptance with the upgrade carry, and every selected proof (agent repair recovery, client compatibility report, installed CLI, model-cache cancellation, OCI link fallback, privileged helper, profile-effect consumer). |
 | Main / Release | `ci.yml` in full, unless Release reuses the integration PR's run for the identical tree, then release acceptance. On a signed `v*` tag `ci.yml` also calls `stable-release.yml` after `ci-gate`; that file holds the stable-channel publication jobs, and the stable package signature identity names it. |
@@ -122,11 +122,12 @@ in separate invocations.
 **The local check before pushing is `scripts/test changed [--base REF]`** (base
 defaults to `origin/main`). It runs the fast guards (`scripts/test guards`), then
 only the test files your diff edits and those that import a touched module,
-statically (an `ast` import graph over `tests/`, `control/tests/` and
-`agent_protocol/tests/`, followed through test support modules and conftests; a
+statically (an `ast` import graph over `tests/`, `control/tests/`,
+`agent_protocol/tests/` and `deploy/compose/tests/`, followed through test support modules and conftests; a
 touched package `__init__` selects importers of anything inside the package).
-It prints the selected files first, runs `control/tests` and the root tests in
-separate pytest processes with `-n 2`, and prints which selected files hold
+It prints the selected files first, runs each suite in its own pytest process with
+`-n 2` (`agent_protocol/tests` in the installed-wheel consumer environment with
+`-c /dev/null`, as CI does), and prints which selected files hold
 `built_image`, `corpus_acceptance` or Postgres tests: those run in CI (or
 `scripts/test-vm-lane`). An empty selection runs the guards only. Full suites run
 in batch CI; do not run them locally.
@@ -137,24 +138,13 @@ For the complete local repository and Controller pytest suites (rarely needed), 
 scripts/test-local
 ```
 
-While iterating, run only the test files that directly exercise your change:
-
-```bash
-scripts/test-local --changed          # changes since the merge base with origin/main
-scripts/test-local --changed HEAD~3   # or since an explicit base
-```
-
-Both modes, and `scripts/test-vm-lane`, first place the recipe library's declared
+`scripts/test-local` and `scripts/test-vm-lane` first place the recipe library's declared
 adapter sources (`tools/fetch-adapter-sources` in `VONK_RECIPE_LIBRARY_ROOT`, default
 `/opt/vonk-forge-recipes`): a recipes pull deletes files that moved to its mirror, the
 synthetic canary package among them. Placing reads the recipes cache and fetches only
 what is missing; a failure is a warning, and the tests that read those files fail.
 
-`scripts/select-changed-tests` maps each changed path (committed, staged,
-unstaged or untracked) to test files: a changed test file selects itself, a
-changed Python module selects the test files that import it directly, and any
-other file selects the test files that name its path. It ignores transitive
-imports, so it is a pre-check; run the full suites before requesting review.
+`tools/touched_tests.py` is the only selector of changed tests. Besides the import graph it selects the test files that name a touched non-module path (a fixture, script or data file).
 
 ### Fresh checkout build and contract smoke checks
 

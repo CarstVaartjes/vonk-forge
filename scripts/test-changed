@@ -44,12 +44,33 @@ if [[ -n "$ci_only" ]]; then
     echo "$ci_only" | sed 's/^/  /'
 fi
 
-for suite in control repository; do
+# agent_protocol tests consume the installed protocol wheel in their own
+# environment with the producer's source path off, exactly as the CI step does.
+run_agent_protocol() {
+    local consumer=${VONK_PROTOCOL_CONSUMER_VENV:-${TMPDIR:-/tmp}/vonk-protocol-consumer}
+    scripts/generate-agent-wire
+    scripts/build-control-wheel
+    [[ -x "$consumer/bin/python" ]] || uv venv --python 3.12 "$consumer"
+    uv pip install --python "$consumer/bin/python" --reinstall-package vonk-agent-protocol \
+        "inventory/wheels/$(scripts/protocol-wheel-name)" 'pytest==9.1.1'
+    # The Rust-peer tests run in CI's connected lane, as in the CI step.
+    "$consumer/bin/python" -m pytest -q -c /dev/null -p no:cacheprovider \
+        --ignore=agent_protocol/tests/test_schema2_recipe_wire.py \
+        --ignore=agent_protocol/tests/test_schema2_recipe_rust_compat.py \
+        "$@"
+}
+
+for suite in control repository compose agent_protocol; do
     files=$(mktemp "${TMPDIR:-/tmp}/test-changed-suite.XXXXXX")
     awk -v suite="$suite" '$1 == suite {print $2}' "$selected" >"$files"
     if [[ -s "$files" ]]; then
         echo "== $suite =="
-        scripts/test "$suite" --files-from "$files" --markers "not postgres and not built_image and not corpus_acceptance" -- -n 2 || status=1
+        if [[ "$suite" == agent_protocol ]]; then
+            mapfile -t paths <"$files"
+            run_agent_protocol "${paths[@]}" || status=1
+        else
+            scripts/test "$suite" --files-from "$files" --markers "not postgres and not built_image and not corpus_acceptance" -- -n 2 || status=1
+        fi
     fi
     rm -f "$files"
 done
