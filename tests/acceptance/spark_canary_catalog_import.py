@@ -33,41 +33,19 @@ from typing import TYPE_CHECKING, Any
 
 from vonk_agent_protocol import CatalogSyncCode
 from vonk_control.auth import TokenCodec
+from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync import (
+    CatalogSyncError,
+    CatalogSyncView,
+    ManagedRecipeCatalogSyncService,
+)
+from vonk_control.catalog.sync_contract import (
+    CatalogSyncTrigger,
+    ManagedCatalogSyncRequest,
+    reviewed_catalog_content,
+)
 from vonk_control.db.connections import build_engine, session_factory
-
-# The carry runs this program in the previous release's Controller first. Wave 4
-# moved these entry points into packages; the previous release still has the
-# flat modules. Delete the fallback once a release with the packages is the
-# carry baseline.
-try:
-    from vonk_control.catalog.service import CatalogService
-    from vonk_control.catalog.sync import (
-        CatalogSyncError,
-        CatalogSyncView,
-        ManagedRecipeCatalogSyncService,
-    )
-    from vonk_control.catalog.sync_contract import (
-        CatalogSyncTrigger,
-        ManagedCatalogSyncRequest,
-        reviewed_catalog_content,
-    )
-    from vonk_control.recipe_packages.client import (
-        RecipePackageClient,
-        load_recipe_package,
-    )
-except ModuleNotFoundError:
-    from vonk_control.catalog_service import CatalogService
-    from vonk_control.catalog_sync import (
-        CatalogSyncError,
-        CatalogSyncView,
-        ManagedRecipeCatalogSyncService,
-    )
-    from vonk_control.catalog_sync_contract import (
-        CatalogSyncTrigger,
-        ManagedCatalogSyncRequest,
-        reviewed_catalog_content,
-    )
-    from vonk_control.recipe_packages import RecipePackageClient, load_recipe_package
+from vonk_control.recipe_packages.client import RecipePackageClient, load_recipe_package
 from vonk_control.settings import Settings
 from vonk_control.source_bundles import DatabaseSourceBundleStore
 
