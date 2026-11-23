@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import cast, get_args
 
 import pytest
@@ -333,3 +334,21 @@ def test_a_row_inserted_already_ended_is_staged_by_its_own_id(tmp_path) -> None:
     assert born.id is not None
     assert woken == [frozenset({born.id})]
     engine.dispose()
+
+
+def test_a_run_switch_waiting_on_its_transfer_persists_the_dependency_reason(
+    tmp_path,
+) -> None:
+    """Catches a dependency wait stored as the generic observation fallback."""
+    service, executor, operation_id, child_id = _waiting_on_transfer(tmp_path)
+    executor.children[child_id] = dataclasses.replace(
+        executor.children[child_id], retry_due_at=NOW + timedelta(seconds=30)
+    )
+    service.redrive(operation_id)
+    with service._sessions() as session:
+        wait = read_wait(_get(session, Job, operation_id))
+    assert wait is not None
+    assert wait.reason is WaitReason.DEPENDENCY_PENDING
+    assert [item.operation.id for item in wait.blockers if item.operation] == [child_id]
+    shown = service.activity_provider().get_operation(operation_id)
+    assert shown is not None and shown.wait_reason is WaitReason.DEPENDENCY_PENDING

@@ -414,6 +414,8 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
                     activity=measured.activity
                     if state == LifecycleState.RUNNING
                     else None,
+                    observed_at=measured.observed_at,
+                    last_progress_at=measured.last_progress_at,
                 )
             )
         if not members:

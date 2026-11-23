@@ -291,7 +291,10 @@ def aggregate_progress(members: Sequence[OperationMemberProgress]) -> OperationP
     timestamps = [
         member.last_progress_at for member in members if member.last_progress_at
     ]
-    observed = [member.observed_at for member in members if member.observed_at]
+    # A finished or cached member is a fact, not a sample: only the members
+    # still being measured decide whether the aggregate is fresh.
+    sampled = active or members
+    observed = [member.observed_at for member in sampled if member.observed_at]
     return OperationProgress(
         phase=phase,
         completed_bytes=sum(member.completed_bytes for member in members),
@@ -312,7 +315,7 @@ def aggregate_progress(members: Sequence[OperationMemberProgress]) -> OperationP
         else None,
         last_progress_at=max(timestamps) if timestamps else None,
         observed_at=min(observed)
-        if len(observed) == len(members) and observed
+        if len(observed) == len(sampled) and observed
         else None,
         elapsed_seconds=max((member.elapsed_seconds or 0) for member in members)
         if members and all(member.elapsed_seconds is not None for member in members)

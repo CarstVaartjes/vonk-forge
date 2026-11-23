@@ -32,6 +32,52 @@ class JobContractState(StrEnum):
     CONTRACT_INVALID = "contract-invalid"
 
 
+class ProgressPhase(StrEnum):
+    QUEUED = "queued"
+    PENDING = "pending"
+    WAITING = "waiting"
+    PREPARING = "preparing"
+    DOWNLOADING = "downloading"
+    MODEL_DOWNLOAD = "model-download"
+    VERIFYING = "verifying"
+    FINALIZING = "finalizing"
+    BUILDING = "building"
+    PULLING = "pulling"
+    TRANSFER = "transfer"
+    COPYING = "copying"
+    UPLOADING = "uploading"
+    INSTALLING = "installing"
+    RECONCILING_INSTALLATION = "reconciling-installation"
+    STARTING = "starting"
+    STOPPING = "stopping"
+    UNINSTALLING = "uninstalling"
+    RECLAIMING = "reclaiming"
+    UPDATING = "updating"
+    EXECUTING = "executing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ProfileChildPhase(StrEnum):
+    MODEL_DOWNLOAD = "model-download"
+    CONTAINER_DOWNLOAD = "container-download"
+    CONTAINER_BUILD = "container-build"
+    TARGET_COPY = "target-copy"
+    RUNTIME_INSTALL = "runtime-install"
+    START = "start"
+    FINAL_VERIFY = "final-verify"
+    TRANSFER = "transfer"
+    VERIFY = "verify"
+    PREPARE = "prepare"
+    CLEANUP = "cleanup"
+    STOP = "stop"
+    UNINSTALL = "uninstall"
+
+
+class ProfileReportedPhase(StrEnum):
+    FINAL_VERIFY = "final_verify"
+
+
 class QualificationStatus(StrEnum):
     WORKING = "Working"
     RECHECK = "Re-check: worked before"
@@ -50,6 +96,8 @@ class QualificationOutcome(StrEnum):
 
 
 STOP_UNCONFIRMED = "unconfirmed"
+WAIT_DEPENDENCY_PENDING = "dependency-pending"
+WAIT_SPARK_BUSY = "queue.spark_busy"
 PROFILE_NOT_ISSUED = "not-issued"
 ENROLLMENT_PENDING = "pending"
 UNKNOWN = "unknown"

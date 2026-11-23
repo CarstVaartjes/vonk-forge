@@ -222,6 +222,7 @@ def _serving_fleet(installation_id: str, run_id: str):
         NodeConnection,
         RunPresence,
     )
+    from vonk_control.run_readiness import GroupHealth
 
     node_id = "spk_0123456789abcdef0123456789abcdef"
     run = RunPresence(
@@ -241,7 +242,7 @@ def _serving_fleet(installation_id: str, run_id: str):
         rank_state=RunState.RUNNING,
         rank_age_seconds=0,
         rank_fresh=True,
-        group_state="healthy",
+        group_state=GroupHealth.HEALTHY,
         healthy=True,
     )
     node = FleetNode(
