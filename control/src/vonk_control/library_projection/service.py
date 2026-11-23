@@ -147,6 +147,7 @@ class LibraryProjection:
         controller: LibraryControllerState,
         running_on: Sequence[str] = (),
         preparation: LibraryLocalProgress | None = None,
+        installed_on_sparks: bool = False,
     ) -> None:
         if digest is None:
             return
@@ -159,6 +160,7 @@ class LibraryProjection:
         ):
             current.controller = controller
         current.running_on = sorted(set(current.running_on) | set(running_on))
+        current.installed_on_sparks = current.installed_on_sparks or installed_on_sparks
         if preparation is not None:
             # Requests arrive in durable creation order; identity has no recency.
             current.preparation = preparation

@@ -9630,6 +9630,11 @@
           "title": "Controller",
           "type": "string"
         },
+        "installed_on_sparks": {
+          "default": false,
+          "title": "Installed On Sparks",
+          "type": "boolean"
+        },
         "preparation": {
           "anyOf": [
             {
