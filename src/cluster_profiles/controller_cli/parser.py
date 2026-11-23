@@ -349,7 +349,6 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         item=int,
     )
     _add_output(recipe_library)
-    _add_show_all(recipe_library)
     recipe_sync_status = recipe_actions.add_parser(
         "sync-status", help="Show when the recipe catalog last synced and what it found"
     )

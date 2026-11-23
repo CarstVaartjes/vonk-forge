@@ -29,7 +29,6 @@ from cluster_profiles.cli_render.library import (
     _applied_filters,
     _needs_download,
     _qualification_status,
-    most_relevant,
 )
 from cluster_profiles.cli_render.operations import stalls
 from cluster_profiles.cli_render.profile import EndpointListing, endpoint_listing
@@ -376,23 +375,20 @@ def _recipe_library_payload(count: int) -> dict[str, object]:
     }
 
 
-def test_recipe_listing_is_compact_by_default_and_full_with_all(capsys):
-    # Break caught: a 100-recipe library printing hundreds of stacked lines.
+def test_bare_recipe_listing_is_compact_and_the_library_listing_is_not(capsys):
+    # Break caught: a 100-recipe listing printing hundreds of lines, or the
+    # library listing (with its own --limit/--sort/--cursor) being cut.
     payload = _recipe_library_payload(100)
     render_payload(payload, "recipe", action=None)
     compact = capsys.readouterr().out.splitlines()
     assert len(compact) < 40
     assert sum("recipe-" in line for line in compact) == COMPACT_RECIPE_ROWS
+    # The running recipe is last in the payload and still on the screen.
+    assert any("recipe-099" in line for line in compact)
 
     render_payload(payload, "recipe", action=None, show_all=True)
-    full = capsys.readouterr().out.splitlines()
-    assert sum("recipe-" in line for line in full) == 100
-
-
-def testmost_relevant_recipes_put_running_then_working_first():
-    # Break caught: the one running recipe hidden behind the cut-off.
-    rows = [(index, index == 40, index % 2 == 0) for index in range(60)]
-    shown = most_relevant(rows, lambda row: (row[1], row[2]))
-    assert len(shown) == COMPACT_RECIPE_ROWS
-    assert shown[0][0] == 40
-    assert all(row[2] for row in shown[1:])
+    every = capsys.readouterr().out.splitlines()
+    assert sum("recipe-" in line for line in every) == 100
+    render_payload(payload, "recipe", action="library")
+    library = capsys.readouterr().out.splitlines()
+    assert sum("recipe-" in line for line in library) == 100

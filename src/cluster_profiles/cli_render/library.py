@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import shlex
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from enum import StrEnum
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import quote
 
 from ..cli_states_generated import QualificationOutcome, QualificationStatus
@@ -411,14 +411,31 @@ def _model_counts(rows: Sequence[Any]) -> tuple[int, int]:
 COMPACT_RECIPE_ROWS = 20
 
 
-def most_relevant[T](
-    rows: Sequence[T], running_and_working: Callable[[T], tuple[bool, bool]]
-) -> list[T]:
-    """Running recipes first, then Working ones, the rest in the order given."""
-    return sorted(
-        rows,
-        key=lambda row: tuple(not flag for flag in running_and_working(row)),
-    )[:COMPACT_RECIPE_ROWS]
+def recipe_cut_note(loaded: int, printed: int) -> None:
+    """Say how many loaded recipes the bare listing did not print."""
+    if loaded > printed:
+        print(f"Showing {printed} of {loaded}; --all lists every one.")
+
+
+class _Row(Protocol):
+    def get(self, key: str, /) -> object: ...
+
+
+def top_recipes(rows: Sequence[_Row]) -> list[_Row]:
+    """The bare ``vonkctl recipe`` rows: running first, then preparing, then Working."""
+
+    def flags(item: _Row) -> tuple[bool, bool, bool]:
+        local = _object(item.get("local"), "local")
+        preparation = _optional(local.get("preparation"), "preparation")
+        return (
+            bool(local.get("running_on")),
+            preparation.get("state") in _ACTIVE_PREPARATION,
+            _qualification_status(item.get("qualification"))
+            == QualificationStatus.WORKING,
+        )
+
+    ranked = sorted(rows, key=lambda row: tuple(not flag for flag in flags(row)))
+    return ranked[:COMPACT_RECIPE_ROWS]
 
 
 def _compact_table(labels: list[str], rows: list[list[object]]) -> None:

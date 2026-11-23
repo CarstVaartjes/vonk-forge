@@ -8,11 +8,7 @@ from collections.abc import Mapping
 
 from ..cli_json_contract import Word
 from ..cli_platform_render import render_platform
-from ..cli_states_generated import (
-    ENDPOINT_UNAVAILABLE,
-    SUCCEEDED,
-    QualificationStatus,
-)
+from ..cli_states_generated import ENDPOINT_UNAVAILABLE, SUCCEEDED
 from ..control_client.errors import ControlMalformedResponse
 from ..generated_control.models.artifact_job_response import ArtifactJobResponse
 from ..generated_control.models.metric_spec import MetricSpec
@@ -23,13 +19,7 @@ from .administration import _catalog_sync, _enrollment, _error
 from .artifact_jobs import _artifact_job, artifact_job_details, prints_record
 from .common import _field, _object, _records, _table, _text, _time, _words
 from .fleet import _fleet_overview, _node
-from .library import (
-    COMPACT_RECIPE_ROWS,
-    LibraryNoun,
-    _library,
-    _qualification_status,
-    most_relevant,
-)
+from .library import LibraryNoun, _library, recipe_cut_note, top_recipes
 from .metrics import _metric_list, _metric_series
 from .operations import _application, _job, _operation, _run_result
 from .profile import _endpoints_view, _gateway_keys, _profile, _profile_endpoints
@@ -166,32 +156,15 @@ def render_payload(
             elif action == "preview":
                 _cache_removal_review(payload, verbose=wide)
             elif action in {None, "library", "detail"}:
-                loaded = (
-                    len(_records(payload, "recipes"))
-                    if noun == LibraryNoun.RECIPE and action != "detail"
-                    else 0
+                rows = (
+                    _records(payload, "recipes") if noun == LibraryNoun.RECIPE else []
                 )
-                if loaded > COMPACT_RECIPE_ROWS and not (wide or show_all):
-                    payload = {
-                        **payload,
-                        "recipes": most_relevant(
-                            _records(payload, "recipes"),
-                            lambda item: (
-                                bool(
-                                    _object(item.get("local"), "local").get(
-                                        "running_on"
-                                    )
-                                ),
-                                _qualification_status(item.get("qualification"))
-                                == QualificationStatus.WORKING,
-                            ),
-                        ),
-                    }
-                    _library(payload, noun, detail=False, wide=False)
-                    print(
-                        f"Showing {COMPACT_RECIPE_ROWS} of {loaded} loaded, "
-                        "running and Working first; --all lists every one."
+                if action is None and rows and not (wide or show_all):
+                    top = top_recipes(rows)
+                    _library(
+                        {**payload, "recipes": top}, noun, detail=False, wide=False
                     )
+                    recipe_cut_note(len(rows), len(top))
                 else:
                     _library(payload, noun, detail=action == "detail", wide=wide)
             else:
