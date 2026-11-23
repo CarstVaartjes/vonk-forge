@@ -1138,7 +1138,6 @@ def _planning_failure(error: Exception) -> BuildUnsettled:
 
 __all__ = [
     "RecipeImageAvailabilityProduction",
-    "RecipeImageAvailabilityScheduler",
     "build_recipe_image_availability",
     "run_availability_scheduler",
 ]

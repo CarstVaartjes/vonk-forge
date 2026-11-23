@@ -35,7 +35,7 @@ from ..strict_json import serialize_json_value
 from .errors import RecipeOperationConflict
 from .intent import _intent_is_current, _job_workload_intent, _shared_workload_intent
 from .progress import (
-    _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
+    _parent_identity,
 )
 from .results import _recorded_result_document, _validated_result
 

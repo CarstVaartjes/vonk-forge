@@ -29,10 +29,8 @@ from vonk_control.run_switch_operations.artifact_inspection import (
     missing_spark_bytes_by_node,
 )
 from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
-from vonk_control.run_switch_operations.result_helpers import (
-    _persisted_result,
-    _read_progress,
-)
+from vonk_control.run_switch_operations.result_helpers import _read_progress
+from vonk_control.run_switch_operations.results import _persisted_result
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .recipe_operations_support import NOW, installed_recipe, setup_services

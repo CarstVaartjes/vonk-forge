@@ -7,14 +7,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from ..cli_states import FAILED, SUCCEEDED
-from ..control_client.errors import ControlClientError
-from ..fleet_qualification import (
-    ArtifactJobSmokeAdapter,
+from cluster_profiles.cli_states_generated import FAILED, SUCCEEDED
+from cluster_profiles.fleet_qualification_observation import (
     QualificationError,
     QualificationObservationUnknown,
-    ServiceSmokeAdapter,
 )
+
+from ..control_client.errors import ControlClientError
+from ..fleet_qualification import ArtifactJobSmokeAdapter, ServiceSmokeAdapter
 from ..qualification_fixtures.contracts import FixtureError
 from .contracts import Batch, Campaign, Lane, ResultsLog
 from .profiles import _wait_serving

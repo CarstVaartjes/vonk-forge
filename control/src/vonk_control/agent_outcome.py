@@ -40,7 +40,6 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitReason,
 )
 from vonk_agent_protocol.outcome import (
-    OperationOutcome,
     OutcomeDone,
     OutcomeEvidence,
     OutcomeFailed,
@@ -189,4 +188,7 @@ def stored_report(
     return message, outcome
 
 
-__all__ = ["OperationOutcome", "agent_outcome", "stored_report"]
+__all__ = [
+    "agent_outcome",
+    "stored_report",
+]

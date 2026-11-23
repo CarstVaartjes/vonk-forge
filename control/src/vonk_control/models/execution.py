@@ -33,8 +33,11 @@ from vonk_agent_protocol.state_machines import (
 )
 from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.wait_contract import WaitEvidence
+
 from ..model_primitives import Base, _lower_hex, _nullable_lower_hex, _state_in
-from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
+from .waits import wait_due_column, wait_evidence_column
 
 
 class RecipeInstallation(Base):

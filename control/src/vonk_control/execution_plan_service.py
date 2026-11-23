@@ -503,5 +503,4 @@ def _bind_runtime_artifacts(
 __all__ = [
     "ControllerExecutionPlanService",
     "ExecutionPlanCompilationError",
-    "RuntimeImageReceipt",
 ]

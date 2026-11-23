@@ -16,7 +16,9 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from .cli_states import ENDED_STATES, SUCCEEDED
+from cluster_profiles.cli_states_generated import SUCCEEDED
+
+from .cli_states import ENDED_STATES
 from .control_transport import open_https
 from .serving_audio import AudioCheckError, assert_speech, multipart_body
 from .serving_request import ArgumentValue, Json, bounded_chat_check

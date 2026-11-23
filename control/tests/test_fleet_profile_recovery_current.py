@@ -1688,7 +1688,7 @@ def test_a_definite_failure_ends_the_load_once_with_its_cause(tmp_path: Path) ->
     load ends on its first definite failure with the child's cause, and recovery
     never re-launches it."""
 
-    from vonk_control.lifecycle.core import RECOVERY
+    from vonk_control.recovery_policy import RECOVERY
 
     crash = "AssertionError: the attention heads do not divide the tensor parallel size"
     sessions, lifecycle, service, _profile, _desired, first, _child, _nodes = (
@@ -1784,7 +1784,7 @@ def test_a_failure_that_changes_keeps_being_retried(
 ) -> None:
     """Changing faults keep their evidence without ending standing intent."""
 
-    from vonk_control.lifecycle.core import RECOVERY
+    from vonk_control.recovery_policy import RECOVERY
 
     sessions, lifecycle, service, *_rest = _failed_profile(tmp_path)
     clock = {"now": lifecycle._clock()}
@@ -1799,7 +1799,7 @@ def test_a_failure_that_changes_keeps_being_retried(
 def test_a_failure_that_differs_only_in_numbers_is_the_same_failure(
     tmp_path: Path, ending: str
 ) -> None:
-    from vonk_control.lifecycle.core import RECOVERY
+    from vonk_control.recovery_policy import RECOVERY
 
     sessions, lifecycle, service, *_rest = _failed_profile(tmp_path)
     clock = {"now": lifecycle._clock()}
@@ -1826,7 +1826,7 @@ def test_a_stall_with_a_stable_cause_keeps_retrying_with_evidence(
 ) -> None:
     """A repeated expired child window cannot end standing profile intent."""
 
-    from vonk_control.lifecycle.core import RECOVERY
+    from vonk_control.recovery_policy import RECOVERY
 
     sessions, lifecycle, service, *_rest = _failed_profile(tmp_path)
     clock = {"now": lifecycle._clock()}

@@ -627,7 +627,6 @@ __all__ = [
     "Contract",
     "ExternalPassthrough",
     "JsonColumn",
-    "Residue",
     "bind",
     "binding_for",
     "bindings",

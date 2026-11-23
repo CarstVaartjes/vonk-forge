@@ -14,6 +14,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import ErrorCategory, WaitReason
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.state_machines import ModelCacheOperatorStatus
 
+from vonk_control.operator_receipt_contract import ReceiptPolicy
+
 from ..agent_upgrades.contract import AgentUpgradeRequestIntent
 from ..api_availability import AVAILABILITY_ERRORS
 from ..auth import Actor
@@ -37,7 +39,7 @@ from ..observation.transfer import (
     observation_response,
 )
 from ..operation_api.contracts import bounded_error_responses
-from ..operator_acceptance import ReceiptPolicy, operator_acceptance
+from ..operator_acceptance import operator_acceptance
 from ..run_states import ENDED_RUN_STATES
 from .contracts import (
     _SELECTOR_PATTERN,

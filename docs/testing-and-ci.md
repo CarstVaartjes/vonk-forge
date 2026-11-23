@@ -798,6 +798,9 @@ full-path literal; move or delete the literal with the code it guards.
 name. The only `__init__` files that import anything import modules, not names: `models/`
 registers every mapped table on `Base.metadata`, and `vonk_agent_protocol` imports `contracts`
 first because the contracts, recipe operations and host helper modules import each other.
+The same test fails a `from module import name` in those packages when `module` only imports
+`name` (a facade) instead of defining it, so every name has one defining module and one import
+path; importing a submodule by name is allowed.
 
 A test module that grows past about 1,500 lines is split by topic into `test_<area>_<topic>.py`
 files next to it, never by line count. The helpers, constants and fixtures the files share live

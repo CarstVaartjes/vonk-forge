@@ -35,10 +35,10 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.owner_liveness import (
     ADOPTION_WINDOW,
+    OWNER_SETTLE_GRACE,
     installations_named_by_live_jobs,
     runs_named_by_live_work,
 )
-from vonk_control.reservation_owners import OWNER_SETTLE_GRACE
 
 from .fleet_match import fleet_mismatch
 from .sparks import Sparks

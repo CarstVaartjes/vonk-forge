@@ -41,14 +41,12 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
 from vonk_forge_contracts import EndpointAlias
 
+from vonk_control.operator_receipt_contract import ReceiptPolicy
+
 from ..auth import MUTATION_ROLES, Actor
 from ..capabilities import CapabilityUnavailableError
 from ..operation_api.contracts import bounded_error_responses
-from ..operator_acceptance import (
-    OperatorReceiptResolver,
-    ReceiptPolicy,
-    operator_acceptance,
-)
+from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
 from ..runtime_init import GATEWAY_MASTER_KEY_PATH
 from ..strict_json import StrictJSONModel
 from .route_grants import BASE_KEY_ROUTES, GatewayInferenceRoute

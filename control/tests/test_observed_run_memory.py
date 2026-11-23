@@ -13,6 +13,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.state_machines import RunState
 from vonk_agent_protocol.swap import GIB
+from vonk_agent_protocol.telemetry import TelemetrySample
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import (
     InstallationNode,
@@ -24,7 +25,7 @@ from vonk_control.models.execution import (
 )
 from vonk_control.observed_run_memory import observed_role_peaks
 from vonk_control.run_admission import RunAdmissionService
-from vonk_control.telemetry.samples import TelemetryRepository, TelemetrySample
+from vonk_control.telemetry.samples import TelemetryRepository
 
 from .test_load_phase_swap_admission import _FREE as _LIVE_FREE
 from .test_load_phase_swap_admission import (

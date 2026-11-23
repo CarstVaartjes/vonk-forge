@@ -21,13 +21,14 @@ from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.wire_model import OperationProgress, StrictJSONModel
 
+from vonk_control.operator_receipt_contract import JobOperatorReceipt
+
 from ..auth import CursorCodec
 from ..cursor_contract import MAX_CURSOR_LENGTH
 from ..fleet_profile_contract.applications import (
     FleetProfileApplicationCancellationView,
 )
 from ..fleet_profile_contract.endpoints import FleetProfileEndpointsView
-from ..jobs.operator_receipts import JobOperatorReceipt
 from ..model_cache.contract import ModelCacheCancellation
 from ..operations.blockers import OperationBlocker
 from ..operations.contract import (

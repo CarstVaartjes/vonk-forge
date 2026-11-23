@@ -30,9 +30,7 @@ def wait_due_column(name: str) -> MappedColumn[datetime | None]:
 
 
 __all__ = [
-    "Residue",
     "ScheduledWaitOwner",
-    "WaitEvidence",
     "wait_due_column",
     "wait_evidence_column",
 ]

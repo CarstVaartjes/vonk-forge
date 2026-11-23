@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.telemetry import TelemetrySample
 from vonk_agent_protocol.wire_model import MAX_TELEMETRY_CAPACITY_BYTES
 from vonk_control.model_primitives import Base
 from vonk_control.models.execution import RecipeRun
@@ -20,11 +21,7 @@ from vonk_control.models.telemetry import (
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
-from vonk_control.telemetry.samples import (
-    ENGINE_LIVE_WINDOW,
-    TelemetryRepository,
-    TelemetrySample,
-)
+from vonk_control.telemetry.samples import ENGINE_LIVE_WINDOW, TelemetryRepository
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32

@@ -41,6 +41,7 @@ from .test_model_cache_recovery_support import observe_unknown
 def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     cache, tmp_path: Path
 ) -> None:
+    from vonk_agent_protocol.wire_model import OperationProgress
     from vonk_control.operation_api.contracts import (
         OperationListPage,
         OperationProvider,
@@ -48,7 +49,6 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     from vonk_control.operation_api.contracts import (
         OperationQuery as operation_api_OperationQuery,
     )
-    from vonk_control.operations import contract as operation_contract
 
     service, _sessions = cache
     cursor_codec = TokenCodec(b"c" * 32).cursor_codec()
@@ -86,7 +86,7 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     assert first["node_ids"] == []
     assert first["attempt"] == 1
     assert first["supported_actions"] == []
-    progress = operation_contract.OperationProgress.model_validate(first["progress"])
+    progress = OperationProgress.model_validate(first["progress"])
     assert progress.phase == "queued"
     assert progress.completed_bytes == 0
     assert progress.total_bytes_known is True

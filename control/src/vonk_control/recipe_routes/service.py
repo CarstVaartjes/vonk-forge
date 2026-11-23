@@ -13,7 +13,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.contracts import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import SecurityRefusalError
-from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
+from vonk_agent_protocol.route_activation import (
+    ROUTE_EVIDENCE_MAX_AGE_SECONDS,
+    ActivationMarker,
+)
 from vonk_agent_protocol.state_machines import RoutePublicationState, RunState
 from vonk_agent_protocol.state_machines import RouteState as RunRouteState
 
@@ -21,7 +24,7 @@ from .. import bounded_retry
 from ..agent_operation_facts import job_start_deadline
 from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
 from ..gateway.litellm import LiteLlmGeneration, ServedModelInfo
-from ..gateway.route_runtime import RECIPE_ROUTE_AUTHORITY_ID, ActivationMarker
+from ..gateway.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 from ..jobs.documents import DistributedRecoveryMarker
 from ..logging import log_event
 from ..models.execution import RecipeRun

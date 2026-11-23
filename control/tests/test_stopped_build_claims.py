@@ -25,8 +25,8 @@ from vonk_control.inventory.repository import (
 from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models.execution import ResourceReservation
 from vonk_control.models.jobs import Job
-from vonk_control.owner_liveness import OwnerKind
-from vonk_control.reservation_owners import OWNER_SETTLE_GRACE, reservation_owner
+from vonk_control.owner_liveness import OWNER_SETTLE_GRACE, OwnerKind
+from vonk_control.reservation_owners import reservation_owner
 
 from .recipe_builds_support import setup
 from .test_build_cancellation_recovery import _issue, _services

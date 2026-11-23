@@ -22,8 +22,7 @@ from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import RecipeInstallation
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
-from vonk_control.owner_liveness import OWNER_SETTLE_GRACE
-from vonk_control.reservation_owners import ADOPTION_WINDOW
+from vonk_control.owner_liveness import ADOPTION_WINDOW, OWNER_SETTLE_GRACE
 
 from .recipe_operations_support import setup_services
 from .test_attempt_residues import _leave_incomplete, _load, _reconciler, _uninstalls

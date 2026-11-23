@@ -13,7 +13,9 @@ included.
 `tests/test_package_no_reexports.py` keeps every `vonk_control`, `cluster_profiles` and
 `vonk_agent_protocol` package `__init__` to a docstring, `__version__` and module-only
 `from . import x` (`vonk_agent_protocol` imports `contracts` first, to order its import cycle): import a name from the module that
-defines it, never through its package.
+defines it, never through its package. The same test fails any `from module import name`
+inside those packages where `module` only imports `name` (a facade): import it from the
+module that defines it.
 
 Every model an `/agent/` route takes or returns (grant requests and replies, the
 bounded error envelope, the capability-unavailable reply, the enrollment

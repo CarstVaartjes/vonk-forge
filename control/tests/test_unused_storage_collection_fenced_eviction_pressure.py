@@ -17,7 +17,6 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.state_machines import InstallationState, RunState
-from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleGate
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileEffectProgress,
@@ -26,6 +25,7 @@ from vonk_control.fleet_profile_contract.review import FleetProfilePreview
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import (
+    ArtifactLifecycleGate,
     ModelCacheOperation,
     ModelCacheSet,
 )

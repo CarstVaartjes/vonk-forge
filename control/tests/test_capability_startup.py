@@ -17,6 +17,8 @@ from vonk_control.auth import Actor, TokenCodec
 from vonk_control.capabilities import CapabilityRegistry, RecoveringService
 from vonk_control.capability_contract import CapabilityAvailability
 from vonk_control.gateway import route_runtime
+from vonk_control.gateway.keys import GatewayKeyService
+from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.observation.platform import PlatformObservation
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.settings import Settings
@@ -34,9 +36,9 @@ def _platform(client, headers) -> PlatformObservation:
     ("service_type", "capability"),
     [
         (FilesystemRuntimeImageStorage, ControllerCapability.RUNTIME_IMAGE_STORAGE),
-        (api.ModelCacheService, ControllerCapability.MODEL_CACHE),
+        (ModelCacheService, ControllerCapability.MODEL_CACHE),
         (artifact_blob_store.ArtifactBlobStore, ControllerCapability.ARTIFACT_STORAGE),
-        (api.GatewayKeyService, ControllerCapability.GATEWAY_KEYS),
+        (GatewayKeyService, ControllerCapability.GATEWAY_KEYS),
         (
             route_runtime.AtomicRouteBundlePublisher,
             ControllerCapability.ROUTE_PUBLISHER,
@@ -56,7 +58,7 @@ def test_production_constructor_fault_and_repair(
     monkeypatch.setattr(api, "CapabilityRegistry", lambda: registry)
     broken = [True]
     original = service_type.__init__
-    original_gateway = api.GatewayKeyService.__init__
+    original_gateway = GatewayKeyService.__init__
     original_publisher = route_runtime.AtomicRouteBundlePublisher.__init__
 
     def gateway(self, **kwargs):
@@ -79,7 +81,7 @@ def test_production_constructor_fault_and_repair(
             raise OSError("injected construction fault")
         if service_type is route_runtime.AtomicRouteBundlePublisher:
             args = (tmp_path / "routes",)
-        if service_type is api.GatewayKeyService:
+        if service_type is GatewayKeyService:
             gateway(self, **kwargs)
         else:
             original(self, *args, **kwargs)

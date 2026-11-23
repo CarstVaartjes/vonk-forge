@@ -12,6 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
+from vonk_agent_protocol.telemetry import TelemetrySample
 from vonk_control.auth import TokenCodec
 from vonk_control.db.connections import session_factory
 from vonk_control.fleet_event_contract import (
@@ -45,10 +46,7 @@ from vonk_control.models.telemetry import (
 )
 from vonk_control.operation_api.durable import durable_operation_services
 from vonk_control.stored.json_values import write_guard_mode
-from vonk_control.telemetry.samples import (
-    TelemetryRepository,
-    TelemetrySample,
-)
+from vonk_control.telemetry.samples import TelemetryRepository
 
 NOW = datetime(2026, 8, 15, 12, tzinfo=UTC)
 

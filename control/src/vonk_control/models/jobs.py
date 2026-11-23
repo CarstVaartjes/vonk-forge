@@ -22,8 +22,11 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, MappedColumn, mapped_column
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
 
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.wait_contract import WaitEvidence
+
 from ..model_primitives import Base, _lower_hex, _state_in
-from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
+from .waits import wait_due_column, wait_evidence_column
 
 
 class Job(Base):

@@ -34,6 +34,8 @@ from vonk_forge_contracts.qualification_status import (
     PublishedQualificationStatusView,
 )
 
+from vonk_control.models.catalog import CatalogDocumentRevision
+
 from ..admission_locking import ConstraintReplay, admitting
 from ..auth import CursorCodec
 from ..identity_insert import insert_identity
@@ -50,7 +52,6 @@ from ..source_bundles import (
 )
 from ..stored.states import CatalogRevisionState
 from .entities import (
-    CatalogDocumentRevision,
     CatalogEntityService,
     CatalogValidationError,
     _head,

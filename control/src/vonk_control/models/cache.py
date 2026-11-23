@@ -22,6 +22,9 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSu
 from vonk_agent_protocol.state_machines import machine_check
 from vonk_forge_contracts import CatalogVocabulary
 
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.wait_contract import WaitEvidence
+
 from ..exact_integer_storage import (
     DecimalIntegerAtMost,
     DecimalIntegerToken,
@@ -37,7 +40,7 @@ from ..model_primitives import (
 )
 from ..stored.json_values import ContractJSON
 from ..stored.states import LibrarySyncRunState, RecipeBuildState
-from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
+from .waits import wait_due_column, wait_evidence_column
 
 
 class ModelCacheSet(Base):

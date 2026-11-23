@@ -19,16 +19,16 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from .cli_artifact_jobs import _create_with_reconcile, _declared_files, _job
-from .cli_states import (
+from cluster_profiles.cli_states_generated import (
     DRAFT,
-    ENDED_STATES,
     FAILED,
     OBSERVING,
     READY,
     SUCCEEDED,
-    preparation,
 )
+
+from .cli_artifact_jobs import _create_with_reconcile, _declared_files, _job
+from .cli_states import ENDED_STATES, preparation
 from .control_client.errors import ControlClientError
 from .fleet_qualification_observation import (
     QualificationError,

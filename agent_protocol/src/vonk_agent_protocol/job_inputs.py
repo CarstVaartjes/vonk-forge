@@ -6,7 +6,9 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from .recipe_jobs import MAX_INPUT_FILES, MAX_INPUT_TOTAL_BYTES, RecipeJobInputFile
+from vonk_agent_protocol.job_limits import MAX_INPUT_FILES, MAX_INPUT_TOTAL_BYTES
+
+from .recipe_jobs import RecipeJobInputFile
 from .wire_model import WireModel
 
 

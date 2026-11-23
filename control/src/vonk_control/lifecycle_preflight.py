@@ -17,7 +17,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    ProgressAlarmCode,
+    WaitReason,
+)
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
 from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
@@ -33,7 +37,6 @@ from .operations.blockers import (
     MAX_BLOCKERS,
     BlockingOperation,
     OperationBlocker,
-    ProgressAlarmCode,
     make_blocker,
 )
 from .persisted_waits import read_wait, typed_wait_reason

@@ -10,14 +10,18 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProgressPhase
 from vonk_agent_protocol.host_helper import ContainerRuntimeAction
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    ProgressAlarmCode,
+    WaitReason,
+)
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )
 from vonk_control.lifecycle.image_availability import PREPARATION_STALL_WINDOW
-from vonk_control.operations.blockers import ProgressAlarmCode, make_blocker
+from vonk_control.operations.blockers import make_blocker
 from vonk_control.progress_stall import (
     PROGRESS_STALL_WINDOW,
     is_stalled,

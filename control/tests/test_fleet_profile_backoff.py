@@ -14,9 +14,9 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-from vonk_control.lifecycle.core import RECOVERY
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.jobs import Job
+from vonk_control.recovery_policy import RECOVERY
 
 from .fleet_profiles_support import _uuid
 from .test_fleet_profile_recovery_current import (

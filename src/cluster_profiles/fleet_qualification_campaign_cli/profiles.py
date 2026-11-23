@@ -8,15 +8,8 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from ..cli_states import SUCCEEDED
-from ..control_client.errors import (
-    ControlClientError,
-    ControlForbidden,
-    ControlMalformedResponse,
-    ControlUnauthorized,
-)
-from ..controller_cli.profile_load import _submit_profile_load
-from ..fleet_qualification import (
+from cluster_profiles.cli_states_generated import SUCCEEDED
+from cluster_profiles.fleet_qualification_observation import (
     QualificationError,
     QualificationObservationUnknown,
     _BudgetClient,
@@ -25,6 +18,14 @@ from ..fleet_qualification import (
     _forget_key,
     _observe,
 )
+
+from ..control_client.errors import (
+    ControlClientError,
+    ControlForbidden,
+    ControlMalformedResponse,
+    ControlUnauthorized,
+)
+from ..controller_cli.profile_load import _submit_profile_load
 from .contracts import _TERMINAL_APPLICATIONS, PROFILE_LABEL, Campaign, Lane, Row
 
 

@@ -677,7 +677,7 @@ def test_post_stop_inventory_pending_waits_past_the_retry_budget_and_then_heals(
     outlives many backoff steps and continues once fresh inventory arrives.
     """
 
-    from vonk_control.lifecycle.core import RECOVERY
+    from vonk_control.recovery_policy import RECOVERY
     from vonk_control.run_switch_operations.errors import (
         RunSwitchPostStopEvidencePending,
     )

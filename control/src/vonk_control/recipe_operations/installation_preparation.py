@@ -57,7 +57,7 @@ from .observation_helpers import (
     wait_for_installation_upkeep,
 )
 from .progress import (
-    _parent_intent as _parent_intent,  # noqa: PLC0414 -- shared helper export
+    _parent_intent,
 )
 
 if TYPE_CHECKING:
