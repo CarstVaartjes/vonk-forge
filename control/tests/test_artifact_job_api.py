@@ -9,9 +9,6 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import cast
 
-from cluster_profiles.generated_control.models.artifact_job_response import (
-    ArtifactJobResponse as ClientArtifactJobResponse,
-)
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -31,6 +28,10 @@ from vonk_control.auth import Actor
 from vonk_control.compiled_artifact_contract import CompiledArtifactContract
 from vonk_control.models.execution import ArtifactJobBlob, ArtifactJobFile
 from vonk_control.strict_json import ControllerAPIRoute
+
+from cluster_profiles.generated_control.models.artifact_job_response import (
+    ArtifactJobResponse as ClientArtifactJobResponse,
+)
 
 JOB_ID = "00000000-0000-4000-8000-000000000001"
 RUN_ID = "00000000-0000-4000-8000-000000000002"

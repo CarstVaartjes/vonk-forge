@@ -9,12 +9,6 @@ from io import StringIO
 from pathlib import Path
 
 import pytest
-from cluster_profiles.generated_control.models.job_operator_receipt import (
-    JobOperatorReceipt,
-)
-from cluster_profiles.generated_control.models.job_operator_receipt_action import (
-    check_job_operator_receipt_action,
-)
 from controller_cli_support import FakeClient, _model_detail, _removal_review, run
 from vonk_agent_protocol import LifecycleState, OperatorActionName
 
@@ -26,6 +20,12 @@ from cluster_profiles.control_client import (
     ControlNotFound,
     ControlTransportError,
     ControlUnavailable,
+)
+from cluster_profiles.generated_control.models.job_operator_receipt import (
+    JobOperatorReceipt,
+)
+from cluster_profiles.generated_control.models.job_operator_receipt_action import (
+    check_job_operator_receipt_action,
 )
 from control.tests.consumer_outcomes import not_adopted
 

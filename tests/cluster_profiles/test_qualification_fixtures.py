@@ -468,11 +468,10 @@ class _ArtifactClient(_DownloadClient):
         self.accepted = {}
 
     def _response(self, job_id, *, state=None, preparation=None):
+        from cluster_profiles.control_client import validate_control_document
         from cluster_profiles.generated_control.models.artifact_job_response import (
             ArtifactJobResponse,
         )
-
-        from cluster_profiles.control_client import validate_control_document
 
         body = self.jobs[job_id]
         declared = [{**item, "media_type": "image/png"} for item in body["inputs"]]

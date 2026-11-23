@@ -61,11 +61,25 @@ def main() -> int:
     if files:
         commands.extend(
             [
-                # Ruff runs exactly CI's Ruff job command. Explicit file lists with
-                # --force-exclude sort the generated client's imports differently
-                # from CI's directory walk, so the hook and CI disagreed.
-                [sys.executable, "-m", "ruff", "check", "."],
-                [sys.executable, "-m", "ruff", "format", "--check", "."],
+                [
+                    sys.executable,
+                    "-m",
+                    "ruff",
+                    "check",
+                    "--force-exclude",
+                    "--",
+                    *files,
+                ],
+                [
+                    sys.executable,
+                    "-m",
+                    "ruff",
+                    "format",
+                    "--check",
+                    "--force-exclude",
+                    "--",
+                    *files,
+                ],
             ]
         )
     commands.append(

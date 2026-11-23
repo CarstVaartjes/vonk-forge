@@ -9,9 +9,6 @@ from contextlib import redirect_stdout
 from importlib.resources import files
 from io import StringIO
 
-from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
-    FleetProfileEndpointsView,
-)
 from library_route_fixtures import _recipe_projection
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
@@ -20,6 +17,9 @@ from cluster_profiles.control_client import (
     ControlNotFound,
     _operation,
     validate_control_document,
+)
+from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
+    FleetProfileEndpointsView,
 )
 
 

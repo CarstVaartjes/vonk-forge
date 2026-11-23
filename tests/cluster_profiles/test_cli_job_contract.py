@@ -5,15 +5,15 @@ from __future__ import annotations
 import json
 
 import pytest
-from cluster_profiles.generated_control.models.artifact_job_contract_response import (
-    ArtifactJobContractResponse,
-)
-from cluster_profiles.generated_control.types import Unset
 
 from cluster_profiles import cli, cli_artifact_jobs
 from cluster_profiles.cli_render.artifact_jobs import contract_knob_fields
 from cluster_profiles.cli_states_generated import JobContractState
 from cluster_profiles.control_client import ControlNotFound
+from cluster_profiles.generated_control.models.artifact_job_contract_response import (
+    ArtifactJobContractResponse,
+)
+from cluster_profiles.generated_control.types import Unset
 
 RUN_ID = "00000000-0000-4000-8000-000000000002"
 REVISION_ID = "00000000-0000-4000-8000-000000000007"

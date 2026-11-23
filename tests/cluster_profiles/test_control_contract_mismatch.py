@@ -352,11 +352,10 @@ def test_a_generated_schema_rejection_on_the_same_contract_stays_re_readable(
 def test_a_refusal_with_an_unknown_reason_keeps_waiting_and_heals(
     tmp_path: Path,
 ) -> None:
+    from cluster_profiles.cli_states_generated import SUCCEEDED
     from cluster_profiles.generated_control.models.job_detail_response import (
         JobDetailResponse,
     )
-
-    from cluster_profiles.cli_states_generated import SUCCEEDED
 
     job_id = "12345678-1234-4123-8123-123456789abc"
     job = f"/api/jobs/{job_id}"

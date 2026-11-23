@@ -8,9 +8,6 @@ from importlib.resources import files
 from typing import cast
 
 import pytest
-from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
-    FleetProfileEndpointsView,
-)
 from controller_cli_support import (
     _RUN_DIGEST,
     _RUN_KEY,
@@ -29,6 +26,9 @@ from cluster_profiles.control_client import (
     ControlNotFound,
     ControlTransportError,
     ControlUnavailable,
+)
+from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
+    FleetProfileEndpointsView,
 )
 
 

@@ -9,9 +9,6 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from cluster_profiles.generated_control.models.artifact_job_contract_response import (
-    ArtifactJobContractResponse as ClientArtifactJobContractResponse,
-)
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -38,6 +35,9 @@ from vonk_control.strict_json import ControllerAPIRoute
 from vonk_forge_contracts import read_recipe
 
 from cluster_profiles.control_client import validate_control_document
+from cluster_profiles.generated_control.models.artifact_job_contract_response import (
+    ArtifactJobContractResponse as ClientArtifactJobContractResponse,
+)
 
 from .agent_api_support import Jobs
 from .artifact_jobs_support import (

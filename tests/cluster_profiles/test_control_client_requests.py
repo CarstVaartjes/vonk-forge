@@ -19,21 +19,6 @@ from typing import Self, cast
 
 import httpx2
 import pytest
-from cluster_profiles.generated_control.models.fleet_profile_definition import (
-    FleetProfileDefinition,
-)
-from cluster_profiles.generated_control.models.fleet_profile_effects import (
-    FleetProfileEffects,
-)
-from cluster_profiles.generated_control.models.fleet_profile_plan_summary import (
-    FleetProfilePlanSummary,
-)
-from cluster_profiles.generated_control.models.fleet_profile_preview import (
-    FleetProfilePreview,
-)
-from cluster_profiles.generated_control.models.fleet_profile_scope_preview import (
-    FleetProfileScopePreview,
-)
 from vonk_control.fleet_projection.common import FleetSnapshot as OwnedFleetSnapshot
 from vonk_control.observation.transfer import (
     OBSERVATION_MEDIA_TYPE,
@@ -52,6 +37,21 @@ from cluster_profiles.control_client import (
     _RecordingTransport,
 )
 from cluster_profiles.control_client.transfers import LocalFilesystemError
+from cluster_profiles.generated_control.models.fleet_profile_definition import (
+    FleetProfileDefinition,
+)
+from cluster_profiles.generated_control.models.fleet_profile_effects import (
+    FleetProfileEffects,
+)
+from cluster_profiles.generated_control.models.fleet_profile_plan_summary import (
+    FleetProfilePlanSummary,
+)
+from cluster_profiles.generated_control.models.fleet_profile_preview import (
+    FleetProfilePreview,
+)
+from cluster_profiles.generated_control.models.fleet_profile_scope_preview import (
+    FleetProfileScopePreview,
+)
 from control.tests.observation_transfer_peer import ObservationHTTPPeer
 
 

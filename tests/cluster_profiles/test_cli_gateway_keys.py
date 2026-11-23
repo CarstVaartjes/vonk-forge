@@ -1,11 +1,10 @@
 import json
 
+from cluster_profiles import cli
+from cluster_profiles.control_client import _request_contract
 from cluster_profiles.generated_control.models.gateway_key_create_request import (
     GatewayKeyCreateRequest,
 )
-
-from cluster_profiles import cli
-from cluster_profiles.control_client import _request_contract
 
 SECRET = "sk-client-" + "s" * 32
 REQUEST_ID = "10000000-0000-4000-8000-000000000001"
