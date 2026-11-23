@@ -283,12 +283,13 @@ def test_postgres_concurrent_current_publishers_keep_one_owner_receipt(
         try:
             return service.publish_run(run_id)
         except UnknownOutcomeError as error:
-            if not isinstance(error, (RecipeRouteSuperseded, RecipeRouteOwnerBusy)):
-                assert error.typed_reason == WaitReason.SCOPE_CHANGED
-            # The loser of the race is replaced by the newer claim, or finds
-            # the owner held; the worker simply retries it, so it is not a
-            # failure.
-            return None
+            lost = error
+        if not isinstance(lost, (RecipeRouteSuperseded, RecipeRouteOwnerBusy)):
+            assert lost.typed_reason == WaitReason.SCOPE_CHANGED
+        # The loser of the race is replaced by the newer claim, or finds
+        # the owner held; the worker simply retries it, so it is not a
+        # failure.
+        return None
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         published = list(pool.map(publish, services))

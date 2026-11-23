@@ -1833,6 +1833,11 @@ def test_grant_revocation_and_consumption_serialize_on_postgres(postgres_engine,
     consumption_done = threading.Event()
     revocation_done = threading.Event()
 
+    def refusal_reason(error: EnrollmentDenied) -> SecurityRefusalReason:
+        assert error.category == ErrorCategory.SECURITY_REFUSAL
+        assert error.typed_reason is not None
+        return error.typed_reason
+
     def submit() -> EnrollmentGrantState | SecurityRefusalReason:
         ready.wait()
         if first == EnrollmentGrantState.REVOKED:
@@ -1841,9 +1846,7 @@ def test_grant_revocation_and_consumption_serialize_on_postgres(postgres_engine,
             submitter.submit(grant.token, request, evidence(request))
             return EnrollmentGrantState.CONSUMED
         except EnrollmentDenied as error:
-            assert error.category == ErrorCategory.SECURITY_REFUSAL
-            assert error.typed_reason is not None
-            return error.typed_reason
+            return refusal_reason(error)
         finally:
             consumption_done.set()
 
@@ -1856,9 +1859,7 @@ def test_grant_revocation_and_consumption_serialize_on_postgres(postgres_engine,
             assert isinstance(result, EnrollmentGrantStatus)
             return result.state
         except EnrollmentDenied as error:
-            assert error.category == ErrorCategory.SECURITY_REFUSAL
-            assert error.typed_reason is not None
-            return error.typed_reason
+            return refusal_reason(error)
         finally:
             revocation_done.set()
 

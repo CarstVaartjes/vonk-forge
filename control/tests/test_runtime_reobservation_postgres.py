@@ -243,10 +243,12 @@ def test_late_runtime_receipt_rejects_changed_authority(service, kind, change):
             job.state = LifecycleState.CANCELLED
         else:
             node.workload_intent_ordinal += 1
+    refusal: StaleAgentFence | None = None
     try:
         queue.record_late_result(receipt)
     except StaleAgentFence as error:
-        assert str(error)
+        refusal = error
+    assert refusal is None or str(refusal)
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
         assert row is not None

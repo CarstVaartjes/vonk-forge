@@ -512,10 +512,8 @@ def test_security_acknowledgement_is_never_retried_or_adopted(tmp_path):
         )
 
     service = _service(base, tmp_path / "live", lambda: NOW, denied)
-    try:
+    with contextlib.suppress(Exception):
         service.publish_run(run_id)
-    except Exception as outcome:  # noqa: BLE001
-        assert outcome is not None
     assert len(calls) == 1
     with base.sessions() as session:
         assert _recipe_run(session, run_id).route_state != "published"

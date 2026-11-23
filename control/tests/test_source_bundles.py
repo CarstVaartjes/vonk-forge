@@ -389,9 +389,11 @@ def test_normalised_source_bundle_path_never_leaves_the_root(raw: str) -> None:
     try:
         normalised = source_bundles._safe_path(raw)
     except SourceBundleError as error:
-        assert error.code in {
-            SourceBundleCode.PATH_FORBIDDEN,
-            SourceBundleCode.PATH_TOO_LONG,
-        }
+        code = error.code
+    else:
+        assert _stays_inside_root(normalised)
         return
-    assert _stays_inside_root(normalised)
+    assert code in {
+        SourceBundleCode.PATH_FORBIDDEN,
+        SourceBundleCode.PATH_TOO_LONG,
+    }

@@ -123,10 +123,14 @@ def test_unverified_identity_never_has_a_persisted_effect(service, monkeypatch):
         return replace(issued, node_id=OTHER_NODE_ID)
 
     monkeypatch.setattr(authority, "renew_node", wrong_identity)
+    failure: RuntimeError | None = None
     try:
         enrollment.renew(NODE_ID, source.serial, csr())
     except RuntimeError as error:
-        assert calls, f"unexpected failure before provider effect: {error}"
+        failure = error
+    assert failure is None or calls, (
+        f"unexpected failure before provider effect: {failure}"
+    )
     with sessions() as session:
         assert session.get(AgentCertificate, calls[0]) is None
         assert session.get(AgentCertificate, source.serial).revoked_at is None
