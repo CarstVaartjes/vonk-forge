@@ -10,9 +10,11 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OutcomeKind
 from vonk_agent_protocol.reason_codes.runs import JournalRepairCode
 
 from ..jobs import states as job_states
+from ..journal_models import RunSwitchJournalRepairPending
 from ..models.jobs import Job
 from ..operations.blockers import make_blocker
 from ..persisted_waits import read_wait, wait_due
+from ..run_switch_contract.journal import RunSwitchJournalRepairPendingState
 from ..run_switch_contract.operations import RunSwitchOperation
 from ..run_switch_contract.progress_view import (
     _progress_operation_state,
@@ -78,9 +80,6 @@ class ProjectionMixin:
             }
             and is_zero_transfer_journal_fault(job)
         ):
-            from ..journal_models import RunSwitchJournalRepairPending
-            from ..run_switch_contract.journal import RunSwitchJournalRepairPendingState
-
             view_session = object_session(job)
             pending = (
                 view_session.get(RunSwitchJournalRepairPending, job.id)

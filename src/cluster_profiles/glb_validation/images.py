@@ -6,6 +6,8 @@ import struct
 import zlib
 from io import BytesIO
 
+from PIL import Image
+
 
 def _valid_png(value: bytes) -> bool:
     if not value.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -266,8 +268,6 @@ def _image_bytes(blob: bytes, view: tuple[int, int], mime_type: str) -> None:
     )
     if valid and mime_type in {"image/jpeg", "image/webp"}:
         try:
-            from PIL import Image
-
             with Image.open(BytesIO(value)) as image:
                 image.verify()
         except (ImportError, OSError, SyntaxError, ValueError):

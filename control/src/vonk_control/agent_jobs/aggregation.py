@@ -18,6 +18,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from .. import agent_operation_states
 from ..agent_upgrades.status import operator_agent_upgrade_reason
 from ..categorized_errors import MissingRecord
+from ..distribution_executor.durable import DurableDistributionPhaseExecutor
 from ..inventory.items import runtime_value
 from ..jobs import states as job_states
 from ..lifecycle.agent_operation import (
@@ -33,6 +34,7 @@ from ..models.jobs import Job
 from ..models.operations import AgentOperation as StoredOperation
 from ..models.operations import AgentOperationAttempt
 from ..offline_stops import is_deferred_stop
+from ..strict_json import serialize_json_value
 from .contracts import _ABANDONABLE_OPERATIONS
 from .evidence import _is_refusal_reason
 from .retry import _abandon_operation, _retry_authorized_for_current_attempt
@@ -54,9 +56,6 @@ def _aggregate_parent(
     self._aggregate_parent_state(session, parent_job_id)
     parent = session.get(Job, parent_job_id)
     if parent is not None and parent.kind == FailureStage.ARTIFACT_DISTRIBUTION:
-        from ..distribution_executor.durable import DurableDistributionPhaseExecutor
-        from ..strict_json import serialize_json_value
-
         projection = DurableDistributionPhaseExecutor.project_child(
             session, parent, self._clock()
         )

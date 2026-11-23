@@ -65,7 +65,11 @@ from pydantic import ValidationError
 from sqlalchemy import event, inspect
 
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, ProgressAlarmCode
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    ProgressAlarmCode,
+    WaitReason,
+)
 from vonk_agent_protocol.wire_model import canonical_message
 
 from .fleet_profile_contract.applications import FleetProfileApplicationProgress
@@ -77,9 +81,10 @@ from .operations.blockers import (
     StallWait,
     make_blocker,
 )
+from .persisted_waits import schedule_wait
 from .settings import PROFILE_STALL_WINDOW_SECONDS
 from .stall_window import Verdict, progress_verdict
-from .wait_contract import WaitEvidence
+from .wait_contract import WaitEvidence, typed_wait_reason
 
 #: How long a wait shows no movement before it is shown as stalled: the load's
 #: own stall window.  It is longer than a preparation's own stall window, so a
@@ -348,11 +353,6 @@ def observe_application_progress(
     # Progress producers may replace their typed blockers after the lifecycle
     # transition. Publish those exact causes with the same SQL update and clock.
     if target.next_action_at is not None and progress.blockers:
-        from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-
-        from .persisted_waits import schedule_wait
-        from .wait_contract import typed_wait_reason
-
         causes = [
             b for b in progress.blockers if b.code is not ProgressAlarmCode.STALLED
         ]

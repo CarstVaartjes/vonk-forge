@@ -631,12 +631,6 @@ def _presence_policy_endpoint(
         current = route()
         response_field = current.response_field
         if isinstance(result, Response) or response_field is None:
-            from .operator_acceptance import (
-                acceptance_arguments,
-                apply_receipt,
-                receipt_policy,
-            )
-
             response = result if isinstance(result, Response) else injected_response
             if not isinstance(response, Response):
                 response = Response(status_code=current.status_code or 200)
@@ -668,12 +662,6 @@ def _presence_policy_endpoint(
         )
         if isinstance(injected_response, Response):
             response.headers.raw.extend(injected_response.headers.raw)
-        from .operator_acceptance import (
-            acceptance_arguments,
-            apply_receipt,
-            receipt_policy,
-        )
-
         return await run_in_threadpool(
             apply_receipt,
             receipt_policy(endpoint),

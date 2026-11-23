@@ -31,6 +31,7 @@ from ..admission_locking import (
     admission_wait_exhausted,
     node_admission_key,
 )
+from ..gpu.clock import gpu_clock_start_intent
 from ..lifecycle.evidence import (
     Residue,
 )
@@ -277,8 +278,6 @@ class StartMixin:
                     canonical_message(payload)
                 )
                 if profile_application_id is not None or gpu_clock is not None:
-                    from ..gpu.clock import gpu_clock_start_intent
-
                     try:
                         desired_clock = gpu_clock_start_intent(session, node_id)
                     except ValueError as error:

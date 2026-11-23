@@ -8,6 +8,8 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 from vonk_forge_contracts import RecipeDefinition
@@ -319,9 +321,9 @@ def _set_selected_profile(
     table = FleetProfileSelection.__table__
     dialect = session.get_bind().dialect.name
     if dialect == "postgresql":
-        from sqlalchemy.dialects.postgresql import insert
+        insert = postgresql_insert
     elif dialect == "sqlite":
-        from sqlalchemy.dialects.sqlite import insert
+        insert = sqlite_insert
     else:
         raise FleetProfileUnsupportedStore(
             "Fleet profile selection requires PostgreSQL or SQLite",

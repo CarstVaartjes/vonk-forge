@@ -13,8 +13,6 @@ from .strict_json import read_stored_model
 
 
 def deferred_stop_nodes(job: Job) -> frozenset[str]:
-    # Imported here because the canonical job contracts reach the queue adapters.
-
     if job.kind != "recipe.stop":
         return frozenset()
     try:

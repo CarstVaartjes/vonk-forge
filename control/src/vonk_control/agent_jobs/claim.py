@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 import uuid
 from datetime import timedelta
 from typing import TYPE_CHECKING
@@ -14,7 +15,12 @@ from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentClaim, AgentProgress, canonical_payload
+from vonk_agent_protocol.contracts import (
+    AgentClaim,
+    AgentProgress,
+    AgentUpgradePayload,
+    canonical_payload,
+)
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -605,10 +611,6 @@ def _claim_once(
                     parent.status_reason = operation.status_reason
                 return None
         if operation.kind == AgentOperation.AGENT_UPGRADE.value:
-            import secrets
-
-            from vonk_agent_protocol.contracts import AgentUpgradePayload
-
             payload = column_value(operation, "payload")
             if not isinstance(payload, AgentUpgradePayload):
                 return None  # the damaged-payload ending above already owns this case

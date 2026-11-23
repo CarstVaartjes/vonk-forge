@@ -30,6 +30,7 @@ from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 
 from ..categorized_errors import InvalidValue
+from ..fleet_model_removal_contract import STORE_RETENTION_MAX_AGE
 from ..jobs import states as job_states
 from ..model_cache import states as model_cache_states
 from ..models.cache import ArtifactLifecycleGate, ModelCacheOperation
@@ -734,8 +735,6 @@ def release_dead_removal_nowait(
     # operation JSON. NAS-only gates have no outstanding remote authority.
     expires_at = row.removal_authority_expires_at
     if expires_at is not None:
-        from ..fleet_model_removal_contract import STORE_RETENTION_MAX_AGE
-
         expires_at = expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=UTC)
         if isinstance(owner, ModelCacheOperation):
             ended_at = owner.completed_at or owner.updated_at

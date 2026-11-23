@@ -46,6 +46,7 @@ from ..security.enrollment import (
     require_expired_proof,
     require_node,
     require_staged_certificate,
+    validate_issued_binding,
 )
 from ..security.enrollment import (
     require_expired_source as _require_expired_source,
@@ -131,7 +132,6 @@ class EnrollmentService(RotationService):
             )
             if issued is None:
                 return False
-            from ..security.enrollment import validate_issued_binding
 
             validate_issued_binding(issued, binding)
             with self._transaction() as session:

@@ -92,6 +92,7 @@ from ..agent_operation_facts import (
     start_deadline,
 )
 from ..categorized_errors import InvalidValue
+from ..evidence_repeats import note_success
 from ..jobs import states as job_states
 from ..models.jobs import Job
 from ..models.operations import AgentOperation as StoredOperation
@@ -581,7 +582,6 @@ class AgentOperationAdapter:
         if after.state is State.SUCCEEDED and before.state is not State.SUCCEEDED:
             # Identity reconciliation can settle an upgrade without a new agent
             # result. Clear its old warning at the common successful write.
-            from ..evidence_repeats import note_success
 
             assert self._session is not None
             note_success(

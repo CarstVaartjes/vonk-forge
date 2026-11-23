@@ -23,6 +23,7 @@ from ..fleet_profiles.capacity import (
     sibling_profile_ports,
     sibling_profile_runs,
 )
+from ..gpu.clock_validation import assess_gpu_clock
 from ..models.cache import RecipeBuild
 from ..prebuilt_images import policy_prebuilt_reference
 from ..preparation_contract import (
@@ -577,8 +578,6 @@ class RunPlanningMixin:
                     ),
                 )
             if request.gpu_clock is not None:
-                from ..gpu.clock_validation import assess_gpu_clock
-
                 clock_blockers, clock_warnings = assess_gpu_clock(
                     session, node_ids, request.gpu_clock
                 )

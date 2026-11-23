@@ -9,8 +9,6 @@ from .generated_control.models.platform_observation import PlatformObservation
 
 
 def render_platform(observation: PlatformObservation) -> None:
-    # Import lazily: the shared terminal helpers live with the task renderer.
-
     _field("Observed", _utc(observation.observed_at))
     build = observation.api.source_sha
     _reported("Controller build", build[:12] if isinstance(build, str) else None)

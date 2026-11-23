@@ -56,6 +56,7 @@ from .contracts import (
 from .reader_contract import (
     StoredAvailabilityIdentity,
 )
+from .scheduling import _expire_preparation
 from .view_contract import (
     RecipeImageAvailabilityView,
 )
@@ -152,8 +153,6 @@ def _fail(
             operation.created_at, payload.progress_advanced_at
         )
         if now >= deadline and operation.current_attempt > 0:
-            from .scheduling import _expire_preparation
-
             _expire_preparation(self, session, operation, payload, now)
             return
         # A preparation that stopped progressing ends at its stall deadline
