@@ -37,7 +37,7 @@ from vonk_control.recipe_update_notice import (
 )
 from vonk_forge_contracts import document_sha256
 
-from tests.fleet_projection_support import (
+from tests.test_fleet_projection import (
     NODE_A,
     NOW,
     _canonical_catalog_documents,
