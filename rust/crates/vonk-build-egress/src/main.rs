@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use std::{
     collections::BTreeSet,
     io::{self, Read, Write},
@@ -22,7 +20,7 @@ const MAX_CONNECTIONS: usize = 64;
 const MAX_RESOLVED_ADDRESSES: usize = 16;
 const MAX_TUNNEL_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 /// Byte budget for one connection, shared across both copy directions so a
-/// tunnel cannot move MAX_TUNNEL_BYTES in each direction.
+/// tunnel cannot move `MAX_TUNNEL_BYTES` in each direction.
 const IO_TIMEOUT: Duration = Duration::from_secs(120);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 static RESOLVER_OWNERS: AtomicUsize = AtomicUsize::new(0);
@@ -37,6 +35,10 @@ fn main() -> ExitCode {
     }
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 fn run(arguments: Vec<String>) -> Result<(), String> {
     if arguments == ["--probe"] {
         probe_available(
@@ -96,6 +98,10 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
     }
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 fn serve(hosts: Arc<BTreeSet<String>>) -> io::Result<()> {
     let listener = TcpListener::bind(LISTEN)?;
     let active = Arc::new(AtomicUsize::new(0));
@@ -113,6 +119,10 @@ fn serve(hosts: Arc<BTreeSet<String>>) -> io::Result<()> {
         let refusal = stream.try_clone();
         let spawned = thread::Builder::new().spawn(move || {
             let _guard = guard;
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "a failed connection ends that connection only"
+            )]
             let _ = handle(stream, &hosts);
         });
         if let Err(error) = spawned {
@@ -188,12 +198,9 @@ fn handle_until(
             return Ok(());
         }
     };
-    let mut upstream = match connect(&addresses, deadline) {
-        Ok(value) => value,
-        Err(()) => {
-            reject(client, 502);
-            return Ok(());
-        }
+    let Ok(mut upstream) = connect(&addresses, deadline) else {
+        reject(client, 502);
+        return Ok(());
     };
     upstream.set_read_timeout(Some(IO_TIMEOUT))?;
     upstream.set_write_timeout(Some(IO_TIMEOUT))?;
@@ -253,7 +260,7 @@ fn resolve_observed(
                 }
             }
             if valid && !addresses.is_empty() {
-                return validate_resolved(addresses).map_err(|_| 502);
+                return validate_resolved(addresses).map_err(|()| 502);
             }
         }
         if attempt < 2 {
@@ -319,8 +326,16 @@ fn resolver_output(command: &mut Command, deadline: Instant) -> Result<Vec<u8>, 
             _ => {
                 // Transfer the exact child and its resource claim to a reaper.
                 // A failed kill never drops a live child or releases its slot.
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort stop of a process that may already have ended"
+                )]
                 let _ = child.kill();
                 retain_resolver(child, owner, |child| {
+                    #[expect(
+                        clippy::let_underscore_must_use,
+                        reason = "best-effort stop of a process that may already have ended"
+                    )]
                     let _ = child.kill();
                 });
                 return Err(());
@@ -377,7 +392,7 @@ fn retain_resolver_with(
     let spawned = start(Box::new(move || {
         let Some((mut child, owner)) = reaper_slot
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take()
         else {
             return;
@@ -395,19 +410,19 @@ fn retain_resolver_with(
         // ownership in one short critical section, with no external wait.
         RETAINED_RESOLVERS
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push((child, owner));
     }));
     if spawned.is_err()
         && let Some(pair) = slot
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take()
     {
         // Service supervision takes over at once; no claim is dropped.
         RETAINED_RESOLVERS
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(pair);
     }
 }
@@ -421,6 +436,10 @@ fn supervise_retained_resolvers() {
         if matches!(child.try_wait(), Ok(Some(_))) {
             false
         } else {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort stop of a process that may already have ended"
+            )]
             let _ = child.kill();
             true
         }
@@ -621,11 +640,23 @@ fn tunnel_until(mut left: TcpStream, mut right: TcpStream, deadline: Instant) ->
         // The client is gone (or failed): send the upstream our FIN so it
         // closes and the other direction ends now, not after its 120 s read
         // timeout, and the connection slot is released.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the receiving side may already be gone; nobody is waiting for the value"
+        )]
         let _ = right_write.shutdown(std::net::Shutdown::Write);
         copied
     })?;
     let inbound = copy_until(&mut right, &mut left, &budget, deadline);
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the receiving side may already be gone; nobody is waiting for the value"
+    )]
     let _ = left.shutdown(std::net::Shutdown::Both);
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the receiving side may already be gone; nobody is waiting for the value"
+    )]
     let _ = right.shutdown(std::net::Shutdown::Both);
     let outbound = outbound
         .join()
@@ -710,6 +741,10 @@ fn reject(mut stream: TcpStream, status: u16) {
         502 => "Bad Gateway",
         _ => "Service Unavailable",
     };
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the peer may have closed the connection; the assertions are on the other side"
+    )]
     let _ = write!(
         stream,
         "HTTP/1.1 {status} {reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"

@@ -21,9 +21,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 .execute_distribution(claim, lease_deadline, cancellation)
                 .await;
         }
-        let request = match RecipeOperationRequest::parse(claim) {
-            Ok(request) => request,
-            Err(_) => return failed("recipe operation payload is invalid"),
+        let Ok(request) = RecipeOperationRequest::parse(claim) else {
+            return failed("recipe operation payload is invalid");
         };
         // The one place a compiled plan is validated; parse stays structural so
         // journal re-observation survives upgrades that tighten the rules.
@@ -72,7 +71,7 @@ impl Executor for RejectingExecutor {
     async fn observe(
         &self,
         _claim: &AgentClaim,
-    ) -> Option<crate::executor::operation_observation::OperationObservation> {
+    ) -> Option<operation_observation::OperationObservation> {
         None
     }
 
@@ -98,7 +97,7 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
                 .observe_operation(
                     claim,
                     (claim.operation == AgentOperation::AgentUpgradeV1).then(|| {
-                        super::upgrade_observation::UpgradeObservation {
+                        upgrade_observation::UpgradeObservation {
                             node_id: self.upgrades.client.node_id(),
                             identity: self.runtime_identity,
                             receipt: crate::package_activation::read_receipt(

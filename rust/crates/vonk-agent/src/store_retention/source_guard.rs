@@ -24,7 +24,7 @@ fn test_only(attributes: &[syn::Attribute]) -> bool {
                 }
             }
             // Other conditions might hold in production, including not(test).
-            _ => true,
+            syn::Meta::Path(_) | syn::Meta::List(_) | syn::Meta::NameValue(_) => true,
         }
     }
     attributes.iter().any(|attribute| {
@@ -34,6 +34,10 @@ fn test_only(attributes: &[syn::Attribute]) -> bool {
     })
 }
 
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "every other case takes the same fallback by design"
+)]
 fn attributes(item: &Item) -> &[syn::Attribute] {
     match item {
         Item::Fn(item) => &item.attrs,
@@ -66,6 +70,10 @@ pub(super) fn constants(text: &str) -> BTreeMap<String, String> {
     constants.0
 }
 
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "every other case takes the same fallback by design"
+)]
 fn data_root(expression: &Expr, default: StoreRoot) -> Option<StoreRoot> {
     let name = match expression {
         Expr::Path(path) => path.path.get_ident().map(ToString::to_string),
@@ -95,6 +103,10 @@ pub(super) fn stores(
         default: StoreRoot,
     }
     impl Stores<'_> {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "every other case takes the same fallback by design"
+        )]
         fn path(&mut self, expression: &Expr, root: StoreRoot) {
             match expression {
                 Expr::Lit(syn::ExprLit {
@@ -254,6 +266,10 @@ fn fields_constants_and_multiline_joins_are_checked_but_test_bodies_are_not() {
 }
 
 /// Packages use literal absolute paths and mktemp's six-X template.
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 pub(super) fn package_stores(text: &str) -> BTreeSet<(StoreRoot, String)> {
     let mut names = BTreeSet::new();
     for (prefix, root) in [

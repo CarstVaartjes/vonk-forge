@@ -122,13 +122,13 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             .map_err(|error| match error {
                 ProcessError::Timeout => GpuUnavailableReason::GpuCommandTimeout,
                 ProcessError::OutputLimit => GpuUnavailableReason::GpuInvalidOutput,
-                _ => GpuUnavailableReason::GpuCommandFailed,
+                ProcessError::Io(_) | ProcessError::StorageLimit | ProcessError::Cancelled => GpuUnavailableReason::GpuCommandFailed,
             })
             .and_then(|output| {
                 if !output.success {
                     return Err(GpuUnavailableReason::GpuCommandFailed);
                 }
-                if output.stdout.len() > SOURCE_TEXT_LIMIT as usize {
+                if output.stdout.len() > usize::try_from(SOURCE_TEXT_LIMIT).unwrap_or(usize::MAX) {
                     return Err(GpuUnavailableReason::GpuInvalidOutput);
                 }
                 parse_first_accelerator(&output.stdout)
@@ -180,8 +180,8 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             for reading in gpu_clock.unavailable.iter_mut().flatten() {
                 reading.reason =
                     vonk_agent_protocol::generated::GpuClockUnavailableReason::RequiresReset;
-                reading.detail =
-                    "GPU requires reset; see the fleet health warning for recovery.".to_owned();
+                "GPU requires reset; see the fleet health warning for recovery."
+                    .clone_into(&mut reading.detail);
             }
         }
         let host = read_host(&self.paths.host, &self.paths.store);
@@ -241,7 +241,9 @@ pub fn gpu_process_memory<R: ProcessRunner>(runner: &R) -> Option<u64> {
             Duration::from_secs(10),
         )
         .ok()?;
-    if !output.success || output.stdout.len() > SOURCE_TEXT_LIMIT as usize {
+    if !output.success
+        || output.stdout.len() > usize::try_from(SOURCE_TEXT_LIMIT).unwrap_or(usize::MAX)
+    {
         return None;
     }
     let mut total = 0_u64;
@@ -255,6 +257,11 @@ pub fn gpu_process_memory<R: ProcessRunner>(runner: &R) -> Option<u64> {
 }
 
 /// Whole seconds since boot: the first field of `/proc/uptime`, floored.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the range check on the line above guarantees the value fits u32"
+)]
 fn read_uptime(path: &Path) -> Option<u32> {
     let seconds = read_bounded_text(path)?
         .split_ascii_whitespace()
@@ -271,10 +278,10 @@ fn collect_gpu_clock<R: ProcessRunner>(
     boot_id: &Uuid,
     data_root: &Path,
 ) -> vonk_agent_protocol::generated::GpuClockObservation {
+    use vonk_agent_protocol::generated::GpuClockMetric as Metric;
     use vonk_agent_protocol::generated::{GpuClockCheckpoint, GpuClockObservation};
     let mut observation = GpuClockObservation::default();
     let mut unavailable = Vec::new();
-    use vonk_agent_protocol::generated::GpuClockMetric as Metric;
     // Isolate optional driver fields: one unsupported query must not hide
     // otherwise available clocks. The monitor samples again every two seconds.
     for (metric, field) in [
@@ -286,10 +293,10 @@ fn collect_gpu_clock<R: ProcessRunner>(
     ] {
         match gpu_clock_reading(runner, metric, field) {
             Ok(value) => match metric {
-                Metric::GraphicsMhz => observation.graphics_mhz = Some(value as u32),
-                Metric::SmMhz => observation.sm_mhz = Some(value as u32),
-                Metric::MaxGraphicsMhz => observation.max_graphics_mhz = Some(value as u32),
-                Metric::MaxSmMhz => observation.max_sm_mhz = Some(value as u32),
+                Metric::GraphicsMhz => observation.graphics_mhz = u32::try_from(value).ok(),
+                Metric::SmMhz => observation.sm_mhz = u32::try_from(value).ok(),
+                Metric::MaxGraphicsMhz => observation.max_graphics_mhz = u32::try_from(value).ok(),
+                Metric::MaxSmMhz => observation.max_sm_mhz = u32::try_from(value).ok(),
                 Metric::ThrottleReasons => observation.throttle_reasons = Some(value),
             },
             Err(failure) => unavailable.push(failure),
@@ -306,7 +313,7 @@ fn collect_gpu_clock<R: ProcessRunner>(
         Ok(bytes)
     })();
     match checkpoint {
-        Ok(bytes) if bytes.len() <= SOURCE_TEXT_LIMIT as usize => {
+        Ok(bytes) if bytes.len() <= usize::try_from(SOURCE_TEXT_LIMIT).unwrap_or(usize::MAX) => {
             match vonk_agent_protocol::parse_strict::<GpuClockCheckpoint>(&bytes) {
                 Ok(checkpoint) => {
                     if checkpoint.applied_boot_id.as_deref() == Some(boot_id.to_string().as_str()) {
@@ -323,7 +330,7 @@ fn collect_gpu_clock<R: ProcessRunner>(
                 Err(error) => {
                     observation.receipt_detail = Some(format!(
                         "Invalid helper GPU clock receipt: {error}; inspect helper reconciliation"
-                    ))
+                    ));
                 }
             }
         }
@@ -331,13 +338,13 @@ fn collect_gpu_clock<R: ProcessRunner>(
             observation.receipt_detail = Some(
                 "Helper GPU clock receipt exceeds 65536 bytes; inspect helper reconciliation"
                     .to_owned(),
-            )
+            );
         }
         Err(error) => {
             observation.receipt_detail = Some(format!(
                 "Helper GPU clock receipt unavailable at {}: {error}; inventory and hourly helper reconciliation retry",
                 checkpoint_path.display()
-            ))
+            ));
         }
     }
     observation
@@ -458,7 +465,7 @@ fn read_bounded_text(path: &Path) -> Option<String> {
     file.take(SOURCE_TEXT_LIMIT + 1)
         .read_to_end(&mut bytes)
         .ok()?;
-    if bytes.len() > SOURCE_TEXT_LIMIT as usize {
+    if bytes.len() > usize::try_from(SOURCE_TEXT_LIMIT).unwrap_or(usize::MAX) {
         return None;
     }
     String::from_utf8(bytes).ok()
@@ -471,10 +478,10 @@ fn parse_memory(value: &str) -> Option<(u64, u64)> {
         let mut fields = line.split_ascii_whitespace();
         match (fields.next(), fields.next(), fields.next(), fields.next()) {
             (Some("MemTotal:"), Some(amount), Some("kB"), None) => {
-                total = amount.parse::<u64>().ok()?.checked_mul(1024)
+                total = amount.parse::<u64>().ok()?.checked_mul(1024);
             }
             (Some("MemAvailable:"), Some(amount), Some("kB"), None) => {
-                available = amount.parse::<u64>().ok()?.checked_mul(1024)
+                available = amount.parse::<u64>().ok()?.checked_mul(1024);
             }
             _ => {}
         }
@@ -606,6 +613,10 @@ fn is_missing(value: &str) -> bool {
     value.is_empty() || matches!(value, "N/A" | "[N/A]")
 }
 
+#[expect(
+    clippy::option_option,
+    reason = "three states: not applicable, applicable but unavailable, and a value"
+)]
 fn optional_mib(value: &str) -> Option<Option<u64>> {
     if is_missing(value) {
         return Some(None);

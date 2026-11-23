@@ -81,6 +81,14 @@ pub(crate) struct UserManager {
 }
 
 impl crate::process::ProcessRunner for UserManager {
+    #[expect(
+        clippy::case_sensitive_file_extension_comparisons,
+        reason = "a fixed lowercase suffix of a generated name"
+    )]
+    #[expect(
+        clippy::format_collect,
+        reason = "builds a small string; a fold would read worse"
+    )]
     fn run(
         &self,
         program: crate::process::Program,
@@ -411,6 +419,7 @@ fn a_build_beside_the_lane_keeps_its_staging_and_base_images_before_it_locks_the
 
 #[test]
 fn retired_stores_are_emptied() {
+    use std::os::unix::fs::PermissionsExt;
     let root = tempfile::tempdir().unwrap();
     authorize_retention(root.path());
     let legacy = file(
@@ -418,7 +427,6 @@ fn retired_stores_are_emptied() {
         b"old",
     );
     // Old custody left read-only directories behind.
-    use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(legacy.parent().unwrap(), fs::Permissions::from_mode(0o500)).unwrap();
     let import = file(&root.path().join("image-imports/archive.tar"), b"old");
     let archive = file(&root.path().join("oci-archives").join(OBJECT), b"old");
@@ -686,12 +694,12 @@ fn an_isolated_entry_among_the_installations_leaves_after_the_grace() {
 
 #[test]
 fn a_removed_installations_cleanup_history_and_lock_leave_after_the_grace() {
+    const HELD: &str = "8b2c3d4e-5f6a-4b7c-9d8e-0f1a2b3c4d5e";
+    const QUARANTINED: &str = "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
     let root = tempfile::tempdir().unwrap();
     authorize_retention(root.path());
     let history = root.path().join("installation-reconciliation");
     let locks = root.path().join("installation-ownership");
-    const QUARANTINED: &str = "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
-    const HELD: &str = "8b2c3d4e-5f6a-4b7c-9d8e-0f1a2b3c4d5e";
     // Removed long ago: superseded bytes, retired records, an unfinished
     // write, the checkpoint and the lock file of the gone installation.
     let retained = file(&history.join(format!("{ORPHAN}.retained/spec.json")), b"{}");
@@ -1024,6 +1032,10 @@ fn every_store_below_the_data_root_has_an_owner_and_a_collector() {
     );
 }
 
+#[expect(
+    clippy::case_sensitive_file_extension_comparisons,
+    reason = "a fixed lowercase suffix of a generated name"
+)]
 fn collect_sources(directory: &Path, sources: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(directory).unwrap() {
         let path = entry.unwrap().path();
@@ -1040,8 +1052,8 @@ fn collect_sources(directory: &Path, sources: &mut Vec<PathBuf>) {
 
 pub(crate) fn retention() -> vonk_agent_protocol::generated::StoreRetentionRequest {
     vonk_agent_protocol::generated::StoreRetentionRequest {
-        issued_at: std::time::SystemTime::now()
-            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        issued_at: SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_secs(),
         expires_at: SystemTime::now()
@@ -1414,7 +1426,7 @@ fn abandoned_build_staging_expires_only_after_its_exact_units_are_quiescent() {
                         .to_vec()
                 },
                 stderr: vec![],
-                exit_code: Some(if self.unavailable { 1 } else { 0 }),
+                exit_code: Some(i32::from(self.unavailable)),
             })
         }
     }
@@ -1675,7 +1687,7 @@ fn retention_failure_is_durable_deduplicated_and_clears_after_recovery() {
 }
 
 /// One build-staging pass of the agent at `root`; the stops it submitted.
-fn stops_of(root: &Path, manager: UserManager) -> Vec<String> {
+fn stops_of(root: &Path, manager: &UserManager) -> Vec<String> {
     let mut pass = super::Pass {
         now: SystemTime::now(),
         deadline: Instant::now() + Duration::from_secs(60),
@@ -1686,7 +1698,7 @@ fn stops_of(root: &Path, manager: UserManager) -> Vec<String> {
         remover: &|_| unreachable!("build staging has no runtime scope"),
         failure: None,
     };
-    pass.build_staging(&root.join("build-staging"), &manager);
+    pass.build_staging(&root.join("build-staging"), manager);
     manager.stops.replace(Vec::new())
 }
 
@@ -1710,12 +1722,12 @@ fn podman_scopes_no_build_owns_are_stopped_only_while_no_build_is_live() {
         unavailable,
         ..UserManager::default()
     };
-    assert_eq!(stops_of(root.path(), manager(&[], false)), scopes);
+    assert_eq!(stops_of(root.path(), &manager(&[], false)), scopes);
     let build = format!("vonk-recipe-build-{ORPHAN}.service");
-    assert!(stops_of(root.path(), manager(&[&build], false)).is_empty());
-    assert!(stops_of(root.path(), manager(&[], true)).is_empty());
+    assert!(stops_of(root.path(), &manager(&[&build], false)).is_empty());
+    assert!(stops_of(root.path(), &manager(&[], true)).is_empty());
     let _beside = crate::executor::BuildBeside::hold(root.path(), ORPHAN.parse().unwrap());
-    assert!(stops_of(root.path(), manager(&[], false)).is_empty());
+    assert!(stops_of(root.path(), &manager(&[], false)).is_empty());
 }
 
 #[test]
@@ -1730,13 +1742,13 @@ fn an_egress_unit_whose_build_is_gone_is_stopped_before_its_envelope() {
         ..UserManager::default()
     };
     assert_eq!(
-        stops_of(root.path(), manager(&[&egress])),
+        stops_of(root.path(), &manager(&[&egress])),
         vec![egress.clone()]
     );
     let build = format!("vonk-recipe-build-{ORPHAN}.service");
-    assert!(stops_of(root.path(), manager(&[&build, &egress])).is_empty());
+    assert!(stops_of(root.path(), &manager(&[&build, &egress])).is_empty());
     let adapter = format!("vonk-runtime-adapter-{ORPHAN}.service");
-    assert!(stops_of(root.path(), manager(&[&adapter, &egress])).is_empty());
+    assert!(stops_of(root.path(), &manager(&[&adapter, &egress])).is_empty());
     let _beside = crate::executor::BuildBeside::hold(root.path(), ORPHAN.parse().unwrap());
-    assert!(stops_of(root.path(), manager(&[&egress])).is_empty());
+    assert!(stops_of(root.path(), &manager(&[&egress])).is_empty());
 }

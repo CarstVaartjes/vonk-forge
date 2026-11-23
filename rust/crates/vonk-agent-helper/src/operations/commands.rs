@@ -275,7 +275,9 @@ fn run_captured_command(
 ) -> Result<CommandOutput, RunnerFailure> {
     let mut stdout = Vec::new();
     let mut output = drive_command(command, timeout, &mut |bytes| {
-        if stdout.len() + bytes.len() > MAX_COMMAND_OUTPUT_BYTES as usize {
+        if stdout.len() + bytes.len()
+            > usize::try_from(MAX_COMMAND_OUTPUT_BYTES).unwrap_or(usize::MAX)
+        {
             return Err(RunnerFailure::OutputBound);
         }
         stdout.extend_from_slice(bytes);
@@ -331,8 +333,12 @@ fn drive_command(
         let mut output = child.stdout.take();
         let mut errors = child.stderr.take();
         for pipe in [
-            output.as_ref().map(|pipe| pipe as &dyn std::os::fd::AsFd),
-            errors.as_ref().map(|pipe| pipe as &dyn std::os::fd::AsFd),
+            output
+                .as_ref()
+                .map(|pipe| -> &dyn std::os::fd::AsFd { pipe }),
+            errors
+                .as_ref()
+                .map(|pipe| -> &dyn std::os::fd::AsFd { pipe }),
         ]
         .into_iter()
         .flatten()
@@ -352,8 +358,8 @@ fn drive_command(
                 return Err(RunnerFailure::Deadline);
             }
             let mut buffer = [0_u8; 1024];
-            if !output_closed {
-                match output.as_mut().expect("piped output").read(&mut buffer) {
+            if let Some(pipe) = output.as_mut().filter(|_| !output_closed) {
+                match pipe.read(&mut buffer) {
                     Ok(0) => output_closed = true,
                     Ok(count) => on_stdout(&buffer[..count])?,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
@@ -396,12 +402,27 @@ fn drive_command(
         }
     })();
     if result.is_err() {
-        if let Some(group) = rustix::process::Pid::from_raw(child.id() as i32) {
+        if let Some(group) = i32::try_from(child.id())
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+        {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort stop of a process that may already have ended"
+            )]
             let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
         }
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = child.kill();
         // Even uninterruptible kernel IO cannot turn cleanup into an infinite
         // wait. A new helper request is admitted after this cleanup allowance.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = child.wait_timeout(Duration::from_secs(1));
     }
     result

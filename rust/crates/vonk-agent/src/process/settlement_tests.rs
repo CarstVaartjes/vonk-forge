@@ -45,6 +45,10 @@ fn failed_service_stop_submission_cannot_bypass_owned_child_reap() {
         format!("--unit=vonk-runtime-adapter-{}", uuid::Uuid::new_v4()),
     ];
     let started = Instant::now();
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "best-effort stop of a process that may already have ended"
+    )]
     let _ = terminate_process(&mut child, Program::SystemdRun, &arguments);
     assert!(started.elapsed() < Duration::from_secs(3));
     assert!(child.try_wait().unwrap().is_some());

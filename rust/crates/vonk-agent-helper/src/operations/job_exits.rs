@@ -83,7 +83,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             let mut file = OpenOptions::new()
                 .write(true)
                 .create_new(true)
-                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
                 .mode(0o600)
                 .open(&temporary)?;
             file.write_all(&bytes)?;
@@ -92,6 +92,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             sync_directory(&root)
         })();
         if written.is_err() {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = fs::remove_file(&temporary);
         }
         written
@@ -114,7 +118,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let mut file = OpenOptions::new()
             .read(true)
             .custom_flags(
-                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                    .bits()
+                    .cast_signed(),
             )
             .open(path)
             .ok()?;

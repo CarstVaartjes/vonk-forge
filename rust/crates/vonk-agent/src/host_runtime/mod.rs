@@ -75,13 +75,12 @@ pub(crate) const RUN_INSPECTION_REQUEST_TIMEOUT: Duration = Duration::from_secs(
 fn background_inspection_slots(socket: &Path) -> std::sync::Arc<tokio::sync::Semaphore> {
     // The privileged helper endpoint owns the native capacity. Independent
     // helpers must not compete for it; cloned boundaries for one helper do.
-    type Slots =
-        std::collections::BTreeMap<std::path::PathBuf, std::sync::Weak<tokio::sync::Semaphore>>;
+    type Slots = std::collections::BTreeMap<PathBuf, std::sync::Weak<tokio::sync::Semaphore>>;
     static SLOTS: std::sync::OnceLock<std::sync::Mutex<Slots>> = std::sync::OnceLock::new();
     let mut slots = SLOTS
         .get_or_init(Default::default)
         .lock()
-        .unwrap_or_else(|error| error.into_inner());
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     slots.retain(|_, slot| slot.strong_count() != 0);
     if let Some(slot) = slots.get(socket).and_then(std::sync::Weak::upgrade) {
         return slot;
@@ -374,6 +373,10 @@ struct RequestFileCleanup(PathBuf);
 
 impl Drop for RequestFileCleanup {
     fn drop(&mut self) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+        )]
         let _ = fs::remove_file(&self.0);
     }
 }
@@ -549,7 +552,7 @@ impl HostRuntimeBoundary<'_> {
             }),
             (Some(false), Some(code)) if code <= 255 && (code != 0 || !evidence) => {
                 Ok(RuntimeReobservation::Exited(HostRuntimeOutcome {
-                    exit_code: Some(code as i32),
+                    exit_code: i32::try_from(code).ok(),
                     stop_uncertain: false,
                     diagnostic: response
                         .diagnostic
@@ -803,7 +806,7 @@ impl HostRuntimeBoundary<'_> {
                         .job
                         .as_ref()
                         .map(|job| u64::from(job.timeout_seconds)),
-                    _ => None,
+                    HostRuntimePlan::Start(_) | HostRuntimePlan::Stop(_) => None,
                 })
                 .filter(|value| (1..=3600).contains(value))
                 .map_or(Duration::from_secs(610), |value| {
@@ -815,13 +818,16 @@ impl HostRuntimeBoundary<'_> {
                 .as_ref()
                 .and_then(|plan| match plan {
                     HostRuntimePlan::Stop(stop) => Some(u64::from(stop.stop_timeout_seconds)),
-                    _ => None,
+                    HostRuntimePlan::Start(_) | HostRuntimePlan::JobRun(_) => None,
                 })
                 .filter(|value| (1..=600).contains(value))
                 .map_or(Duration::from_secs(45), |value| {
                     Duration::from_secs(value + 45)
                 }),
-            _ => Duration::from_secs(610),
+            HostRuntimeAction::ImagePull
+            | HostRuntimeAction::ImageInspect
+            | HostRuntimeAction::RunInspect
+            | HostRuntimeAction::InstallationCleanup => Duration::from_secs(610),
         };
         let mut request = runtime_request_for_fence(
             authority.fence(),
@@ -891,7 +897,7 @@ impl HostRuntimeBoundary<'_> {
                         HostRuntimeAction::Start | HostRuntimeAction::InstallationCleanup
                     )
                 {
-                    nonce = response.installation_intent_nonce.clone();
+                    nonce.clone_from(&response.installation_intent_nonce);
                     if nonce.as_deref().is_none_or(|value| {
                         value.len() != 64
                             || !value
@@ -920,7 +926,7 @@ impl HostRuntimeBoundary<'_> {
             }
             require_executed_outcome(&response, stop_uncertain)?;
             Ok(HostRuntimeOutcome {
-                exit_code: response.exit_code.map(|code| code as i32),
+                exit_code: response.exit_code.and_then(|code| i32::try_from(code).ok()),
                 stop_uncertain,
                 diagnostic: response
                     .diagnostic

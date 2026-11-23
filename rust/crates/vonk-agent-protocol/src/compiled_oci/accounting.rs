@@ -108,7 +108,7 @@ pub fn measure_exec_invocation(
         .ok_or(CompiledOciError::Invalid("exec pointer count overflow"))?;
     let pointer_bytes = u64::try_from(pointer_count)
         .ok()
-        .and_then(|count| count.checked_mul(std::mem::size_of::<usize>() as u64))
+        .and_then(|count| count.checked_mul(size_of::<usize>() as u64))
         .ok_or(CompiledOciError::Invalid(
             "exec pointer byte count overflow",
         ))?;

@@ -13,7 +13,7 @@ fn observation_capture_rename_is_unknown_then_same_directory_reopens() {
     fs::create_dir(&before_name).unwrap();
     // An actual old filesystem mtime makes the subsequent rename's change
     // observable even when this filesystem's clock has coarse resolution.
-    fs::File::open(&runs)
+    File::open(&runs)
         .unwrap()
         .set_times(fs::FileTimes::new().set_modified(std::time::UNIX_EPOCH))
         .unwrap();
@@ -87,7 +87,7 @@ fn service_start_persists_its_full_controller_generation_for_restart_observation
     let runner = NoProcess;
     for generation in [u64::from(u32::MAX) + 1, i64::MAX as u64] {
         let run_id = Uuid::new_v4().to_string();
-        let identity = super::RecipeRunStartIdentity {
+        let identity = RecipeRunStartIdentity {
             run_generation: generation,
         };
         runtime(data.path(), &runner)

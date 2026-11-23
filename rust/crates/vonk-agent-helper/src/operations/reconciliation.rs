@@ -27,7 +27,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let agent_data = OpenOptions::new()
             .read(true)
             .custom_flags(
-                (rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::NOFOLLOW).bits() as i32,
+                (rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::NOFOLLOW)
+                    .bits()
+                    .cast_signed(),
             )
             .open(&self.roots.agent_data)?;
         let installations = match rustix::fs::openat(
@@ -82,6 +84,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
 
 impl<R: CommandRunner> OperationExecutor<R> {
     #[cfg(test)]
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "every other error passes through unchanged"
+    )]
     pub(super) fn runtime_reconcile_installation(
         &self,
         identity: &RecipeReconciliationIdentity,
@@ -228,7 +234,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .read(true)
             .write(true)
             .create(true)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
             .mode(0o600)
             .open(lock_path)?;
         let metadata = lock.metadata()?;
@@ -252,6 +258,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "the Result keeps the signature shared with its sibling operations"
+    )]
     pub(super) fn refuse_reconciled_runtime(
         &self,
         installation_id: &str,
@@ -261,6 +271,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // stale-effect rejection. Retire the old checkpoint without gating it.
         let root = self.roots.data.join(INSTALLATION_RECONCILIATION_DIRECTORY);
         let path = root.join(format!("{installation_id}.json"));
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+        )]
         let _ = fs::remove_file(path);
         Ok(())
     }

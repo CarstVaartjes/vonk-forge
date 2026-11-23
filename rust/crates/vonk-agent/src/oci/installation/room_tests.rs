@@ -15,22 +15,21 @@ const UNUSED: u64 = 4096;
 /// are the least recently used) and two unused ones, the older first.
 fn stocked() -> (
     tempfile::TempDir,
-    crate::workloads::CompiledExecutionPlan,
+    CompiledExecutionPlan,
     Vec<PathBuf>,
     PathBuf,
     PathBuf,
 ) {
     let data = tempdir().unwrap();
     crate::store_retention::tests::authorize_retention(data.path());
-    let plan: crate::workloads::CompiledExecutionPlan =
-        serde_json::from_value(compiled_plan()).unwrap();
+    let plan: CompiledExecutionPlan = serde_json::from_value(compiled_plan()).unwrap();
     let own = stock_store(data.path(), &plan);
     let store = data.path().join("distribution/models");
     let unused = |name: &str| {
         // ctime orders them: the store's recency is the last change.
         std::thread::sleep(Duration::from_millis(20));
         let path = store.join(name.repeat(64));
-        fs::write(&path, vec![0_u8; UNUSED as usize]).unwrap();
+        fs::write(&path, vec![0_u8; usize::try_from(UNUSED).unwrap()]).unwrap();
         path
     };
     let older = unused("a");

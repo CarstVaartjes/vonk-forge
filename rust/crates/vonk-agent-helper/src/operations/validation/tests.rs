@@ -122,11 +122,10 @@ fn runtime_publications_require_an_explicit_routable_bind_address() {
 
 #[test]
 fn compiled_workload_fixture_reaches_helper_validation_with_scoped_receipts() {
-    let plan: vonk_agent_protocol::compiled_execution_plan::CompiledExecutionPlan =
-        serde_json::from_str(include_str!(
-            "../../../tests/fixtures/compiled_workload_v2.json"
-        ))
-        .unwrap();
+    let plan: CompiledExecutionPlan = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/compiled_workload_v2.json"
+    ))
+    .unwrap();
     plan.validate().unwrap();
     assert_eq!(plan.runtime.executable, "/opt/vonk/bin/vllm");
     assert!(!plan.security.host_network());

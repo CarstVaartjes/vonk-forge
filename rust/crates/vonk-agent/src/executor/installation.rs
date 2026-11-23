@@ -49,7 +49,14 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             vonk_agent_protocol::generated::AgentClaimPayload::RecipeJobRunRequest(request) => {
                 &request.plan_digest
             }
-            _ => {
+            vonk_agent_protocol::generated::AgentClaimPayload::RuntimePreflightRequest(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::AgentUpgradePayload(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::ArtifactDistributionPayload(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::RecipeBuildRequest(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::RecipeBuildCleanupRequest(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::RecipeStopPayload(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::RecipeReconcilePayload(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::RecipeUninstallPayload(_) => {
                 return Err(Box::new(failed(
                     "installation preparation request is invalid",
                 )));
@@ -422,9 +429,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         "vonk-agent: installation {installation_id} model store listing deferred ({}); its shared objects are kept",
                         error.safe_category()
                     );
-                    Default::default()
+                    Vec::default()
                 }),
-            None => Default::default(),
+            None => Vec::default(),
         };
         let identity = RecipeReconciliationIdentity {
             installation_id: installation_uuid,
@@ -459,7 +466,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                             | HelperErrorCode::RequestReplayed
                     )
                 }
-                _ => false,
+                crate::host_runtime::HostRuntimeError::Io(_)
+                | crate::host_runtime::HostRuntimeError::HelperProtocol(_)
+                | crate::host_runtime::HostRuntimeError::HelperProtocolBound { .. }
+                | crate::host_runtime::HostRuntimeError::StopUncertain => false,
             };
             if authority_denied {
                 return failed_stage_owned(
@@ -477,23 +487,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         if *cancellation.borrow() {
             return cancelled("controller cancellation observed after runtime cache cleanup");
         }
-        if !store_objects.is_empty() {
-            // Keep discovery while shared-object reclamation remains unconfirmed.
-            if let Some(model) = request.cleanup_model_content_sha256.as_deref()
-                && let Err(error) = self.runtime.uninstall_with_model_cleanup(
-                    &identity,
-                    &request.recipe_content_sha256,
-                    model,
-                )
-            {
-                return unconfirmed(
-                    WaitReason::CleanupUnconfirmed,
-                    "installation removal is unconfirmed",
-                    UnknownEvidence::at(FailureStage::InstallationRemoval)
-                        .because(error.safe_category()),
-                );
-            }
-        } else {
+        if store_objects.is_empty() {
             match self.runtime.finalize_reconciliation(&identity) {
                 Ok(done) if done.complete => {}
                 Ok(_) => {
@@ -510,6 +504,22 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         "reconcile_finalize",
                     );
                 }
+            }
+        } else {
+            // Keep discovery while shared-object reclamation remains unconfirmed.
+            if let Some(model) = request.cleanup_model_content_sha256.as_deref()
+                && let Err(error) = self.runtime.uninstall_with_model_cleanup(
+                    &identity,
+                    &request.recipe_content_sha256,
+                    model,
+                )
+            {
+                return unconfirmed(
+                    WaitReason::CleanupUnconfirmed,
+                    "installation removal is unconfirmed",
+                    UnknownEvidence::at(FailureStage::InstallationRemoval)
+                        .because(error.safe_category()),
+                );
             }
         }
         if *cancellation.borrow() {

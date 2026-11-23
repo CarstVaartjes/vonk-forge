@@ -60,7 +60,7 @@ impl PreparedRuntimeIdentity {
         if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_AGENT_BYTES {
             return Err(RuntimeIdentityError::UnsafeExecutable);
         }
-        let mut raw = Vec::with_capacity(metadata.len() as usize);
+        let mut raw = Vec::with_capacity(usize::try_from(metadata.len()).unwrap_or_default());
         executable
             .by_ref()
             .take(MAX_AGENT_BYTES + 1)

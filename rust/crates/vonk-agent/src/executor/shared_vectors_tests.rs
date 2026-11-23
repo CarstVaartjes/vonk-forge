@@ -37,14 +37,14 @@ fn without_volatile(value: &mut Value) {
             }
             members.values_mut().for_each(without_volatile);
         }
-        _ => {}
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
     }
 }
 
 /// Assert `produced` is the vector `name`.
 fn assert_is_vector(name: &str, mut produced: Value) {
     let path = format!("{VECTORS}{name}");
-    let mut vector: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let mut vector: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     without_volatile(&mut produced);
     without_volatile(&mut vector);
     assert_eq!(produced, vector, "{name}");
@@ -110,9 +110,9 @@ fn an_inspected_exited_workload_is_the_shared_observation_vector() {
         endpoint_ready: Some(false),
         failure_diagnostics: exited_workload_diagnostics(&exited),
     };
-    let observed_at = chrono::DateTime::parse_from_rfc3339("2026-10-17T08:00:00+00:00")
+    let observed_at = DateTime::parse_from_rfc3339("2026-10-17T08:00:00+00:00")
         .unwrap()
-        .with_timezone(&chrono::Utc);
+        .with_timezone(&Utc);
     let report = build_exact_recipe_run_observations(observed_at, &[observation]).unwrap();
     assert_is_vector(
         "recipe-run-observation-exited-v1.json",

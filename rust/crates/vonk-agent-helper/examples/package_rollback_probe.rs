@@ -1,4 +1,8 @@
 //! Disposable root-owned ARM64 systemd acceptance driver, never packaged.
+#![expect(
+    clippy::unwrap_used,
+    reason = "example program: a failed unwrap ends the demonstration"
+)]
 use std::io::Read;
 use std::path::Path;
 use vonk_agent_helper::operations::{ManagedRoots, OperationExecutor, ProcessCommandRunner};

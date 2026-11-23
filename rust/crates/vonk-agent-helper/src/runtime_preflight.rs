@@ -12,6 +12,10 @@ pub const PROBE_BINARY: &str = "/usr/lib/vonk-forge/vonk-runtime-probe";
 struct Cleanup(PathBuf);
 impl Drop for Cleanup {
     fn drop(&mut self) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+        )]
         let _ = fs::remove_dir_all(&self.0);
     }
 }
@@ -92,6 +96,10 @@ pub fn run(
         })
     })();
     // Always remove exact, uniquely named probe objects, including failed runs.
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "best-effort cleanup: the next reconciliation pass repeats it"
+    )]
     let _ = docker(
         &["container".into(), "rm".into(), "--force".into(), name],
         cleanup_budget(started, deadline),

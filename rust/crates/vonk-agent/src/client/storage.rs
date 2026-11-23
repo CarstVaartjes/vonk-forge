@@ -112,7 +112,11 @@ pub(super) async fn inspect_trusted_final(
     }
     let file = tokio::fs::OpenOptions::new()
         .read(true)
-        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
+        .custom_flags(
+            (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC)
+                .bits()
+                .cast_signed(),
+        )
         .open(path)
         .await
         .map_err(ClientError::Local)?;
@@ -164,7 +168,11 @@ pub(super) async fn open_trusted_partial(path: &Path) -> Result<tokio::fs::File,
         .write(true)
         .truncate(false)
         .mode(0o600)
-        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
+        .custom_flags(
+            (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC)
+                .bits()
+                .cast_signed(),
+        )
         .open(path)
         .await
         .map_err(ClientError::Local)?;

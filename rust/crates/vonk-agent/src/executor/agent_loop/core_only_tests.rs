@@ -16,7 +16,19 @@ fn is_core(result: &AgentResult) -> bool {
     match &result.result {
         AgentResultResult::OutcomeFailed(failed) => failed.reason == CORE_ONLY_REASON,
         AgentResultResult::OutcomeUnknown(unknown) => unknown.reason == CORE_ONLY_REASON,
-        _ => false,
+        AgentResultResult::RuntimePreflightResult(_)
+        | AgentResultResult::AgentInstallResult(_)
+        | AgentResultResult::RecipeStartResult(_)
+        | AgentResultResult::RecipeStopResult(_)
+        | AgentResultResult::RecipeReconcileResult(_)
+        | AgentResultResult::RecipeUninstallResult(_)
+        | AgentResultResult::RecipeBuildEvidence(_)
+        | AgentResultResult::RecipeBuildCleanupEvidence(_)
+        | AgentResultResult::RecipeJobRunResult(_)
+        | AgentResultResult::ArtifactDistributionResult(_)
+        | AgentResultResult::AgentFailureResult(_)
+        | AgentResultResult::AgentUpgradeResult(_)
+        | AgentResultResult::OutcomeDone(_) => false,
     }
 }
 
@@ -182,10 +194,7 @@ async fn a_refused_core_discards_delivery_with_evidence_across_restart() {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
-    assert_eq!(
-        retained,
-        vonk_agent_protocol::canonical_json(&full).unwrap()
-    );
+    assert_eq!(retained, canonical_json(&full).unwrap());
     assert!(
         !acknowledged,
         "discarding delivery must not claim acceptance"

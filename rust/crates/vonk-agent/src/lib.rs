@@ -1,4 +1,3 @@
-#![forbid(unsafe_code)]
 pub mod runtime_preflight;
 
 pub mod agent_upgrade;

@@ -72,13 +72,16 @@ impl WriteSecure for ReadinessReceipt {
             Ok(())
         })();
         if result.is_err() {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = fs::remove_file(&temporary);
         }
         result
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn verify_readiness_at(
     path: &Path,
     expected_identity: &AgentRuntimeIdentity,
@@ -98,7 +101,7 @@ pub fn verify_readiness_at(
     {
         return Err(ReadinessError::Unsafe);
     }
-    let mut raw = Vec::with_capacity(metadata.len() as usize);
+    let mut raw = Vec::with_capacity(usize::try_from(metadata.len()).unwrap_or_default());
     File::open(path)?
         .take(MAX_RECEIPT_BYTES + 1)
         .read_to_end(&mut raw)?;

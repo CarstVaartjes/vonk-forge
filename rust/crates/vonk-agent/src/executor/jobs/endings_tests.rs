@@ -16,7 +16,7 @@ fn an_exit_code_out_of_range_ends_the_job_at_once_with_the_raw_value() {
     let client = AgentHttpClient::for_http_test("http://127.0.0.1:9/", NODE_ID);
     let executor = RecipeExecutor {
         client: &client,
-        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        helper_socket: Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime: OciRuntime {
             runner: &NoProcess,
             data_root: data.path(),
@@ -36,7 +36,7 @@ fn an_exit_code_out_of_range_ends_the_job_at_once_with_the_raw_value() {
         (Some(-1), "Some(-1)"),
         (None, "None"),
     ] {
-        let outcome = crate::host_runtime::HostRuntimeOutcome {
+        let outcome = HostRuntimeOutcome {
             exit_code,
             stop_uncertain: false,
             diagnostic: None,
@@ -109,13 +109,13 @@ fn the_net_ends_an_unknown_without_receipt_or_bound_and_keeps_bounded_ones() {
 fn a_receipted_unknown_is_the_shared_vector_on_the_wire() {
     // The agent reports a receipted ending's stage and cause as the outcome's
     // evidence, beside the receipt; the Controller stores them with it.
-    let vector: serde_json::Value = serde_json::from_str(include_str!(
+    let vector: Value = serde_json::from_str(include_str!(
         "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-unknown-receipt-v1.json"
     ))
     .unwrap();
     let (claim, request) = job_claim();
     let stop_plan = job_run_stop_plan(&claim, &request).unwrap();
-    let receipt: vonk_agent_protocol::RecipeJobRunResult =
+    let receipt: RecipeJobRunResult =
         serde_json::from_value(vector["result"]["receipt"].clone()).unwrap();
     let job_scope = request.job_id.to_string();
     let job = DispatchedJob {
@@ -155,7 +155,7 @@ fn a_job_the_host_memory_guard_killed_fails_by_that_cause_not_by_what_it_left() 
     let client = AgentHttpClient::for_http_test("http://127.0.0.1:9/", NODE_ID);
     let executor = RecipeExecutor {
         client: &client,
-        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        helper_socket: Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime: OciRuntime {
             runner: &NoProcess,
             data_root: data.path(),
@@ -173,16 +173,14 @@ fn a_job_the_host_memory_guard_killed_fails_by_that_cause_not_by_what_it_left() 
         reason=workload.host_memory_exhausted exit_cause=host_memory_exhausted \
         mem_available_bytes=1 memory_full_avg10=99 trigger=sustained_full_psi \
         sustained_ms=3000";
-    let outcome = crate::host_runtime::HostRuntimeOutcome {
+    let outcome = HostRuntimeOutcome {
         exit_code: Some(137),
         stop_uncertain: false,
         diagnostic: Some(guard_kill.to_owned()),
         process_logs: None,
     };
     let judged = |observation| {
-        let super::super::operation_observation::OperationObservation::Confirmed(result) =
-            observation
-        else {
+        let operation_observation::OperationObservation::Confirmed(result) = observation else {
             panic!("a guard kill is a confirmed ending");
         };
         let failure = result.failure().expect("a definite failure").clone();
@@ -197,10 +195,8 @@ fn a_job_the_host_memory_guard_killed_fails_by_that_cause_not_by_what_it_left() 
             "{diagnostic}"
         );
         assert!(!diagnostic.contains("rule="), "{diagnostic}");
-        let evidence = crate::failure_evidence::from_failure(
-            &vonk_agent_protocol::generated::AgentOperation::RecipeJobRunV1,
-            &failure,
-        );
+        let evidence =
+            crate::failure_evidence::from_failure(&AgentOperation::RecipeJobRunV1, &failure);
         assert_eq!(
             evidence.category,
             crate::failure_evidence::FailureCategory::Capacity
@@ -227,7 +223,7 @@ fn a_job_that_ended_by_its_own_exception_is_still_judged_by_its_outputs() {
     let client = AgentHttpClient::for_http_test("http://127.0.0.1:9/", NODE_ID);
     let executor = RecipeExecutor {
         client: &client,
-        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        helper_socket: Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime: OciRuntime {
             runner: &NoProcess,
             data_root: data.path(),
@@ -245,7 +241,7 @@ fn a_job_that_ended_by_its_own_exception_is_still_judged_by_its_outputs() {
         fs::write(outputs.join(format!("frame{index}.png")), b"1").unwrap();
     }
     executor.runtime.persist_job_intent(&request).unwrap();
-    let outcome = crate::host_runtime::HostRuntimeOutcome {
+    let outcome = HostRuntimeOutcome {
         exit_code: Some(1),
         stop_uncertain: false,
         diagnostic: Some(
@@ -255,7 +251,7 @@ fn a_job_that_ended_by_its_own_exception_is_still_judged_by_its_outputs() {
         ),
         process_logs: None,
     };
-    let super::super::operation_observation::OperationObservation::Confirmed(result) =
+    let operation_observation::OperationObservation::Confirmed(result) =
         executor.observe_job_exit(&claim, &request, outcome)
     else {
         panic!("a breach is a confirmed ending");

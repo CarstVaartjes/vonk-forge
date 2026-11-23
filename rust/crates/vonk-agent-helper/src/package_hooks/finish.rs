@@ -10,6 +10,10 @@ pub(super) const AGENT_UNITS: [&str; 2] =
     ["vonk-forge-agent.service", "vonk-forge-monitor.service"];
 /// How long dpkg has to leave; the unit's budget below counts the same wait.
 const DPKG_WAIT_SECONDS: u64 = 120;
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "120 seconds fits u32; `try_from` is not const"
+)]
 const DPKG_EXIT_POLLS: u32 = DPKG_WAIT_SECONDS as u32 * POLLS_PER_SECOND;
 /// The most commands one run issues: stop, restart, is-active and show of the
 /// helper, the agent restart, and the settling start.

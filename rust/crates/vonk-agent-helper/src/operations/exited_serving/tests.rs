@@ -92,13 +92,16 @@ fn a_run_the_agent_still_claims_keeps_its_container() {
 }
 
 #[test]
+#[expect(
+    clippy::used_underscore_binding,
+    reason = "a field held to keep its temporary directory alive and read once for its path"
+)]
 fn unreadable_claims_or_listing_remove_nothing() {
     let host = Host::with(&[job(ENDED, ENDED, "exited")]);
     let (_temp, executor) = host_executor(&host);
     // A malformed/symlinked claims directory is unknown, never absence.
     fs::create_dir_all(&executor.roots.agent_data).unwrap();
-    std::os::unix::fs::symlink(_temp.path(), executor.roots.agent_data.join("run-metadata"))
-        .unwrap();
+    symlink(_temp.path(), executor.roots.agent_data.join("run-metadata")).unwrap();
     executor.sweep_exited_serving_at(after(24 * 14));
     assert!(host.present(ENDED));
 

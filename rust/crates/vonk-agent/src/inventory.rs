@@ -66,12 +66,20 @@ fn maintain_state_database_reserve(
         for _ in 0..(STATE_DATABASE_DISK_RESERVE_BYTES / block.len() as u64) {
             if let Err(error) = file.write_all(&block) {
                 drop(file);
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+                )]
                 let _ = fs::remove_file(&reserve);
                 return Err(error);
             }
         }
         if let Err(error) = file.sync_all() {
             drop(file);
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = fs::remove_file(&reserve);
             return Err(error);
         }
@@ -232,6 +240,10 @@ async fn collect_process_with_budget(
         let exited = child.try_wait()?.is_some();
         if !exited || !process_group_gone(*group) {
             if exited || tokio::time::Instant::now() >= *deadline {
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort stop of a process that may already have ended"
+                )]
                 let _ = rustix::process::kill_process_group(*group, rustix::process::Signal::KILL);
             }
             return Err(unavailable());
@@ -279,19 +291,24 @@ async fn collect_process_with_budget(
     let result = tokio::time::timeout_at(deadline, observe).await;
     // Cancellation/timeout never loses ownership. A subsequent bounded pass
     // reaps the old process before a fresh observer can run.
-    match result {
-        Ok(result) => {
-            if child.try_wait()?.is_some() && process_group_gone(*group) {
-                *slot = None;
-            } else {
-                let _ = rustix::process::kill_process_group(*group, rustix::process::Signal::KILL);
-            }
-            result
-        }
-        Err(_) => {
+    if let Ok(result) = result {
+        if child.try_wait()?.is_some() && process_group_gone(*group) {
+            *slot = None;
+        } else {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort stop of a process that may already have ended"
+            )]
             let _ = rustix::process::kill_process_group(*group, rustix::process::Signal::KILL);
-            Err(unavailable())
         }
+        result
+    } else {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
+        let _ = rustix::process::kill_process_group(*group, rustix::process::Signal::KILL);
+        Err(unavailable())
     }
 }
 
@@ -309,6 +326,10 @@ pub async fn stop_process() {
     if let Ok(mut slot) = INVENTORY_PROCESS.try_lock()
         && let Some((child, _, group)) = slot.as_mut()
     {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = rustix::process::kill_process_group(*group, rustix::process::Signal::KILL);
         if tokio::time::timeout(Duration::from_secs(1), child.wait())
             .await
@@ -545,7 +566,7 @@ fn host_settings<R: ProcessRunner>(
         display_manager_active,
         graphical_default_target: default_target == "graphical.target",
         display_memory: crate::display_memory::observe(
-            std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+            Path::new(crate::host_runtime::HELPER_SOCKET),
             Some(memory_total_bytes),
         ),
         gpu_clock_support: runner
@@ -567,6 +588,10 @@ fn host_settings<R: ProcessRunner>(
     })
 }
 
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "every other error passes through unchanged"
+)]
 fn startup_probe<R: ProcessRunner>(
     runner: &R,
     program: Program,
@@ -601,7 +626,7 @@ fn startup_probe<R: ProcessRunner>(
 }
 
 fn egress_boundary_available(path: &Path) -> bool {
-    fs::symlink_metadata(path).ok().is_some_and(|metadata| {
+    fs::symlink_metadata(path).is_ok_and(|metadata| {
         metadata.is_file()
             && !metadata.file_type().is_symlink()
             && metadata.uid() == 0
@@ -612,6 +637,10 @@ fn egress_boundary_available(path: &Path) -> bool {
     })
 }
 
+#[expect(
+    clippy::match_same_arms,
+    reason = "the arms stay apart on purpose: each names a distinct case of the state machine"
+)]
 pub fn available_memory_bytes<R: ProcessRunner>(
     runner: &R,
     meminfo_path: &Path,
@@ -722,18 +751,15 @@ fn parse_gpus(
             eprintln!("vonk-agent: skipping malformed GPU inventory row");
             continue;
         }
-        let (gpu_total, gpu_free) = match mib(fields[1]).and_then(|gpu_total| {
+        let Ok((gpu_total, gpu_free)) = mib(fields[1]).and_then(|gpu_total| {
             mib(fields[2]).and_then(|gpu_free| {
                 (gpu_free <= gpu_total)
                     .then_some((gpu_total, gpu_free))
                     .ok_or(InventoryError::Parse)
             })
-        }) {
-            Ok(memory) => memory,
-            Err(_) => {
-                eprintln!("vonk-agent: skipping GPU inventory row with invalid memory evidence");
-                continue;
-            }
+        }) else {
+            eprintln!("vonk-agent: skipping GPU inventory row with invalid memory evidence");
+            continue;
         };
         if driver
             .as_ref()

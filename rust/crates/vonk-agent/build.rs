@@ -1,8 +1,13 @@
+#![expect(clippy::expect_used, reason = "build script: a panic fails the build")]
 use std::env;
 
 const DEVELOPMENT_BUILD_DIGEST: &str =
     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn main() {
     println!("cargo:rerun-if-env-changed=VONK_AGENT_BUILD_DIGEST");
     println!("cargo:rerun-if-env-changed=VONK_AGENT_SEMANTIC_VERSION");

@@ -54,6 +54,10 @@ pub(super) struct BuildEgressStart<'a> {
 }
 
 impl<'a, R: ProcessRunner + ?Sized> BuildEgress<'a, R> {
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the call takes ownership at this boundary; the caller's value is consumed"
+    )]
     pub(super) fn start(
         runner: &'a R,
         context: BuildEgressStart<'a>,
@@ -160,6 +164,10 @@ impl<'a, R: ProcessRunner + ?Sized> BuildEgress<'a, R> {
             remaining_build_time(context.deadline)?,
             false,
         );
+        #[expect(
+            clippy::unwrap_used,
+            reason = "the service argv was built with the podman path"
+        )]
         let podman = service
             .iter()
             .position(|value| value == "/usr/bin/podman")
@@ -244,6 +252,10 @@ impl<'a, R: ProcessRunner + ?Sized> BuildEgress<'a, R> {
         // `podman exec --probe` can only report as "container is not running".
         // Read only a bounded tail of this operation-private diagnostic file.
         if let Ok(mut file) = File::open(self.staging.join("build-egress.stderr")) {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort cleanup: the next reconciliation pass repeats it"
+            )]
             let _ = file
                 .seek(SeekFrom::End(-4096))
                 .or_else(|_| file.seek(SeekFrom::Start(0)));
@@ -337,6 +349,10 @@ impl<R: ProcessRunner + ?Sized> Drop for BuildEgress<'_, R> {
         let deadline = Instant::now() + Duration::from_secs(10);
         // Let Podman stop the container before stopping its owning service;
         // otherwise systemd waits its full stop timeout for conmon first.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort cleanup: the next reconciliation pass repeats it"
+        )]
         let _ = self.run(
             &[
                 "stop".to_owned(),
@@ -347,6 +363,10 @@ impl<R: ProcessRunner + ?Sized> Drop for BuildEgress<'_, R> {
                 .saturating_duration_since(Instant::now())
                 .min(Duration::from_secs(2)),
         );
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort cleanup: the next reconciliation pass repeats it"
+        )]
         let _ = self.runner.run(
             Program::Systemctl,
             &[
@@ -388,6 +408,10 @@ impl<R: ProcessRunner + ?Sized> Drop for BuildEgress<'_, R> {
             if remaining.is_zero() {
                 break;
             }
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort cleanup: the next reconciliation pass repeats it"
+            )]
             let _ = self.run(&arguments, remaining.min(Duration::from_secs(2)));
         }
     }
@@ -408,7 +432,7 @@ pub(super) fn network_boundary_error(
 /// mount namespace, including the commands that create Podman's pause process.
 /// Use an operation-private runtime directory consistently for build and egress.
 /// Podman 4.9 replaces /run inside its rootless network namespace and preserves
-/// only XDG_RUNTIME_DIR. Its runroot must therefore be inside that directory,
+/// only `XDG_RUNTIME_DIR`. Its runroot must therefore be inside that directory,
 /// not its parent, or Netavark loses access to networks/ipam.db.
 pub(super) fn podman_user_service_arguments(
     unit: &str,

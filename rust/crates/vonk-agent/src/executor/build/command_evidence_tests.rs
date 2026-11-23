@@ -25,10 +25,7 @@ fn host_denials_are_platform_blockers_not_recipe_failures_or_silent_retries() {
         else {
             panic!("a host denial is a definite platform blocker");
         };
-        assert_eq!(
-            outcome.code,
-            vonk_agent_protocol::generated::FailureCode::RecipeBuildPlatformBlocked
-        );
+        assert_eq!(outcome.code, FailureCode::RecipeBuildPlatformBlocked);
         assert_eq!(outcome.retry_after_seconds, None);
         let evidence = outcome.evidence.unwrap().diagnostics.unwrap();
         assert_eq!(
@@ -62,10 +59,7 @@ fn a_podman_go_crash_after_denial_words_is_not_reported_as_a_blocked_platform() 
     let ExecutionResult::Failed(failure) = build_error_outcome(&error) else {
         panic!("a returned crash is a definite failure");
     };
-    assert_ne!(
-        failure.code,
-        Some(vonk_agent_protocol::generated::FailureCode::RecipeBuildPlatformBlocked)
-    );
+    assert_ne!(failure.code, Some(FailureCode::RecipeBuildPlatformBlocked));
     assert!(!failure.reason.contains("platform is blocked"));
 }
 

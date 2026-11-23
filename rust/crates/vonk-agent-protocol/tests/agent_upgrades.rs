@@ -1,5 +1,7 @@
-#![forbid(unsafe_code)]
-
+#![expect(
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 use chrono::DateTime;
 use serde_json::{Value, json};
 use uuid::Uuid;

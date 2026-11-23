@@ -71,7 +71,12 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 }
                 boundary.reobserve_job(job).await
             }
-            _ => {
+            RecipeOperationRequest::RuntimePreflight(_)
+            | RecipeOperationRequest::Build(_)
+            | RecipeOperationRequest::BuildCleanup(_)
+            | RecipeOperationRequest::Install(_)
+            | RecipeOperationRequest::Uninstall(_)
+            | RecipeOperationRequest::Reconcile(_) => {
                 return OperationObservation::confirmed(failed(
                     "claim payload does not match runtime observer",
                 ));

@@ -9,7 +9,7 @@ const FALLBACK_STORE: &str = "compile-cache-fallback";
 
 impl<R: CommandRunner> OperationExecutor<R> {
     /// Called only after exact-plan validation and proven container absence,
-    /// under runtime_stores' launch lock. Cache failure cannot veto a run.
+    /// under `runtime_stores`' launch lock. Cache failure cannot veto a run.
     pub(super) fn bind_compile_cache(
         &self,
         run: &mut ValidatedDockerRun,
@@ -255,6 +255,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             let path = entry.path();
             if mounts.iter().any(|mount| mount.starts_with(&path)) {
                 // Last use means the end of use, not the time population began.
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+                )]
                 let _ = File::open(&path).and_then(|dir| dir.set_modified(now));
                 continue;
             }
@@ -273,7 +277,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     stat.f_bavail.saturating_mul(stat.f_frsize) < request.required_free_bytes
                 })
             });
-            if !pressured && !age.is_some_and(|age| age >= GRACE) {
+            if !pressured && age.is_none_or(|age| age < GRACE) {
                 continue;
             }
             let result = (|| {
@@ -284,8 +288,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 let dir = OpenOptions::new()
                     .read(true)
                     .custom_flags(
-                        (rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::NOFOLLOW).bits()
-                            as i32,
+                        (rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::NOFOLLOW)
+                            .bits()
+                            .cast_signed(),
                     )
                     .open(&path)?;
                 remove_directory_contents(&dir, metadata.dev())?;

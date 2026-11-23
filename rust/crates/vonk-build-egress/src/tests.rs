@@ -239,12 +239,12 @@ fn dns_rebinding_or_mixed_answers_fail_closed() {
 
 #[test]
 fn failed_termination_retains_child_and_exhausted_owners_recover_after_reaping() {
+    static OWNERS: AtomicUsize = AtomicUsize::new(0);
     let _serial = RETAINED_RESOLVERS_TESTS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     // Wrong implementation: dropping a child after failed kill releases its
     // claim, lets repeated timeouts accumulate processes, or leaves a zombie.
-    static OWNERS: AtomicUsize = AtomicUsize::new(0);
     let mut owners = (0..MAX_CONNECTIONS)
         .map(|_| ResolverOwner::acquire_at(&OWNERS).unwrap())
         .collect::<Vec<_>>();
@@ -285,11 +285,11 @@ fn failed_termination_retains_child_and_exhausted_owners_recover_after_reaping()
 
 #[test]
 fn exhausted_reap_budget_hands_actual_child_to_supervision_and_fresh_admission_recovers() {
+    static OWNERS: AtomicUsize = AtomicUsize::new(0);
     let _serial = RETAINED_RESOLVERS_TESTS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     // The old per-child infinite loop never reached a terminal ownership handoff.
-    static OWNERS: AtomicUsize = AtomicUsize::new(0);
     let owner = ResolverOwner::acquire_at(&OWNERS).unwrap();
     let child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
     let pid = child.id();
@@ -400,12 +400,12 @@ fn no_infallible_thread_spawn_remains_in_the_proxy() {
 
 #[test]
 fn a_reaper_that_cannot_start_hands_its_child_and_claim_to_supervision() {
+    static OWNERS: AtomicUsize = AtomicUsize::new(0);
     let _serial = RETAINED_RESOLVERS_TESTS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     // Wrong implementation: the unstarted reaper closure takes the child and its
     // claim down with it, leaking the process and the admission slot.
-    static OWNERS: AtomicUsize = AtomicUsize::new(0);
     let owner = ResolverOwner::acquire_at(&OWNERS).unwrap();
     let child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
     let pid = child.id();
@@ -433,6 +433,6 @@ fn a_reaper_that_cannot_start_hands_its_child_and_claim_to_supervision() {
     }
 }
 
-/// Fixtures bind on `127.0.0.2`: OrbStack's VM port forwarder probes new
+/// Fixtures bind on `127.0.0.2`: `OrbStack`'s VM port forwarder probes new
 /// `127.0.0.1` listeners with a `GET /` that a fixture would count.
 const FIXTURE_BIND: &str = "127.0.0.2:0";

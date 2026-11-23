@@ -22,7 +22,7 @@ fn reconciliation_removing_checkpoint_recovers_after_partial_or_complete_quarant
             reconciliation_checkpoint_path(&checkpoint_root, &installation_id.to_string()).unwrap();
         let quarantine =
             reconciliation_quarantine_path(&checkpoint_root, &installation_id.to_string()).unwrap();
-        let mut checkpoint = super::read_reconciliation_checkpoint(&checkpoint_path)
+        let mut checkpoint = read_reconciliation_checkpoint(&checkpoint_path)
             .unwrap()
             .unwrap();
         let expected_directory_identity = read_reconciliation_directory_identity(&installation)

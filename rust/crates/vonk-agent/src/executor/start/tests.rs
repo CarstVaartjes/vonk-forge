@@ -11,7 +11,7 @@ async fn collective_readiness_retries_inspection_without_repreparing_a_launched_
     let address = listener.local_addr().unwrap();
     let data = tempdir().unwrap();
     let runtime_root = tempdir().unwrap();
-    let mut claim = super::super::runtime_observation_tests::runtime_claims().remove(0);
+    let mut claim = runtime_observation_tests::runtime_claims().remove(0);
     let AgentClaimPayload::RecipeStartPayload(request) = &mut claim.payload else {
         panic!("start fixture");
     };
@@ -32,7 +32,7 @@ async fn collective_readiness_retries_inspection_without_repreparing_a_launched_
         "compiled_execution_plan": request.compiled_execution_plan,
     }))
     .unwrap();
-    super::super::content_observation_tests::prepare_effect(data.path(), &install);
+    content_observation_tests::prepare_effect(data.path(), &install);
     let runtime = OciRuntime {
         runner: &NoProcess,
         data_root: data.path(),
@@ -103,8 +103,7 @@ async fn collective_readiness_retries_inspection_without_repreparing_a_launched_
                 let grant: vonk_agent_protocol::SignedHostHelperGrant = serde_json::from_str(include_str!(
                     "../../../../../../agent_protocol/fixtures/host-helper-grant-python-issued.json"
                 )).unwrap();
-                let body = vonk_agent_protocol::canonical_generated_json(&json!({"grant": grant}))
-                    .unwrap();
+                let body = canonical_generated_json(&json!({"grant": grant})).unwrap();
                 write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
                 stream.write_all(&body).unwrap();
             }
@@ -144,9 +143,9 @@ async fn collective_readiness_retries_inspection_without_repreparing_a_launched_
                 error_code: None, diagnostic: None, process_logs: None,
                 container_labels: None,
             };
-            let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
+            let body = canonical_generated_json(&response).unwrap();
             stream
-                .write_all(&(body.len() as u32).to_be_bytes())
+                .write_all(&u32::try_from(body.len()).unwrap().to_be_bytes())
                 .unwrap();
             stream.write_all(&body).unwrap();
             return true;
@@ -222,7 +221,7 @@ async fn collective_start_with_drops(
     let address = listener.local_addr().unwrap();
     let data = tempdir().unwrap();
     let runtime_root = tempdir().unwrap();
-    let mut claim = super::super::runtime_observation_tests::runtime_claims().remove(0);
+    let mut claim = runtime_observation_tests::runtime_claims().remove(0);
     let AgentClaimPayload::RecipeStartPayload(request) = &mut claim.payload else {
         panic!("start fixture");
     };
@@ -243,7 +242,7 @@ async fn collective_start_with_drops(
         "compiled_execution_plan": request.compiled_execution_plan,
     }))
     .unwrap();
-    super::super::content_observation_tests::prepare_effect(data.path(), &install);
+    content_observation_tests::prepare_effect(data.path(), &install);
     let runtime = OciRuntime {
         runner: &NoProcess,
         data_root: data.path(),
@@ -317,8 +316,7 @@ async fn collective_start_with_drops(
                 let grant: vonk_agent_protocol::SignedHostHelperGrant = serde_json::from_str(include_str!(
                     "../../../../../../agent_protocol/fixtures/host-helper-grant-python-issued.json"
                 )).unwrap();
-                let body = vonk_agent_protocol::canonical_generated_json(&json!({"grant": grant}))
-                    .unwrap();
+                let body = canonical_generated_json(&json!({"grant": grant})).unwrap();
                 write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
                 stream.write_all(&body).unwrap();
             } else {
@@ -351,9 +349,9 @@ async fn collective_start_with_drops(
             process_logs: None,
             container_labels: None,
         };
-        let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
+        let body = canonical_generated_json(&response).unwrap();
         stream
-            .write_all(&(body.len() as u32).to_be_bytes())
+            .write_all(&u32::try_from(body.len()).unwrap().to_be_bytes())
             .unwrap();
         stream.write_all(&body).unwrap();
     });
@@ -439,7 +437,7 @@ fn every_workload_container_start_drops_the_page_cache_first() {
         ["HostRuntimePlan::", "JobRun("],
     ]
     .map(|parts| parts.concat());
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut pending = vec![root.clone()];
     let mut sites = Vec::new();
     let mut unguarded = Vec::new();

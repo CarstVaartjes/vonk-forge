@@ -1,5 +1,9 @@
-#![forbid(unsafe_code)]
-
+#![expect(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,
@@ -617,7 +621,7 @@ fn stage_base_archive(root: &Path) {
     fs::write(directory.join("image.oci.tar"), oci_archive(&fixture)).unwrap();
 }
 
-fn base_archive_path(root: &Path) -> std::path::PathBuf {
+fn base_archive_path(root: &Path) -> PathBuf {
     let fixture = registry_fixture();
     root.join("base-images")
         .join("sha256")
@@ -715,7 +719,7 @@ fn docker_archive(fixture: &OciRegistryFixture, image_name: &str) -> Vec<u8> {
 struct PrivateContainerd {
     _root: TempDir,
     child: Child,
-    socket: std::path::PathBuf,
+    socket: PathBuf,
 }
 
 impl PrivateContainerd {
@@ -778,7 +782,15 @@ impl PrivateContainerd {
                 break;
             }
             if Instant::now() >= deadline {
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort stop of a process that may already have ended"
+                )]
                 let _ = child.kill();
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort stop of a process that may already have ended"
+                )]
                 let _ = child.wait();
                 let diagnostic = bounded_text(&fs::read(&stderr_path).unwrap_or_default(), 8_192);
                 panic!("private containerd did not become ready: {diagnostic}");
@@ -822,7 +834,15 @@ fn bounded_containerd_diagnostic_keeps_the_failure_tail() {
 
 impl Drop for PrivateContainerd {
     fn drop(&mut self) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = self.child.kill();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = self.child.wait();
     }
 }
@@ -834,12 +854,20 @@ struct DockerCleanup {
 
 impl Drop for DockerCleanup {
     fn drop(&mut self) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the outcome of this step is not what the test asserts"
+        )]
         let _ = Command::new("/usr/bin/docker")
             .args(["container", "rm", "--force", &self.container])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the outcome of this step is not what the test asserts"
+        )]
         let _ = Command::new("/usr/bin/docker")
             .args(["image", "rm", "--force", &self.image])
             .stdin(Stdio::null())

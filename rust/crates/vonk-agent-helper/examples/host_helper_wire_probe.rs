@@ -1,3 +1,8 @@
+#![expect(
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "example program: a failed unwrap ends the demonstration"
+)]
 use std::io::{self, Read};
 
 use vonk_agent_helper::protocol::{
@@ -7,6 +12,10 @@ use vonk_agent_protocol::canonical_json;
 
 const ALLOWED_GID: u32 = 971;
 
+#[expect(
+    clippy::match_same_arms,
+    reason = "the arms stay apart on purpose: each names a distinct case of the state machine"
+)]
 fn main() {
     let mut raw = Vec::new();
     io::stdin().read_to_end(&mut raw).unwrap();
@@ -80,6 +89,11 @@ fn main() {
                 String::from_utf8(canonical_json(&grant).unwrap()).unwrap()
             );
         }
-        _ => panic!("probe input is not a bound run inspection, Stop or reconciliation grant"),
+        vonk_agent_protocol::HostHelperOperation::ApplyGpuClockOperation(_)
+        | vonk_agent_protocol::HostHelperOperation::ApplySwapOperation(_)
+        | vonk_agent_protocol::HostHelperOperation::InstallVonkDebOperation(_)
+        | vonk_agent_protocol::HostHelperOperation::ExecuteContainerRuntimeRequestOperation(_) => {
+            panic!("probe input is not a bound run inspection, Stop or reconciliation grant")
+        }
     }
 }

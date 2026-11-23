@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 //! Stdin/stdout probe for the compiled execution-plan serde boundary.
 
 use std::io::{self, BufRead, Write};

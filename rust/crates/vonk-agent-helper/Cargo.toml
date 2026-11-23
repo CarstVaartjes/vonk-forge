@@ -29,3 +29,6 @@ path = "src/lib.rs"
 [[bin]]
 name = "vonk-agent-helper"
 path = "src/main.rs"
+
+[lints]
+workspace = true

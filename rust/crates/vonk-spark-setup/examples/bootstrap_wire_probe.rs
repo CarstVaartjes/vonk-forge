@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 //! Exercise the same bootstrap parser used by Spark setup discovery.
 
 use std::io::{self, BufRead, Write};

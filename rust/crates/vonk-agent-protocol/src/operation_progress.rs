@@ -13,6 +13,10 @@ fn bounded(value: &str, max: usize) -> bool {
 fn number(value: Option<f64>, max: f64) -> bool {
     value.is_none_or(|v| v.is_finite() && v >= 0.0 && v <= max)
 }
+#[expect(
+    clippy::ref_option,
+    reason = "mirrors the wire field type that serde hands over by reference"
+)]
 fn timestamp(value: &Option<String>) -> bool {
     value
         .as_ref()

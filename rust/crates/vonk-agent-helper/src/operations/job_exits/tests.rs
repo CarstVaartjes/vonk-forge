@@ -193,7 +193,7 @@ fn a_stopped_running_job_retains_no_invented_exit() {
     ));
 }
 
-/// Stop observes physical absence even when a JobRun's retained exit exists.
+/// Stop observes physical absence even when a `JobRun`'s retained exit exists.
 #[test]
 fn runtime_absence_probe_never_substitutes_a_retained_exit_or_removes_a_container() {
     let host = exited_job(3);

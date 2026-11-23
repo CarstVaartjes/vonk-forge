@@ -27,6 +27,10 @@ pub(super) fn range_end(index: u64, range_bytes: u64, total: u64) -> u64 {
 #[cfg(target_os = "linux")]
 pub(super) fn preallocate(file: &tokio::fs::File, offset: u64, total: u64) {
     if total > offset {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+        )]
         let _ = rustix::fs::fallocate(
             file,
             rustix::fs::FallocateFlags::KEEP_SIZE,
@@ -114,7 +118,8 @@ impl RangeRecord {
             } else {
                 length
             };
-            let mut bitmap = vec![0; bitmap_len(total, range_bytes) as usize];
+            let mut bitmap =
+                vec![0; usize::try_from(bitmap_len(total, range_bytes)).unwrap_or_default()];
             for index in 0..total.div_ceil(range_bytes) {
                 if range_end(index, range_bytes, total) < prefix {
                     bitmap[(index / 8) as usize] |= 1 << (index % 8);
@@ -234,7 +239,7 @@ fn read_record(
     {
         return Ok(None);
     }
-    let mut bitmap = vec![0; bitmap_bytes as usize];
+    let mut bitmap = vec![0; usize::try_from(bitmap_bytes).unwrap_or_default()];
     file.read_exact_at(&mut bitmap, total + RANGE_RECORD_HEADER)?;
     Ok(Some((range_bytes, bitmap)))
 }
@@ -249,6 +254,10 @@ async fn blocking<T: Send + 'static>(
 
 #[cfg(target_os = "linux")]
 pub(super) fn release_pages(file: &fs::File, offset: u64, length: u64) {
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+    )]
     let _ = rustix::fs::fadvise(
         file,
         offset,
@@ -265,7 +274,11 @@ pub(super) fn release_pages(_file: &fs::File, _offset: u64, _length: u64) {}
 /// and a failed hint must not turn that into a failed transfer.  A node that
 /// keeps the pages is the behaviour that shipped before this call.
 pub(super) fn release_distribution_page_cache(path: &Path) {
-    if let Ok(file) = std::fs::File::open(path) {
+    if let Ok(file) = fs::File::open(path) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+        )]
         let _ = rustix::fs::fadvise(&file, 0, None, rustix::fs::Advice::DontNeed);
     }
 }

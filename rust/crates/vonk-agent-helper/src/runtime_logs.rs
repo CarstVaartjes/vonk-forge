@@ -31,7 +31,7 @@
 //!   budget and those lines are retained ahead of it in the same way, and the
 //!   fix can be sized from the evidence.
 //! * The window keeps a native abort's message.  A C++ exception that ends the
-//!   process (PyTorch's `c10::Error`) is reported as `terminate called ...`
+//!   process (`PyTorch`'s `c10::Error`) is reported as `terminate called ...`
 //!   and `what(): <message>`, then a long native stack and often a wrapper's
 //!   traceback.  The message lines are retained ahead of the tail, with the
 //!   omitted middle marked, so the evidence keeps both why the process aborted
@@ -197,6 +197,10 @@ fn last_failure_line(stream: &[u8]) -> Option<(usize, usize, usize, Option<usize
 
 /// The text of a log line without the prefix a supervised process adds
 /// (`(APIServer pid=54) `) or the engine's `ERROR 10-06 05:05:21 [file:1] `.
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn line_content(line: &[u8]) -> String {
     let text = String::from_utf8_lossy(line);
     let mut rest: &str = text.trim_end_matches(['\r', '\n']);
@@ -499,7 +503,7 @@ fn ahead_of_window(
 }
 
 /// How a C++ runtime reports the exception that aborts its process
-/// (libstdc++'s terminate handler, which PyTorch's `c10::Error` goes through):
+/// (libstdc++'s terminate handler, which `PyTorch`'s `c10::Error` goes through):
 /// `terminate called after throwing an instance of 'c10::Error'`, then
 /// `  what():  <message>` over as many lines as the message has.  The stack it
 /// prints next (`Exception raised from ...`, `frame #0: ...`) is long, and any
@@ -612,6 +616,10 @@ const BYTE_UNITS: [&str; 4] = ["GiB", "GB", "MiB", "MB"];
 /// quantity.  A download's size (`Downloading apache-tvm-ffi (2.4 MB)`) names
 /// no memory, and a setting (`gpu_memory_utilization=0.9`) carries no byte
 /// quantity.
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn reports_memory(line: &[u8]) -> bool {
     let text = String::from_utf8_lossy(line);
     let names_memory = text
@@ -665,6 +673,10 @@ pub fn retain(stream: &[u8]) -> FailureLogTail {
 }
 
 /// [`retain`], with or without the stream's first error ahead of the window.
+#[expect(
+    clippy::naive_bytecount,
+    reason = "small log streams; a counting dependency is not warranted"
+)]
 fn retain_stream(stream: &[u8], keep_head: bool) -> FailureLogTail {
     let (causes, range) = window(stream, keep_head);
     let (start, length) = (range.start, range.len());
@@ -898,6 +910,10 @@ pub fn python_exception(logs: &HostHelperProcessLogs) -> Option<String> {
 }
 
 /// What `line_content` strips from a line: the process and log-record prefix.
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn line_prefix(line: &[u8]) -> String {
     let text = String::from_utf8_lossy(line);
     let text = text.trim_end_matches(['\r', '\n']);
@@ -1064,7 +1080,7 @@ pub fn exit_summary(
     parts.push(format!("{EXIT_CAUSE_FIELD}={}", cause.token()));
     match (logs, log_error) {
         (Some(logs), _) if logs.stdout.text.is_empty() && logs.stderr.text.is_empty() => {
-            parts.push("no_output=true".to_owned())
+            parts.push("no_output=true".to_owned());
         }
         (None, Some(reason)) => parts.push(format!("logs_unavailable={reason:?}")),
         (None, None) => parts.push("logs_unavailable=\"not captured\"".to_owned()),
@@ -1077,7 +1093,7 @@ pub fn exit_summary(
     // better with the path the exception names.
     if let Some(exception) = output.and_then(CapturedOutput::exception) {
         summary.push_str(vonk_agent_protocol::failure_evidence::EXIT_SUMMARY_EXCEPTION_FIELD);
-        summary.push_str(&format!("{exception:?}"));
+        summary = format!("{summary}{exception:?}");
     }
     summary
 }

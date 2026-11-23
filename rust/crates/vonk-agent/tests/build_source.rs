@@ -1,5 +1,7 @@
-#![forbid(unsafe_code)]
-
+#![expect(
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 use std::io::Cursor;
 
 use tempfile::tempdir;

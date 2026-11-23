@@ -208,7 +208,7 @@ def main() -> None:
     )
     rust = any(
         file.endswith(".rs")
-        or file in {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml"}
+        or file in {"Cargo.toml", "Cargo.lock", "clippy.toml", "rust-toolchain.toml"}
         or file.startswith("rust/")
         and file.endswith("Cargo.toml")
         for file in changed

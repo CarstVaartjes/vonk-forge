@@ -33,16 +33,23 @@ impl RotationError {
             || matches!(self, Self::Client(error) if error.retryable())
     }
 
+    #[expect(
+        clippy::match_same_arms,
+        reason = "the arms stay apart on purpose: each names a distinct case of the state machine"
+    )]
     pub fn code(&self) -> String {
         match self {
             Self::ActiveIdentityExpired => SecurityRefusalReason::LocalIdentityExpired.to_string(),
             Self::ObservationEnded => {
                 vonk_agent_protocol::generated::WaitReason::ObservationUnavailable.to_string()
             }
-            Self::Client(error) => error.code().map(str::to_owned).unwrap_or_else(|| {
-                vonk_agent_protocol::generated::ControllerErrorCode::ControllerUnavailable
-                    .to_string()
-            }),
+            Self::Client(error) => error.code().map_or_else(
+                || {
+                    vonk_agent_protocol::generated::ControllerErrorCode::ControllerUnavailable
+                        .to_string()
+                },
+                str::to_owned,
+            ),
             Self::Identity(_) => {
                 vonk_agent_protocol::generated::WaitReason::ObservationUnavailable.to_string()
             }
@@ -54,6 +61,10 @@ impl RotationError {
     /// (401/403, including revocation), the pinned server authority changed,
     /// or an issued credential does not belong to this node/key. Local storage
     /// loss ends a bounded observation attempt and preserves the other lanes.
+    #[expect(
+        clippy::match_same_arms,
+        reason = "the arms stay apart on purpose: each names a distinct case of the state machine"
+    )]
     pub fn fatal(&self) -> bool {
         match self {
             Self::ActiveIdentityExpired | Self::ObservationEnded | Self::Identity(_) => false,

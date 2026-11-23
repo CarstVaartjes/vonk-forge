@@ -13,7 +13,7 @@ fn canonical_job_claim_prepares_without_a_serving_port() {
         serde_json::from_value(claim["payload"].clone()).unwrap();
     let spec = request.compiled_execution_plan.clone();
     spec.validate().unwrap();
-    let placement = super::job_placement(&spec).unwrap();
+    let placement = job_placement(&spec).unwrap();
     let data = tempdir().unwrap();
     let run_id = request.run_id.to_string();
     fs::create_dir_all(data.path().join("runs").join(&run_id).join("inputs")).unwrap();
@@ -132,10 +132,7 @@ fn job_run_grant_requests_are_the_shared_vector_the_controller_grants() {
         request.validate().unwrap();
         let digest = hex_sha256(&canonical_json(&request).unwrap());
         let body = crate::client::build_host_runtime_grant_request(&claim, &request, &digest)
-            .and_then(|grant| {
-                vonk_agent_protocol::canonical_generated_json(&grant)
-                    .map_err(|_| ClientError::Protocol)
-            })
+            .and_then(|grant| canonical_generated_json(&grant).map_err(|_| ClientError::Protocol))
             .unwrap();
         let produced: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(
@@ -208,11 +205,13 @@ async fn active_job_cancellation_runs_the_stop_path_promptly() {
         Duration::from_secs(1),
         run_interruptible_job(
             async move {
+                #[expect(clippy::let_underscore_must_use, reason = "waits for a task to end; its outcome is observed elsewhere")]
                 let _ = job_drained.await;
             },
             &mut cancellation,
             move || async move {
                 observed.store(true, Ordering::Release);
+                #[expect(clippy::let_underscore_must_use, reason = "the receiving side may already be gone; nobody is waiting for the value")]
                 let _ = job_stopped.send(());
                 Ok::<(), ()>(())
             },
@@ -232,11 +231,11 @@ async fn active_job_cancellation_runs_the_stop_path_promptly() {
 fn artifact_job_failure_keeps_current_result_and_typed_diagnostics() {
     let mut job_claim = claim();
     job_claim.operation = "recipe.job.run.v1".parse().unwrap();
-    let envelope: serde_json::Value = serde_json::from_str(include_str!(
+    let envelope: Value = serde_json::from_str(include_str!(
         "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-result-v1.json"
     ))
     .unwrap();
-    let mut receipt: vonk_agent_protocol::RecipeJobRunResult =
+    let mut receipt: RecipeJobRunResult =
         serde_json::from_value(envelope["result"].clone()).unwrap();
     receipt.exit_code = 1;
     receipt.reason = Some("runtime failed".to_owned());
@@ -265,11 +264,13 @@ async fn lost_cancellation_owner_stops_the_job_and_admits_a_fresh_operation() {
         Duration::from_secs(1),
         run_interruptible_job(
             async {
+                #[expect(clippy::let_underscore_must_use, reason = "waits for a task to end; its outcome is observed elsewhere")]
                 let _ = finished.await;
             },
             &mut cancellation,
             move || async move {
                 observed.store(true, Ordering::SeqCst);
+                #[expect(clippy::let_underscore_must_use, reason = "the receiving side may already be gone; nobody is waiting for the value")]
                 let _ = finish.send(());
                 Ok::<(), ()>(())
             },
@@ -334,7 +335,7 @@ async fn completed_job_upload_recovers_without_reexecution_and_new_jobs_are_admi
     let listener = TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
     listener.set_nonblocking(true).unwrap();
     let address = listener.local_addr().unwrap();
-    let peer = std::thread::spawn(move || {
+    let peer = thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut payloads = Vec::new();
         for step in 0..5 {
@@ -346,7 +347,7 @@ async fn completed_job_upload_recovers_without_reexecution_and_new_jobs_are_admi
                 match listener.accept() {
                     Ok((stream, _)) => break stream,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(Duration::from_millis(1))
+                        thread::sleep(Duration::from_millis(1));
                     }
                     Err(error) => panic!("output peer: {error}"),
                 }
@@ -392,7 +393,7 @@ async fn completed_job_upload_recovers_without_reexecution_and_new_jobs_are_admi
     let client = AgentHttpClient::for_http_test(&format!("http://{address}/"), NODE_ID);
     let executor = RecipeExecutor {
         client: &client,
-        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        helper_socket: Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime,
         runtime_root: runtime_root.path(),
     };
@@ -486,8 +487,7 @@ async fn unreadable_retained_job_record_reports_its_step_and_cause_on_the_wire()
     // re-observed and proven absent here, so no exit will be read. It ends
     // failed, saying where and why, instead of an unknown observed without
     // end.
-    let peers =
-        super::reobserve_tests::peers(request.job_id, vec![super::reobserve_tests::Answer::Absent]);
+    let peers = reobserve_tests::peers(request.job_id, vec![reobserve_tests::Answer::Absent]);
     let scope = data.path().join("runs").join(request.job_id.to_string());
     fs::create_dir_all(&scope).unwrap();
     fs::write(scope.join("job-request.json"), b"{damaged").unwrap();
@@ -539,12 +539,12 @@ fn job_start_preparation_reports_the_runtime_step_that_stopped_it() {
         spec,
         &request.installation_id.to_string(),
         &request.job_id.to_string(),
-        &super::job_placement(spec).unwrap(),
+        &job_placement(spec).unwrap(),
         spec,
     ) else {
         panic!("a start without its input directory is not prepared");
     };
-    let (stage, cause) = super::local_step(
+    let (stage, cause) = local_step(
         FailureStage::RuntimeProjection,
         "job start preparation",
         &error,
@@ -552,10 +552,10 @@ fn job_start_preparation_reports_the_runtime_step_that_stopped_it() {
     assert_eq!(stage, FailureStage::JobInputs);
     assert!(!cause.is_empty());
     // An error that names no step of its own keeps the caller's step.
-    let (stage, _) = super::local_step(
+    let (stage, _) = local_step(
         FailureStage::RunStorage,
         "job scope cleanup",
-        &crate::oci::OciError::Artifact,
+        &OciError::Artifact,
     );
     assert_eq!(stage, FailureStage::RunStorage);
 }
@@ -580,7 +580,7 @@ fn a_step_before_launch_waits_at_its_stage_unless_the_input_was_refused() {
         spec,
         &request.installation_id.to_string(),
         &request.job_id.to_string(),
-        &super::job_placement(spec).unwrap(),
+        &job_placement(spec).unwrap(),
         spec,
     ) else {
         panic!("a start without its input directory is not prepared");
@@ -595,7 +595,7 @@ fn a_step_before_launch_waits_at_its_stage_unless_the_input_was_refused() {
         (
             FailureStage::RunStorage,
             "job intent record",
-            crate::oci::OciError::Io(storage),
+            OciError::Io(storage),
         ),
     ] {
         let result = job_step_before_launch(stage, step, &error);
@@ -621,16 +621,14 @@ fn a_step_before_launch_waits_at_its_stage_unless_the_input_was_refused() {
     let refused = job_step_before_launch(
         FailureStage::JobInputs,
         "job input manifest write",
-        &crate::oci::OciError::Workload(
-            vonk_agent_protocol::compiled_execution_plan::WorkloadError::Invalid("input"),
-        ),
+        &OciError::Workload(WorkloadError::Invalid("input")),
     );
     assert_eq!(refused.state(), AgentResultState::Failed);
     assert_eq!(refused.failure().expect("a failure").failure_kind, None);
 }
 
 fn grant_answer(status: u16, code: Option<&str>) -> crate::host_runtime::HostRuntimeError {
-    let mut answer = crate::client::ControllerError::from_status(status);
+    let mut answer = ControllerError::from_status(status);
     answer.endpoint = "/agent/host-runtime/grant".into();
     if let Some(code) = code {
         answer.code = code.into();
@@ -895,7 +893,7 @@ async fn an_exited_job_whose_outputs_break_their_bound_ends_failed_with_the_evid
     let client = AgentHttpClient::for_http_test("http://127.0.0.1:9/", NODE_ID);
     let executor = RecipeExecutor {
         client: &client,
-        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        helper_socket: Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime,
         runtime_root: runtime_root.path(),
     };
@@ -988,17 +986,17 @@ async fn a_job_holds_hygiene_drops_until_it_exits() {
     use vonk_agent_protocol::generated::{PageCacheDropPurpose, PageCacheDropReport};
     // The re-observation path: the same phase the fresh dispatch holds.
     let (claim, request) = job_claim();
-    let peers = super::reobserve_tests::peers(
+    let peers = reobserve_tests::peers(
         request.job_id,
         vec![
-            super::reobserve_tests::Answer::Running,
-            super::reobserve_tests::Answer::Running,
-            super::reobserve_tests::Answer::Exited(3),
+            reobserve_tests::Answer::Running,
+            reobserve_tests::Answer::Running,
+            reobserve_tests::Answer::Exited(3),
         ],
     );
     let data = tempdir().unwrap();
-    let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    let log = std::sync::Arc::clone(&asked);
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let log = Arc::clone(&asked);
     let dropper: Dropper = Arc::new(move |purpose| {
         log.lock().unwrap().push(purpose);
         Box::pin(async move {

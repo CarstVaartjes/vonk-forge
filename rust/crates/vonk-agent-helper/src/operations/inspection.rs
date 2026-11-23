@@ -13,6 +13,10 @@ enum EffectObservation {
 /// is named in the failure, so it can never read as a container with nothing to
 /// say: it carries its logs, or a typed reason they are missing, and an exit
 /// summary.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 pub(crate) fn process_exited(
     logs: Result<CommandOutput, String>,
     exit: Result<crate::runtime_logs::ContainerExit, &'static str>,
@@ -219,7 +223,29 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         OperationError::RuntimeProcessExited {
                             logs, exit_summary, ..
                         } => (logs, Some(exit_summary)),
-                        _ => (None, None),
+                        OperationError::InvalidOperation
+                        | OperationError::UnsafePath
+                        | OperationError::InvalidArtifact
+                        | OperationError::InstallationIntentObservationRequired { .. }
+                        | OperationError::PackagePreparationUnavailable
+                        | OperationError::PackageMetadataInvalid
+                        | OperationError::PackagePreflightFailed
+                        | OperationError::PackageInstallFailed { .. }
+                        | OperationError::CommandFailed { .. }
+                        | OperationError::RuntimeJobWaitFailed { .. }
+                        | OperationError::RuntimeInvocationLimitExceeded { .. }
+                        | OperationError::RuntimeInvocationLimitsUnavailable
+                        | OperationError::RuntimeImageLoadFailed
+                        | OperationError::RuntimeImageInspectFailed
+                        | OperationError::RuntimeImageMissing
+                        | OperationError::RuntimeImageIdentityInvalid
+                        | OperationError::RuntimeImageReceiptFailed
+                        | OperationError::RuntimeRunMissing
+                        | OperationError::RuntimeFabricUnavailable
+                        | OperationError::StopUncertain
+                        | OperationError::InstallationReconciliationBusy
+                        | OperationError::InstallationReconciliationStorageUnavailable
+                        | OperationError::Io(_) => (None, None),
                     }
                 } else {
                     (None, None)
@@ -259,10 +285,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         &self,
         run_id: &str,
     ) -> Result<NamedContainer, OperationError> {
-        if uuid::Uuid::parse_str(run_id)
-            .map(|parsed| parsed.to_string() != run_id)
-            .unwrap_or(true)
-        {
+        if uuid::Uuid::parse_str(run_id).map_or(true, |parsed| parsed.to_string() != run_id) {
             return Err(OperationError::InvalidOperation);
         }
         let name = format!("vonk-{run_id}");
@@ -692,7 +715,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 }
             }
             // Never dispatch a mutator through the observation frame.
-            _ => Err(OperationError::InvalidOperation),
+            HostRuntimeAction::RuntimePreflight
+            | HostRuntimeAction::ImageInspect
+            | HostRuntimeAction::RunInspect
+            | HostRuntimeAction::Start
+            | HostRuntimeAction::Stop => Err(OperationError::InvalidOperation),
         }
     }
 }

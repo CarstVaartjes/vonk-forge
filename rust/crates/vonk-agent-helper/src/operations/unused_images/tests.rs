@@ -5,7 +5,7 @@ use crate::operations::test_support::*;
 
 const KEPT_INSTALLATION: &str = "60000000-0000-4000-8000-000000000006";
 
-fn executor() -> (tempfile::TempDir, PullRunner, OperationExecutor<PullRunner>) {
+fn executor() -> (TempDir, PullRunner, OperationExecutor<PullRunner>) {
     let temp = tempfile::tempdir().unwrap();
     let runner = PullRunner {
         pulled_config: format!("sha256:{}", "c".repeat(64)),
@@ -320,7 +320,7 @@ fn daemon_inventory_collects_images_without_receipts_but_preserves_live_content(
         .write(true)
         .open(&marker)
         .unwrap()
-        .set_modified(std::time::SystemTime::now() - Duration::from_secs(25 * 3600))
+        .set_modified(std::time::SystemTime::now() - Duration::from_hours(25))
         .unwrap();
     *runner.container_query_fails.lock().unwrap() = true;
     executor.sweep_unused_runtime_images();
@@ -358,6 +358,10 @@ fn orphan_image_grace_records_disappear_when_docker_no_longer_has_the_content() 
 }
 
 #[test]
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn an_orphan_image_is_collected_however_many_managed_images_the_listing_holds() {
     // The listing grows with the images the helper must remove. A total
     // output bound wedged it for good: the orphan was never seen, so the
@@ -388,7 +392,7 @@ fn an_orphan_image_is_collected_however_many_managed_images_the_listing_holds() 
         .join(format!(".untracked-{}", &orphan[7..]));
     File::create(&marker)
         .unwrap()
-        .set_modified(std::time::SystemTime::now() - Duration::from_secs(25 * 3600))
+        .set_modified(std::time::SystemTime::now() - Duration::from_hours(25))
         .unwrap();
 
     executor.sweep_runtime_images_unused_for(UNUSED_IMAGE_GRACE, &|| None);

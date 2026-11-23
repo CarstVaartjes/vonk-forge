@@ -286,7 +286,7 @@ jobs:
       - name: Verify Rust formatting
         run: cargo fmt --all --check
       - name: Lint Rust workspace
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --frozen -- -D warnings
 
   rust-tests:
     name: Rust workspace tests

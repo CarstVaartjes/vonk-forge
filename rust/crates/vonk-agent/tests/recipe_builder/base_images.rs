@@ -39,7 +39,7 @@ fn fresh_node_produces_verified_exact_digest_oci_archive_before_offline_build() 
         .join(fixture.manifest_digest.strip_prefix("sha256:").unwrap())
         .join("image.oci.tar");
     let mut entries = BTreeMap::new();
-    for entry in tar::Archive::new(fs::File::open(stored).unwrap())
+    for entry in tar::Archive::new(File::open(stored).unwrap())
         .entries()
         .unwrap()
     {
@@ -323,7 +323,7 @@ fn repeated_identical_base_image_layer_is_materialized_once() {
         "blobs/sha256/{}",
         fixture.layer_digest.strip_prefix("sha256:").unwrap()
     );
-    let layer_entries = tar::Archive::new(fs::File::open(stored).unwrap())
+    let layer_entries = tar::Archive::new(File::open(stored).unwrap())
         .entries()
         .unwrap()
         .map(|entry| entry.unwrap().path().unwrap().into_owned())
@@ -555,6 +555,10 @@ fn supersession_during_base_fetch_ends_before_import_and_fresh_work_is_admitted(
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test takes a raw lock to prove how a HeldLock contends with it"
+)]
 fn base_image_lock_contention_waits_and_build_succeeds() {
     let root = tempdir().unwrap();
     let runtime = tempdir().unwrap();

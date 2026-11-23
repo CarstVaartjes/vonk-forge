@@ -78,8 +78,8 @@ pub async fn wait_ready_until(
         let deadline = phase_deadline(&lease_deadline, immutable_deadline.as_ref());
         let until_deadline = (deadline - Utc::now()).to_std().unwrap_or(Duration::ZERO);
         tokio::select! {
-            _ = tokio::time::sleep(Duration::from_secs(1)) => {}
-            _ = tokio::time::sleep(until_deadline) => return Err(HealthError::Deadline),
+            () = tokio::time::sleep(Duration::from_secs(1)) => {}
+            () = tokio::time::sleep(until_deadline) => return Err(HealthError::Deadline),
             changed = lease_deadline.changed() => {
                 if changed.is_err() {
                     return Err(HealthError::Deadline);

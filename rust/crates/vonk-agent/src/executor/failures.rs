@@ -28,6 +28,10 @@ pub fn recipe_start_result(request: &RecipeStartRequest) -> RecipeStartResult {
     RecipeStartResult { endpoint }
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 pub fn distribution_success(evidence: DistributionDownloadEvidence) -> ExecutionResult {
     ExecutionResult::done(ArtifactDistributionResult {
         downloaded_bytes: evidence.downloaded_bytes,
@@ -166,11 +170,21 @@ pub(super) fn host_runtime_evidence(
                     error.preflight_code()
                 )
             }
-            _ => error.preflight_code().to_owned(),
+            crate::host_runtime::HostRuntimeError::Io(_)
+            | crate::host_runtime::HostRuntimeError::Controller(_)
+            | crate::host_runtime::HostRuntimeError::HelperProtocol(_)
+            | crate::host_runtime::HostRuntimeError::StopUncertain
+            | crate::host_runtime::HostRuntimeError::HelperRejected { .. } => {
+                error.preflight_code().clone()
+            }
         })
         .helper(runtime_helper_code(error))
 }
 
+#[expect(
+    clippy::match_same_arms,
+    reason = "the arms stay apart on purpose: each names a distinct case of the state machine"
+)]
 pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRuntimeError) -> bool {
     use crate::host_runtime::HostRuntimeError;
     match error {
@@ -544,7 +558,11 @@ fn helper_refusal(error: &crate::host_runtime::HostRuntimeError) -> Option<Helpe
         crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } => {
             Some(classify_helper_code(*code))
         }
-        _ => None,
+        crate::host_runtime::HostRuntimeError::Io(_)
+        | crate::host_runtime::HostRuntimeError::Controller(_)
+        | crate::host_runtime::HostRuntimeError::HelperProtocol(_)
+        | crate::host_runtime::HostRuntimeError::HelperProtocolBound { .. }
+        | crate::host_runtime::HostRuntimeError::StopUncertain => None,
     }
 }
 
@@ -677,7 +695,17 @@ pub(super) fn preparation_failure_at(
 ) -> ExecutionResult {
     let (stage, category) = match error {
         OciError::Install { .. } => error.safe_install_context(),
-        _ => error.safe_start_context(),
+        OciError::Process(_)
+        | OciError::Workload(_)
+        | OciError::Runtime
+        | OciError::ImageDigest
+        | OciError::Artifact
+        | OciError::ModelStoreLayout { .. }
+        | OciError::Io(_)
+        | OciError::Json(_)
+        | OciError::Capacity
+        | OciError::ReconciliationBusy
+        | OciError::Start { .. } => error.safe_start_context(),
     };
     let stage = if matches!(stage, FailureStage::Unknown) {
         fallback
@@ -777,7 +805,14 @@ fn retryable_runtime_preparation(error: &OciError) -> bool {
         // These refuse workload input or bytes at the image ingress.
         OciError::Workload(_) | OciError::ImageDigest => false,
         // Local process, storage, metadata and capacity are observations.
-        _ => true,
+        OciError::Process(_)
+        | OciError::Runtime
+        | OciError::Artifact
+        | OciError::ModelStoreLayout { .. }
+        | OciError::Io(_)
+        | OciError::Json(_)
+        | OciError::Capacity
+        | OciError::ReconciliationBusy => true,
     }
 }
 

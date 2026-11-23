@@ -146,7 +146,7 @@ fn an_ask_is_answered_only_by_the_helpers_report_for_it() {
             }
             let body = canonical_generated_json(&answer).unwrap();
             stream
-                .write_all(&(body.len() as u32).to_be_bytes())
+                .write_all(&u32::try_from(body.len()).unwrap().to_be_bytes())
                 .unwrap();
             stream.write_all(&body).unwrap();
         }
@@ -191,7 +191,7 @@ async fn a_load_after_the_cadence_ended_starts_it_again() {
 
 #[tokio::test(start_paused = true)]
 async fn a_tick_asks_load_while_any_phase_loads_and_hygiene_after() {
-    let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let asked = Arc::new(Mutex::new(Vec::new()));
     let log = Arc::clone(&asked);
     let dropper: Dropper = Arc::new(move |purpose| {
         log.lock().unwrap().push(purpose);
