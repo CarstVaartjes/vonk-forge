@@ -35,7 +35,7 @@ from .recipe_operations_support import (
     setup_services,
     started_recipe,
 )
-from .run_switch_operations_support import (
+from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )

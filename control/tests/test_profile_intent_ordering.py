@@ -23,11 +23,11 @@ from vonk_control.models import (
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .recipe_operations_support import setup_services
-from .run_switch_operations_support import (
+from .test_profile_installed_execution import _profile_service
+from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )
-from .test_profile_installed_execution import _profile_service
 
 
 def _profile_order_services(tmp_path, engine, *, start: datetime):

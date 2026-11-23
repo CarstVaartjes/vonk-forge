@@ -67,14 +67,14 @@ from .recipe_operations_support import (
     setup_services,
     started_recipe,
 )
-from .run_switch_operations_support import (
-    CompleteArtifactInspector,
-    RecordingArtifactExecutor,
-)
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     claim_agent,
     inventory_items_fixture,
+)
+from .test_run_switch_operations import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
 )
 from .test_terminal_history_collection import _job
 

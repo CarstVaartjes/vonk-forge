@@ -317,8 +317,9 @@ def test_accepted_plan_refresh_records_unknown_cause_and_resumes(tmp_path, monke
     from vonk_control.models import Job
     from vonk_control.run_switch_contract import RunSwitchApplyRequest
 
-    from .recipe_operations_support import NOW, setup_services
-    from .run_switch_operations_support import (
+    from .recipe_operations_support import setup_services
+    from .test_run_switch_operations import (
+        NOW,
         RecordingArtifactExecutor,
         _request,
         _service,
@@ -503,8 +504,8 @@ def test_run_switch_cancel_reports_exhausted_contention_then_can_progress(
         cancellation_retry,
     )
 
-    from .run_switch_operations_support import RecordingArtifactExecutor, _request
     from .test_run_switch_lifecycle import _Harness
+    from .test_run_switch_operations import RecordingArtifactExecutor, _request
 
     harness = _Harness(tmp_path, RecordingArtifactExecutor())
     service = harness.service

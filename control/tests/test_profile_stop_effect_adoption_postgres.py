@@ -47,7 +47,6 @@ from .fleet_profiles_support import NOW, _node_id, _uuid
 from .node_contacts import contact_row
 from .profile_stop_readmission_support import start_on_released_gang
 from .recipe_operations_support import installed_recipe, setup_services, started_recipe
-from .run_switch_operations_support import RecordingArtifactExecutor, _service
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_profile_adapter_continuity import _running_child
 from .test_profile_adapter_parallel_postgres import _stored
@@ -56,6 +55,7 @@ from .test_profile_continuity_postgres import (
     _SQLCancellationAdapter,
 )
 from .test_recipe_operations_part5 import _issue_exact_stop_grant
+from .test_run_switch_operations import RecordingArtifactExecutor, _service
 
 
 def _claims(sessions, node_id):

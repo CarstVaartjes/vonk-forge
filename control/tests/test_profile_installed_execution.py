@@ -72,14 +72,14 @@ from vonk_control.unused_storage_collection import (
 from cluster_profiles.control_client import validate_control_document
 
 from .recipe_operations_support import installed_recipe, setup_services, started_recipe
-from .run_switch_operations_support import (
+from .runtime_image_fixtures import copy_as_another_recipe
+from .test_run_switch_operations import (
     MODEL_ARTIFACT,
     CompleteArtifactInspector,
     ModelCacheManifestProvider,
     RecordingArtifactExecutor,
     _request,
 )
-from .runtime_image_fixtures import copy_as_another_recipe
 
 
 def _profile_service(sessions, lifecycle):

@@ -42,12 +42,12 @@ from .recipe_operations_support import (
     setup_services,
     started_recipe,
 )
-from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service
 from .test_profile_continuity_postgres import (
     _assessment_with_promises,
     _SQLCancellationAdapter,
 )
 from .test_recipe_operations_part5 import _issue_exact_stop_grant
+from .test_run_switch_operations import RecordingArtifactExecutor, _request, _service
 
 
 @pytest.mark.parametrize("through_profile", [False, True])

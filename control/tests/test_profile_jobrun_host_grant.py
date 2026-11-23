@@ -24,12 +24,12 @@ from vonk_control.host_helper_authority import (
 from vonk_control.models import AgentOperation, Job
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
-from .run_switch_operations_support import (
+from .runtime_identity_support import claim_agent
+from .test_artifact_job_lifecycle import _issued_job
+from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )
-from .runtime_identity_support import claim_agent
-from .test_artifact_job_lifecycle import _issued_job
 
 
 def _selected_profile_grant(tmp_path, reason="superseded by newer workload intent"):

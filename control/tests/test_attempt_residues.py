@@ -52,11 +52,11 @@ from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .profile_due_fixtures import next_profile_due
 from .recipe_operations_support import ConcurrentPublisher, setup_services
-from .run_switch_operations_support import (
+from .test_profile_build_process_recovery import _complete_agent_work
+from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )
-from .test_profile_build_process_recovery import _complete_agent_work
 
 
 def _load(tmp_path: Path, *, executor=None, artifacts=None):

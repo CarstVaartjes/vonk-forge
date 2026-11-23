@@ -27,7 +27,8 @@ from vonk_control.run_switch_operations import PhaseExecution, _phase_result
 
 from .non_blocking import assert_ended_without_blocking
 from .recipe_operations_support import installed_recipe, setup_services
-from .run_switch_operations_support import (
+from .test_run_switch_lifecycle import _Harness, _result, _retrying, _ScriptedExecutor
+from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _child_operation_id,
@@ -35,7 +36,6 @@ from .run_switch_operations_support import (
     _request,
     _service,
 )
-from .test_run_switch_lifecycle import _Harness, _result, _retrying, _ScriptedExecutor
 
 
 def _evidence(harness: _Harness) -> str:

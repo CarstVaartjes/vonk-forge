@@ -47,7 +47,7 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256
 from tests.display_fixtures import reword
 
 from ..recipe_operations_support import ConcurrentPublisher, setup_services
-from ..run_switch_operations_support import (
+from ..test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )

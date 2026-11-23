@@ -663,7 +663,7 @@ def test_profile_preview_projects_exact_preparation_from_run_switch_authority(
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
     from .recipe_operations_support import setup_services
-    from .run_switch_operations_support import (
+    from .test_run_switch_operations import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
@@ -740,7 +740,7 @@ def _exact_cleanup_profile(tmp_path: Path, *, engine=None):
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
     from .recipe_operations_support import installed_recipe, setup_services
-    from .run_switch_operations_support import (
+    from .test_run_switch_operations import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
@@ -842,7 +842,7 @@ def _exact_planned_cleanup_profile(tmp_path: Path):
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
     from .recipe_operations_support import setup_services
-    from .run_switch_operations_support import (
+    from .test_run_switch_operations import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
@@ -961,7 +961,7 @@ def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(
         setup_services,
         started_recipe,
     )
-    from .run_switch_operations_support import (
+    from .test_run_switch_operations import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
@@ -1234,7 +1234,7 @@ def test_a_stop_step_for_an_already_replaced_workload_is_skipped(
         setup_services,
         started_recipe,
     )
-    from .run_switch_operations_support import (
+    from .test_run_switch_operations import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )

@@ -15,12 +15,12 @@ from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .recipe_operations_support import setup_services
-from .run_switch_operations_support import (
+from .runtime_identity_support import set_inventory_identity
+from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _request,
 )
-from .runtime_identity_support import set_inventory_identity
 
 
 @pytest.mark.parametrize("inspection", [False, True])

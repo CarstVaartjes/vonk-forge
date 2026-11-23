@@ -23,11 +23,11 @@ from vonk_control.fleet_profiles import build_production_fleet_profile_service
 from vonk_control.models import AgentOperation, ArtifactJob, Job
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
-from .run_switch_operations_support import (
+from .test_artifact_job_lifecycle import _issued_job
+from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )
-from .test_artifact_job_lifecycle import _issued_job
 
 
 def _damage(sessions, artifact_job_id: str, damage: str) -> str:

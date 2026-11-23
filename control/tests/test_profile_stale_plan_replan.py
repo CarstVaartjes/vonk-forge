@@ -22,7 +22,7 @@ from vonk_control.recovery_policy import RECOVERY
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .recipe_operations_support import installed_recipe, setup_services
-from .run_switch_operations_support import (
+from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )

@@ -50,14 +50,14 @@ from .recipe_operations_support import (
     start_evidence,
     started_recipe,
 )
-from .run_switch_operations_support import (
+from .test_lifecycle_preflight import _finish
+from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _replace_child,
     _request,
     _service,
 )
-from .test_lifecycle_preflight import _finish
 
 
 @pytest.fixture

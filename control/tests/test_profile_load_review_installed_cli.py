@@ -20,10 +20,6 @@ from vonk_control.models import (
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .recipe_operations_support import installed_recipe, setup_services, started_recipe
-from .run_switch_operations_support import (
-    CompleteArtifactInspector,
-    RecordingArtifactExecutor,
-)
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     inventory_items_fixture,
@@ -34,6 +30,10 @@ from .test_profile_load_installed_cli import (
     _https_api_peer,
     _process_environment,
     _run_pty,
+)
+from .test_run_switch_operations import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
 )
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)

@@ -59,14 +59,14 @@ from vonk_control.runtime_image_preparation import (
 )
 
 from .recipe_operations_support import NOW, _CanonicalModelCache, setup_services
-from .run_switch_operations_support import (
+from .runtime_image_fixtures import place_test_image
+from .test_lifecycle_preflight import _finish
+from .test_run_switch_operations import (
     CompleteArtifactInspector,
     _AdvancingClock,
     _request,
     _target_copy_evidence,
 )
-from .runtime_image_fixtures import place_test_image
-from .test_lifecycle_preflight import _finish
 
 
 class _ColdInspector(CompleteArtifactInspector):
