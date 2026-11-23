@@ -78,10 +78,13 @@ def reconcile_schema(connection: Connection) -> None:
     inspector = inspect(connection)
     tables = set(inspector.get_table_names()) - _FOREIGN_TABLES
     metadata_tables = set(Base.metadata.tables)
-    column_key = lambda difference: (
-        str(difference[2]),
-        str(getattr(difference[3], "name", difference[3])),
-    )
+
+    def column_key(difference):
+        return (
+            str(difference[2]),
+            str(getattr(difference[3], "name", difference[3])),
+        )
+
     reported_type_changes = {
         column_key(difference)
         for difference in differences

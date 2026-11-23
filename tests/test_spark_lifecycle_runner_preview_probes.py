@@ -206,7 +206,10 @@ def test_artifact_job_recipe_is_imported_by_the_controller_catalog(
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 10, 15, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 10, 15, tzinfo=UTC)
+
     reader = program.FixtureReader(index, {digest: archive})
     # Copying the original context digest after adding the job used to make
     # candidate acceptance fail at package ingress. Editorial changes reuse it.

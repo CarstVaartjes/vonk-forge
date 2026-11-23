@@ -188,7 +188,10 @@ def test_worker_waits_for_api_publication_without_gateway_authority(tmp_path):
     service, _, applied, run_id = setup(tmp_path)
     with service.sessions.begin() as session:
         _recipe_run(session, run_id).route_state = RouteState.PENDING
-    prepare = lambda runs: require_existing_recipe_routes(service.sessions, runs)
+
+    def prepare(runs):
+        return require_existing_recipe_routes(service.sessions, runs)
+
     with pytest.raises(RecipeRouteNotReady):
         prepare(frozenset({run_id}))
     worker = RecipeOperationWorker(

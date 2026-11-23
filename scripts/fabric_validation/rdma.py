@@ -73,8 +73,12 @@ def run_one_rdma(
             return runner.remote(host.ssh_alias, command, check=check)
         return runner.worker_via_fabric(command, check=check)
 
-    server_call = lambda command, check=True: call_on(server_host, command, check=check)
-    client_call = lambda command, check=True: call_on(client_host, command, check=check)
+    def server_call(command, check=True):
+        return call_on(server_host, command, check=check)
+
+    def client_call(command, check=True):
+        return call_on(client_host, command, check=check)
+
     server_pid = server_call(server_command).stdout.strip()
     if not server_pid.isdigit():
         raise GateError(f"{label} did not return a perftest server PID")

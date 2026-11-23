@@ -49,7 +49,10 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
     monkeypatch,
 ) -> None:
     clock_value = [datetime(2026, 9, 24, tzinfo=UTC)]
-    clock = lambda: clock_value[0]
+
+    def clock():
+        return clock_value[0]
+
     now = clock()
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)

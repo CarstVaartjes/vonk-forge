@@ -231,12 +231,18 @@ def test_malformed_rows_restart_complete_read_before_resolving(noun, bad_row):
         client = Pages(
             [{"recipes": [recipe("one/code", "Coding"), bad_row]}, valid, valid]
         )
-        resolver = lambda: selection_module._resolve_recipe_selector(client, "Coding")
+
+        def resolver() -> object:
+            return selection_module._resolve_recipe_selector(client, "Coding")
+
         expected = "one/code"
     else:
         valid = {"nodes": [{"id": "spk_" + "a" * 32, "display_name": "Atlas"}]}
         client = Pages([{"nodes": [*valid["nodes"], bad_row]}, valid, valid])
-        resolver = lambda: selection_module._resolve_spark_selectors(client, ["Atlas"])
+
+        def resolver() -> object:
+            return selection_module._resolve_spark_selectors(client, ["Atlas"])
+
         expected = ["spk_" + "a" * 32]
     assert resolver() == expected
     assert len(client.calls) == 2

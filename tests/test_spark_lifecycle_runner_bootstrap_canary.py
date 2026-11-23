@@ -515,7 +515,10 @@ def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> N
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 9, 28, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 9, 28, tzinfo=UTC)
+
     reader = program.FixtureReader(index, {digest: archive})
     sync = ManagedRecipeCatalogSyncService(
         sessions,
@@ -601,7 +604,10 @@ def test_canary_catalog_path_calls_the_installed_service_contract(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'sync.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 10, 9, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 10, 9, tzinfo=UTC)
+
     reader = program.FixtureReader(_release_index([]), {})
     snapshot = reader.snapshot
     service = ManagedRecipeCatalogSyncService(

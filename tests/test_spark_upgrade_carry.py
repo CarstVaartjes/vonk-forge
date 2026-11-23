@@ -842,11 +842,13 @@ def test_a_cleanup_application_is_accepted_whole_and_refused_when_damaged():
     lifecycle._current_release = lambda: types.SimpleNamespace(  # type: ignore[method-assign]
         contract=types.SimpleNamespace(check_json_response=lambda *_args: None)
     )
-    check = lambda application: lifecycle._validate_cleanup_application(
-        application,
-        installation_ids=["5b6a3f2e-1c4d-4e8f-9a0b-1c2d3e4f5a62"],
-        run_id="5b6a3f2e-1c4d-4e8f-9a0b-1c2d3e4f5a61",
-    )
+
+    def check(application):
+        return lifecycle._validate_cleanup_application(
+            application,
+            installation_ids=["5b6a3f2e-1c4d-4e8f-9a0b-1c2d3e4f5a62"],
+            run_id="5b6a3f2e-1c4d-4e8f-9a0b-1c2d3e4f5a61",
+        )
 
     check(_cleanup_application())
     with pytest.raises(LifecycleError, match="removal receipt is incomplete"):

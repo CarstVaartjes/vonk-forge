@@ -298,7 +298,10 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     _upgrade_fresh_database(postgres_engine)
     lap("database_migration")
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    clock = lambda: datetime.now(UTC)
+
+    def clock():
+        return datetime.now(UTC)
+
     catalog = CatalogService(
         sessions,
         clock=clock,

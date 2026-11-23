@@ -377,7 +377,10 @@ def _profile_worker_process_dies_with_pending_cancel(
     )
     sessions = sessionmaker(engine, expire_on_commit=False)
     now = datetime.fromisoformat(now_text)
-    clock = lambda: now
+
+    def clock():
+        return now
+
     agent_jobs = AgentJobService(sessions, clock=clock)
     lifecycle = RecipeOperationService(
         sessions,
@@ -420,7 +423,10 @@ def _resume_profile_cancel_process(
     )
     sessions = sessionmaker(engine, expire_on_commit=False)
     now = datetime.fromisoformat(now_text)
-    clock = lambda: now
+
+    def clock():
+        return now
+
     agent_jobs = AgentJobService(sessions, clock=clock)
     lifecycle = RecipeOperationService(
         sessions,
@@ -467,7 +473,10 @@ def _agent_result(claim, *, state: str, result: dict[str, object]) -> AgentResul
 
 def _two_target_stop_case(tmp_path, *, engine):
     now = [NOW]
-    clock = lambda: now[0]
+
+    def clock():
+        return now[0]
+
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2, engine=engine
     )
@@ -1643,7 +1652,10 @@ def test_profile_cancel_settles_when_a_distribution_sibling_is_parked_for_retry(
         )
     assert revision is not None
     now = [lifecycle._clock()]
-    clock = lambda: now[0]
+
+    def clock():
+        return now[0]
+
     lifecycle._clock = clock
     executor = RecordingArtifactExecutor(child_transfer=True)
     run_switch = RunSwitchOperationService(

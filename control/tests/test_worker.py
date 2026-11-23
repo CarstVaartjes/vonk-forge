@@ -1305,7 +1305,10 @@ def test_production_assembly_hands_the_step_heartbeat_to_the_worker(
     engine = create_engine(f"sqlite:///{tmp_path / 'builder.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 8, 6, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 8, 6, tzinfo=UTC)
+
     model_cache = ModelCacheService(sessions, tmp_path / "models", clock=clock)
     request.addfinalizer(model_cache.close)
     beats: list[str] = []

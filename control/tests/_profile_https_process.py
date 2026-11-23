@@ -27,7 +27,10 @@ def _app(trace_path: Path):
     engine = create_engine(database_url, pool_pre_ping=True)
     sessions = sessionmaker(engine, expire_on_commit=False)
     codec = TokenCodec(b"p" * 32)
-    clock = lambda: NOW
+
+    def clock():
+        return NOW
+
     app = create_app(
         jobs=JobService(sessions, clock=clock),
         tokens=codec,

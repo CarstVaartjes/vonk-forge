@@ -86,7 +86,10 @@ def _api(
     projection_now: datetime = ROUTE_NOW,
 ) -> tuple[TestClient, TokenCodec]:
     codec = TokenCodec(_TOKEN_KEY)
-    clock = lambda: projection_now
+
+    def clock():
+        return projection_now
+
     profile_service = profiles or FleetProfileService(sessions, clock=clock)
     operations = durable_operation_services(
         sessions,

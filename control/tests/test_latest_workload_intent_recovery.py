@@ -220,7 +220,10 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
         # that its memory is actually free. Keep the replacement unqueued until
         # a sample clears the stop timestamp and admitted clock skew.
         fresh_at = stopped_at + MAX_INVENTORY_FUTURE_SKEW + timedelta(seconds=1)
-        fresh_clock = lambda: fresh_at
+
+        def fresh_clock():
+            return fresh_at
+
         lifecycle._clock = fresh_clock
         agent_jobs._clock = fresh_clock
         switch._clock = fresh_clock

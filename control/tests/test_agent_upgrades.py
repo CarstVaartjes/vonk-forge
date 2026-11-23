@@ -1416,7 +1416,10 @@ def test_an_unresolvable_release_is_an_actionable_refusal(
     engine = create_engine(f"sqlite:///{tmp_path / 'candidate.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 8, 27, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 8, 27, tzinfo=UTC)
+
     upgrades = AgentUpgradeService(
         sessions,
         AgentJobService(sessions, clock=clock),
@@ -1490,7 +1493,10 @@ def test_a_release_that_is_mid_publication_is_fetched_again(
     engine = create_engine(f"sqlite:///{tmp_path / 'candidate.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 8, 27, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 8, 27, tzinfo=UTC)
+
     upgrades = AgentUpgradeService(
         sessions,
         AgentJobService(sessions, clock=clock),

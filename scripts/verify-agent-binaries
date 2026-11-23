@@ -52,14 +52,17 @@ def read_regular(path: Path) -> bytes:
                 raise VerificationError(f"binary changed while read: {path.name}")
             content.extend(chunk)
         after = os.fstat(descriptor)
-        identity = lambda value: (
-            value.st_dev,
-            value.st_ino,
-            value.st_nlink,
-            value.st_size,
-            value.st_mtime_ns,
-            value.st_ctime_ns,
-        )
+
+        def identity(value):
+            return (
+                value.st_dev,
+                value.st_ino,
+                value.st_nlink,
+                value.st_size,
+                value.st_mtime_ns,
+                value.st_ctime_ns,
+            )
+
         if identity(before) != identity(after):
             raise VerificationError(f"binary changed while read: {path.name}")
         return bytes(content)

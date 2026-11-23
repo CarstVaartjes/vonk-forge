@@ -64,7 +64,10 @@ def test_installed_login_keeps_only_a_private_token_that_later_commands_use(
                 password_verifier=hash_password(_PASSWORD),
             )
         )
-    now = lambda: datetime.now(UTC)
+
+    def now():
+        return datetime.now(UTC)
+
     api = TestClient(
         create_app(
             jobs=JobService(sessions, clock=now),

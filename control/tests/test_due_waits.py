@@ -180,11 +180,14 @@ def test_corrupt_first_row_cannot_starve_later_due_work(
     assert seen == [good.id] * 10
     assert bad.id in caplog.text
     assert "private-test-marker" not in caplog.text
-    failures = lambda: [
-        record
-        for record in caplog.records
-        if "worker.due_wait_failed" in record.message
-    ]
+
+    def failures():
+        return [
+            record
+            for record in caplog.records
+            if "worker.due_wait_failed" in record.message
+        ]
+
     assert len(failures()) == 1
     # A changed corrupt snapshot earns one fresh report, not twenty more.
     with postgres_engine.begin() as connection:

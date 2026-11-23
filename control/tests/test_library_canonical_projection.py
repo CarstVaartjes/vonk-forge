@@ -195,7 +195,10 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     engine = create_engine(f"sqlite:///{tmp_path / 'library.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 9, 5, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 9, 5, tzinfo=UTC)
+
     entities = CatalogEntityService(
         sessions, clock=clock, cursors=TokenCodec(b"l" * 32).cursor_codec()
     )
@@ -1566,7 +1569,10 @@ def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 10, 15, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 10, 15, tzinfo=UTC)
+
     reader = program.FixtureReader(index, {digest: archive})
     sync = ManagedRecipeCatalogSyncService(
         sessions,
@@ -1712,7 +1718,10 @@ def test_connected_consumers_read_documents_only_from_detail(
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime.now(UTC)
+
+    def clock():
+        return datetime.now(UTC)
+
     codec = TokenCodec(b"a" * 32)
     catalog = CatalogEntityService(sessions, clock=clock, cursors=codec.cursor_codec())
     for row in [*index["catalog_entities"], entry]:

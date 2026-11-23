@@ -89,15 +89,18 @@ def select(changed: list[str]) -> list[tuple[str, Path]]:
         module = _module_name(path)
         if module is not None:
             pattern = _importers(module)
-            matches = lambda text, pattern=pattern: pattern.search(text) is not None
+
+            def matches(text, pattern=pattern):
+                return pattern.search(text) is not None
         else:
             needle = (
                 path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else name
             )
             stem = Path(needle).name
-            matches = lambda text, needle=needle, stem=stem: (
-                needle in text or ("/" in needle and f'"{stem}"' in text)
-            )
+
+            def matches(text, needle=needle, stem=stem):
+                return needle in text or ("/" in needle and f'"{stem}"' in text)
+
         for suite_name, files in _test_files().items():
             for test_file in files:
                 if matches(_source(test_file)):

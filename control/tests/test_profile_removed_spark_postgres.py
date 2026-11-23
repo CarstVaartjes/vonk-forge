@@ -97,7 +97,10 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
     lifecycle = planner._lifecycle
     assert lifecycle is not None
     now = [lifecycle._clock()]
-    clock = lambda: now[0]
+
+    def clock():
+        return now[0]
+
     profiles._clock = planner._clock = lifecycle._clock = clock
     with sessions() as session:
         mapping_id = session.scalar(select(ClusterMapping.id))

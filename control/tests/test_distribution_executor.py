@@ -534,7 +534,10 @@ def test_stored_runtime_identity_reuses_content_without_producer_history(
     tmp_path: Path, build_id: str | None
 ) -> None:
     """A provenance query fails here: the database has no producer tables."""
-    clock = lambda: datetime.now(UTC)
+
+    def clock():
+        return datetime.now(UTC)
+
     sessions, operations, _distribution = _unused_executor_services(clock)
     source = RecipeBuildObjectSource(sessions, tmp_path)
     storage = FilesystemRuntimeImageStorage(tmp_path)

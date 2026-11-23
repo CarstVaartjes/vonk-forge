@@ -265,7 +265,10 @@ def test_a_pinned_image_is_read_from_the_projection_not_the_document(
         mine.projected = projected
     statements: list[str] = []
     engine = sessions.kw["bind"]
-    record = lambda *args: statements.append(str(args[2]))
+
+    def record(*args):
+        return statements.append(str(args[2]))
+
     event.listen(engine, "before_cursor_execute", record)
     try:
         with sessions() as session:

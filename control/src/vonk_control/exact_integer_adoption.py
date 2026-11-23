@@ -153,7 +153,9 @@ def _pending_adoption(connection: Connection) -> dict[str, tuple[str, ...]]:
         if connection.dialect.name == "sqlite":
             # SQLite preserves the declared expression spelling. Compare only
             # our owned canonical expressions, never normalize unknown checks.
-            normalize = lambda value: str(value).strip()
+            def normalize(value):
+                return str(value).strip()
+
             for constraint in Base.metadata.tables[table_name].constraints:
                 if (
                     isinstance(constraint, CheckConstraint)

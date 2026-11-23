@@ -931,7 +931,10 @@ def test_expired_recovery_limit_cannot_starve_enrollment_and_clears(
     issued = enroll(enrollment, node_id=NODE_C, request=csr(NODE_C, key=key))
     clock.now = issued.not_after + timedelta(days=1)
     admitted_at = clock.now
-    monotonic = lambda: (clock.now - admitted_at).total_seconds()
+
+    def monotonic():
+        return (clock.now - admitted_at).total_seconds()
+
     recovery = EnrollmentRateLimiter(maximum=1, clock=monotonic)
     monkeypatch.setattr(routes, "EnrollmentRateLimiter", lambda **_: recovery)
     client = TestClient(

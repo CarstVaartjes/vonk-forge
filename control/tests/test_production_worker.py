@@ -129,7 +129,10 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     current = datetime(2026, 8, 6, tzinfo=UTC)
-    clock = lambda: current
+
+    def clock():
+        return current
+
     jobs = JobService(sessions, clock=clock)
     route_root = tmp_path / "routes"
     publisher = AtomicRouteBundlePublisher(
@@ -224,7 +227,10 @@ def test_production_worker_binds_build_reuse_to_the_image_cache_root(tmp_path) -
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     current = datetime(2026, 8, 6, tzinfo=UTC)
-    clock = lambda: current
+
+    def clock():
+        return current
+
     jobs = JobService(sessions, clock=clock)
     publisher = AtomicRouteBundlePublisher(tmp_path / "routes")
 
@@ -357,7 +363,10 @@ def test_unusable_image_cache_root_leaves_the_other_lanes_running_and_heals(
     )
 
     now = [datetime(2026, 8, 6, tzinfo=UTC)]
-    clock = lambda: now[0]
+
+    def clock():
+        return now[0]
+
     registry = CapabilityRegistry(clock=clock)
     engine = create_engine(f"sqlite:///{tmp_path / 'optional-image-cache.sqlite'}")
     Base.metadata.create_all(engine)
@@ -452,7 +461,10 @@ def test_the_production_worker_runs_the_first_catalog_sync(tmp_path) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'worker.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 11, 20, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 11, 20, tzinfo=UTC)
+
     worker = assemble_production_worker(
         jobs=JobService(sessions, clock=clock),
         sessions=sessions,

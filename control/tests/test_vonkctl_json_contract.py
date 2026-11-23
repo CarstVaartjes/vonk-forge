@@ -161,7 +161,10 @@ def _world(tmp_path: Path) -> tuple[ControlClient, TestClient, dict]:
     sessions = sessionmaker(engine, expire_on_commit=False)
     # Seeds one idle Spark into the sessions; the app it returns is not used.
     _profile_api(sessions, with_idle_spark=True)
-    clock = lambda: datetime(2026, 9, 10, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 9, 10, tzinfo=UTC)
+
     codec = TokenCodec(b"p" * 32)
     profiles = FleetProfileService(sessions, clock=clock)
     app = create_app(

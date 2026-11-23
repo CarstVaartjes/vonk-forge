@@ -168,13 +168,16 @@ def _load_private_key(path: Path) -> ed25519.Ed25519PrivateKey:
             raise HostHelperAuthorityError("host helper private key is unsafe")
         raw = os.read(descriptor, 16 * 1024 + 1)
         after = os.fstat(descriptor)
-        identity = lambda value: (
-            value.st_dev,
-            value.st_ino,
-            value.st_size,
-            value.st_mtime_ns,
-            value.st_ctime_ns,
-        )
+
+        def identity(value):
+            return (
+                value.st_dev,
+                value.st_ino,
+                value.st_size,
+                value.st_mtime_ns,
+                value.st_ctime_ns,
+            )
+
         if len(raw) > 16 * 1024 or identity(before) != identity(after):
             raise HostHelperAuthorityError("host helper private key changed while read")
     except HostHelperAuthorityError:

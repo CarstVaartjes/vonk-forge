@@ -1367,7 +1367,10 @@ def test_a_child_start_waits_for_busy_admission_and_resumes_its_accepted_intent(
         actor="admin",
     )
     now = [lifecycle._clock()]
-    clock = lambda: now[0]
+
+    def clock():
+        return now[0]
+
     lifecycle._clock = run_switch._clock = service._clock = clock
     application = service.apply(profile.id, request_key=_uuid(831), actor="admin")
     with sessions() as session:

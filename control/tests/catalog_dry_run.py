@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import cache
@@ -258,7 +258,10 @@ def import_catalog(root: Path, work: Path) -> Iterator[CatalogDryRun]:
     engine = create_engine(f"sqlite:///{work / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock: Callable[[], datetime] = lambda: NOW
+
+    def clock() -> datetime:
+        return NOW
+
     catalog = CatalogService(
         sessions,
         clock=clock,

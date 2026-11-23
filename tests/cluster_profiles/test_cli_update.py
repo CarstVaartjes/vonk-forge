@@ -309,7 +309,10 @@ def test_update_installs_only_changed_signed_wheel(
         return subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(cli_update, "_install", install)
-    download = lambda url, maximum: objects[url]
+
+    def download(url, maximum):
+        return objects[url]
+
     checked = cli_update.run_update(
         channel="stable",
         public_key=key,

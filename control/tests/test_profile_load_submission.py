@@ -337,7 +337,10 @@ def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
 def test_load_retries_a_transient_admission_owner(postgres_engine, monkeypatch) -> None:
     sessions, _api, _codec, _headers_unused, _preview = _profile_api(postgres_engine)
     now = [NOW]
-    clock = lambda: now[0]
+
+    def clock():
+        return now[0]
+
     planner = RunSwitchOperationService(sessions, clock=clock)
     profiles = build_production_fleet_profile_service(
         sessions, clock=clock, run_switch_operations=planner

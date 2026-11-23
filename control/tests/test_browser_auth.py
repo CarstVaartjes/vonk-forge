@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import threading
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 
@@ -61,7 +60,10 @@ def browser_auth(
     *tokens: str,
 ) -> BrowserAuthService:
     iterator = iter(tokens)
-    source: Callable[[], str] = lambda: next(iterator)
+
+    def source() -> str:
+        return next(iterator)
+
     return BrowserAuthService(
         sessions,
         token_signing_key=b"test-token-signing-key",

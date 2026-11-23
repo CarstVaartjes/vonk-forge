@@ -244,7 +244,10 @@ def test_unknown_catalog_sync_ends_and_admits_a_fresh_request(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 10, 8, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 10, 8, tzinfo=UTC)
+
     catalog = CatalogService(sessions, clock=clock, cursors=CursorCodec(b"x" * 32))
     reader = Mock(spec=RecipeLibrarySyncReader)
     reader.list.side_effect = [
