@@ -60,36 +60,21 @@ from .contract import (
     EnrollmentGrantStatus,
     EnrollmentObservationOutcome,
 )
-from .validation import EVIDENCE_REFUSAL_REASONS
 from .validation import (
-    _decode_token as _decode_token,  # noqa: PLC0414 -- shared helper export
-)
-from .validation import (
-    _digest as _digest,  # noqa: PLC0414 -- shared helper export
-)
-from .validation import (
-    _load_csr as _load_csr,  # noqa: PLC0414 -- shared helper export
-)
-from .validation import (
-    _stored_utc as _stored_utc,  # noqa: PLC0414 -- shared helper export
-)
-from .validation import (
-    _utc as _utc,  # noqa: PLC0414 -- shared helper export
-)
-from .validation import (
-    _validate_actor as _validate_actor,  # noqa: PLC0414 -- shared helper export
-)
-from .validation import (
-    _validate_evidence as _validate_evidence,  # noqa: PLC0414 -- shared helper export
-)
-from .validation import (
-    _validate_node_id as _validate_node_id,  # noqa: PLC0414 -- shared helper export
+    EVIDENCE_REFUSAL_REASONS,
+    _decode_token,
+    _digest,
+    _load_csr,
+    _stored_utc,
+    _utc,
+    _validate_actor,
+    _validate_evidence,
+    _validate_node_id,
 )
 
 _LOGGER = logging.getLogger("vonk_control.enrollment")
 
-from vonk_control.enrollment.contract import EnrollmentGrant
-from vonk_control.enrollment.contract import EnrollmentIssuanceClaim as _IssuanceClaim
+from vonk_control.enrollment.contract import EnrollmentGrant, EnrollmentIssuanceClaim
 
 from .ending import retain_ended_effect
 from .persistence import (
@@ -390,7 +375,7 @@ class EnrollmentCore:
         self._reconcile_competing_enrollment(token_bytes, csr, evidence, now)
         failure: str | None = None
         outcome: IssuedCertificate | None = None
-        claim: _IssuanceClaim | None = None
+        claim: EnrollmentIssuanceClaim | None = None
         wait_for_enrollment_id: str | None = None
         with self._transaction() as session:
             grant = session.scalar(
@@ -526,7 +511,7 @@ class EnrollmentCore:
                         )
                         enrollment.provider_request = binding.model_dump(mode="json")
                         session.add(enrollment)
-                        claim = _IssuanceClaim(
+                        claim = EnrollmentIssuanceClaim(
                             enrollment_id=enrollment.id,
                             node_id=node_id,
                             csr_pem=csr_pem,
@@ -542,7 +527,7 @@ class EnrollmentCore:
         return self._issue_enrollment_claim(claim, now)
 
     def _issue_enrollment_claim(
-        self, claim: _IssuanceClaim, now: datetime
+        self, claim: EnrollmentIssuanceClaim, now: datetime
     ) -> IssuedCertificate:
         if claim.provider_request is None:
             with self._transaction() as session:
@@ -693,7 +678,7 @@ class EnrollmentCore:
                 enrollment.state = EnrollmentRecordState.ENDED
                 claim = None
             else:
-                claim = _IssuanceClaim(
+                claim = EnrollmentIssuanceClaim(
                     enrollment_id=enrollment.id,
                     node_id=enrollment.node_id,
                     csr_pem=material,

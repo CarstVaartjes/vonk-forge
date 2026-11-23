@@ -41,10 +41,8 @@ from .lifecycle_contract import (
 )
 from .observation_helpers import _aware
 from .progress import (
-    _cancel_requested as _cancel_requested,  # noqa: PLC0414 -- shared helper export
-)
-from .progress import (
-    _parent_intent as _parent_intent,  # noqa: PLC0414 -- shared helper export
+    _cancel_requested,
+    _parent_intent,
 )
 from .results import _recorded_result, _recorded_result_document, _validated_result
 

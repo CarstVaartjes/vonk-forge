@@ -34,10 +34,8 @@ from .intent import (
 from .interfaces import IssuedWorkloadReconciliation
 from .observation_helpers import _aware
 from .progress import (
-    _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
-)
-from .progress import (
-    _parent_intent as _parent_intent,  # noqa: PLC0414 -- shared helper export
+    _parent_identity,
+    _parent_intent,
 )
 
 if TYPE_CHECKING:

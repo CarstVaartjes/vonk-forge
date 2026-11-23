@@ -22,7 +22,7 @@ from vonk_agent_protocol.state_machines import (
     NodeIdentityState,
 )
 
-from vonk_control.enrollment.contract import EnrollmentRotationClaim as _RotationClaim
+from vonk_control.enrollment.contract import EnrollmentRotationClaim
 
 from ..agent_contacts import ensure_contact
 from ..ca_issuance_contract import CertificateIssuanceBinding
@@ -43,13 +43,9 @@ from ..security.enrollment import (
 )
 from .types import EnrollmentDenied, EnrollmentIssuanceUncertain
 from .validation import (
-    _load_csr as _load_csr,  # noqa: PLC0414 -- shared helper export
-)
-from .validation import (
-    _stored_utc as _stored_utc,  # noqa: PLC0414 -- shared helper export
-)
-from .validation import (
-    _validate_evidence as _validate_evidence,  # noqa: PLC0414 -- shared helper export
+    _load_csr,
+    _stored_utc,
+    _validate_evidence,
 )
 
 
@@ -282,14 +278,14 @@ def _rotation_claim(
     rotation: AgentCertificateRotation,
     *,
     owner: bool,
-) -> _RotationClaim:
+) -> EnrollmentRotationClaim:
     binding = _issuance_binding(rotation.provider_request)
     try:
         csr_pem = rotation.csr_pem.encode("ascii")
     except UnicodeError:
         csr_pem = b""
         binding = None
-    return _RotationClaim(
+    return EnrollmentRotationClaim(
         node_id=rotation.node_id,
         source_serial=rotation.source_serial,
         generation=rotation.generation,

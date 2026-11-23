@@ -51,10 +51,8 @@ from .lifecycle_contract import (
 )
 from .observation_helpers import _aware
 from .progress import (
-    _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
-)
-from .progress import (
-    _recorded_parent as _recorded_parent,  # noqa: PLC0414 -- shared helper export
+    _parent_identity,
+    _recorded_parent,
 )
 from .results import _recorded_result
 

@@ -18,8 +18,10 @@ from cluster_profiles.control_client.errors import (
     ControlTransportError,
 )
 from cluster_profiles.controller_cli import cache_removal as cache_removal_module
-from cluster_profiles.controller_cli import common as common_module
 from cluster_profiles.controller_cli import dispatch as dispatch_module
+from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
+    FleetProfileEndpointsView,
+)
 
 from .consumer_outcomes import not_adopted
 
@@ -167,7 +169,7 @@ class _FakeController:
 
     def profile_endpoints(
         self, number: int, alias: str | None = None
-    ) -> common_module.FleetProfileEndpointsView:
+    ) -> FleetProfileEndpointsView:
         raise AssertionError(f"unexpected endpoint lookup: {number} {alias}")
 
 

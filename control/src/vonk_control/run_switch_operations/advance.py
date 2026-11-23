@@ -51,15 +51,11 @@ from ..recipe_builds.common import RecipeBuildAdmissionBusy
 from ..recipe_operations.interfaces import RecipeOperationView
 from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_contract.phase_results import RunSwitchDistributionChildResult
-from ..run_switch_contract.progress_view import RECOVERY_STALL_WINDOW
 from ..run_switch_contract.progress_view import (
-    _complete_operation_progress as _complete_operation_progress,  # noqa: PLC0414 -- shared helper export
-)
-from ..run_switch_contract.progress_view import (
-    _complete_phase_progress as _complete_phase_progress,  # noqa: PLC0414 -- shared helper export
-)
-from ..run_switch_contract.progress_view import (
-    _merge_progress_evidence as _merge_progress_evidence,  # noqa: PLC0414 -- shared helper export
+    RECOVERY_STALL_WINDOW,
+    _complete_operation_progress,
+    _complete_phase_progress,
+    _merge_progress_evidence,
 )
 from ..stall_window import stall_deadline
 from ..stored.json_values import read_row_column

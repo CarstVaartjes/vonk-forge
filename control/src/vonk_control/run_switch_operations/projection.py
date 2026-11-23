@@ -13,7 +13,7 @@ from ..operations.blockers import make_blocker
 from ..persisted_waits import read_wait, wait_due
 from ..run_switch_contract.operations import RunSwitchOperation
 from ..run_switch_contract.progress_view import (
-    _progress_view as _progress_view,  # noqa: PLC0414 -- shared helper export
+    _progress_view,
 )
 from ..stored.json_values import read_row_column
 from .constants import _OPERATION_KIND_ADAPTER

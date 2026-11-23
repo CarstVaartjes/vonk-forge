@@ -26,10 +26,8 @@ from ..models.jobs import Job
 from ..models.operations import AgentOperation, AgentOperationAttempt
 from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .progress import (
-    _cancel_requested as _cancel_requested,  # noqa: PLC0414 -- shared helper export
-)
-from .progress import (
-    _parent_intent as _parent_intent,  # noqa: PLC0414 -- shared helper export
+    _cancel_requested,
+    _parent_intent,
 )
 
 
