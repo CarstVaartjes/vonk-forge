@@ -126,8 +126,6 @@ def _runtime(kind: Kind) -> tuple[AgentPayload, AgentResultPayload]:
                 manifest_sha256=recipe_job_manifest_sha256(()),
             ),
         )
-    if kind is Kind.RECIPE_START:
-        return claim.payload, RecipeStartResult()
     return claim.payload, RecipeStopResult()
 
 

@@ -826,7 +826,7 @@ def test_lost_owner_authority_expires_before_fresh_reference(
             assert gate is None, (
                 now[0],
                 None if row is None else (row.state, row.updated_at, row.completed_at),
-                None if gate is None else gate.removal_authority_expires_at,
+                gate.removal_authority_expires_at,
             )
         # Reacquire the exact content reference, rather than proving only that
         # unrelated work can proceed after the failed request.
