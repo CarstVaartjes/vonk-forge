@@ -1,5 +1,5 @@
 import type { ArtifactJob, ArtifactJobInterface, RecipeDefinition } from "../api/types";
-import { ArtifactPreparation, LifecycleState } from "../api/vocabulary.generated";
+import { ArtifactPreparation, TERMINAL_LIFECYCLE_STATES } from "../api/vocabulary.generated";
 
 /** The job interfaces of a recipe: everything it declares that is not the chat (OpenAI) one. */
 export type JobRecipeInterface = Extract<
@@ -15,19 +15,13 @@ export function jobInterfacesOf(
   );
 }
 
-const TERMINAL_STATES = new Set<string>([
-  LifecycleState.SUCCEEDED,
-  LifecycleState.FAILED,
-  LifecycleState.CANCELLED,
-]);
-
 /** The name a job is shown under: its lifecycle state, or its preparation stage before it is submitted. */
 export function phaseOf(job: ArtifactJob): string {
   return job.state ?? job.preparation ?? ArtifactPreparation.DRAFT;
 }
 
 export function isTerminal(job: ArtifactJob): boolean {
-  return job.state != null && TERMINAL_STATES.has(job.state);
+  return job.state != null && TERMINAL_LIFECYCLE_STATES.has(job.state);
 }
 
 /** What each job interface makes, after "Create". */

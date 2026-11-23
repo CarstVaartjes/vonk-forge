@@ -55,7 +55,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             | rustix::fs::OFlags::CLOEXEC;
         let agent = OpenOptions::new()
             .read(true)
-            .custom_flags(flags.bits() as i32)
+            .custom_flags(flags.bits().cast_signed())
             .open(&self.roots.agent_data)?;
         let parent = rustix::fs::openat(&agent, store, flags, rustix::fs::Mode::empty())
             .map_err(errno_io)?;
@@ -167,7 +167,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     let lock = OpenOptions::new()
                         .read(true)
                         .write(true)
-                        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+                        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
                         .open(root.join("lock"));
                     if let Ok(lock) = lock
                         && let Ok(_held) = HeldLock::try_exclusive(lock)
@@ -185,7 +185,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     }
                 }
                 // Existing image/custody/memory-guard owners collect their stores.
-                _ => {}
+                Collector::ControllerOrder
+                | Collector::Claim
+                | Collector::Bookkeeping
+                | Collector::ModelObjects
+                | Collector::BaseImages
+                | Collector::BuildStaging
+                | Collector::Untracked
+                | Collector::UntrackedRuns => {}
             }
         }
     }
@@ -239,7 +246,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             unproven.retain(|id| {
                 listed
                     .get(*id)
-                    .is_some_and(|state| !super::exited_serving::is_ended_state(state))
+                    .is_some_and(|state| !exited_serving::is_ended_state(state))
             });
         }
         if unproven.is_empty() {
@@ -480,6 +487,10 @@ fn time_left(deadline: Instant, cap: Duration) -> Result<Duration, OperationErro
 /// before its end line, is dropped, so its container stays unproven.
 #[derive(Default)]
 struct OwnerRecords {
+    #[expect(
+        clippy::option_option,
+        reason = "three states: no header yet, a header that is not ours, and our header"
+    )]
     header: Option<Option<(String, String, String)>>,
     mounts: Vec<PathBuf>,
     valid: bool,

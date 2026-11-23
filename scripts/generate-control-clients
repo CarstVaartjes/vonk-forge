@@ -39,7 +39,14 @@ from vonk_forge_contracts.qualification_status import (
 )
 
 from vonk_agent_protocol.job_wire import MEDIA_TYPE_PATTERN
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleVocabulary
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LIVE_LIFECYCLE_STATES,
+    TERMINAL_LIFECYCLE_STATES,
+    UNSUCCESSFUL_LIFECYCLE_STATES,
+    LifecycleState,
+    LifecycleVocabulary,
+)
+from vonk_agent_protocol.phase_words import BYTE_PHASES, PHASE_WORDS, WAIT_WORDS
 from vonk_agent_protocol.reason_codes.vocabulary import ReasonCodeVocabulary
 from vonk_agent_protocol.recipe_jobs import canonical_media_types
 from vonk_control import control_limits
@@ -52,11 +59,14 @@ from vonk_control.fleet_model_removal_contract import (
     FleetRemovalDisposition,
     FleetRemovalReason,
 )
+from vonk_control.fleet_profile_contract.review import ProfileLoadAction
+from vonk_control.library.contract import LibraryCacheState
 from vonk_control.model_cache.contract import (
     CacheOperationKind,
     ModelStorageObservationReason,
 )
 from vonk_control.operation_api.openapi import admin_openapi_schema
+from vonk_control.run_readiness import GroupHealth
 
 OPENAPI = ROOT / "control/openapi.json"
 PYTHON_OUTPUT = ROOT / "src/cluster_profiles/generated_control"
@@ -116,9 +126,12 @@ def typescript_vocabulary() -> str:
             FleetRemovalReason,
             CacheAssetDisposition,
             CacheOperationKind,
+            LibraryCacheState,
+            ProfileLoadAction,
             ModelStorageObservationReason,
             QualificationStatus,
             QualificationOutcome,
+            GroupHealth,
         )
     )
     for words in word_types:
@@ -134,6 +147,32 @@ def typescript_vocabulary() -> str:
             f"(typeof {words.__name__})[keyof typeof {words.__name__}];"
         )
         lines.append("")
+    # The one grouping of operation states every client reads: it ended, it
+    # has not, or it ended as a failure (a cancel or a replacement is neither).
+    for name, states in (
+        ("TERMINAL_LIFECYCLE_STATES", TERMINAL_LIFECYCLE_STATES),
+        ("LIVE_LIFECYCLE_STATES", LIVE_LIFECYCLE_STATES),
+        ("UNSUCCESSFUL_LIFECYCLE_STATES", UNSUCCESSFUL_LIFECYCLE_STATES),
+    ):
+        members = ", ".join(
+            json.dumps(state.value) for state in LifecycleState if state in states
+        )
+        lines.append(
+            f"export const {name}: ReadonlySet<string> = new Set([{members}]);"
+        )
+    lines.append("")
+    for name, table in (("PHASE_WORDS", PHASE_WORDS), ("WAIT_WORDS", WAIT_WORDS)):
+        lines.append(f"export const {name}: Readonly<Record<string, string>> = {{")
+        lines.extend(
+            f"  {json.dumps(key)}: {json.dumps(text)}," for key, text in table.items()
+        )
+        lines.append("};")
+        lines.append("")
+    members = ", ".join(json.dumps(phase) for phase in BYTE_PHASES)
+    lines.append(
+        f"export const BYTE_PHASES: ReadonlySet<string> = new Set([{members}]);"
+    )
+    lines.append("")
     return "\n".join(lines).rstrip("\n") + "\n"
 
 

@@ -13,7 +13,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 
-/// Streams a lone transfer is known to sustain on a 2.5 GbE NAS.
+/// Streams a lone transfer is known to sustain on a 2.5 `GbE` NAS.
 pub(crate) const INITIAL_STREAMS: usize = 4;
 /// Most streams one agent opens, however well throughput keeps growing.
 pub(crate) const MAX_STREAMS: usize = 8;
@@ -26,6 +26,15 @@ const HOLD_WINDOWS: u32 = 6;
 /// Longest a waiting stream sleeps before it re-reads the limit.
 const WAIT_SLICE: Duration = Duration::from_secs(1);
 
+/// What this governor's streams received over the network: every byte once,
+/// and the span from the first received byte to the latest.
+#[derive(Debug, Default, Clone, Copy)]
+struct Fetched {
+    bytes: u64,
+    first: Option<Instant>,
+    last: Option<Instant>,
+}
+
 #[derive(Debug)]
 struct State {
     max: usize,
@@ -34,6 +43,7 @@ struct State {
     peak_active: usize,
     window_started: Instant,
     window_bytes: u64,
+    fetched: Fetched,
     last_rate: Option<f64>,
     previous_limit: Option<usize>,
     hold_windows: u32,
@@ -48,6 +58,7 @@ impl State {
             peak_active: 0,
             window_started: now,
             window_bytes: 0,
+            fetched: Fetched::default(),
             last_rate: None,
             previous_limit: None,
             hold_windows: 0,
@@ -68,6 +79,10 @@ impl State {
 
     /// Close the measuring window once it has elapsed. Returns whether the
     /// limit changed, so waiting streams can be woken.
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a rate or ratio in floating point, not an exact count; f64 precision is ample"
+    )]
     fn evaluate(&mut self, now: Instant) -> bool {
         let elapsed = now.saturating_duration_since(self.window_started);
         if elapsed < WINDOW {
@@ -177,6 +192,10 @@ impl StreamGovernor {
                     self.changed.notify_waiters();
                 }
             }
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "waits for a task to end; its outcome is observed elsewhere"
+            )]
             let _ = tokio::time::timeout(WAIT_SLICE, notified).await;
         }
     }
@@ -184,13 +203,27 @@ impl StreamGovernor {
     /// Count bytes already accepted by the writer.
     pub(crate) fn record_bytes(&self, count: u64) {
         let mut state = self.lock();
+        let now = Instant::now();
         state.window_bytes = state.window_bytes.saturating_add(count);
+        state.fetched.bytes = state.fetched.bytes.saturating_add(count);
+        state.fetched.first.get_or_insert(now);
+        state.fetched.last = Some(now);
         if state.evaluate(Instant::now()) {
             let limit = state.limit;
             drop(state);
             eprintln!("vonk-agent: model transfer streams now {limit}");
             self.changed.notify_waiters();
         }
+    }
+
+    /// Bytes received over the network so far and the time they took.
+    pub(crate) fn fetched(&self) -> (u64, Duration) {
+        let fetched = self.lock().fetched;
+        let span = match (fetched.first, fetched.last) {
+            (Some(first), Some(last)) => last.saturating_duration_since(first),
+            _ => Duration::ZERO,
+        };
+        (fetched.bytes, span)
     }
 
     /// A range failed in a way worth retrying: use fewer streams for a while.

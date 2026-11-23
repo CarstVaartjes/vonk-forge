@@ -6,6 +6,7 @@ import {
   type WireNumber,
 } from "../api/contract-numeric";
 import { ApiError } from "../api/errors";
+import { LibraryNodeNamesProvider } from "../components/library/library-node-names";
 import {
   availabilityProgress,
   LibraryAvailabilityProgress,
@@ -14,7 +15,12 @@ import {
   availabilityFailure,
   LibraryAvailabilityFeedback,
 } from "../components/library/library-availability-feedback";
-import { LifecycleState } from "../api/vocabulary.generated";
+import {
+  LIVE_LIFECYCLE_STATES,
+  LifecycleState,
+  TERMINAL_LIFECYCLE_STATES,
+  UNSUCCESSFUL_LIFECYCLE_STATES,
+} from "../api/vocabulary.generated";
 
 /** A wait for a person. */
 export function isOperatorWait(state: string | undefined): boolean {
@@ -38,16 +44,22 @@ import { exactTime, relativeTime } from "../lib/time";
 
 export { relativeTime };
 type ActivityView = "timeline" | "table";
-type ActivityStatus = "recorded" | "in_progress" | "attention" | "unsuccessful" | "unknown";
+type ActivityStatus =
+  | "recorded"
+  | "in_progress"
+  | "attention"
+  | "unsuccessful"
+  | "called_off"
+  | "unknown";
 type ActivitySummary = { request_id: string; actor: string; action: string; targets: string[] };
 type ActivityRecord = ActivitySummary & {
-  occurred_at?: string | null;
+  occurred_at?: string | null | undefined;
   source: "job" | "operation";
   target_names?: string[];
   operation?: OperationDetail;
   /** The Controller's plain phrase for the event, and the workload it acts on. */
   summary?: string;
-  subject?: string | null;
+  subject?: string | null | undefined;
 };
 type ActivityApi = Pick<
   ControlApi,
@@ -87,40 +99,41 @@ export function activityCategory(event: ActivitySummary): string {
   return CATEGORY_LABELS[category] ?? titleCase(category);
 }
 
+/** The lifecycle words, grouped by the contract's sets: a cancel is the operator's own request, not a failure. */
+function lifecycleStatus(state: string): ActivityStatus | undefined {
+  if (UNSUCCESSFUL_LIFECYCLE_STATES.has(state)) return "unsuccessful";
+  if (state === LifecycleState.CANCELLED) return "called_off";
+  if (state === LifecycleState.NEEDS_OPERATOR) return "attention";
+  if (TERMINAL_LIFECYCLE_STATES.has(state)) return "recorded";
+  if (LIVE_LIFECYCLE_STATES.has(state)) return "in_progress";
+  return undefined;
+}
+
+/** The states of other operation kinds that are not lifecycle words. */
 const OPERATION_STATUS: Record<string, ActivityStatus> = {
-  cancelled: "unsuccessful",
-  canceled: "unsuccessful",
+  canceled: "called_off",
   error: "unsuccessful",
   expired: "unsuccessful",
-  failed: "unsuccessful",
   uncertain: "attention",
   waiting: "in_progress",
-  [LifecycleState.NEEDS_OPERATOR]: "attention",
-  [LifecycleState.BACKOFF]: "in_progress",
-  [LifecycleState.OBSERVING]: "in_progress",
   compensating: "in_progress",
   pending: "in_progress",
   planned: "in_progress",
-  queued: "in_progress",
-  running: "in_progress",
   starting: "in_progress",
   stopping: "in_progress",
   compensated: "recorded",
   completed: "recorded",
-  succeeded: "recorded",
-  // Replaced by a successor operation: not a fault.
-  superseded: "recorded",
 };
 
 /** An operation state as the Activity page classes it; a state not listed here is not known. */
 function operationStatus(state: string): ActivityStatus {
-  return OPERATION_STATUS[state] ?? "unknown";
+  return lifecycleStatus(state) ?? OPERATION_STATUS[state] ?? "unknown";
 }
 
 /** Finished work does not change again; every other state (waiting, uncertain, not known) can. */
 export function operationEnded(state: string): boolean {
   const status = operationStatus(state);
-  return status === "unsuccessful" || status === "recorded";
+  return status === "unsuccessful" || status === "called_off" || status === "recorded";
 }
 
 export function activityStatus(event: ActivitySummary): ActivityStatus {
@@ -134,6 +147,7 @@ export function activityStatus(event: ActivitySummary): ActivityStatus {
 
 function statusLabel(status: ActivityStatus): string {
   if (status === "unsuccessful") return "Unsuccessful";
+  if (status === "called_off") return "Cancelled";
   if (status === "attention") return "Needs review";
   if (status === "in_progress") return "In progress";
   if (status === "unknown") return "Unknown state";
@@ -144,7 +158,7 @@ function statusTone(status: ActivityStatus): "neutral" | "ok" | "warn" | "bad" |
   if (status === "unsuccessful") return "bad";
   if (status === "attention") return "warn";
   if (status === "in_progress") return "info";
-  if (status === "unknown") return "neutral";
+  if (status === "unknown" || status === "called_off") return "neutral";
   return "ok";
 }
 
@@ -154,6 +168,7 @@ const LINKABLE_STATUSES: readonly ActivityStatus[] = [
   "in_progress",
   "attention",
   "unsuccessful",
+  "called_off",
 ];
 
 const OPERATION_STATES = [
@@ -235,7 +250,7 @@ function EventTime({ event, now }: { event: ActivityRecord; now: Date }) {
   );
 }
 
-function CopyableValue({ label, value }: { label: string; value?: string | null }) {
+function CopyableValue({ label, value }: { label: string; value?: string | null | undefined }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const statusId = useId();
   if (!value)
@@ -314,6 +329,7 @@ function TechnicalDetails({ event }: { event: ActivityRecord }) {
         ) : (
           event.targets.map((target, index) => (
             <CopyableValue
+              // biome-ignore lint/suspicious/noArrayIndexKey: the same target can repeat; the position tells the copies apart
               key={`${target}:${index}`}
               label={event.targets.length === 1 ? "Target" : `Target ${index + 1}`}
               value={target}
@@ -386,9 +402,14 @@ const LIVE_JOB_STATES = new Set<string>([
   "waiting",
 ]);
 
+/** The one decision "this card polls itself": live work needs no Refresh button. */
+function stateUpdatesItself(state: string): boolean {
+  return LIVE_JOB_STATES.has(state);
+}
+
 function jobUpdatesAutomatically(detail: JobDetail): boolean {
   return (
-    LIVE_JOB_STATES.has(detail.state) ||
+    stateUpdatesItself(detail.state) ||
     (isOperatorWait(detail.state) &&
       (detail.agent_upgrade_diagnostics?.targets.some((target) => target.retry_queued) ?? false))
   );
@@ -611,7 +632,7 @@ function JobProgressDetails({
               disabled={loading}
               onClick={() => void loadDetail()}
             >
-              {loading ? "Retrying…" : "Try again"}
+              {loading ? "Retrying…" : "Retry"}
             </button>
           </div>
         )}
@@ -622,14 +643,16 @@ function JobProgressDetails({
                 <span>Current state</span>
                 <strong>{detail.summary}</strong>
               </div>
-              <button
-                type="button"
-                className="button secondary"
-                disabled={loading || resuming}
-                onClick={() => void loadDetail()}
-              >
-                {loading ? "Refreshing…" : "Refresh details"}
-              </button>
+              {(!jobUpdatesAutomatically(detail) || error) && (
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={loading || resuming}
+                  onClick={() => void loadDetail()}
+                >
+                  {loading ? "Refreshing…" : "Refresh details"}
+                </button>
+              )}
             </header>
             {jobUpdatesAutomatically(detail) && (
               <p className="activity-job-live" role="status">
@@ -688,6 +711,7 @@ function JobProgressDetails({
                 <h3>Affected targets</h3>
                 <ul>
                   {visibleTargets.map((target, index) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: the same target can repeat; the position tells the copies apart
                     <li key={`${detail.targets[index]}:${index}`}>{target}</li>
                   ))}
                 </ul>
@@ -801,6 +825,7 @@ function JobProgressDetails({
                 <CopyableValue label="Authority revision" value={detail.authority_revision} />{" "}
                 {detail.targets.map((target, index) => (
                   <CopyableValue
+                    // biome-ignore lint/suspicious/noArrayIndexKey: the same target can repeat; the position tells the copies apart
                     key={`${target}:${index}`}
                     label={detail.targets.length === 1 ? "Target ID" : `Target ID ${index + 1}`}
                     value={target}
@@ -844,6 +869,7 @@ function ActivityTimeline({
         const status = activityStatus(event);
         return (
           <li
+            // biome-ignore lint/suspicious/noArrayIndexKey: one request can appear in several events; the position tells them apart
             key={`${event.source}:${event.request_id}:${index}`}
             className={`activity-event is-${status}`}
           >
@@ -851,7 +877,6 @@ function ActivityTimeline({
             <article>
               <header>
                 <div>
-                  <span className="activity-category">{activityCategory(event)}</span>
                   <h2>{activityTitle(event)}</h2>
                 </div>
                 <StatusPill tone={statusTone(status)}>{statusLabel(status)}</StatusPill>
@@ -921,6 +946,7 @@ function ActivityTable({
           {events.map((event, index) => {
             const status = activityStatus(event);
             return (
+              // biome-ignore lint/suspicious/noArrayIndexKey: one request can appear in several events; the position tells them apart
               <tr key={`${event.source}:${event.request_id}:${index}`}>
                 <td data-label="Event">
                   <strong>{activityTitle(event)}</strong>
@@ -975,9 +1001,8 @@ function ActivityOverview({
       result[activityStatus(event)] += 1;
       return result;
     },
-    { recorded: 0, in_progress: 0, attention: 0, unsuccessful: 0, unknown: 0 },
+    { recorded: 0, in_progress: 0, attention: 0, unsuccessful: 0, called_off: 0, unknown: 0 },
   );
-  const total = Math.max(events.length, 1);
   const scope = filtering
     ? `${events.length} matching ${events.length === 1 ? "event" : "events"} from ${loadedCount} loaded`
     : `${loadedCount} loaded ${loadedCount === 1 ? "event" : "events"}`;
@@ -1004,25 +1029,12 @@ function ActivityOverview({
         <strong>{counts.unsuccessful}</strong>
       </div>
       <div>
+        <span>Cancelled</span>
+        <strong>{counts.called_off}</strong>
+      </div>
+      <div>
         <span>Unknown state</span>
         <strong>{counts.unknown}</strong>
-      </div>
-      <div
-        className="activity-outcome-bar"
-        role="img"
-        aria-label={`${counts.recorded} recorded, ${counts.in_progress} in progress, ${counts.attention} need review, ${counts.unsuccessful} unsuccessful, ${counts.unknown} unknown`}
-      >
-        <span className="is-recorded" style={{ width: `${(counts.recorded / total) * 100}%` }} />
-        <span
-          className="is-in-progress"
-          style={{ width: `${(counts.in_progress / total) * 100}%` }}
-        />
-        <span className="is-attention" style={{ width: `${(counts.attention / total) * 100}%` }} />
-        <span
-          className="is-unsuccessful"
-          style={{ width: `${(counts.unsuccessful / total) * 100}%` }}
-        />
-        <span className="is-unknown" style={{ width: `${(counts.unknown / total) * 100}%` }} />
       </div>
     </section>
   );
@@ -1108,13 +1120,7 @@ function CanonicalOperationDetails({
         );
     }
   }, [api, detail.id, onUpdate]);
-  const active = [
-    LifecycleState.QUEUED,
-    LifecycleState.RUNNING,
-    LifecycleState.BACKOFF,
-    "pending",
-    "planned",
-  ].includes(detail.state);
+  const active = stateUpdatesItself(detail.state);
   useEffect(() => {
     if (!active) return;
     let loading = false;
@@ -1159,7 +1165,6 @@ function CanonicalOperationDetails({
       ))}
       <p className="activity-job-attempt" style={{ margin: 0 }}>
         Attempt {formatWire(detail.attempt)}
-        {detail.progress?.phase ? ` · ${titleCase(detail.progress.phase)}` : ""}
         {active ? " · Updates automatically" : ""}
       </p>
       {detail.recovery?.uncertain ||
@@ -1171,7 +1176,7 @@ function CanonicalOperationDetails({
       ) : (
         detail.recovery?.explanation && <p style={{ margin: 0 }}>{detail.recovery.explanation}</p>
       )}
-      {!operationEnded(detail.state) && (
+      {!operationEnded(detail.state) && (!active || error) && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: ".5rem" }}>
           <button type="button" className="button secondary" onClick={() => void refresh()}>
             Refresh operation
@@ -1193,6 +1198,7 @@ const STATUS_ORDER: Record<ActivityStatus, number> = {
   attention: 0,
   unsuccessful: 1,
   in_progress: 2,
+  called_off: 2,
   unknown: 2,
   recorded: 2,
 };
@@ -1510,255 +1516,259 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
       filters.target ||
       filters.requestId,
   );
+  const names = useMemo(() => Object.fromEntries(targetNames), [targetNames]);
   return (
-    <div className="activity-page">
-      <PageHeader
-        title="Activity"
-        description="Meaningful control-plane changes, without technical identifiers by default."
-        actions={
-          <>
-            <div className="segmented" role="group" aria-label="Activity view">
+    <LibraryNodeNamesProvider names={names}>
+      <div className="activity-page">
+        <PageHeader
+          title="Activity"
+          description="Meaningful control-plane changes, without technical identifiers by default."
+          actions={
+            <>
+              <fieldset className="segmented group-reset" aria-label="Activity view">
+                <button
+                  type="button"
+                  aria-pressed={view === "timeline"}
+                  onClick={() => chooseView("timeline")}
+                >
+                  Timeline
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={view === "table"}
+                  onClick={() => chooseView("table")}
+                >
+                  Table
+                </button>
+              </fieldset>
               <button
                 type="button"
-                aria-pressed={view === "timeline"}
-                onClick={() => chooseView("timeline")}
+                className="button secondary"
+                disabled={loading || loadingMore}
+                onClick={() => setAttempt((value) => value + 1)}
               >
-                Timeline
+                {loading && events ? "Refreshing…" : "Refresh activity"}
               </button>
+            </>
+          }
+        />
+
+        {events && events.length > 0 && (
+          <ActivityOverview events={filtered} filtering={filtering} loadedCount={events.length} />
+        )}
+
+        {events && (
+          <section className="library-pagination" aria-label="Activity history coverage">
+            <p role="status">
+              Showing {events.length} loaded {events.length === 1 ? "event" : "events"}.
+              {canonicalCursor ? " Load older activity below." : ""}
+            </p>
+            <details className="activity-technical">
+              <summary>History coverage</summary>
+              <p>
+                {canonicalAvailable
+                  ? `Loaded ${canonicalCount} of ${formatWire(canonicalTotal)} operations`
+                  : "Operations are unavailable"}
+                . Summary counts and filters cover only these loaded records.
+              </p>
+            </details>
+            {canonicalCursor && (
               <button
                 type="button"
-                aria-pressed={view === "table"}
-                onClick={() => chooseView("table")}
+                className="button secondary"
+                disabled={loading || loadingMore}
+                onClick={() => void loadMoreOperations()}
               >
-                Table
+                {loadingMore ? "Loading older operations…" : "Load older operations"}
               </button>
-            </div>
+            )}
+            {canonicalAvailable &&
+              !canonicalCursor &&
+              compareWire(canonicalCount, canonicalTotal) < 0 && (
+                <p role="status">
+                  The operations API reports additional records but did not provide a continuation
+                  cursor.
+                </p>
+              )}
+            {paginationError && <p role="alert">{paginationError}</p>}
+          </section>
+        )}
+
+        <section className="activity-controls" aria-label="Activity controls">
+          <div className="activity-bar">
+            <label className="activity-search">
+              <span className="sr-only">Search activity</span>
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search activity: action, operator, or technical ID"
+              />
+            </label>
+            <label>
+              <span className="sr-only">Area</span>
+              <select value={category} onChange={(event) => setCategory(event.target.value)}>
+                <option value="">All areas</option>
+                {categories.map((value) => (
+                  <option key={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span className="sr-only">Status</span>
+              <select
+                value={status}
+                onChange={(event) => setStatus(event.target.value as ActivityStatus | "")}
+              >
+                <option value="">All statuses</option>
+                <option value="recorded">Recorded</option>
+                <option value="in_progress">In progress</option>
+                <option value="attention">Needs review</option>
+                <option value="unsuccessful">Unsuccessful</option>
+                <option value="called_off">Cancelled</option>
+                <option value="unknown">Unknown state</option>
+              </select>
+            </label>
             <button
               type="button"
-              className="button"
-              disabled={loading || loadingMore}
-              onClick={() => setAttempt((value) => value + 1)}
+              className="button secondary"
+              aria-expanded={moreOpen}
+              aria-controls="activity-more-filters"
+              onClick={() => setMoreOpen((open) => !open)}
             >
-              {loading && events ? "Refreshing…" : "Refresh activity"}
+              More filters{moreActive > 0 ? ` (${moreActive})` : ""}
             </button>
-          </>
-        }
-      />
+          </div>
+          <div className="activity-filters" id="activity-more-filters" hidden={!moreOpen}>
+            <label>
+              <span>Operator</span>
+              <select value={actor} onChange={(event) => setActor(event.target.value)}>
+                <option value="">All operators</option>
+                {actors.map((value) => (
+                  <option key={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Operation state</span>
+              <select
+                value={filters.state ?? ""}
+                onChange={(event) =>
+                  changeFilters({ ...filters, state: event.target.value || undefined })
+                }
+              >
+                <option value="">All states</option>
+                {OPERATION_STATES.map((value) => (
+                  <option key={value} value={value}>
+                    {titleCase(value)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Spark</span>
+              <select
+                value={filters.target ?? ""}
+                onChange={(event) =>
+                  changeFilters({ ...filters, target: event.target.value || undefined })
+                }
+              >
+                <option value="">All Sparks</option>
+                {[...targetNames].map(([id, name]) => (
+                  <option key={id} value={id}>
+                    {name || id}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Request ID</span>
+              <input
+                value={requestText}
+                placeholder="Full request ID"
+                aria-invalid={requestText !== "" && !REQUEST_ID.test(requestText.trim())}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setRequestText(value);
+                  const id = value.trim().toLowerCase();
+                  if (REQUEST_ID.test(id)) changeFilters({ ...filters, requestId: id });
+                  else if (!value.trim() && filters.requestId)
+                    changeFilters({ ...filters, requestId: undefined });
+                }}
+              />
+            </label>
+            <label>
+              <span>Sort</span>
+              <select
+                value={sort}
+                onChange={(event) => setSort(event.target.value as "recent" | "attention")}
+              >
+                <option value="recent">Most recent first</option>
+                <option value="attention">Needs attention first</option>
+              </select>
+            </label>
+          </div>
+          <div className="activity-control-footer">
+            <span role="status">
+              {events
+                ? `${filtered.length} of ${events.length} loaded ${events.length === 1 ? "event" : "events"} · ${sort === "attention" ? "Needs-review and unsuccessful events first" : "Most recent events first"}`
+                : "Loading activity"}
+            </span>
+            {filtering && filtered.length > 0 && (
+              <button type="button" className="activity-clear" onClick={clearFilters}>
+                Clear filters
+              </button>
+            )}
+          </div>
+        </section>
 
-      {events && events.length > 0 && (
-        <ActivityOverview events={filtered} filtering={filtering} loadedCount={events.length} />
-      )}
-
-      {events && (
-        <section className="library-pagination" aria-label="Activity history coverage">
-          <p role="status">
-            Showing {events.length} loaded {events.length === 1 ? "event" : "events"}.
-            {canonicalCursor ? " Load older activity below." : ""}
-          </p>
-          <details className="activity-technical">
-            <summary>History coverage</summary>
-            <p>
-              {canonicalAvailable
-                ? `Loaded ${canonicalCount} of ${formatWire(canonicalTotal)} operations`
-                : "Operations are unavailable"}
-              . Summary counts and filters cover only these loaded records.
-            </p>
-          </details>
-          {canonicalCursor && (
+        {loading && !events && !error && <SkeletonRows columns={4} label="Loading activity" />}
+        {error && (
+          <section className="activity-state is-error" role="alert">
+            <div>
+              <strong>Activity unavailable</strong>
+              <p>{error}</p>
+            </div>
             <button
               type="button"
               className="button secondary"
               disabled={loading || loadingMore}
-              onClick={() => void loadMoreOperations()}
+              onClick={() => setAttempt((value) => value + 1)}
             >
-              {loadingMore ? "Loading older operations…" : "Load older operations"}
+              Retry
             </button>
-          )}
-          {canonicalAvailable &&
-            !canonicalCursor &&
-            compareWire(canonicalCount, canonicalTotal) < 0 && (
-              <p role="status">
-                The operations API reports additional records but did not provide a continuation
-                cursor.
-              </p>
-            )}
-          {paginationError && <p role="alert">{paginationError}</p>}
-        </section>
-      )}
-
-      <section className="activity-controls" aria-label="Activity controls">
-        <div className="activity-bar">
-          <label className="activity-search">
-            <span className="sr-only">Search activity</span>
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search activity: action, operator, or technical ID"
-            />
-          </label>
-          <label>
-            <span className="sr-only">Area</span>
-            <select value={category} onChange={(event) => setCategory(event.target.value)}>
-              <option value="">All areas</option>
-              {categories.map((value) => (
-                <option key={value}>{value}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span className="sr-only">Status</span>
-            <select
-              value={status}
-              onChange={(event) => setStatus(event.target.value as ActivityStatus | "")}
-            >
-              <option value="">All statuses</option>
-              <option value="recorded">Recorded</option>
-              <option value="in_progress">In progress</option>
-              <option value="attention">Needs review</option>
-              <option value="unsuccessful">Unsuccessful</option>
-              <option value="unknown">Unknown state</option>
-            </select>
-          </label>
-          <button
-            type="button"
-            className="button secondary"
-            aria-expanded={moreOpen}
-            aria-controls="activity-more-filters"
-            onClick={() => setMoreOpen((open) => !open)}
-          >
-            More filters{moreActive > 0 ? ` (${moreActive})` : ""}
-          </button>
-        </div>
-        <div className="activity-filters" id="activity-more-filters" hidden={!moreOpen}>
-          <label>
-            <span>Operator</span>
-            <select value={actor} onChange={(event) => setActor(event.target.value)}>
-              <option value="">All operators</option>
-              {actors.map((value) => (
-                <option key={value}>{value}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Operation state</span>
-            <select
-              value={filters.state ?? ""}
-              onChange={(event) =>
-                changeFilters({ ...filters, state: event.target.value || undefined })
-              }
-            >
-              <option value="">All states</option>
-              {OPERATION_STATES.map((value) => (
-                <option key={value} value={value}>
-                  {titleCase(value)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Spark</span>
-            <select
-              value={filters.target ?? ""}
-              onChange={(event) =>
-                changeFilters({ ...filters, target: event.target.value || undefined })
-              }
-            >
-              <option value="">All Sparks</option>
-              {[...targetNames].map(([id, name]) => (
-                <option key={id} value={id}>
-                  {name || id}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Request ID</span>
-            <input
-              value={requestText}
-              placeholder="Full request ID"
-              aria-invalid={requestText !== "" && !REQUEST_ID.test(requestText.trim())}
-              onChange={(event) => {
-                const value = event.target.value;
-                setRequestText(value);
-                const id = value.trim().toLowerCase();
-                if (REQUEST_ID.test(id)) changeFilters({ ...filters, requestId: id });
-                else if (!value.trim() && filters.requestId)
-                  changeFilters({ ...filters, requestId: undefined });
-              }}
-            />
-          </label>
-          <label>
-            <span>Sort</span>
-            <select
-              value={sort}
-              onChange={(event) => setSort(event.target.value as "recent" | "attention")}
-            >
-              <option value="recent">Most recent first</option>
-              <option value="attention">Needs attention first</option>
-            </select>
-          </label>
-        </div>
-        <div className="activity-control-footer">
-          <span role="status">
-            {events
-              ? `${filtered.length} of ${events.length} loaded ${events.length === 1 ? "event" : "events"} · ${sort === "attention" ? "Needs-review and unsuccessful events first" : "Most recent events first"}`
-              : "Loading activity"}
-          </span>
-          {filtering && filtered.length > 0 && (
-            <button type="button" className="activity-clear" onClick={clearFilters}>
-              Clear filters
-            </button>
-          )}
-        </div>
-      </section>
-
-      {loading && !events && !error && <SkeletonRows columns={4} label="Loading activity" />}
-      {error && (
-        <section className="activity-state is-error" role="alert">
-          <div>
-            <strong>Activity unavailable</strong>
-            <p>{error}</p>
-          </div>
-          <button
-            type="button"
-            className="button secondary"
-            disabled={loading || loadingMore}
-            onClick={() => setAttempt((value) => value + 1)}
-          >
-            Try again
-          </button>
-        </section>
-      )}
-      {!loading && !error && events && filtered.length === 0 && (
-        <EmptyState
-          title="No activity yet"
-          description="Activity lists the changes made to your fleet, keys and library."
-          filtered={filtering}
-          onClearFilters={clearFilters}
-          action={{ label: "Refresh", onClick: () => setAttempt((value) => value + 1) }}
-        />
-      )}
-      {displayed.length > 0 &&
-        (view === "timeline" ? (
-          <ActivityTimeline
-            api={api}
-            events={displayed}
-            now={now}
-            onJobUpdate={updateOperation}
-            onOperationUpdate={updateCanonicalOperation}
-            targetNames={targetNames}
+          </section>
+        )}
+        {!loading && !error && events && filtered.length === 0 && (
+          <EmptyState
+            title="No activity yet"
+            description="Activity lists the changes made to your fleet, keys and library."
+            filtered={filtering}
+            onClearFilters={clearFilters}
+            action={{ label: "Refresh", onClick: () => setAttempt((value) => value + 1) }}
           />
-        ) : (
-          <ActivityTable
-            api={api}
-            events={displayed}
-            now={now}
-            onJobUpdate={updateOperation}
-            onOperationUpdate={updateCanonicalOperation}
-            targetNames={targetNames}
-          />
-        ))}
-    </div>
+        )}
+        {displayed.length > 0 &&
+          (view === "timeline" ? (
+            <ActivityTimeline
+              api={api}
+              events={displayed}
+              now={now}
+              onJobUpdate={updateOperation}
+              onOperationUpdate={updateCanonicalOperation}
+              targetNames={targetNames}
+            />
+          ) : (
+            <ActivityTable
+              api={api}
+              events={displayed}
+              now={now}
+              onJobUpdate={updateOperation}
+              onOperationUpdate={updateCanonicalOperation}
+              targetNames={targetNames}
+            />
+          ))}
+      </div>
+    </LibraryNodeNamesProvider>
   );
 }

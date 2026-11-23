@@ -102,6 +102,34 @@ _RESOLVED_RECIPE_SETS: dict[str, str] = {}
 _RESOLVED_RECIPE_SETS_BOUND = 4096
 
 
+def _recipe_model_digests(self: LibraryProjection) -> dict[str, list[str]]:
+    """The model digests each active recipe binds, from the catalog snapshot."""
+
+    _, recipes = self._catalog_snapshot
+    return {
+        row.content_digest: [reference.content_sha256 for reference in recipe.models]
+        for row, recipe in recipes
+    }
+
+
+def _state_digests(self: LibraryProjection, digests: Sequence[str]) -> list[str]:
+    """The digests whose evidence decides the state of ``digests``.
+
+    A model's installations, runs and artifact sets are recorded against the
+    recipes that bind it, so a model's state reads those recipes too. This is the
+    one rule every endpoint asks through, so a digest has the same state in the
+    list, the cached list and the detail, whatever else the request named.
+    """
+
+    asked = set(digests)
+    readers = {
+        recipe
+        for recipe, models in self._recipe_model_digests().items()
+        if asked.intersection(models)
+    }
+    return sorted(asked | readers)
+
+
 def _local_state_snapshot(
     self: LibraryProjection,
     digests: Sequence[str],
@@ -110,7 +138,7 @@ def _local_state_snapshot(
         candidate = (
             self._local_state()
             if self._local_state is not None
-            else self._database_local_state(digests)
+            else self._database_local_state(self._state_digests(digests))
         )
     except SecurityRefusalError:
         raise
@@ -380,9 +408,13 @@ def _database_local_state(
                 RecipeInstallation.id,
                 RecipeInstallation.recipe_revision_id,
                 RecipeInstallation.state,
+                RecipeInstallation.model_content_sha256,
             ).where(
-                recipe_content_membership(
-                    RecipeInstallation.recipe_revision_id, digests
+                or_(
+                    recipe_content_membership(
+                        RecipeInstallation.recipe_revision_id, digests
+                    ),
+                    RecipeInstallation.model_content_sha256.in_(digests),
                 )
             )
         ).all()
@@ -512,6 +544,10 @@ def _database_local_state(
                 total=progress.measurement.total_bytes,
                 wait=read_wait(cache_operation),
             )
+        if state in model_cache_states.words(LifecycleState.CANCELLED):
+            # An operator's cancel says nothing about what is held: the cache
+            # set decides, and with none the digest reads not cached.
+            continue
         controller = (
             "preparing"
             if state in model_cache_states.LIVE
@@ -540,11 +576,15 @@ def _database_local_state(
             controller=controller,
         )
     installation_revision: dict[str, str] = {}
+    installation_model: dict[str, str] = {}
     for (
         installation_id,
         installation_revision_id,
         installation_state,
+        installation_model_digest,
     ) in installations:
+        if installation_model_digest is not None:
+            installation_model[installation_id] = installation_model_digest
         controller = _controller_state(
             {
                 InstallationState.PLANNED: "preparing",
@@ -570,6 +610,24 @@ def _database_local_state(
             revision_digests.get(installation_revision_id),
             controller=controller,
         )
+        # The Sparks of an active installation hold the models of its artifact set.
+        installed_set = recipe_sets.get(
+            revision_digests.get(installation_revision_id, "")
+        )
+        for model_digest in reference_digests.get(installed_set or "", ()):
+            self._merge_local(
+                asset_facts,
+                model_digest,
+                controller=cast(
+                    LibraryControllerState, LibraryCacheState.NOT_CACHED.value
+                ),
+                installed_on_sparks=True,
+            )
+            held = asset_facts[model_digest]
+            if held.controller == AssetAvailability.UNKNOWN.value:
+                held.controller = cast(
+                    LibraryControllerState, LibraryCacheState.NOT_CACHED.value
+                )
     nodes_by_run: dict[str, list[str]] = {}
     for run_id, node_id in run_nodes:
         nodes_by_run.setdefault(run_id, []).append(node_id)
@@ -587,14 +645,20 @@ def _database_local_state(
                 running_on=nodes,
             )
         installed_revision_id = installation_revision.get(installation_id)
-        self._merge_local(
-            asset_facts,
+        installed_digest = (
             revision_digests.get(installed_revision_id)
             if installed_revision_id is not None
-            else None,
-            controller="cached",
-            running_on=nodes,
+            else None
         )
+        # A run serves its recipe and the model its installation recorded,
+        # whether or not its plan names one or its recipe is still the head.
+        for served in (installed_digest, installation_model.get(installation_id)):
+            self._merge_local(
+                asset_facts,
+                served,
+                controller=LibraryCacheState.CACHED.value,
+                running_on=nodes,
+            )
     claims = _image_claims(
         head_digests,
         builds=[

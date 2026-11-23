@@ -209,6 +209,10 @@ async fn upgrade_process_death_at_every_custody_seam_reobserves_without_installi
         let (ready, received) = std::sync::mpsc::channel();
         let stdout = child.stdout.take().unwrap();
         let reader = thread::spawn(move || {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the receiving side may already be gone; nobody is waiting for the value"
+            )]
             let _ = ready.send(
                 BufReader::new(stdout)
                     .lines()

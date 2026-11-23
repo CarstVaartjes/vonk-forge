@@ -1,5 +1,5 @@
-//! Read-only nl80211 evidence for the wireless NAS route. GET_INTERFACE and
-//! GET_STATION require no CAP_NET_ADMIN (Linux net/wireless/nl80211.c).
+//! Read-only nl80211 evidence for the wireless NAS route. `GET_INTERFACE` and
+//! `GET_STATION` require no `CAP_NET_ADMIN` (Linux net/wireless/nl80211.c).
 //! No subprocess, privileges, cache or retry loop: each inventory probes anew.
 
 use vonk_agent_protocol::generated::NetworkInterface;
@@ -7,11 +7,11 @@ use vonk_agent_protocol::generated::NetworkInterface;
 #[cfg(any(target_os = "linux", test))]
 mod attributes {
     // Stable Linux UAPI: include/uapi/linux/nl80211.h.
-    pub const IFINDEX: u16 = 3;
-    pub const IFTYPE: u16 = 5;
+    pub(super) const IFINDEX: u16 = 3;
+    pub(super) const IFTYPE: u16 = 5;
     const IFTYPE_STATION: u32 = 2;
-    pub const STA_INFO: u16 = 21;
-    pub const WIPHY_FREQ: u16 = 38;
+    pub(super) const STA_INFO: u16 = 21;
+    pub(super) const WIPHY_FREQ: u16 = 38;
     const SIGNAL: u16 = 7;
     const TX_BITRATE: u16 = 8;
     const RX_BITRATE: u16 = 14;
@@ -20,7 +20,7 @@ mod attributes {
 
     /// Netlink attributes have native-endian headers and four-byte alignment.
     /// An unknown attribute is ignored; a truncated stream is never evidence.
-    pub fn parse(mut bytes: &[u8]) -> Option<Vec<(u16, &[u8])>> {
+    pub(super) fn parse(mut bytes: &[u8]) -> Option<Vec<(u16, &[u8])>> {
         let mut result = Vec::new();
         // Each attribute consumes at least its four-byte header.
         for _ in 0..bytes.len() / 4 {
@@ -38,13 +38,13 @@ mod attributes {
         bytes.is_empty().then_some(result)
     }
 
-    pub fn get(bytes: &[u8], kind: u16) -> Option<&[u8]> {
+    pub(super) fn get(bytes: &[u8], kind: u16) -> Option<&[u8]> {
         parse(bytes)?
             .into_iter()
             .find_map(|(key, value)| (key == kind).then_some(value))
     }
 
-    pub fn u32_value(bytes: &[u8]) -> Option<u32> {
+    pub(super) fn u32_value(bytes: &[u8]) -> Option<u32> {
         Some(u32::from_ne_bytes(bytes.try_into().ok()?))
     }
 
@@ -57,7 +57,11 @@ mod attributes {
         (rate > 0).then_some(f64::from(rate) / 10.0)
     }
 
-    pub fn radio(interface: &mut super::NetworkInterface, bytes: &[u8], index: u32) -> Option<()> {
+    pub(super) fn radio(
+        interface: &mut super::NetworkInterface,
+        bytes: &[u8],
+        index: u32,
+    ) -> Option<()> {
         if u32_value(get(bytes, IFINDEX)?)? != index
             || u32_value(get(bytes, IFTYPE)?)? != IFTYPE_STATION
         {
@@ -69,7 +73,7 @@ mod attributes {
         Some(())
     }
 
-    pub fn station(interface: &mut super::NetworkInterface, bytes: &[u8]) {
+    pub(super) fn station(interface: &mut super::NetworkInterface, bytes: &[u8]) {
         let Some(info) = get(bytes, STA_INFO) else {
             return;
         };
@@ -82,7 +86,7 @@ mod attributes {
     }
 }
 
-pub fn collect(interface: &mut NetworkInterface) {
+pub(crate) fn collect(interface: &mut NetworkInterface) {
     #[cfg(target_os = "linux")]
     let _ = linux::collect(interface);
     #[cfg(not(target_os = "linux"))]
@@ -240,7 +244,7 @@ mod linux {
         }
     }
 
-    pub fn collect(interface: &mut NetworkInterface) -> Option<()> {
+    pub(super) fn collect(interface: &mut NetworkInterface) -> Option<()> {
         let index: u32 = fs::read_to_string(format!("/sys/class/net/{}/ifindex", interface.name))
             .ok()?
             .trim()

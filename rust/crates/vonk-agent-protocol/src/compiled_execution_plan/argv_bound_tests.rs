@@ -8,7 +8,7 @@
         let long: Vec<String> = (0..600).map(|index| format!("--flag-{index}")).collect();
         assert!(valid_opaque_argv(&long));
 
-        let absurd: Vec<String> = (0..MAX_ARGV_ITEMS + 1)
+        let absurd: Vec<String> = (0..=MAX_ARGV_ITEMS)
             .map(|index| format!("--flag-{index}"))
             .collect();
         assert!(!valid_opaque_argv(&absurd));

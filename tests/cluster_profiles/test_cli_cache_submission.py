@@ -751,6 +751,7 @@ def _fleet_review(
         "review_digest": digest * 64,
         "nas_reclaimable_bytes": nas_bytes,
         "blockers": [] if blocker is None else [blocker],
+        "submittable": removable and blocker is None,
         "fleet": {
             "nas_remove": removable,
             "nas_reason": "unused" if removable else "referenced",

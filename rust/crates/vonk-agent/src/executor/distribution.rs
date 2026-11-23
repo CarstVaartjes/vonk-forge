@@ -40,6 +40,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         item.bytes,
                         item.total_bytes.unwrap_or(bytes),
                     );
+                    self.client
+                        .set_progress_fetched(claim.fence, item.fetched.0, item.fetched.1);
                 },
             ),
             lease_deadline.clone(),
@@ -126,7 +128,7 @@ where
             changed = lease.changed() => {
                 if changed.is_err() { return None; }
             }
-            _ = tokio::time::sleep(lease_remaining) => {
+            () = tokio::time::sleep(lease_remaining) => {
                 if remaining_lease(*lease.borrow()).is_zero() { return None; }
             }
             result = &mut operation => return Some(result),

@@ -5,7 +5,7 @@ use super::*;
 #[derive(Debug, Clone)]
 pub struct DistributionDownloadEvidence {
     pub model_digests: Vec<String>,
-    pub model_paths: Vec<std::path::PathBuf>,
+    pub model_paths: Vec<PathBuf>,
     pub oci_image_digest: String,
     pub oci_image_config_digest: String,
     pub downloaded_bytes: u64,
@@ -20,6 +20,9 @@ pub struct DistributionProgress {
     pub kind: String,
     pub bytes: u64,
     pub total_bytes: Option<u64>,
+    /// Bytes received over the network by this order, and the time they took.
+    /// Objects already present or resumed from disk count in `bytes` only.
+    pub fetched: (u64, Duration),
 }
 
 pub(super) struct DistributionProgressTracker<F> {
@@ -41,6 +44,7 @@ impl<F: FnMut(DistributionProgress)> DistributionProgressTracker<F> {
         object: &vonk_agent_protocol::DistributionObject,
         bytes: u64,
         completed: bool,
+        fetched: (u64, Duration),
     ) {
         // Retried ranges and verification can report the same offset again.
         // Count each object's bytes once, regardless of completion order.
@@ -52,9 +56,10 @@ impl<F: FnMut(DistributionProgress)> DistributionProgressTracker<F> {
             completed_items: self.completed_items,
             total_items: self.object_bytes.len() as u64,
             object_sha256: object.sha256.clone(),
-            kind: object.kind.to_string(),
+            kind: object.kind.clone(),
             bytes: self.bytes,
             total_bytes: Some(self.total_bytes),
+            fetched,
         });
     }
 }
@@ -71,6 +76,8 @@ pub(super) struct ProgressSnapshot {
     /// Subprocess output and growth observed for this order. It is local
     /// evidence that a silent step still advances, not a transfer counter.
     pub(super) activity: u64,
+    /// Bytes this order received over the network and the time they took.
+    pub(super) fetched: Option<(u64, Duration)>,
 }
 
 /// One order's progress as the heartbeat and its stall window read it.
@@ -84,6 +91,7 @@ pub(crate) struct ProgressCounters {
     /// Whether any phase measured bytes.
     pub(crate) measured: bool,
     pub(crate) activity: u64,
+    pub(crate) fetched: Option<(u64, Duration)>,
 }
 
 impl AgentHttpClient {
@@ -99,6 +107,7 @@ impl AgentHttpClient {
             settled_bytes: 0,
             counters: None,
             activity: 0,
+            fetched: None,
         });
     }
 
@@ -138,9 +147,18 @@ impl AgentHttpClient {
                     settled_bytes: 0,
                     counters: None,
                     activity: 0,
+                    fetched: None,
                 });
             }
         }
+    }
+
+    /// This order received `bytes` over the network in `span`; the totals only grow.
+    pub(crate) fn set_progress_fetched(&self, fence: uuid::Uuid, bytes: u64, span: Duration) {
+        self.with_snapshot(fence, |snapshot| {
+            let (known, longest) = snapshot.fetched.unwrap_or_default();
+            snapshot.fetched = Some((known.max(bytes), longest.max(span)));
+        });
     }
 
     /// Record subprocess output or growth as progress of this order.
@@ -187,6 +205,7 @@ impl AgentHttpClient {
                     total_bytes: total.map(|total| snapshot.settled_bytes.saturating_add(total)),
                     measured: snapshot.settled_bytes > 0 || snapshot.counters.is_some(),
                     activity: snapshot.activity,
+                    fetched: snapshot.fetched,
                 }
             })
     }

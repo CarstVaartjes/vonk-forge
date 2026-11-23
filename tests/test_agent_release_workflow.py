@@ -422,7 +422,7 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "scripts/verify-agent-deb" in text
     assert "uses: ./.github/actions/agent-package-security" in text
     assert "cargo fmt --all --check" in security
-    assert "cargo clippy --workspace --all-targets --locked -- -D warnings" in security
+    assert "cargo clippy --workspace --all-targets --frozen -- -D warnings" in security
     assert "cargo test --workspace --locked" in security
     assert "tests/scripts/test_agent_deb.py" in security
     assert "scripts/verify-agent-systemd" in text

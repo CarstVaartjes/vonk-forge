@@ -42,6 +42,10 @@ pub enum Hook {
 }
 
 impl Hook {
+    #[expect(
+        clippy::match_same_arms,
+        reason = "the arms stay apart on purpose: each names a distinct case of the state machine"
+    )]
     pub fn parse(arguments: &[String]) -> Result<Self, String> {
         let words: Vec<&str> = arguments.iter().map(String::as_str).collect();
         match words.as_slice() {

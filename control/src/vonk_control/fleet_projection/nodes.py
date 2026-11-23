@@ -39,7 +39,11 @@ from vonk_control.fleet_projection.common import (
     telemetry_point,
 )
 from vonk_control.fleet_projection.display_memory import display_memory_advice
+from vonk_control.fleet_projection.fabric_rails import fabric_rails_warning
 from vonk_control.fleet_projection.host_checks import host_checks, host_checks_note
+from vonk_control.fleet_projection.memory_fragmentation import (
+    memory_fragmentation_warning,
+)
 from vonk_control.gpu.health import gpu_health_reason
 from vonk_control.inventory.items import inventory_items
 from vonk_control.inventory.repository import _validated_inventory
@@ -76,6 +80,7 @@ def _node(
     telemetry_unreadable: bool = False,
     gpu_clock_desired: GpuClockRange | None = None,
     swap_desired: SwapIntent | None = None,
+    agent_upgrade_available: bool | None = None,
 ) -> FleetNode:
     warnings: list[ProjectionReason] = list(layout_notices)
     contact = agent.contact
@@ -333,6 +338,7 @@ def _node(
     )
     return FleetNode(
         agent_runtime=agent_runtime,
+        agent_upgrade_available=agent_upgrade_available,
         gpu_clock_desired=gpu_clock_desired,
         swap_desired=swap_desired,
         id=node_id,
@@ -509,6 +515,10 @@ def _host_settings_warnings(host: HostSettings | None) -> list[ProjectionReason]
     advice = display_memory_advice(host)
     if advice is not None:
         warnings.append(advice)
+    if host is not None and (fragmented := memory_fragmentation_warning(host)):
+        warnings.append(fragmented)
+    if host is not None and (rails := fabric_rails_warning(host)):
+        warnings.append(rails)
     return warnings
 
 

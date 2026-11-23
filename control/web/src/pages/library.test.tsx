@@ -1,8 +1,14 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App } from "../app";
-import { minimalLibraryDetail, modelLibrary, recipeLibrary } from "../test-fixtures/library";
+import {
+  libraryViewSnapshot,
+  minimalLibraryDetail,
+  modelLibrary,
+  recipeLibrary,
+} from "../test-fixtures/library";
+import { CacheOperationKind } from "../api/vocabulary.generated";
 import type { ControlApi, VisualFleetSnapshot } from "../api/types";
-import { loadLibraryView, withObservedRuns } from "./library";
+import { hasLivePreparation, loadLibraryView, withObservedFleet } from "./library";
 import { afterEach, vi } from "vitest";
 import { ApiClient } from "../api/client";
 
@@ -99,7 +105,11 @@ test("merges paged Library responses beyond the first 100 Models", async () => {
   expect(calls).toEqual([undefined, "page-2"]);
 });
 
-type LibraryRequest = { cursor?: string; sort?: string; updatedSince?: string };
+type LibraryRequest = {
+  cursor?: string | undefined;
+  sort?: string | undefined;
+  updatedSince?: string | undefined;
+};
 
 function pagedLibraryApi(calls: LibraryRequest[], api: Partial<ControlApi> = {}) {
   return {
@@ -176,17 +186,50 @@ test("offers artifact jobs the running runs of this exact recipe revision from t
   const fleet = {
     nodes: [
       {
+        installed: [],
         loaded: [
           presence("run-a", revision, "running"),
           presence("run-old", "other-revision", "running"),
         ],
       },
-      { loaded: [presence("run-a", revision, "running"), presence("run-b", revision, "stopping")] },
+      {
+        installed: [],
+        loaded: [presence("run-a", revision, "running"), presence("run-b", revision, "stopping")],
+      },
     ],
   } as unknown as VisualFleetSnapshot;
-  expect(withObservedRuns(minimalLibraryDetail, fleet)!.operational_state.runs).toEqual([
+  expect(withObservedFleet(minimalLibraryDetail, fleet)!.operational_state.runs).toEqual([
     { run_id: "run-a", state: "running" },
   ]);
+});
+
+test("counts the installations of this exact recipe revision from the fleet", () => {
+  const revision = minimalLibraryDetail.recipe.recipe_revision_id;
+  const installed = (installation_id: string, recipe_revision_id: string) => ({
+    installation_id,
+    recipe_revision_id,
+  });
+  const fleet = {
+    nodes: [
+      { installed: [installed("i-1", revision), installed("i-old", "other")], loaded: [] },
+      { installed: [installed("i-1", revision), installed("i-2", revision)], loaded: [] },
+    ],
+  } as unknown as VisualFleetSnapshot;
+  expect(withObservedFleet(minimalLibraryDetail, fleet)!.operational_state.installations).toEqual([
+    "i-1",
+    "i-2",
+  ]);
+});
+
+test("a live preparation keeps the library reading, without a cutoff", () => {
+  const idle = libraryViewSnapshot;
+  expect(hasLivePreparation(idle)).toBe(false);
+  const model = idle.models[0]!;
+  const preparing = {
+    ...idle,
+    models: [{ ...model, actions: [CacheOperationKind.CANCEL, CacheOperationKind.FOLLOW] }],
+  };
+  expect(hasLivePreparation(preparing)).toBe(true);
 });
 
 test("assesses placement only when the library fleet filter is requested", async () => {

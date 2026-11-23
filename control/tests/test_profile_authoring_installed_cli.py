@@ -23,7 +23,7 @@ from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileInput,
     FleetProfileView,
 )
-from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profile_contract.review import FleetProfilePreviewResponse
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.jobs.queue import JobService
 from vonk_control.library_projection.service import LibraryProjection
@@ -371,7 +371,7 @@ def test_installed_remove_and_pin_save_ignore_unrelated_cache_evidence(
     headers = _headers(codec, "administrator")
     review_response = api.post("/api/profile/10/preview", headers=headers)
     assert review_response.status_code == 200, review_response.text
-    review = FleetProfilePreview.model_validate_json(review_response.content)
+    review = FleetProfilePreviewResponse.model_validate_json(review_response.content)
     decisions = {item.alias: item for item in review.admission_decisions}
     assert decisions["admitted"].allowed
     assert not decisions["disk-blocked"].allowed

@@ -1,5 +1,8 @@
 #![cfg(test)]
-#![allow(unused_imports)]
+#![expect(
+    unused_imports,
+    reason = "a facade that re-exports the parent's names for the test modules"
+)]
 
 pub(super) use super::{
     ExecutionResult, Executor, HEARTBEAT_RETRY_FLOOR, HeartbeatFailure, HelperErrorCode,

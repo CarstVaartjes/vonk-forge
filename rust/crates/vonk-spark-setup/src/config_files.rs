@@ -53,6 +53,10 @@ pub(super) fn valid_written_config(config: &WrittenConfig, paths: &InstallPaths)
         && (1..=1_000_000).contains(&config.fabric_bandwidth_mbps)
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 pub(super) fn valid_node_id(value: &str) -> bool {
     value.len() == 36
         && value.starts_with("spk_")

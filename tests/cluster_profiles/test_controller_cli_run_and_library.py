@@ -293,8 +293,9 @@ def test_run_parser_exposes_spark_confirmation_and_wait_controls() -> None:
 @pytest.mark.parametrize(
     "reason_code", [None, "profile.spark_offline", "profile.node_revoked"]
 )
+@pytest.mark.parametrize("already_serving", [False, True])
 def test_run_reviews_and_waits_before_reporting_endpoint(
-    reason_code: str | None,
+    reason_code: str | None, already_serving: bool
 ) -> None:
     profile = {
         "name": "Default",
@@ -349,6 +350,7 @@ def test_run_reviews_and_waits_before_reporting_endpoint(
                     "allowed": reason_code is None,
                     "plan_digest": "b" * 64,
                     "effects_digest": "c" * 64,
+                    **({"next_action": "nothing_to_change"} if already_serving else {}),
                     "reasons": []
                     if reason_code is None
                     else [{"code": reason_code, "detail": "Spark is not ready"}],
@@ -396,8 +398,10 @@ def test_run_reviews_and_waits_before_reporting_endpoint(
     endpoints = result["endpoints"]
     assert isinstance(endpoints, Mapping)
     assert endpoints["application_id"] == application_id
-    assert profile["assignments"][0]["recipe_selector"] == "vonk-forge/qwen-code"
-    assert "/api/profile/1/load" in paths
+    # A recipe that already serves submits nothing and still reports its endpoints.
+    assert ("/api/profile/1/load" in paths) is not already_serving
+    if not already_serving:
+        assert profile["assignments"][0]["recipe_selector"] == "vonk-forge/qwen-code"
     # The Controller prepares what the load needs; the client no longer downloads.
     assert not any("/download" in path for path in paths)
 

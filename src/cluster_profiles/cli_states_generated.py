@@ -32,6 +32,52 @@ class JobContractState(StrEnum):
     CONTRACT_INVALID = "contract-invalid"
 
 
+class ProgressPhase(StrEnum):
+    QUEUED = "queued"
+    PENDING = "pending"
+    WAITING = "waiting"
+    PREPARING = "preparing"
+    DOWNLOADING = "downloading"
+    MODEL_DOWNLOAD = "model-download"
+    VERIFYING = "verifying"
+    FINALIZING = "finalizing"
+    BUILDING = "building"
+    PULLING = "pulling"
+    TRANSFER = "transfer"
+    COPYING = "copying"
+    UPLOADING = "uploading"
+    INSTALLING = "installing"
+    RECONCILING_INSTALLATION = "reconciling-installation"
+    STARTING = "starting"
+    STOPPING = "stopping"
+    UNINSTALLING = "uninstalling"
+    RECLAIMING = "reclaiming"
+    UPDATING = "updating"
+    EXECUTING = "executing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ProfileChildPhase(StrEnum):
+    MODEL_DOWNLOAD = "model-download"
+    CONTAINER_DOWNLOAD = "container-download"
+    CONTAINER_BUILD = "container-build"
+    TARGET_COPY = "target-copy"
+    RUNTIME_INSTALL = "runtime-install"
+    START = "start"
+    FINAL_VERIFY = "final-verify"
+    TRANSFER = "transfer"
+    VERIFY = "verify"
+    PREPARE = "prepare"
+    CLEANUP = "cleanup"
+    STOP = "stop"
+    UNINSTALL = "uninstall"
+
+
+class ProfileReportedPhase(StrEnum):
+    FINAL_VERIFY = "final_verify"
+
+
 class QualificationStatus(StrEnum):
     WORKING = "Working"
     RECHECK = "Re-check: worked before"
@@ -50,6 +96,8 @@ class QualificationOutcome(StrEnum):
 
 
 STOP_UNCONFIRMED = "unconfirmed"
+WAIT_DEPENDENCY_PENDING = "dependency-pending"
+WAIT_SPARK_BUSY = "queue.spark_busy"
 PROFILE_NOT_ISSUED = "not-issued"
 ENROLLMENT_PENDING = "pending"
 UNKNOWN = "unknown"
@@ -82,11 +130,89 @@ ASSET_REMOVE = "remove"
 ASSET_RETAIN_SHARED = "retain-shared"
 ASSET_RETAIN_REFERENCED = "retain-referenced"
 ASSET_RETAIN_OBSERVATION_UNAVAILABLE = "retain-observation-unavailable"
+PROFILE_LOAD = "load"
+PROFILE_NOTHING_TO_CHANGE = "nothing_to_change"
+ACTION_DOWNLOAD = "download"
+ACTION_REMOVE = "remove"
+ACTION_CANCEL = "cancel"
+ACTION_FOLLOW = "follow"
 JOB_KIND_CLEANUP = "recipe.cleanup.v2"
 ASSET_VERIFIED = "verified"
 ASSET_MODEL_SET = "model-set"
 ASSET_MODEL_OBJECT = "model-object"
 ASSET_RUNTIME_IMAGE = "runtime-image"
+
+# The lifecycle states that are terminal.
+TERMINAL_LIFECYCLE_STATES = frozenset(
+    {
+        "succeeded",
+        "failed",
+        "cancelled",
+        "superseded",
+    }
+)
+
+# The lifecycle states that are live.
+LIVE_LIFECYCLE_STATES = frozenset(
+    {
+        "queued",
+        "running",
+        "observing",
+        "backoff",
+        "needs-operator",
+    }
+)
+
+# The lifecycle states that are unsuccessful.
+UNSUCCESSFUL_LIFECYCLE_STATES = frozenset(
+    {
+        "failed",
+    }
+)
+
+# Plain words for a phase, one table for every client.
+PHASE_WORDS: dict[str, str] = {
+    "transfer": "Copying model files to the Sparks",
+    "copying": "Copying model files to the Sparks",
+    "target-copy": "Copying model files to the Sparks",
+    "uploading": "Uploading files",
+    "downloading": "Downloading the model",
+    "model-download": "Downloading the model",
+    "container-download": "Downloading the container image",
+    "pulling": "Downloading the container image",
+    "container-build": "Building the container image",
+    "building": "Building the container image",
+    "runtime-install": "Installing the runtime",
+    "installing": "Installing the runtime",
+    "reconciling-installation": "Checking the installation",
+    "start": "Starting on the Sparks",
+    "starting": "Starting on the Sparks",
+    "final-verify": "Checking the result",
+    "final_verify": "Checking the result",
+    "verify": "Checking the result",
+    "verifying": "Checking the result",
+    "prepare": "Preparing the load",
+    "preparing": "Preparing the load",
+    "finalizing": "Finishing up",
+    "stop": "Stopping the running workload",
+    "stopping": "Stopping the running workload",
+    "uninstall": "Removing the old install",
+    "uninstalling": "Removing the old install",
+    "cleanup": "Cleaning up",
+    "reclaiming": "Cleaning up",
+    "queued": "Waiting in the queue",
+    "pending": "Waiting in the queue",
+    "waiting": "Waiting in the queue",
+    "updating": "Updating",
+    "executing": "Working",
+    "completed": "Finished",
+    "failed": "Failed",
+}
+
+# Plain words for a wait, one table for every client.
+WAIT_WORDS: dict[str, str] = {
+    "queue.spark_busy": "the Spark's current operation to finish",
+}
 
 # The shared HTTP status disposition table, first match wins:
 # (first status, last status, disposition); anything else is observed.

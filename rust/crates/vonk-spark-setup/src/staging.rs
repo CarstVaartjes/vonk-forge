@@ -163,7 +163,7 @@ pub(super) fn stage_verified_package_from(
 }
 
 pub(super) fn libc_nofollow() -> i32 {
-    0o400000
+    0o400_000
 }
 
 pub(super) fn same_file(left: &fs::Metadata, right: &fs::Metadata) -> bool {

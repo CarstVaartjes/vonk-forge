@@ -1,4 +1,5 @@
-import { addWire, compareWire, formatWire, type WireNumber } from "../../api/contract-numeric";
+import { CacheOperationKind, LibraryCacheState } from "../../api/vocabulary.generated";
+import { compareWire, formatWire } from "../../api/contract-numeric";
 import type { MouseEvent } from "react";
 import { useState } from "react";
 import type {
@@ -28,12 +29,12 @@ import {
 type LibraryModelsViewProps = {
   api: ControlApi;
   entries: LibraryRecipeRecord[];
-  fleet?: VisualFleetSnapshot;
+  fleet?: VisualFleetSnapshot | undefined;
   modelInventory?: LibraryViewSnapshot["models"];
   filters: LibraryWorkcellFilters;
   onFiltersChange(filters: LibraryWorkcellFilters): void;
   onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void;
-  onNavigatePath?(path: string, replace?: boolean): void;
+  onNavigatePath?: ((path: string, replace?: boolean) => void) | undefined;
   onQueryChange(value: string): void;
   onRefresh(signal: AbortSignal): Promise<void>;
   path: string;
@@ -122,7 +123,7 @@ export function LibraryModelsView({
         onFiltersChange={(next) => updateFilters(next)}
         onQueryChange={onQueryChange}
       />
-      <div className="library-model-list" aria-label="Model library">
+      <section className="library-model-list" aria-label="Model library">
         {[...groups].slice(0, limit).map(([key, revisions]) => (
           <ModelRevisionsRow
             key={key}
@@ -144,7 +145,7 @@ export function LibraryModelsView({
             }}
           />
         )}
-      </div>
+      </section>
     </section>
   );
 }
@@ -189,6 +190,16 @@ function ModelRevisionsRow({
   const capabilities = model.usage;
   const running = (model.local.running_on ?? []).length;
   const preparation = model.local.preparation;
+  // One rule, decided by the Controller: download or remove, never a button that cannot apply.
+  const actions = model.actions;
+  const downloadable = actions.includes(CacheOperationKind.DOWNLOAD);
+  // A live preparation the Controller reports: its progress and Cancel come from here, not from this page's memory.
+  const cancellable = actions.includes(CacheOperationKind.CANCEL);
+  // An idle partial set reads as preparing but can be resumed; only a live preparation cannot.
+  const downloadState =
+    downloadable && model.local.controller === LibraryCacheState.PREPARING
+      ? LibraryCacheState.NOT_CACHED
+      : model.local.controller;
   // A recipe may reference the same model in more than one selection with
   // different roles, so list each recipe once per model.
   const recipes = [
@@ -245,26 +256,32 @@ function ModelRevisionsRow({
             </select>
           </label>
         )}
-        <LibraryCacheAction
-          key={key}
-          api={api}
-          onPrepared={onPrepared}
-          selector={`${model.model.publisher}/${model.model.slug}`}
-          modelContentSha256={model.model.content_sha256}
-          state={model.local.controller}
-        />
-        <LibraryCacheAction
-          fleetOnly
-          key={`${key}-fleet`}
-          api={api}
-          onPrepared={onPrepared}
-          selector={`${model.model.publisher}/${model.model.slug}`}
-          modelContentSha256={model.model.content_sha256}
-          state={model.local.controller}
-        />
-        {model.local.controller === "preparing" && preparation && (
-          <span role="status">{preparation.phase ?? preparation.state}</span>
-        )}
+        <div className="library-model-actions">
+          {(downloadable ||
+            cancellable ||
+            model.local.controller === LibraryCacheState.PREPARING) && (
+            <LibraryCacheAction
+              key={key}
+              api={api}
+              onPrepared={onPrepared}
+              selector={`${model.model.publisher}/${model.model.slug}`}
+              modelContentSha256={model.model.content_sha256}
+              state={downloadState}
+              preparation={cancellable ? preparation : undefined}
+            />
+          )}
+          {actions.includes(CacheOperationKind.REMOVE) && (
+            <LibraryCacheAction
+              fleetOnly
+              key={`${key}-fleet`}
+              api={api}
+              onPrepared={onPrepared}
+              selector={`${model.model.publisher}/${model.model.slug}`}
+              modelContentSha256={model.model.content_sha256}
+              state={model.local.controller}
+            />
+          )}
+        </div>
       </div>
       <dl>
         <div>

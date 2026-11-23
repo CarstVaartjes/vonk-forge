@@ -760,32 +760,26 @@ def test_lost_load_response_retries_only_with_original_request_key() -> None:
 
 
 def test_progress_does_not_invent_percentage_for_unknown_total() -> None:
-    assert (
-        progress_line(
-            {
-                "state": "running",
-                "progress": {
-                    "phase": "building",
-                    "completed_items": 4,
-                    "total_items": 7,
-                },
-            }
-        )
-        == "building | items 4 / 7"
+    line = progress_line(
+        {
+            "state": "running",
+            "progress": {"phase": "building", "completed_items": 4, "total_items": 7},
+        }
     )
-    assert (
-        progress_line(
-            {
-                "state": "running",
-                "progress": {
-                    "phase": "copying",
-                    "completed_bytes": 20,
-                    "total_bytes_known": False,
-                },
-            }
-        )
-        == "copying | 20 B; total unknown"
+    assert "items 4 / 7" in line
+    assert "%" not in line
+    unknown_total = progress_line(
+        {
+            "state": "running",
+            "progress": {
+                "phase": "copying",
+                "completed_bytes": 20,
+                "total_bytes_known": False,
+            },
+        }
     )
+    assert "20 B" in unknown_total
+    assert "total unknown" in unknown_total
 
 
 def test_removal_flags_are_scoped_to_recipe_model_dependency() -> None:

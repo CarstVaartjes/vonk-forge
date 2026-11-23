@@ -16,9 +16,16 @@ inventory report must not make self-healing stop and re-activate a held run.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import NamedTuple
+
+from pydantic import GetJsonSchemaHandler
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import CoreSchema
 
 from vonk_agent_protocol.reason_codes.evidence import RunDegradedReason
 from vonk_agent_protocol.state_machines import RouteState, RunState
+from vonk_agent_protocol.wire_model import WireEnum
+from vonk_control.run_states import HOLDING_RUN_STATES, STARTING_RUN_STATES
 
 
 def run_not_ready_for_profile(
@@ -52,3 +59,54 @@ def run_not_ready_for_profile(
     if route_state != RouteState.PUBLISHED:
         return RunDegradedReason.ROUTE_NOT_PUBLISHED
     return None
+
+
+class GroupHealth(WireEnum):
+    """What the fleet says about a loaded recipe group; one transition function."""
+
+    HEALTHY = "healthy"
+    #: Within its start: its owning Start operation fails the run past the
+    #: start deadline, which is degraded; a group still starting is progress.
+    STARTING = "starting"
+    DEGRADED = "degraded"
+    UNAVAILABLE = "unavailable"
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, core_schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        """A plain string enum inline: the published shape stays a string field."""
+        return {"type": "string", "enum": [member.value for member in cls]}
+
+
+class GroupVerdict(NamedTuple):
+    """A group's state and the tri-state ``healthy`` fact derived from it."""
+
+    state: GroupHealth
+    healthy: bool | None
+
+
+def group_health(
+    *,
+    issue: bool,
+    reason: RunDegradedReason | None,
+    run_state: str,
+    rank_states: Iterable[str],
+) -> GroupVerdict:
+    """The one verdict: unreadable evidence, then ready, then still starting.
+
+    A group is starting while its run is planned or starting and no rank is
+    failed, lost or stopping; a lost rank or a missing rank is degraded.
+    ``healthy`` is true only for a ready group, false only for a degraded one.
+    """
+    if issue:
+        return GroupVerdict(GroupHealth.UNAVAILABLE, None)
+    if reason is None:
+        return GroupVerdict(GroupHealth.HEALTHY, True)
+    if (
+        reason == RunDegradedReason.RUN_NOT_RUNNING
+        and run_state in STARTING_RUN_STATES
+        and all(state in HOLDING_RUN_STATES for state in rank_states)
+    ):
+        return GroupVerdict(GroupHealth.STARTING, None)
+    return GroupVerdict(GroupHealth.DEGRADED, False)

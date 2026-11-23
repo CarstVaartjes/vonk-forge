@@ -121,7 +121,7 @@ from vonk_agent_protocol.state_machines import RouteState
 from vonk_control.fleet_profile_contract.review import (
     FleetProfileApplicationView,
     FleetProfileLoadRequest,
-    FleetProfilePreview,
+    FleetProfilePreviewResponse,
 )
 from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchChildResult,
@@ -1080,7 +1080,7 @@ def _validate_canary_cleanup_preview(
     """Require the exact admitted delegated-cleanup intent."""
 
     try:
-        typed = FleetProfilePreview.model_validate_json(_canonical(preview))
+        typed = FleetProfilePreviewResponse.model_validate_json(_canonical(preview))
     except ValueError as error:
         raise LifecycleError("synthetic canary cleanup preview is invalid") from error
     if (

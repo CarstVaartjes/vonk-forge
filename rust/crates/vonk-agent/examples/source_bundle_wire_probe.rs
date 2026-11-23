@@ -4,6 +4,7 @@ use vonk_agent::build_source::materialize_source_bundle;
 use vonk_agent_protocol::canonical_json;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
     let expected = std::env::args().nth(1).ok_or("source digest is required")?;
     let mut payload = Vec::new();
     io::stdin().read_to_end(&mut payload)?;
@@ -14,7 +15,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err("materialized file differs from verified source".into());
         }
     }
-    use std::io::Write;
     io::stdout().write_all(&canonical_json(&source.files)?)?;
     Ok(())
 }

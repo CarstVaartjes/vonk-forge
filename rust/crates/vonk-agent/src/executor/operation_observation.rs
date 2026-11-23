@@ -85,7 +85,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     pub(super) async fn observe_operation(
         &self,
         claim: &AgentClaim,
-        upgrade: Option<super::upgrade_observation::UpgradeObservation<'_>>,
+        upgrade: Option<upgrade_observation::UpgradeObservation<'_>>,
     ) -> OperationObservation {
         let kind = ObservationKind::of(&claim.operation);
         let pending = |cause, reason| {
@@ -103,7 +103,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         &self,
         claim: &AgentClaim,
         kind: ObservationKind,
-        upgrade: Option<super::upgrade_observation::UpgradeObservation<'_>>,
+        upgrade: Option<upgrade_observation::UpgradeObservation<'_>>,
     ) -> Result<OperationObservation, ProbeError> {
         use vonk_agent_protocol::generated::AgentClaimPayload as Payload;
         let unknown = |reason| {
@@ -117,9 +117,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             OperationObservation::Blocked(PendingObservation::new(claim, cause, reason))
         };
         match kind {
-            ObservationKind::Upgrade => {
-                Ok(super::upgrade_observation::observe_upgrade(claim, upgrade))
-            }
+            ObservationKind::Upgrade => Ok(upgrade_observation::observe_upgrade(claim, upgrade)),
             ObservationKind::Start | ObservationKind::Stop | ObservationKind::JobRun => {
                 Ok(self.observe_runtime(claim).await)
             }
@@ -413,7 +411,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
 }
 
 /// Runs before receipt delivery and claims, including an entirely idle fleet.
-/// Startup reaches this same pass through run_once; it never dispatches effects.
+/// Startup reaches this same pass through `run_once`; it never dispatches effects.
 /// A claim this process is executing (on the lane or beside it) is its
 /// executor's to settle and is never probed.
 pub async fn reobserve_operations<E: Executor>(
@@ -422,7 +420,7 @@ pub async fn reobserve_operations<E: Executor>(
     now: DateTime<Utc>,
 ) -> Result<(), StateError> {
     for claim in state.observation_claims()? {
-        if super::off_lane::Executing::contains(state, claim.fence) {
+        if Executing::contains(state, claim.fence) {
             continue;
         }
         let Some(observation) = executor.observe(&claim).await else {
@@ -502,7 +500,7 @@ pub(super) async fn observing_during<F: Future, C: LoopClient, E: Executor>(
         if let Err(error) = reobserve_operations(&mut state, executor, Utc::now()).await {
             eprintln!("vonk-agent: periodic operation observation deferred: {error}");
         }
-        if let Err(error) = super::agent_loop::deliver_retained(client, &mut state).await {
+        if let Err(error) = deliver_retained(client, &mut state).await {
             eprintln!("vonk-agent: periodic receipt delivery deferred: {error}");
         }
         Some(((), Some(state)))

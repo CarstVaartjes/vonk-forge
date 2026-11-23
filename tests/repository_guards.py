@@ -65,6 +65,10 @@ GUARDS: tuple[str, ...] = (
 
 SCOPED: tuple[tuple[str, str], ...] = (
     (
+        "tests/scripts/test_touched_tests.py",
+        "scripts/test changed selects a test its patch edits, one importing a touched module directly or through test support modules, and not an unrelated one.",
+    ),
+    (
         "control/tests/test_missing_acceptance_retryable.py",
         "A mutation that returns without writing its owner row answers the retryable 503, then resolves once the row exists.",
     ),
@@ -99,6 +103,14 @@ SCOPED: tuple[tuple[str, str], ...] = (
     (
         "tests/scripts/test_nas_image_janitor.py",
         "NAS daemon platform-image selection, persisted grace, deletion refusal recovery and lost-network re-attachment.",
+    ),
+    (
+        "control/tests/test_run_group_health.py",
+        "A starting group is not degraded and raises no attention; a dropped or missing rank still is; no whole-tree scan.",
+    ),
+    (
+        "tests/cluster_profiles/test_follow_feed.py",
+        "Follow view renders the Controller's rate, ETA and per-Spark bars and keeps its terminal and pipe cadence; no whole-tree scan.",
     ),
     (
         "tests/cluster_profiles/test_cli_job_receipts.py",

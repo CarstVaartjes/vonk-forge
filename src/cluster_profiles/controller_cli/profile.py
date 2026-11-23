@@ -22,7 +22,6 @@ from cluster_profiles.controller_cli.common import (
 )
 from cluster_profiles.controller_cli.confirmation import (
     _confirm_action,
-    _require_confirmation,
 )
 from cluster_profiles.controller_cli.observation import _bounded_timeout, _poll_path
 from cluster_profiles.controller_cli.profile_authoring import _profile_authoring
@@ -395,7 +394,6 @@ def _profile(
                 terminal=lambda _: True,
                 attempts=3,
             )
-        _require_confirmation(args, "profile load")
         return _load_profile(
             args,
             client,

@@ -19,7 +19,10 @@ from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.state_machines import AssetAvailability
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-from vonk_control.fleet_model_removal_contract import FleetModelRemovalEffects
+from vonk_control.fleet_model_removal_contract import (
+    FleetModelRemovalEffects,
+    FleetRemovalDisposition,
+)
 from vonk_control.strict_json import StrictJSONModel
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -128,17 +131,44 @@ class CacheRemovalReviewContent(_CacheRemovalModel):
         _require_review_byte_budget(self.model_dump(mode="json", exclude_none=False))
         return self
 
+    def is_submittable(self) -> bool:
+        """Whether confirming would remove something: nothing blocks it and at
+        least one asset, or one file on a Spark, goes."""
+
+        if self.blockers:
+            return False
+        if any(
+            asset.disposition == CacheAssetDisposition.REMOVE for asset in self.assets
+        ):
+            return True
+        fleet = self.fleet
+        return fleet is not None and (
+            fleet.nas_remove
+            or any(
+                item.disposition == FleetRemovalDisposition.REMOVE
+                for target in fleet.targets
+                for item in (*target.objects, *target.installations)
+            )
+        )
+
 
 class CacheRemovalReview(CacheRemovalReviewContent):
     """A complete review whose digest is verified during model validation."""
 
     review_digest: Digest
+    #: The one rule for offering Confirm, read by the web UI and vonkctl: true
+    #: when nothing blocks the removal and something would be removed.
+    submittable: bool
 
     @model_validator(mode="after")
     def digest_matches_content(self) -> CacheRemovalReview:
         expected = cache_removal_review_digest(self)
         if self.review_digest != expected:
             raise ValueError("cache-removal review digest does not match its content")
+        if self.submittable != self.is_submittable():
+            raise ValueError(
+                "cache-removal review submittable does not match its content"
+            )
         return self
 
 
@@ -186,6 +216,7 @@ def _canonical_content(content: CacheRemovalReviewContent) -> dict[str, object]:
     document = normalized.model_dump(mode="json", exclude_none=False)
     document.pop("observed_at")
     document.pop("review_digest", None)
+    document.pop("submittable", None)
     return document
 
 
@@ -215,6 +246,7 @@ def seal_cache_removal_review(
         {
             **normalized.model_dump(mode="json", exclude_none=False),
             "review_digest": cache_removal_review_digest(normalized),
+            "submittable": normalized.is_submittable(),
         }
     )
 

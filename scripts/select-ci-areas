@@ -167,7 +167,14 @@ def lane_selected(paths: Iterable[str], event: str) -> bool:
 # The member tier runs rust-quality (fmt, clippy) only when Rust changed. The
 # Rust build also reads Python, schema and lock inputs (its build.rs exports the
 # wire schema from them); build.rs is the one owner of that list, read here.
-RUST_INPUTS = ("rust/", ".cargo/", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml")
+RUST_INPUTS = (
+    "rust/",
+    ".cargo/",
+    "Cargo.toml",
+    "Cargo.lock",
+    "clippy.toml",
+    "rust-toolchain.toml",
+)
 WIRE_BUILD_SCRIPT = "rust/crates/vonk-agent-protocol/build.rs"
 
 

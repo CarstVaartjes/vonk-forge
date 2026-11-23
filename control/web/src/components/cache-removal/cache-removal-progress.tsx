@@ -10,6 +10,7 @@ import {
   type CacheRemovalReceipt,
 } from "./cache-removal-operations";
 import { failureNotice } from "../../lib/error-display";
+import { phaseWords } from "../../lib/phase-words";
 import { useToast } from "../ui/toast";
 import { CacheRemovalReviewDetails } from "./cache-removal-review";
 
@@ -26,7 +27,7 @@ export function CacheRemovalProgress({
   api: ControlApi;
   intent: CacheRemovalIntent;
   initial: CacheRemovalReceipt | null;
-  initialError?: string;
+  initialError?: string | undefined;
   onComplete(): void;
   onDismiss(): void;
   onRejected(message: string): void;
@@ -125,7 +126,7 @@ export function CacheRemovalProgress({
   }
 
   return (
-    <div className="library-cache-action" aria-label="Cache removal progress">
+    <section className="library-cache-action" aria-label="Cache removal progress">
       <CacheRemovalReviewDetails review={intent.review} />
       {receipt ? (
         <p role="status">
@@ -142,7 +143,7 @@ export function CacheRemovalProgress({
       {receipt && "fleet" in receipt && receipt.fleet && (
         <p>Fleet removal deadline: {receipt.fleet.deadline_at}</p>
       )}
-      {receipt?.progress?.phase && <p>{receipt.progress.phase}</p>}
+      {receipt?.progress?.phase && <p>{phaseWords(receipt.progress.phase)}</p>}
       {receipt?.failure && (
         <p role="alert">
           {receipt.failure.code}: {receipt.failure.detail}
@@ -154,7 +155,7 @@ export function CacheRemovalProgress({
         disabled={busy}
         onClick={() => void refresh()}
       >
-        {receipt ? "Refresh removal status" : "Check request status"}
+        Refresh status
       </button>
       {!receipt && requestMissing && (
         <button
@@ -175,6 +176,6 @@ export function CacheRemovalProgress({
           </button>
         )}
       {error && <p role="alert">{error}</p>}
-    </div>
+    </section>
   );
 }

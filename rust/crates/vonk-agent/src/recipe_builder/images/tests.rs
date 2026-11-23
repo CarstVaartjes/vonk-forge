@@ -33,9 +33,9 @@ fn adapter_stage_is_written_only_for_its_own_digest() {
     let directory = tempfile::tempdir().expect("temporary adapter context");
     let path = directory.path().join("Containerfile");
     let accepted = adapter(ADAPTER_STAGE);
-    super::write_adapter_containerfile(&path, &accepted).expect("matching digest");
+    write_adapter_containerfile(&path, &accepted).expect("matching digest");
     assert_eq!(
-        std::fs::read_to_string(&path).expect("written adapter"),
+        fs::read_to_string(&path).expect("written adapter"),
         ADAPTER_STAGE
     );
     // The wrong implementation trusts the declared fields without
@@ -44,9 +44,9 @@ fn adapter_stage_is_written_only_for_its_own_digest() {
         adapter_sha256: "0".repeat(64),
         definition: accepted.definition.clone(),
     };
-    assert!(super::write_adapter_containerfile(&path, &tampered).is_err());
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), ADAPTER_STAGE);
-    super::write_adapter_containerfile(&path, &accepted).unwrap();
+    assert!(write_adapter_containerfile(&path, &tampered).is_err());
+    assert_eq!(fs::read_to_string(&path).unwrap(), ADAPTER_STAGE);
+    write_adapter_containerfile(&path, &accepted).unwrap();
 }
 
 #[test]
@@ -57,15 +57,15 @@ fn digest_bound_adapter_is_consumed_without_a_second_syntax_policy() {
         "FROM scratch\n",
         "FROM ${VONK_RECIPE_IMAGE}\nADD https://example.invalid/x /x\n",
     ] {
-        super::write_adapter_containerfile(&path, &adapter(source)).unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
+        write_adapter_containerfile(&path, &adapter(source)).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
     }
 }
 
 #[test]
 fn adapted_image_evidence_binds_interface_adapter_and_user() {
     let request = adapter(ADAPTER_STAGE);
-    super::inspect_adapted_image(&inspect_payload(&request, "10001:10001", "v1"), &request)
+    inspect_adapted_image(&inspect_payload(&request, "10001:10001", "v1"), &request)
         .expect("matching adapted evidence");
     // The wrong implementation checks only that some label and some user
     // exist, so a different adapter or user would be accepted.
@@ -74,8 +74,7 @@ fn adapted_image_evidence_binds_interface_adapter_and_user() {
         inspect_payload(&request, "10001:10001", "v2"),
         b"linux\tarm64\tv1\tvonk.runtime-contract.vllm.v1\t".to_vec(),
     ] {
-        assert!(super::inspect_adapted_image(&payload, &request).is_err());
-        super::inspect_adapted_image(&inspect_payload(&request, "10001:10001", "v1"), &request)
-            .unwrap();
+        assert!(inspect_adapted_image(&payload, &request).is_err());
+        inspect_adapted_image(&inspect_payload(&request, "10001:10001", "v1"), &request).unwrap();
     }
 }

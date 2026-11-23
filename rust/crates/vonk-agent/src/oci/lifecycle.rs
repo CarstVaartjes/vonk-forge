@@ -275,8 +275,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let lifecycle = self.load_run_lifecycle(run_id)?;
         let stop_timeout = lifecycle
             .as_ref()
-            .map(|(spec, _, _, _)| spec.lifecycle.stop_timeout_seconds)
-            .unwrap_or(30);
+            .map_or(30, |(spec, _, _, _)| spec.lifecycle.stop_timeout_seconds);
         let (
             image_digest,
             registry_index_digest,

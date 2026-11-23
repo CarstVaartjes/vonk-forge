@@ -1,5 +1,7 @@
-#![forbid(unsafe_code)]
-
+#![expect(
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 use chrono::{DateTime, FixedOffset, Utc};
 use serde_json::Value;
 use tempfile::tempdir;
@@ -60,6 +62,7 @@ fn operation_progress(phase: &str) -> OperationProgress {
         activity_sequence: None,
         completed_items: None,
         elapsed_seconds: None,
+        fetched: None,
         eta_seconds: None,
         kind: None,
         last_progress_at: None,

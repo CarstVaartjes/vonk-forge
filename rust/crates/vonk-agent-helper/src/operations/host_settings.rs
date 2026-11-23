@@ -2,7 +2,7 @@
 use super::*;
 
 /// How often the helper checks the host settings.
-pub const HOST_SETTINGS_INTERVAL: Duration = Duration::from_secs(60 * 60);
+pub const HOST_SETTINGS_INTERVAL: Duration = Duration::from_hours(1);
 const SYSTEMCTL: &str = "/usr/bin/systemctl";
 const HEADLESS_TARGET: &str = "multi-user.target";
 // The exact command lines, compiled in: no argument comes from elsewhere.

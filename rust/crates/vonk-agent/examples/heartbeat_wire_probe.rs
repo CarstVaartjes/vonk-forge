@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 //! Parse heartbeat responses with the same strict Rust type used by the agent.
 //!
 //! The connected Controller bridge feeds this probe the response body emitted

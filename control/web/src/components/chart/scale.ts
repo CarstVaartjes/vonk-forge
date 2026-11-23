@@ -64,8 +64,11 @@ export const linePath = (runs: readonly Run[]): string =>
 export const washPath = (runs: readonly Run[], baseline: number): string =>
   runs
     .filter((run) => run.length > 1)
-    .map((run) => {
+    .flatMap((run) => {
+      const first = run[0];
+      const last = run.at(-1);
+      if (!first || !last) return [];
       const line = linePath([run]);
-      return `${line}L${run[run.length - 1][0].toFixed(1)} ${baseline}L${run[0][0].toFixed(1)} ${baseline}Z`;
+      return [`${line}L${last[0].toFixed(1)} ${baseline}L${first[0].toFixed(1)} ${baseline}Z`];
     })
     .join("");

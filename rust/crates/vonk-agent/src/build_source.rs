@@ -139,7 +139,7 @@ fn scan(payload: &[u8]) -> Result<Scanned, BuildSourceError> {
         if size > MAX_FILE_BYTES || total > MAX_TOTAL_BYTES {
             return Err(BuildSourceError::Size);
         }
-        let mut content = Vec::with_capacity(size as usize);
+        let mut content = Vec::with_capacity(usize::try_from(size).unwrap_or_default());
         entry
             .by_ref()
             .take(MAX_FILE_BYTES + 1)
@@ -190,7 +190,11 @@ fn safe_path(path: &Path) -> Result<String, BuildSourceError> {
     for component in path.components() {
         match component {
             Component::Normal(value) if !value.is_empty() => normalized.push(value),
-            _ => return Err(BuildSourceError::Path),
+            Component::Prefix(_)
+            | Component::RootDir
+            | Component::CurDir
+            | Component::ParentDir
+            | Component::Normal(_) => return Err(BuildSourceError::Path),
         }
     }
     let value = normalized.to_str().ok_or(BuildSourceError::Path)?;

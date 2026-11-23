@@ -175,7 +175,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .create(true)
             .truncate(false)
             .mode(0o600)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
             .open(root.join("lock"))?;
         // Another pass is converging and writes the receipt; the next
         // inventory brings this intent again.
@@ -346,6 +346,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 
     /// Leftovers of a crash or reboot: inactive managed files are never reused.
+    #[expect(
+        clippy::unused_self,
+        reason = "a method so it stays beside its siblings behind the same type"
+    )]
     fn remove_inactive_swap_files(&self, root: &Path, active: &[PathBuf]) {
         let Ok(entries) = fs::read_dir(root) else {
             return;
@@ -401,7 +405,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 .write(true)
                 .create_new(true)
                 .mode(0o600)
-                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
                 .open(&temporary)
                 .map_err(io("swap file not created"))?;
             self.swap_command(
@@ -428,7 +432,15 @@ impl<R: CommandRunner> OperationExecutor<R> {
             )
         })();
         if let Err(wait) = created {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = fs::remove_file(&temporary);
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = fs::remove_file(&target);
             return Err(wait);
         }
@@ -547,7 +559,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
 fn read_checkpoint(path: &Path) -> Result<Option<SwapCheckpoint>, OperationError> {
     match OpenOptions::new()
         .read(true)
-        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
+        .custom_flags(
+            (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                .bits()
+                .cast_signed(),
+        )
         .open(path)
     {
         Ok(file) => {

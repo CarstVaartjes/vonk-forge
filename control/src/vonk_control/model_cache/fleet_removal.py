@@ -596,6 +596,7 @@ class FleetRemovalMixin:
                     **review.model_dump(
                         exclude={
                             "review_digest",
+                            "submittable",
                             "fleet",
                             "assets",
                             "nas_reclaimable_bytes",

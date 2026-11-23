@@ -180,15 +180,16 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             let run_id = std::str::from_utf8(name)
                 .ok()
                 .filter(|id| canonical_uuid(id));
-            if entry.file_type() != rustix::fs::FileType::Directory || run_id.is_none() {
+            let Some(run_id) =
+                run_id.filter(|_| entry.file_type() == rustix::fs::FileType::Directory)
+            else {
                 progress.had_failures = true;
                 failures.push(RecipeRunInspectionFailure {
                     run_id: None,
                     error: OciError::Artifact,
                 });
                 continue;
-            }
-            let run_id = run_id.expect("validated UUID");
+            };
             match self.recipe_run_inspection_plan(run_id) {
                 Ok(Some(plan)) => {
                     bytes += plan.target.command.iter().map(String::len).sum::<usize>()
@@ -311,6 +312,10 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         )))
     }
 
+    #[expect(
+        clippy::unused_self,
+        reason = "a method so it stays beside its siblings behind the same type"
+    )]
     pub(super) fn read_run_lifecycle(&self, path: &Path) -> Result<Option<RunLifecycle>, OciError> {
         read_run_lifecycle(path)
     }

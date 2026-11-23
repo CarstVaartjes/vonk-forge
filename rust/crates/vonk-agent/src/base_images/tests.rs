@@ -131,7 +131,7 @@ fn warm_archive_identity_ignores_reference_spelling_but_enforces_digest_and_plat
 #[test]
 fn truncated_managed_layer_is_not_reused() {
     let (bytes, image, layer) = fixture();
-    let source = Cursor::new(bytes[..layer.end as usize - 1].to_vec());
+    let source = Cursor::new(bytes[..usize::try_from(layer.end).unwrap() - 1].to_vec());
     let budget = TransferBudget {
         deadline: Instant::now() + Duration::from_secs(10),
         cancelled: &|| false,

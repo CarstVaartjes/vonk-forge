@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 //! Exercise the actual enrollment request and certificate response parsers.
 
 use std::io::{self, BufRead, Write};

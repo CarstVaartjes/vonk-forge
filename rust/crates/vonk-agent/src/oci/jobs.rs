@@ -74,7 +74,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             if entry.file_type()?.is_file() {
                 OpenOptions::new()
                     .read(true)
-                    .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+                    .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
                     .open(entry.path())?
                     .sync_all()?;
             }

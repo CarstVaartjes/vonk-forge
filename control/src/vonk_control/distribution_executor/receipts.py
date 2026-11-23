@@ -264,6 +264,8 @@ def project_child(session: Session, child: Job, now: datetime) -> _ChildView:
                 if state == LifecycleState.RUNNING
                 else None,
                 activity=measured.activity if state == LifecycleState.RUNNING else None,
+                observed_at=measured.observed_at,
+                last_progress_at=measured.last_progress_at,
             )
         )
     if not members:

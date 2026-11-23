@@ -87,12 +87,17 @@ class ProjectionCode(WireEnum):
     HOST_DISPLAY_MEMORY = "host.display-memory"
     #: The GPU clock ceiling is not applied: sustained load can power it off.
     HOST_GPU_CLOCK_UNCAPPED = "host.gpu-clock-uncapped"
+    #: Kernel page tables left by exited workloads fragment memory; only a
+    #: reboot returns them. Advice, never an action.
+    HOST_MEMORY_FRAGMENTED = "host.memory-fragmented"
     #: Active swap is below the desired size: big loads lose their cushion.
     HOST_SWAP_SHORT = "host.swap-short"
     MODEL_STORE_LAYOUT = "model.store_layout"
     INSTALL_PARTIAL = "install.partial"
     INVENTORY_MISSING = "inventory.missing"
     INVENTORY_STALE = "inventory.stale"
+    #: One RDMA device of a cabled port stays flat while its sibling carries traffic.
+    NETWORK_RAILS_UNDERUSED = "network.rails-underused"
     NETWORK_NAS_ROUTE_WIFI_NO_WIRED_PORT = "network.nas-route-wifi-no-wired-port"
     NETWORK_NAS_ROUTE_WIFI_WIRED_PORT_DOWN = "network.nas-route-wifi-wired-port-down"
     NETWORK_NAS_ROUTE_WIFI_WIRED_PORT_UNUSED = (

@@ -39,14 +39,14 @@ export function nodeHealth(
     installationId?: string;
   }[] = [];
   const { status, reasons } = nodeStatus(node, now);
-  reasons.forEach((reason, index) =>
+  for (const [index, reason] of reasons.entries()) {
     rows.push({
       key: `status-${index}`,
       tone: nodeStatusTone(status),
       title: status === "offline" ? "Offline" : "Attention",
       detail: reason,
-    }),
-  );
+    });
+  }
   const alerts = (attention ?? []).filter((alert) => alert.labels.node_id === node.id);
   for (const alert of alerts)
     rows.push({

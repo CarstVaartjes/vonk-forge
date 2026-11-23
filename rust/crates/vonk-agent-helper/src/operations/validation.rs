@@ -165,7 +165,7 @@ pub(super) fn validate_docker_run_with_archive(
                 index += 1;
                 match arguments.get(index).map(String::as_str) {
                     Some(vonk_agent_protocol::WORKLOAD_MEMLOCK_ULIMIT) if !memlock => {
-                        memlock = true
+                        memlock = true;
                     }
                     Some("stack=67108864:67108864") if !stack => stack = true,
                     _ => return Err(OperationError::InvalidOperation),
@@ -608,7 +608,7 @@ pub(super) fn validate_docker_run_with_archive(
         return Err(OperationError::UnsafePath);
     }
     let mut compiled_arguments = arguments.to_vec();
-    compiled_arguments[index] = image_reference.clone();
+    compiled_arguments[index].clone_from(&image_reference);
     let tmp_root = outputs.join("tmp").join(state_run_id);
     Ok(ValidatedDockerRun {
         local_image_reference: image_reference,

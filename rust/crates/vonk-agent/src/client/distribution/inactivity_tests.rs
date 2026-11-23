@@ -16,12 +16,12 @@ const WINDOW: Duration = Duration::from_millis(400);
 /// Serve each ranged request whole, split into `chunks` parts: write the first
 /// `sent` of them one `pause` apart, then hold the connection open in silence.
 fn dripping_server(body: &'static [u8], chunks: usize, sent: usize, pause: Duration) -> String {
-    let listener = std::net::TcpListener::bind(FIXTURE_BIND).unwrap();
+    let listener = TcpListener::bind(FIXTURE_BIND).unwrap();
     let address = listener.local_addr().unwrap();
-    std::thread::spawn(move || {
+    thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { return };
-            std::thread::spawn(move || {
+            thread::spawn(move || {
                 let deadline = std::time::Instant::now() + Duration::from_secs(5);
                 let mut head = Vec::new();
                 let mut byte = [0_u8; 1];
@@ -32,6 +32,10 @@ fn dripping_server(body: &'static [u8], chunks: usize, sent: usize, pause: Durat
                     head.push(byte[0]);
                 }
                 let length = body.len();
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "the peer may have closed the connection; the assertions are on the other side"
+                )]
                 let _ = write!(
                     stream,
                     "HTTP/1.1 206 Partial Content\r\nContent-Length: {length}\r\n\
@@ -40,7 +44,7 @@ fn dripping_server(body: &'static [u8], chunks: usize, sent: usize, pause: Durat
                     hex_sha256(body),
                 );
                 for part in body.chunks(length.div_ceil(chunks)).take(sent) {
-                    std::thread::sleep(pause);
+                    thread::sleep(pause);
                     if stream
                         .write_all(part)
                         .and_then(|()| stream.flush())
@@ -50,6 +54,10 @@ fn dripping_server(body: &'static [u8], chunks: usize, sent: usize, pause: Durat
                     }
                 }
                 // Silence: the connection stays open until the client leaves.
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "the peer may have closed the connection; the assertions are on the other side"
+                )]
                 let _ = stream.read(&mut [0_u8; 1]);
             });
         }
@@ -94,7 +102,7 @@ async fn a_range_that_keeps_dripping_completes_however_long_it_takes() {
         .await
         .unwrap();
     assert!(started.elapsed() > WINDOW * 2);
-    assert_eq!(std::fs::read(root.path().join("object")).unwrap(), BODY);
+    assert_eq!(fs::read(root.path().join("object")).unwrap(), BODY);
 }
 
 #[tokio::test]
@@ -147,5 +155,5 @@ async fn a_slot_wait_longer_than_the_window_does_not_fail_the_range() {
     );
     drop(held);
     transfer.await.unwrap();
-    assert_eq!(std::fs::read(root.path().join("object")).unwrap(), BODY);
+    assert_eq!(fs::read(root.path().join("object")).unwrap(), BODY);
 }

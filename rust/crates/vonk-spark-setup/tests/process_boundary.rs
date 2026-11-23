@@ -1,3 +1,10 @@
+#![expect(
+    clippy::exit,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 mod common;
 
 use std::{
@@ -376,10 +383,10 @@ fn configured_upgrade(paths: &InstallPaths) {
     fs::write(paths.config.with_file_name("setup-state"), b"paired-v1\n").unwrap();
 }
 
-fn run_headless_upgrade_process(root: PathBuf) {
-    let paths = install_paths(&root);
+fn run_headless_upgrade_process(root: &Path) {
+    let paths = install_paths(root);
     configured_upgrade(&paths);
-    let (request, authority) = signed_request(&root);
+    let (request, authority) = signed_request(root);
     let receipt = root.join("sudo-receipt");
     fs::write(
         &paths.sudo,
@@ -406,10 +413,10 @@ fn run_headless_upgrade_process(root: PathBuf) {
     handoff_to_root_with_authority(&prepared, &mut ProcessRunner, &authority).unwrap();
 }
 
-fn run_fresh_handoff_process(root: PathBuf) {
-    let paths = install_paths(&root);
+fn run_fresh_handoff_process(root: &Path) {
+    let paths = install_paths(root);
     fs::create_dir_all(paths.config.parent().unwrap()).unwrap();
-    let (request, authority) = signed_request(&root);
+    let (request, authority) = signed_request(root);
     let ca = rcgen::generate_simple_self_signed(vec!["controller.example.test".to_owned()])
         .unwrap()
         .cert
@@ -463,8 +470,8 @@ fn run_fresh_handoff_process(root: PathBuf) {
     handoff_to_root_with_authority(&prepared, &mut ProcessRunner, &authority).unwrap();
 }
 
-fn run_apply_process(root: PathBuf) {
-    let paths = install_paths(&root);
+fn run_apply_process(root: &Path) {
+    let paths = install_paths(root);
     let authority =
         ReleaseAuthority::from_pem(fs::read(root.join("test-public.pem")).unwrap()).unwrap();
     let executable = paths
@@ -549,8 +556,8 @@ impl CommandRunner for PtyApplyRunner {
     fn sleep(&mut self, _duration: std::time::Duration) {}
 }
 
-fn run_pty_apply_process(root: PathBuf, executable: PathBuf) {
-    let mut paths = install_paths(&root);
+fn run_pty_apply_process(root: &Path, executable: &Path) {
+    let mut paths = install_paths(root);
     paths.sudo = PathBuf::from("/usr/bin/sudo");
     paths.required_owner = Some(0);
     let authority =
@@ -578,7 +585,7 @@ fn run_pty_apply_process(root: PathBuf, executable: PathBuf) {
     };
     let result = apply_setup_from_with_authority(
         frame.as_slice(),
-        &executable,
+        executable,
         &paths,
         &mut runner,
         CallerIdentity::current().unwrap(),
@@ -750,7 +757,7 @@ fn caller_bound_frame(uid: u32) -> Vec<u8> {
     .unwrap();
     let mut frame = Vec::new();
     frame.extend_from_slice(MAGIC);
-    frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    frame.extend_from_slice(&u32::try_from(payload.len()).unwrap().to_be_bytes());
     frame.extend_from_slice(&payload);
     frame.extend_from_slice(&Sha256::digest(&payload));
     frame
@@ -790,9 +797,9 @@ fn compiled_cli_rejects_direct_apply_from_the_unprivileged_phase() {
 fn headless_upgrade_reaches_the_real_stdin_only_sudo_boundary() {
     if let Ok(root) = std::env::var(HELPER_ROOT) {
         if std::env::var_os(APPLY_HELPER).is_some() {
-            run_apply_process(PathBuf::from(root));
+            run_apply_process(Path::new(&root));
         } else {
-            run_headless_upgrade_process(PathBuf::from(root));
+            run_headless_upgrade_process(Path::new(&root));
         }
         return;
     }
@@ -890,7 +897,7 @@ fn headless_upgrade_reaches_the_real_stdin_only_sudo_boundary() {
 fn real_sudo_process_receives_the_pairing_token_only_in_the_bounded_stdin_frame() {
     const MODE: &str = "VONK_SPARK_FRESH_HANDOFF_HELPER";
     if std::env::var_os(MODE).is_some() {
-        run_fresh_handoff_process(PathBuf::from(std::env::var(HELPER_ROOT).unwrap()));
+        run_fresh_handoff_process(Path::new(&std::env::var(HELPER_ROOT).unwrap()));
         return;
     }
     let temporary = tempdir().unwrap();
@@ -947,8 +954,8 @@ fn real_sudo_pty_foreground_auth_then_recover_without_reinstall() {
     const APPLY_SETUP: &str = "VONK_REAL_SUDO_PTY_APPLY_SETUP";
     if let Ok(executable) = std::env::var(APPLY_SETUP) {
         run_pty_apply_process(
-            PathBuf::from(std::env::var(ROOT).unwrap()),
-            PathBuf::from(executable),
+            Path::new(&std::env::var(ROOT).unwrap()),
+            Path::new(&executable),
         );
         return;
     }

@@ -1,7 +1,7 @@
 //! Typed counterpart of the canonical Pydantic operation progress graph.
 use crate::ProtocolError;
 pub use crate::generated::{
-    OperationCheckpoint, OperationMemberProgress, OperationProgress,
+    NetworkFetch, OperationCheckpoint, OperationMemberProgress, OperationProgress,
     OperationProgressActivity as ProgressActivity,
 };
 use chrono::DateTime;
@@ -13,6 +13,10 @@ fn bounded(value: &str, max: usize) -> bool {
 fn number(value: Option<f64>, max: f64) -> bool {
     value.is_none_or(|v| v.is_finite() && v >= 0.0 && v <= max)
 }
+#[expect(
+    clippy::ref_option,
+    reason = "mirrors the wire field type that serde hands over by reference"
+)]
 fn timestamp(value: &Option<String>) -> bool {
     value
         .as_ref()
@@ -96,6 +100,7 @@ impl OperationProgress {
             || !number(self.smoothed_bytes_per_second, 1e15)
             || !number(self.eta_seconds, 1e9)
             || !number(self.elapsed_seconds, f64::MAX)
+            || !number(self.fetched.as_ref().map(|fetch| fetch.seconds), f64::MAX)
             || !timestamp(&self.observed_at)
             || !timestamp(&self.last_progress_at)
             || self.total_bytes_known != self.total_bytes.is_some()
@@ -129,4 +134,32 @@ fn valid_sha256(value: &str) -> bool {
         && value
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+#[cfg(test)]
+mod fetched_vector_tests {
+    use super::*;
+
+    #[test]
+    fn the_shared_fetched_vector_round_trips_and_invalid_documents_are_refused() {
+        let vector: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/operation-progress-fetched-v1.json"
+        ))
+        .unwrap();
+        for document in vector["valid"].as_array().unwrap() {
+            let progress: OperationProgress =
+                crate::parse_strict(&serde_json::to_vec(document).unwrap()).unwrap();
+            progress.validate().unwrap();
+            let again = serde_json::to_value(&progress).unwrap();
+            assert_eq!(
+                again["fetched"],
+                document.get("fetched").cloned().unwrap_or_default()
+            );
+        }
+        for document in vector["invalid"].as_array().unwrap() {
+            let parsed =
+                crate::parse_strict::<OperationProgress>(&serde_json::to_vec(document).unwrap());
+            assert!(parsed.is_err());
+        }
+    }
 }

@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { vi } from "vitest";
-import type { ControlApi } from "../../api/types";
+import type { ControlApi, LibraryViewRecipe, LibraryViewSnapshot } from "../../api/types";
+import { CacheOperationKind } from "../../api/vocabulary.generated";
 import {
   activeFilterSummary,
   buildLibraryRecipeRecords,
@@ -24,6 +25,27 @@ import {
   modelKey,
 } from "../../lib/library-route";
 import { formatBytes } from "../../lib/fleet";
+
+/** The snapshot with every recipe in one cache state, as the Controller would list its actions. */
+function withRecipeState(
+  controller: LibraryViewRecipe["local"]["controller"],
+  actions: LibraryViewRecipe["actions"],
+  preparation: LibraryViewRecipe["local"]["preparation"] = null,
+): LibraryViewSnapshot {
+  const state = (recipe: LibraryViewRecipe): LibraryViewRecipe => ({
+    ...recipe,
+    local: { controller, running_on: [], preparation },
+    actions,
+  });
+  return {
+    ...libraryViewSnapshot,
+    models: libraryViewSnapshot.models.map((model) => ({
+      ...model,
+      recipes: model.recipes.map(state),
+    })),
+    unlinked_recipes: libraryViewSnapshot.unlinked_recipes.map(state),
+  };
+}
 
 test("renders every selected model's own recipe identities", () => {
   const model = libraryViewSnapshot.models.find((entry) => entry.recipes.length > 1)!;
@@ -134,7 +156,7 @@ test("removes a recipe only after an explicit model choice", async () => {
       onQueryChange={() => undefined}
       query=""
       route={{ kind: LibraryPath.MODELS, modelKey: modelKey(base.model) }}
-      snapshot={libraryViewSnapshot}
+      snapshot={withRecipeState("cached", [CacheOperationKind.REMOVE])}
     />,
   );
 
@@ -142,7 +164,6 @@ test("removes a recipe only after an explicit model choice", async () => {
   // one before issuing any request.
   fireEvent.click(screen.getAllByRole("button", { name: "Remove recipe" })[0]!);
   expect(removeRecipe).not.toHaveBeenCalled();
-  fireEvent.click(screen.getAllByRole("button", { name: "Keep the model" })[0]!);
   await waitFor(() =>
     expect(screen.getByLabelText("Cache removal review")).toHaveTextContent("42 bytes"),
   );
@@ -280,7 +301,6 @@ test("keeps same-Model Recipe variants together and shows creator attribution", 
 
   const pane = screen.getByLabelText("Recipes matching selected Model");
   expect(new Set(records.map((record) => record.key)).size).toBe(records.length);
-  expect(screen.getAllByRole("button", { name: "Remove recipe" })).toHaveLength(records.length);
   expect(pane).toHaveTextContent(records[0]!.recipe!.recipe_document.provenance.attribution[0]!);
   expect(pane).toHaveTextContent(records[0]!.recipe!.recipe_document.runtime.engine);
   expect(pane).toHaveTextContent(records[1]!.recipe!.recipe_document.runtime.engine);
@@ -577,7 +597,7 @@ test("the Models list starts with one page and Show more reveals the rest", () =
   render(renderBulk(bulkSnapshot(45), 0));
   const list = within(screen.getByLabelText("Models"));
   expect(list.getAllByRole("listitem")).toHaveLength(40);
-  fireEvent.click(list.getByRole("button", { name: "Show more (5 more models)" }));
+  fireEvent.click(screen.getByRole("button", { name: "Show more (5 more models)" }));
   expect(list.getAllByRole("listitem")).toHaveLength(45);
 });
 
@@ -592,7 +612,7 @@ test("Show more starts over when a filter changes", () => {
   const snapshot = bulkSnapshot(45);
   const { rerender } = render(renderBulk(snapshot, 0));
   const list = within(screen.getByLabelText("Models"));
-  fireEvent.click(list.getByRole("button", { name: /^Show more/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^Show more/ }));
   expect(list.getAllByRole("listitem")).toHaveLength(45);
   rerender(renderBulk(snapshot, 0, { ...EMPTY_LIBRARY_WORKCELL_FILTERS, sort: "name" }));
   expect(list.getAllByRole("listitem")).toHaveLength(40);
@@ -674,4 +694,70 @@ test("the Model row keeps its title and link when the filters change", () => {
     }),
   );
   expect(row()).toHaveAttribute("href", modelLibraryPath(modelKey(short.model)));
+});
+
+test.each([
+  ["not_cached", [CacheOperationKind.DOWNLOAD], { download: true, remove: false }],
+  ["cached", [CacheOperationKind.REMOVE], { download: false, remove: true }],
+  [
+    "failed",
+    [CacheOperationKind.DOWNLOAD, CacheOperationKind.REMOVE],
+    { download: true, remove: true },
+  ],
+  ["unknown", [], { download: false, remove: false }],
+] as const)(
+  "a %s recipe row offers only the actions the Controller lists",
+  (controller, actions, expected) => {
+    const base = libraryViewSnapshot.models.find((entry) => entry.recipes.length > 0)!;
+    render(
+      <LibraryWorkcell
+        api={{} as never}
+        filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+        onFiltersChange={() => undefined}
+        onNavigate={() => undefined}
+        onQueryChange={() => undefined}
+        query=""
+        route={{ kind: LibraryPath.MODELS, modelKey: modelKey(base.model) }}
+        snapshot={withRecipeState(controller, [...actions])}
+      />,
+    );
+    expect(screen.queryAllByRole("button", { name: /^Download recipe/ }).length > 0).toBe(
+      expected.download,
+    );
+    expect(screen.queryAllByRole("button", { name: "Remove recipe" }).length > 0).toBe(
+      expected.remove,
+    );
+  },
+);
+
+test("a recipe the Controller reports as preparing shows its real progress and Cancel after a reload", () => {
+  const base = libraryViewSnapshot.models.find((entry) => entry.recipes.length > 0)!;
+  render(
+    <LibraryWorkcell
+      api={{} as never}
+      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+      onFiltersChange={() => undefined}
+      onNavigate={() => undefined}
+      onQueryChange={() => undefined}
+      query=""
+      route={{ kind: LibraryPath.MODELS, modelKey: modelKey(base.model) }}
+      snapshot={withRecipeState(
+        "preparing",
+        [CacheOperationKind.CANCEL, CacheOperationKind.FOLLOW],
+        {
+          operation_id: "11111111-1111-4111-8111-111111111111",
+          state: "running",
+          phase: "downloading",
+          completed_bytes: 512,
+          total_bytes: 1024,
+          blockers: [],
+        },
+      )}
+    />,
+  );
+  expect(screen.getAllByRole("button", { name: "Cancel recipe download" }).length).toBeGreaterThan(
+    0,
+  );
+  expect(screen.getAllByRole("status")[0]).toHaveTextContent("50%");
+  expect(screen.queryByRole("button", { name: /^Download recipe/ })).toBeNull();
 });

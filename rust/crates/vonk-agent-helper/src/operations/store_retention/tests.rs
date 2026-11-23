@@ -364,7 +364,7 @@ fn interrupted_store_collection_does_not_poison_future_retention() {
     assert!(!scope.exists());
 }
 
-fn managed_containers(count: usize) -> Vec<crate::operations::test_support::Container> {
+fn managed_containers(count: usize) -> Vec<test_support::Container> {
     (0..count)
         .map(|number| {
             job(
@@ -391,11 +391,7 @@ fn owner_collection_completes_however_many_managed_containers_exist() {
         .unwrap();
     assert_eq!(owners.runtimes.len(), 500);
     assert_eq!(owners.mounts.len(), 500 * 200);
-    assert!(
-        owners
-            .installations
-            .contains(crate::operations::test_support::INSTALLATION)
-    );
+    assert!(owners.installations.contains(test_support::INSTALLATION));
     // One listing and ceil(500 / OWNER_BATCH) inspections; no re-listing.
     assert_eq!(
         host.calls.lock().unwrap().len(),

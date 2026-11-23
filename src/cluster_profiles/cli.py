@@ -44,7 +44,7 @@ from cluster_profiles.cli_outcome import (
 from cluster_profiles.cli_presentations import PRESENTATIONS
 from cluster_profiles.cli_render.common import terminal_text
 from cluster_profiles.cli_render.dispatch import render_payload
-from cluster_profiles.cli_render.progress import progress_line
+from cluster_profiles.cli_render.follow import FollowFeed
 from cluster_profiles.cli_update import (
     CliUpdateError,
     begin_interactive_update_check,
@@ -646,6 +646,7 @@ def _emit(
             safe,
             getattr(args, "command", None) or "profile",
             wide=getattr(args, "wide", False),
+            show_all=getattr(args, "show_all", False),
             action=(
                 "connection"
                 if getattr(args, "check_connection", False)
@@ -872,22 +873,30 @@ def _main(
             )
             return 0
         last_progress: str | None = None
+        feed = FollowFeed(
+            sys.stderr,
+            tty=sys.stderr.isatty() and not args.no_input,
+            clean=_sanitize_text,
+        )
 
         def render_watch(observed: Mapping[str, object]) -> None:
             nonlocal last_progress
             loginfo = getattr(args, "fleet_action", None) == "loginfo"
             if loginfo and not getattr(args, "follow", False):
                 return
-            if getattr(args, "watch", False) or loginfo:
-                buffer = StringIO()
-                with redirect_stderr(buffer):
-                    _emit(observed, args, error=True)
-                message = buffer.getvalue().rstrip()
-            else:
-                message = _sanitize_text(progress_line(observed))
             observation = getattr(args, "observation", None)
-            if isinstance(observation, Observation) and observation.error:
-                message = f"Reconnecting: {observation.error}; last confirmed {message}"
+            note = (
+                f"Reconnecting: {observation.error}; last confirmed "
+                if isinstance(observation, Observation) and observation.error
+                else ""
+            )
+            if not (getattr(args, "watch", False) or loginfo):
+                feed.show(observed, note)
+                return
+            buffer = StringIO()
+            with redirect_stderr(buffer):
+                _emit(observed, args, error=True)
+            message = note + buffer.getvalue().rstrip()
             if message != last_progress:
                 encoding = sys.stderr.encoding or "utf-8"
                 print(
@@ -898,11 +907,14 @@ def _main(
 
         if not args.global_json and not getattr(args, "json", False):
             args._watch_callback = render_watch
-        result = run_controller(
-            args,
-            client,
-            request_id_factory or (lambda: str(uuid.uuid4())),
-        )
+        try:
+            result = run_controller(
+                args,
+                client,
+                request_id_factory or (lambda: str(uuid.uuid4())),
+            )
+        finally:
+            feed.close()
         outcome = CommandOutcome.from_command(args, result)
         if (
             outcome.observation

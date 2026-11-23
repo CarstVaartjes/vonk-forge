@@ -13,7 +13,7 @@ async fn refused_control_reports_and_resumes_without_certificate_change() {
         while tokio::time::Instant::now() < deadline {
             if authority
                 .observe_before_claim(async { reports.set(reports.get() + 1) }, |s| {
-                    statuses.borrow_mut().push(s.to_owned())
+                    statuses.borrow_mut().push(s.to_owned());
                 })
                 .await
                 .is_none()
@@ -55,7 +55,7 @@ async fn running_workloads_are_reported_while_a_long_claim_executes() {
     let reports = RefCell::new(Vec::new());
     let output = super::observing_during(
         async {
-            tokio::time::sleep(Duration::from_secs(40 * 60)).await;
+            tokio::time::sleep(Duration::from_mins(40)).await;
             "downloaded"
         },
         super::RUN_OBSERVATION_INTERVAL,
@@ -66,13 +66,9 @@ async fn running_workloads_are_reported_while_a_long_claim_executes() {
     let reports = reports.into_inner();
     // The Controller calls a rank stale after five minutes of silence.
     let mut last = Duration::ZERO;
-    for at in reports
-        .iter()
-        .copied()
-        .chain([Duration::from_secs(40 * 60)])
-    {
+    for at in reports.iter().copied().chain([Duration::from_mins(40)]) {
         assert!(
-            at - last < Duration::from_secs(60),
+            at.checked_sub(last).unwrap() < Duration::from_secs(60),
             "silent from {last:?} to {at:?}"
         );
         last = at;
@@ -143,8 +139,8 @@ async fn inventory_lane_survives_refusal_and_reports_after_recovery() {
     );
     tokio::pin!(lane);
     tokio::select! {
-        _ = &mut lane => panic!("inventory lane exited"),
-        _ = tokio::time::sleep(Duration::from_secs(180)) => {}
+        () = &mut lane => panic!("inventory lane exited"),
+        () = tokio::time::sleep(Duration::from_secs(180)) => {}
     }
     assert!(recovered.get());
 }
@@ -172,12 +168,12 @@ async fn inventory_collections(stop_at: Option<u64>) -> Vec<u64> {
                 tokio::time::sleep(Duration::from_secs(at)).await;
                 stops.stopped();
             }
-            future::pending::<()>().await
+            future::pending::<()>().await;
         };
         tokio::select! {
-            _ = &mut lane => panic!("inventory lane exited"),
-            _ = stop => {}
-            _ = tokio::time::sleep(Duration::from_secs(130)) => {}
+            () = &mut lane => panic!("inventory lane exited"),
+            () = stop => {}
+            () = tokio::time::sleep(Duration::from_secs(130)) => {}
         }
     }
     collected.into_inner()
@@ -194,6 +190,8 @@ async fn completed_stop_collects_on_a_bounded_schedule_and_leaves_the_cadence_al
     }
     assert!((120..=122).contains(&times[5]), "{times:?}");
 }
+
+type GpuMemoryReader = fn() -> Option<u64>;
 
 #[tokio::test(start_paused = true)]
 async fn only_a_done_recipe_stop_arms_the_post_stop_schedule() {
@@ -242,10 +240,17 @@ async fn only_a_done_recipe_stop_arms_the_post_stop_schedule() {
         (AgentOperation::RecipeStart, done(), false),
     ] {
         let stops = PostStopInventory::default();
+        let data = tempfile::tempdir().unwrap();
         let executor = super::CustodyExecutor {
             executor: &Fake(result),
             available: true,
             stops: stops.clone(),
+            memory: Arc::new(vonk_agent::memory_readings::Ledger::open(
+                std::path::Path::new("/nonexistent"),
+                data.path(),
+                4096,
+            )),
+            gpu_memory: || Some(0),
         };
         let mut claim = template.clone();
         claim.operation = operation;
@@ -254,6 +259,43 @@ async fn only_a_done_recipe_stop_arms_the_post_stop_schedule() {
             .await;
         let first = tokio::time::Instant::now() + Duration::from_secs(31);
         assert_eq!(stops.due(first), armed, "{:?}", claim.operation);
+    }
+
+    // A stop that never completed freezes nothing: the next completed stop
+    // with no GPU process is a reading, and one with a GPU process is not.
+    let host = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let proc = host.path().join("proc");
+    std::fs::create_dir_all(proc.join("sys/kernel/random")).unwrap();
+    std::fs::write(
+        proc.join("sys/kernel/random/boot_id"),
+        "6f1c1d8e-0000-4000-8000-000000000001\n",
+    )
+    .unwrap();
+    std::fs::write(proc.join("meminfo"), "SecPageTables: 100 kB\n").unwrap();
+    let memory = Arc::new(vonk_agent::memory_readings::Ledger::open(
+        host.path(),
+        data.path(),
+        4096,
+    ));
+    let mut stop = template.clone();
+    stop.operation = AgentOperation::RecipeStop;
+    let cases: [(ExecutionResult, GpuMemoryReader, bool); 4] = [
+        (ExecutionResult::failed("no"), || Some(0), false),
+        (done(), || Some(1 << 30), false),
+        (done(), || None, false),
+        (done(), || Some(0), true),
+    ];
+    for (result, gpu_memory, recorded) in cases {
+        let executor = super::CustodyExecutor {
+            executor: &Fake(result),
+            available: true,
+            stops: PostStopInventory::default(),
+            memory: memory.clone(),
+            gpu_memory,
+        };
+        executor.execute(&stop, lease.clone(), cancel.clone()).await;
+        assert_eq!(memory.snapshot().is_some(), recorded);
     }
 }
 
@@ -337,7 +379,7 @@ node_id = "spk_0123456789abcdef0123456789abcdef"
                         .map(|_| ())
                         .map_err(Into::into),
                 };
-                std::future::ready(outcome)
+                future::ready(outcome)
             },
             |_| {
                 std::fs::write(&config_path, repaired_config).unwrap();
@@ -444,6 +486,10 @@ async fn failed_inventory_round_keeps_control_available_and_later_recovers() {
     let attempted = Cell::new(false);
     let mut failures = 0;
     let inventory = async {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the outcome of this step is not what the test asserts"
+        )]
         let _ = collect_inventory_until_ready(
             || async {
                 attempted.set(true);

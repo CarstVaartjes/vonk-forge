@@ -160,7 +160,10 @@ fn system_runner_truncates_verbose_diagnostics_without_killing_the_process() {
         )
         .unwrap();
     assert!(output.success);
-    assert_eq!(output.stdout.len(), DIAGNOSTIC_LIMIT as usize);
+    assert_eq!(
+        output.stdout.len(),
+        usize::try_from(DIAGNOSTIC_LIMIT).unwrap()
+    );
     assert!(output.stdout.starts_with(DIAGNOSTIC_TRUNCATED));
     assert!(output.stdout.ends_with(&[b'x'; 1024]));
 }
@@ -265,6 +268,10 @@ fn curl_enforces_the_download_body_limit() {
         stream
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1048576\r\n\r\n")
             .unwrap();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the peer may have closed the connection; the assertions are on the other side"
+        )]
         let _ = stream.write_all(&[b'x'; 1024]);
     });
     let directory = tempdir().unwrap();

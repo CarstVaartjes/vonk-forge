@@ -79,6 +79,7 @@ def _transfer(
     size: int,
     seconds: float | None,
     *,
+    reused: int = 0,
     ago: timedelta = timedelta(hours=1),
     state: str = "succeeded",
     kind: str = "artifact.distribution.v1",
@@ -113,9 +114,14 @@ def _transfer(
                 if progress is not None
                 else {
                     "phase": "completed",
-                    "completed_bytes": size,
+                    "completed_bytes": size + reused,
                     "total_bytes_known": False,
-                    "elapsed_seconds": seconds,
+                    "elapsed_seconds": 2 * (seconds or 0),
+                    **(
+                        {}
+                        if seconds is None
+                        else {"fetched": {"bytes": size, "seconds": seconds}}
+                    ),
                 },
             )
         )
@@ -171,25 +177,23 @@ def test_small_failed_old_and_other_orders_are_not_evidence() -> None:
     assert _notices(sessions) == {}
 
 
-def test_an_instant_already_present_transfer_does_not_make_a_healthy_spark_slow() -> (
-    None
-):
+def test_reused_bytes_are_not_nas_bytes() -> None:
+    # A Spark whose copy found everything present reports a huge completed
+    # total in no time; only what was fetched is a NAS rate.
     sessions = _sessions()
-    # Present objects report every byte at once: one sample at a "GB/s" rate.
-    _transfer(sessions, FAST, 48 * GB, 2, ago=timedelta(minutes=5))
-    _transfer(sessions, FAST, 30 * GB, 500)
-    _transfer(sessions, FAST, 30 * GB, 520, ago=timedelta(hours=2))
+    _transfer(sessions, FAST, 0, 0, reused=60 * GB, ago=timedelta(minutes=5))
+    _transfer(sessions, FAST, 2 * GB, 30, reused=40 * GB, ago=timedelta(hours=1))
+    _transfer(sessions, FAST, 30 * GB, 500, ago=timedelta(hours=2))
     _transfer(sessions, SLOW, 25 * GB, 600)
 
     assert _notices(sessions) == {}
 
 
-def test_the_median_ignores_one_inflated_sample_of_the_slow_spark() -> None:
+def test_a_genuinely_slow_nas_path_is_still_named_beside_reuse() -> None:
     sessions = _sessions()
-    _transfer(sessions, FAST, 48 * GB, 550)
-    _transfer(sessions, SLOW, 25 * GB, 3, ago=timedelta(minutes=5))
-    _transfer(sessions, SLOW, 25 * GB, 7000)
-    _transfer(sessions, SLOW, 20 * GB, 6000, ago=timedelta(hours=2))
+    _transfer(sessions, FAST, 0, 0, reused=60 * GB, ago=timedelta(minutes=5))
+    _transfer(sessions, FAST, 30 * GB, 500)
+    _transfer(sessions, SLOW, 25 * GB, 7000, reused=30 * GB)
 
     assert set(_notices(sessions)) == {SLOW}
 
@@ -292,3 +296,13 @@ def test_link_evidence_fits_the_warning_bound_without_cutting_it_off() -> None:
     )
     assert "median of 5 recent transfers" in reason.detail
     assert reason.detail.endswith("RX 866.7 Mbit/s.")
+
+
+def test_reuse_only_transfers_cannot_crowd_out_the_real_ones() -> None:
+    sessions = _sessions()
+    _transfer(sessions, FAST, 48 * GB, 550, ago=timedelta(hours=5))
+    for minutes in range(1, 21):
+        _transfer(sessions, FAST, 0, 0, reused=60 * GB, ago=timedelta(minutes=minutes))
+    _transfer(sessions, SLOW, 25 * GB, 7000)
+
+    assert set(_notices(sessions)) == {SLOW}

@@ -486,6 +486,7 @@ def _progress(
     completed_bytes: int = 0,
     total_bytes: int | None = None,
     bytes_per_second: float | None = None,
+    smoothed_bytes_per_second: float | None = None,
     eta_seconds: float | None = None,
     checkpoint: OperationCheckpoint | None = None,
 ) -> OperationProgress:
@@ -495,6 +496,7 @@ def _progress(
         total_bytes=total_bytes,
         total_bytes_known=total_bytes is not None,
         bytes_per_second=bytes_per_second,
+        smoothed_bytes_per_second=smoothed_bytes_per_second,
         eta_seconds=eta_seconds,
         checkpoint=checkpoint,
     )

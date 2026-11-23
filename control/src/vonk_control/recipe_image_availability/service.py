@@ -832,6 +832,7 @@ class RecipeImageAvailabilityService:
         total_bytes: int | None = None,
         completed_bytes: int = 0,
         bytes_per_second: float | None = None,
+        smoothed_bytes_per_second: float | None = None,
         eta_seconds: float | None = None,
     ) -> None:
         return image_preparation._set_progress(
@@ -841,6 +842,7 @@ class RecipeImageAvailabilityService:
             total_bytes=total_bytes,
             completed_bytes=completed_bytes,
             bytes_per_second=bytes_per_second,
+            smoothed_bytes_per_second=smoothed_bytes_per_second,
             eta_seconds=eta_seconds,
         )
 

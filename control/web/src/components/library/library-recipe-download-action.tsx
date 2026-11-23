@@ -1,19 +1,14 @@
 import { useCallback, useRef, useState } from "react";
 import { ContractViolation } from "../../api/errors";
-import { LifecycleState } from "../../api/vocabulary.generated";
+import { LifecycleState, TERMINAL_LIFECYCLE_STATES } from "../../api/vocabulary.generated";
 import type { ControlApi, RecipeImageAvailabilityResponse } from "../../api/types";
 import { failureNotice } from "../../lib/error-display";
+import { phaseWords } from "../../lib/phase-words";
 import { CancelOperation } from "../ui/cancel-operation";
 import { useOperationObserver } from "../../hooks/use-operation-observer";
 import { ObservationNotice } from "../ui/observation-notice";
 import { useToast } from "../ui/toast";
 import { WaitingFor } from "../ui/waiting-for";
-
-const TERMINAL_STATES = new Set<string>([
-  LifecycleState.SUCCEEDED,
-  LifecycleState.FAILED,
-  LifecycleState.CANCELLED,
-]);
 
 function failureText(response: RecipeImageAvailabilityResponse): string {
   const failure = response.failure;
@@ -27,8 +22,8 @@ function progressLabel(response: RecipeImageAvailabilityResponse): string {
     (child) => child.state !== LifecycleState.SUCCEEDED,
   ).length;
   if (pending > 0)
-    return `${response.progress.phase} · ${pending} model cache child${pending === 1 ? "" : "ren"}`;
-  return response.progress.phase;
+    return `${phaseWords(response.progress.phase)} · ${pending} model cache child${pending === 1 ? "" : "ren"}`;
+  return phaseWords(response.progress.phase);
 }
 
 /**
@@ -55,7 +50,7 @@ export function LibraryRecipeDownloadAction({
   const requestKey = useRef("");
   const toast = useToast();
   const observer = useOperationObserver<RecipeImageAvailabilityResponse>({
-    isTerminal: (operation) => !operation.residue && TERMINAL_STATES.has(operation.state),
+    isTerminal: (operation) => !operation.residue && TERMINAL_LIFECYCLE_STATES.has(operation.state),
     // Terminal: refetch the library and cache state that depends on this download.
     onTerminal: (operation) => {
       if (operation.state === LifecycleState.SUCCEEDED) {
@@ -66,7 +61,7 @@ export function LibraryRecipeDownloadAction({
     },
   });
   const operation = observer.value;
-  const running = Boolean(operation && !TERMINAL_STATES.has(operation.state));
+  const running = Boolean(operation && !TERMINAL_LIFECYCLE_STATES.has(operation.state));
   const observing = Boolean(operation && (operation.residue || running));
   const busy = submitting || observing;
   const phase =
@@ -144,7 +139,11 @@ export function LibraryRecipeDownloadAction({
         />
       )}
       {running && operation && (
-        <WaitingFor blockers={operation.blockers} nextAttemptAt={operation.next_attempt_at} />
+        <WaitingFor
+          blockers={operation.blockers}
+          nextAttemptAt={operation.next_attempt_at}
+          phase={operation.progress?.phase}
+        />
       )}
       {running && operation && (
         <CancelOperation

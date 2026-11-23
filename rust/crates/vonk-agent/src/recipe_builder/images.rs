@@ -166,7 +166,7 @@ pub(super) fn sha256_file_cancellable(
     cancelled: &dyn Fn() -> bool,
 ) -> Result<String, std::io::Error> {
     use std::io::Read;
-    let mut file = fs::File::open(path)?;
+    let mut file = File::open(path)?;
     let mut digest = Sha256::new();
     let mut buffer = [0_u8; 1024 * 1024];
     loop {

@@ -25,19 +25,19 @@ type Operator = {
   logoutError: string;
   loggingOut: boolean;
   onLogout(): void;
-  role: string;
+  operatorRole: string;
   subject: string;
 };
 
 type AppShellProps = {
-  activeRoute?: AppRoute;
+  activeRoute?: AppRoute | undefined;
   children: ReactNode;
   footer?: ReactNode;
   live?: LiveStatus | null;
   navigationKey?: string;
   navigationLocked?: boolean;
-  onNavigate(event: MouseEvent<HTMLAnchorElement>, route: AppRoute): boolean | void;
-  operator?: Operator;
+  onNavigate(event: MouseEvent<HTMLAnchorElement>, route: AppRoute): void;
+  operator?: Operator | undefined;
 };
 
 export function AppShell({
@@ -138,11 +138,13 @@ export function AppShell({
         </div>
       </header>
       <main ref={mainContent} id="main-content" tabIndex={-1}>
-        <div className="content-frame">
-          {children}
-          {footer}
-        </div>
+        <div className="content-frame">{children}</div>
       </main>
+      {footer && (
+        <div className="shell-footer">
+          <div className="content-frame">{footer}</div>
+        </div>
+      )}
     </div>
   );
 }

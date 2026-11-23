@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from scripts.protocol_wheel import protocol_wheel_name
+from tools.touched_tests import select
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -408,18 +409,10 @@ def test_unavailable_control_test_source_keeps_integrations() -> None:
 
 
 def test_changed_nas_module_selects_its_real_python_consumers() -> None:
-    """A changed standalone package must not escape the local --changed test loop."""
-    result = subprocess.run(
-        [sys.executable, str(ROOT / "scripts/select-changed-tests")],
-        input="nas_setup/src/vonk_nas_setup/pki.py\n",
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=10,
+    """A changed standalone package must not escape the local `scripts/test changed` loop."""
+    assert ("repository", "tests/nas_setup/test_pki.py") in select(
+        ["nas_setup/src/vonk_nas_setup/pki.py"]
     )
-    assert result.returncode == 0, result.stderr
-    assert "repository tests/nas_setup/test_pki.py" in result.stdout.splitlines()
 
 
 @pytest.mark.parametrize(

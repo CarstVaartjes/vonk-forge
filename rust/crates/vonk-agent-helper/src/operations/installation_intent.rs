@@ -12,7 +12,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         cleanup: bool,
     ) -> Result<(), OperationError> {
         let ordinal = ordinal
-            .filter(|value| *value <= i64::MAX as u64)
+            .filter(|value| i64::try_from(*value).is_ok())
             .ok_or(OperationError::InvalidOperation)?;
         let root = self.roots.data.join("installation-intent-fences");
         let observe = || -> Result<(), OperationError> {
@@ -26,7 +26,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
             let mut file = OpenOptions::new()
                 .read(true)
                 .custom_flags(
-                    (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+                    (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                        .bits()
+                        .cast_signed(),
                 )
                 .open(&path)
                 .ok()?;
@@ -47,7 +49,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             let record: InstallationIntentFence = parse_strict(&bytes).ok()?;
             (record.installation_id == installation_id
                 && record.schema_version == 2
-                && record.highest_ordinal <= i64::MAX as u64
+                && i64::try_from(record.highest_ordinal).is_ok()
                 && record.nonce.len() == 64
                 && record
                     .nonce
@@ -90,7 +92,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             let mut file = OpenOptions::new()
                 .write(true)
                 .create_new(true)
-                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
                 .mode(0o600)
                 .open(&staging)?;
             file.write_all(&bytes)?;
@@ -100,6 +102,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             sync_directory(&self.roots.data)
         })();
         if publish.is_err() {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = fs::remove_file(&staging);
         }
         publish.map_err(|_| OperationError::InstallationReconciliationStorageUnavailable)?;

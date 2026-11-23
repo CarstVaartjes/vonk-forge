@@ -17,19 +17,25 @@ from cluster_profiles.cli_render.common import (
     _words,
 )
 from cluster_profiles.cli_render.library import _option_choices
+from cluster_profiles.cli_states_generated import PROFILE_NOTHING_TO_CHANGE
 from cluster_profiles.generated_control.models.fleet_profile_gpu_clock_effect import (
     FleetProfileGpuClockEffect,
 )
 
 
 class ReviewVerdict(StrEnum):
+    NOTHING_TO_CHANGE = "Nothing to change"
     READY = "Ready for review"
     READY_AFTER_PREPARATION = "Ready after preparation"
     BLOCKED = "Blocked"
 
 
-def review_verdict(allowed: object, waits_for_preparation: object) -> ReviewVerdict:
-    """Allowed, waiting only for preparation, or blocked; never "allowed" by default."""
+def review_verdict(
+    allowed: object, waits_for_preparation: object, next_action: object
+) -> ReviewVerdict:
+    """What the Controller says loading this plan does; never "allowed" by default."""
+    if next_action == PROFILE_NOTHING_TO_CHANGE:
+        return ReviewVerdict.NOTHING_TO_CHANGE
     if allowed is True:
         return ReviewVerdict.READY
     if waits_for_preparation is True:
@@ -39,7 +45,9 @@ def review_verdict(allowed: object, waits_for_preparation: object) -> ReviewVerd
 
 def _preview(payload: Mapping[str, object]) -> None:
     verdict = review_verdict(
-        payload.get("allowed"), payload.get("waits_for_preparation")
+        payload.get("allowed"),
+        payload.get("waits_for_preparation"),
+        payload.get("next_action"),
     )
     print(verdict)
     if verdict is ReviewVerdict.READY_AFTER_PREPARATION:

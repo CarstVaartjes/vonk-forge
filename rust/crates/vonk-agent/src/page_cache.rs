@@ -53,7 +53,7 @@ fn helpers() -> std::sync::MutexGuard<'static, Helpers> {
     HELPERS
         .get_or_init(Default::default)
         .lock()
-        .unwrap_or_else(|error| error.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// A test's own cadence for the helper at `socket`, held by the caller.
@@ -153,7 +153,9 @@ impl LoadPhases {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|error| error.into_inner())
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// `run` holds a phase of `purpose` from now until it is finished,

@@ -19,6 +19,7 @@ from vonk_agent_protocol.capability_reply import ControllerCapability
 from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
 from vonk_control.agent_jobs.contracts import controller_result_consumer
 from vonk_control.agent_services import build_agent_services
+from vonk_control.agent_upgrades.availability import UpgradeAvailability
 from vonk_control.agent_upgrades.service import AgentUpgradeService
 from vonk_control.api.application import create_app
 from vonk_control.api.common import _LOGGER, SpaFiles
@@ -311,11 +312,13 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     database_bundles = DatabaseSourceBundleStore(sessions)
     telemetry_repository = TelemetryRepository(sessions, clock=clock)
     fleet_event_repository = FleetEventRepository(sessions, clock=clock)
+    upgrade_availability = UpgradeAvailability(clock)
     visual_fleet = FleetProjection(
         sessions,
         clock=clock,
         events=fleet_event_repository,
         telemetry=telemetry_repository,
+        agent_upgrade_available=upgrade_availability.reader,
     )
     visual_fleet_stream = FleetStream(
         fleet_event_repository,
@@ -502,6 +505,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         channel=settings.install_channel,
         release_api_url=AGENT_RELEASE_API_URL,
     )
+    upgrade_availability.bind(agent_upgrades.current_package)
 
     agent_services.operations.set_result_consumer(
         controller_result_consumer(

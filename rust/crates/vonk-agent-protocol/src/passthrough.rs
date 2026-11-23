@@ -66,11 +66,16 @@ impl WireDocument {
                                     *text = rewritten;
                                 }
                             }
-                            _ => walk(member, names, rewrite),
+                            Value::Null
+                            | Value::Bool(_)
+                            | Value::Number(_)
+                            | Value::String(_)
+                            | Value::Array(_)
+                            | Value::Object(_) => walk(member, names, rewrite),
                         }
                     }
                 }
-                _ => {}
+                Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
             }
         }
         walk(&mut self.0, names, rewrite);
@@ -103,6 +108,10 @@ pub fn revalidate<T: Serialize + DeserializeOwned>(value: &T) -> Result<T, serde
     WireDocument::of(value)?.into_typed()
 }
 
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "every other error passes through unchanged"
+)]
 fn sort_members(value: Value) -> Value {
     match value {
         Value::Object(values) => Value::Object(

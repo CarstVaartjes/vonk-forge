@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -11,6 +12,7 @@ from pydantic import (
     model_validator,
 )
 
+from vonk_agent_protocol.agent_words import ProfileAction
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
@@ -48,6 +50,19 @@ from vonk_control.strict_json import StrictModel
 from vonk_control.wait_contract import QueueWait
 
 
+class ProfileLoadAction(StrEnum):
+    """What a load of the reviewed plan would do, decided once by the Controller."""
+
+    #: Applies changes and stops no workload.
+    LOAD = "load"
+    #: Applies changes that stop serving workloads: confirm them first.
+    LOAD_STOPPING = "load_stopping"
+    #: Everything already matches the saved profile.
+    NOTHING_TO_CHANGE = "nothing_to_change"
+    #: Cannot be loaded now; the reasons say why.
+    BLOCKED = "blocked"
+
+
 class FleetProfileReviewedDecision(StrictModel):
     """The reviewable semantic decision that owns the reconciliation digest."""
 
@@ -76,6 +91,55 @@ class FleetProfileReviewedDecision(StrictModel):
     reasons: list[FleetProfileReason] = Field(max_length=128)
 
 
+def _stops_a_workload(decision: FleetProfileReviewedDecision) -> bool:
+    """Whether loading stops a serving workload: a run stop, or an adopted one."""
+
+    return bool(decision.summary.stops) or any(
+        application.stops for application in decision.effects.adopted
+    )
+
+
+def _changes_something(decision: FleetProfileReviewedDecision) -> bool:
+    """Whether loading does anything beyond keeping what already runs."""
+
+    effects = decision.effects
+    summary = decision.summary
+    return bool(
+        decision.steps
+        or decision.preparation_steps
+        or effects.gpu_clocks
+        or effects.adopted
+        or any(item.action != ProfileAction.KEEP for item in effects.installations)
+        or any(
+            item.action != ProfileAction.KEEP or item.previous_alias is not None
+            for item in effects.runs
+        )
+        or summary.starts
+        or summary.installs
+        or summary.uninstalls
+        or _stops_a_workload(decision)
+    )
+
+
+def profile_load_action(decision: FleetProfileReviewedDecision) -> ProfileLoadAction:
+    """The one rule for offering, confirming and describing a load.
+
+    A plan loads when it can be admitted now or once the Controller has prepared
+    what it lacks, and it changes something. It needs a confirmation exactly
+    when it stops a workload.
+    """
+
+    if not (decision.allowed or decision.waits_for_preparation):
+        return ProfileLoadAction.BLOCKED
+    if not _changes_something(decision):
+        return ProfileLoadAction.NOTHING_TO_CHANGE
+    return (
+        ProfileLoadAction.LOAD_STOPPING
+        if _stops_a_workload(decision)
+        else ProfileLoadAction.LOAD
+    )
+
+
 class FleetProfilePreview(FleetProfileReviewedDecision):
     generated_at: datetime
     assessments: list[FleetProfileAssignmentAssessment] = Field(max_length=64)
@@ -93,6 +157,27 @@ class FleetProfilePreview(FleetProfileReviewedDecision):
                 name: getattr(self, name)
                 for name in FleetProfileReviewedDecision.model_fields
             }
+        )
+
+
+class FleetProfilePreviewResponse(FleetProfilePreview):
+    """What the review endpoint answers: the stored plan and what loading it does."""
+
+    #: The published review document's own version; the stored plan keeps its own.
+    schema_version: Literal[3] = 3  # type: ignore[assignment]
+    next_action: ProfileLoadAction
+
+    @classmethod
+    def of(cls, preview: FleetProfilePreview) -> FleetProfilePreviewResponse:
+        # The stored plan is already valid: copy its fields, add the derived answer.
+        return cls.model_construct(
+            **{
+                name: getattr(preview, name)
+                for name in FleetProfilePreview.model_fields
+                if name != "schema_version"
+            },
+            schema_version=3,
+            next_action=profile_load_action(preview),
         )
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import shlex
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import quote
 
 from cluster_profiles.cli_render.common import (
@@ -31,10 +31,17 @@ from cluster_profiles.cli_render.vocabulary import (
     status_meaning,
 )
 from cluster_profiles.cli_states_generated import (
+    ACTION_CANCEL,
+    ACTION_DOWNLOAD,
+    ACTION_FOLLOW,
+    ACTION_REMOVE,
+    LIVE_LIFECYCLE_STATES,
+    UNKNOWN,
     QualificationOutcome,
     QualificationStatus,
 )
 from cluster_profiles.cli_telemetry_render import size as _size
+from cluster_profiles.control_client.errors import ControlMalformedResponse
 from cluster_profiles.generated_control.models.library_resource_projection import (
     LibraryResourceProjection,
 )
@@ -172,16 +179,27 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
         _field("Preparation", preparation.get("state"))
         _field("Progress", progress_line({"progress": preparation}))
         _waiting(preparation)
-        if preparation.get("operation_id"):
+    # The Controller decides which actions apply; the web UI reads the same field.
+    # A preparation is a model-cache operation for a model and for a recipe alike.
+    actions = item.get("actions")
+    if not isinstance(actions, list):
+        raise ControlMalformedResponse("actions observation is unavailable")
+    operation = preparation.get("operation_id")
+    if operation:
+        if ACTION_FOLLOW in actions:
             _field(
-                "Next",
-                f"vonkctl {noun} progress {shlex.quote(str(preparation['operation_id']))} --follow",
+                "Next", f"vonkctl model progress {shlex.quote(str(operation))} --follow"
             )
-    elif local.get("controller") in {"not_cached", "failed"} and isinstance(
-        selector, str
-    ):
-        _field("Next", f"vonkctl {noun} download {shlex.quote(selector)}")
-    elif local.get("controller") == "unknown":
+        if ACTION_CANCEL in actions:
+            _field(
+                "Cancel", f"vonkctl model cancel {shlex.quote(str(operation))} --yes"
+            )
+    if isinstance(selector, str):
+        if ACTION_DOWNLOAD in actions:
+            _field("Next", f"vonkctl {noun} download {shlex.quote(selector)}")
+        if ACTION_REMOVE in actions:
+            _field("Remove", _remove_command(noun, selector))
+    if local.get("controller") == UNKNOWN:
         print(
             "Cache availability is unknown; inspect the Controller before preparing assets."
         )
@@ -201,7 +219,11 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
             _field("Quantization", item.get("quantization"))
 
 
-_ACTIVE_PREPARATION = {"queued", "running", "pending", "preparing"}
+def _remove_command(noun: str, selector: str) -> str:
+    quoted = shlex.quote(selector)
+    if noun == LibraryNoun.MODEL:
+        return f"vonkctl model remove {quoted} --fleet"
+    return f"vonkctl recipe remove {quoted} --review"
 
 
 def _cache_word(value: object) -> str:
@@ -320,7 +342,7 @@ def _library_row(item: Mapping[str, object], noun: str) -> list[object]:
     resources = _object(item.get("resources"), "resources")
     preparation = _optional(local.get("preparation"), "preparation")
     cache = _cache_word(local.get("controller"))
-    if preparation.get("state") in _ACTIVE_PREPARATION:
+    if preparation.get("state") in LIVE_LIFECYCLE_STATES:
         cache = progress_line(
             {"progress": preparation, "blockers": preparation.get("blockers")}
         ).replace(" | ", ": ")
@@ -414,6 +436,56 @@ def _model_counts(rows: Sequence[Any]) -> tuple[int, int]:
     return len(models), len(variants)
 
 
+#: ``vonkctl recipe`` prints this many rows unless ``--all`` or ``--wide`` asks for more.
+COMPACT_RECIPE_ROWS = 20
+
+
+def recipe_cut_note(loaded: int, printed: int) -> None:
+    """Say how many loaded recipes the bare listing did not print."""
+    if loaded > printed:
+        print(f"Showing {printed} of {loaded}; --all lists every one.")
+
+
+class _Row(Protocol):
+    def get(self, key: str, /) -> object: ...
+
+
+def top_recipes(rows: Sequence[_Row]) -> list[_Row]:
+    """The bare ``vonkctl recipe`` rows: running first, then preparing, then Working."""
+
+    def flags(item: _Row) -> tuple[bool, bool, bool]:
+        local = _object(item.get("local"), "local")
+        preparation = _optional(local.get("preparation"), "preparation")
+        return (
+            bool(local.get("running_on")),
+            preparation.get("state") in LIVE_LIFECYCLE_STATES,
+            _qualification_status(item.get("qualification"))
+            == QualificationStatus.WORKING,
+        )
+
+    ranked = sorted(rows, key=lambda row: tuple(not flag for flag in flags(row)))
+    return ranked[:COMPACT_RECIPE_ROWS]
+
+
+def _compact_table(labels: list[str], rows: list[list[object]]) -> None:
+    """A table without the shared publisher prefix and without columns that never differ."""
+    rendered = [[_text(value) for value in row] for row in rows]
+    prefixes = {value.split("/", 1)[0] for value in (row[0] for row in rendered)}
+    if len(prefixes) == 1 and all("/" in row[0] for row in rendered):
+        print(f"Publisher: {prefixes.pop()}")
+        for row in rendered:
+            row[0] = row[0].split("/", 1)[1]
+    same = [
+        index
+        for index in range(1, len(labels))
+        if len(rendered) > 1 and len({row[index] for row in rendered}) == 1
+    ]
+    for index in same:
+        _field(labels[index].title(), rendered[0][index])
+    keep = [index for index in range(len(labels)) if index not in same]
+    _table([labels[i] for i in keep], [[row[i] for i in keep] for row in rendered])
+
+
 def _library(
     payload: Mapping[str, object], noun: str, *, detail: bool, wide: bool
 ) -> None:
@@ -479,7 +551,10 @@ def _library(
             labels.extend(["READY", "QUALIFICATION"])
         if noun == LibraryNoun.MODEL:
             labels.extend(["UNIQUE", "SHARED"])
-        _table(labels, [_library_row(item, noun) for item in rows])
+        if noun == LibraryNoun.RECIPE:
+            _compact_table(labels, [_library_row(item, noun) for item in rows])
+        else:
+            _table(labels, [_library_row(item, noun) for item in rows])
         if noun == LibraryNoun.MODEL:
             for item in rows:
                 raw_usage = _optional(item.get("cache_usage"), "cache_usage")
@@ -496,10 +571,11 @@ def _library(
                 _object(item.get("local"), "local").get("preparation"), "preparation"
             )
             operation = preparation.get("operation_id")
-            if preparation.get("state") in _ACTIVE_PREPARATION and operation:
+            actions = item.get("actions") if operation else None
+            if isinstance(actions, list) and ACTION_FOLLOW in actions:
                 _field(
                     "Follow",
-                    f"vonkctl {noun} progress {shlex.quote(str(operation))} --follow",
+                    f"vonkctl model progress {shlex.quote(str(operation))} --follow",
                 )
     print()
     if isinstance(cursor, str):

@@ -71,7 +71,7 @@ pub fn project(
                     .iter()
                     .any(|artifact| artifact.mount.target == mount.target) =>
             {
-                saw_model = true
+                saw_model = true;
             }
             "inputs" if has_job && mount.target == "/inputs" => {
                 saw_inputs = true;

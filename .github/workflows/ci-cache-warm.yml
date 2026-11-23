@@ -84,7 +84,7 @@ jobs:
       - name: Fetch locked crates
         run: scripts/retry-dependency-fetch cargo fetch --locked
       - name: Lint Rust workspace
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --frozen -- -D warnings
       - name: Build the Rust workspace tests
         run: cargo test --workspace --locked --no-run
       - name: Build the debug probes and examples

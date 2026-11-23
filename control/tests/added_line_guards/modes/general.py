@@ -82,10 +82,11 @@ def check_noexit(ctx: CheckContext) -> None:
         if path.endswith(".rs"):
             patterns.extend(
                 [
+                    # Clippy's panic, expect_used and unwrap_used cover the rest. Its
+                    # exit skips `fn main` and impl methods, so exit stays here.
                     r"(?:std::)?process::(?:exit|abort)\s*\(",
                     r"ExitCode::(?:from|FAILURE)",
-                    r"\b(?:panic!|unreachable!)\s*\(",
-                    r"\.expect\s*\(",
+                    r"\bunreachable!\s*\(",
                 ]
             )
         if path.startswith(("packaging/", "deploy/")):
@@ -207,6 +208,12 @@ def check_legacy(ctx: CheckContext) -> None:
     )
     if "legacy" in modes and not is_test and legacy_tolerance.in_web_scope(path):
         hits.extend(legacy_tolerance.scan_web_source(source))
+    if "lifecycle-sets" in modes and lifecycle_sets.in_web_scope(path):
+        hits.extend(
+            (line, lifecycle_sets.KIND)
+            for line in lifecycle_sets.scan_web_source(source)
+            if line in ctx.added
+        )
 
 
 def check_docker_listings(ctx: CheckContext) -> None:

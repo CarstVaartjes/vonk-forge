@@ -20,9 +20,9 @@ use vonk_agent_protocol::host_memory_guard_policy::{
 /// Why the guard stopped the managed workloads; the evidence's `trigger`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Trigger {
-    /// R1 without swap: MemAvailable exhausted.
+    /// R1 without swap: `MemAvailable` exhausted.
     MemoryExhausted,
-    /// R1 with swap: MemAvailable and free swap both exhausted.
+    /// R1 with swap: `MemAvailable` and free swap both exhausted.
     MemoryAndSwapExhausted,
     /// R2: swap nearly full and still filling with memory low.
     SwapFilling,
@@ -63,7 +63,7 @@ impl Trigger {
 pub struct Counters {
     pub swap_in: u64,
     pub swap_out: u64,
-    /// workingset_refault_anon + workingset_refault_file.
+    /// `workingset_refault_anon` + `workingset_refault_file`.
     pub refault: u64,
 }
 
@@ -174,7 +174,7 @@ pub fn read_sample(mut read: impl FnMut(&str) -> std::io::Result<String>) -> Sam
 }
 
 /// Whether an NVRM line seen at `line` still counts at `now` (R5).
-pub fn driver_line_counts(line: Instant, now: Instant) -> bool {
+pub(super) fn driver_line_counts(line: Instant, now: Instant) -> bool {
     now.saturating_duration_since(line) <= DRIVER_LINE_WINDOW
 }
 
@@ -190,6 +190,10 @@ struct Conditions {
     driver_free_low: bool,
 }
 
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "a rate or ratio in floating point, not an exact count; f64 precision is ample"
+)]
 fn conditions(sample: &Sample, rates: Option<Rates>, loading: bool) -> Conditions {
     let available = sample.available_bytes;
     let below = |value: Option<u64>, bar: u64| value.is_some_and(|value| value < bar);
@@ -268,6 +272,10 @@ impl Decision {
         self.rates
     }
 
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a rate or ratio in floating point, not an exact count; f64 precision is ample"
+    )]
     fn update_rates(&mut self, now: Instant, counters: Option<Counters>) {
         self.rates = match (self.previous, counters) {
             (Some((then, before)), Some(after)) if now > then => {
@@ -410,7 +418,7 @@ fn packed(fields: &[&str], readings: &[String]) -> String {
 
 /// The readings behind a kill (Step 0) as one evidence property,
 /// `PRESSURE_PROPERTY`, its value packing every `PRESSURE_FIELDS` reading.
-pub fn readings(sample: &Sample, rates: Option<Rates>, loading: bool) -> (String, String) {
+pub(super) fn readings(sample: &Sample, rates: Option<Rates>, loading: bool) -> (String, String) {
     let rate = |value: Option<f64>| value.map_or_else(unknown, |v| format!("{v:.0}"));
     let values = [
         loading.to_string(),

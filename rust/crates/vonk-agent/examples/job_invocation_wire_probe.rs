@@ -1,4 +1,8 @@
 //! Exercise a real Controller job claim through production preparation.
+#![expect(
+    clippy::panic,
+    reason = "example program: a failed unwrap ends the demonstration"
+)]
 use std::{
     fs,
     io::{self, Read},

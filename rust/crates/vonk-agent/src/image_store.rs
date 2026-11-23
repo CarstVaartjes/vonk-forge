@@ -184,7 +184,7 @@ pub fn response_head(status: reqwest::StatusCode, headers: &HeaderMap) -> String
     );
     for name in FORWARDED_HEADERS {
         if let Some(value) = headers.get(name).and_then(|value| value.to_str().ok()) {
-            head.push_str(&format!("{name}: {value}\r\n"));
+            head = format!("{head}{name}: {value}\r\n");
         }
     }
     head.push_str("connection: close\r\n\r\n");
@@ -240,6 +240,10 @@ async fn serve_connection(
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error);
     }
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the receiving side may already be gone; nobody is waiting for the value"
+    )]
     let _ = stream.shutdown().await;
 }
 

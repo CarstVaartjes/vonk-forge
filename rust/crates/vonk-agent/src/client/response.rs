@@ -15,7 +15,7 @@ pub fn parse_claim_response(status: u16, body: &[u8]) -> Result<Option<AgentClai
             if status_code.is_success() {
                 Err(ClientError::Protocol)
             } else {
-                classify_status(status_code).map(|_| None)
+                classify_status(status_code).map(|()| None)
             }
         }
     }
@@ -162,7 +162,7 @@ pub(super) fn controller_rejection_digest(body: &[u8]) -> Option<String> {
         digest.push_str(": ");
         digest.push_str(&ranked[..kept].join("; "));
         if reported > kept {
-            digest.push_str(&format!("; +{} more", reported - kept));
+            digest = format!("{digest}; +{} more", reported - kept);
         }
     }
     Some(
@@ -228,7 +228,7 @@ pub(crate) fn controller_error(
     };
     error.decision = if error.retryable() {
         vonk_agent_protocol::generated::AgentClientDecision::Retry.as_str()
-    } else if super::http_status_disposition(status_code) == super::Disposition::Security
+    } else if http_status_disposition(status_code) == Disposition::Security
         && !error.host_runtime_grant_denied()
     {
         vonk_agent_protocol::generated::AgentClientDecision::Exit.as_str()
@@ -276,7 +276,9 @@ pub(super) async fn bounded_body_limit(
     {
         return Err(ClientError::Protocol);
     }
-    let mut body = Vec::with_capacity(response.content_length().unwrap_or(0) as usize);
+    let mut body = Vec::with_capacity(
+        usize::try_from(response.content_length().unwrap_or(0)).unwrap_or_default(),
+    );
     let inactivity = Inactivity::new(TRANSFER_INACTIVITY);
     while let Some(chunk) = next_chunk(response.chunk(), &inactivity).await? {
         if body.len().saturating_add(chunk.len()) > maximum_bytes {

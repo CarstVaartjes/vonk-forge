@@ -266,8 +266,12 @@ def _cache_removal_review(payload: object, *, verbose: bool = False) -> None:
     _findings("Saved references", blocking)
     _findings("Active work", review.active_work)
     _blockers(review, verbose=verbose)
-    # The Controller decides on submit whether this waits or refuses.
-    print(f"Confirm: {_confirm_command(review)} --yes --detach")
+    # The Controller says whether confirming would remove anything; a blocked or
+    # empty review offers no Confirm, and its blockers above name the next step.
+    if review.submittable:
+        print(f"Confirm: {_confirm_command(review)} --yes --detach")
+    elif not review.blockers:
+        print("Nothing to remove.")
     if verbose:
         print("Detail:")
         _detail(review, sharing, blocking)

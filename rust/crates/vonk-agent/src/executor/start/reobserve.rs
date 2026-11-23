@@ -37,7 +37,7 @@ const START_FAILED: &str = "container runtime could not start the workload";
 fn inspection_grant_refused(error: &HostRuntimeError) -> bool {
     matches!(
         error,
-        HostRuntimeError::Controller(crate::client::ClientError::Controller(refusal))
+        HostRuntimeError::Controller(ClientError::Controller(refusal))
             if refusal.refusal().refuses_bytes()
     )
 }

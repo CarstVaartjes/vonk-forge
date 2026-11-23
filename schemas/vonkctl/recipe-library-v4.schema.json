@@ -60,7 +60,7 @@
       "type": "array"
     },
     "schema_version": {
-      "const": 3,
+      "const": 4,
       "title": "Schema Version",
       "type": "integer"
     }
@@ -73,6 +73,6 @@
     "freshness_policy",
     "schema_version"
   ],
-  "title": "vonkctl recipe-library document (schema_version 3)",
+  "title": "vonkctl recipe-library document (schema_version 4)",
   "type": "object"
 }

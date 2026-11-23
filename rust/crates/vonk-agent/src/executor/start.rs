@@ -11,7 +11,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         claim: &AgentClaim,
         lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
         cancellation: tokio::sync::watch::Receiver<bool>,
-        request: vonk_agent_protocol::RecipeStartRequest,
+        request: RecipeStartRequest,
     ) -> ExecutionResult {
         let rank_launch = matches!(request.phase, Some(RecipeStartPhase::RankLaunch));
         let start_deadline = request
@@ -38,21 +38,20 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         claim: &AgentClaim,
         lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
         cancellation: tokio::sync::watch::Receiver<bool>,
-        request: vonk_agent_protocol::RecipeStartRequest,
+        request: RecipeStartRequest,
         load: &mut Option<crate::page_cache::LoadPhase>,
     ) -> ExecutionResult {
         self.report_phase(claim, ProgressPhase::Starting).await;
         let installation_id = request.installation_id.to_string();
         let collective_readiness =
             matches!(request.phase, Some(RecipeStartPhase::CollectiveReadiness));
-        let phase_deadline = match request
+        let Ok(phase_deadline) = request
             .start_deadline
             .as_deref()
             .map(DateTime::parse_from_rfc3339)
             .transpose()
-        {
-            Ok(deadline) => deadline,
-            Err(_) => return failed("recipe start deadline is invalid"),
+        else {
+            return failed("recipe start deadline is invalid");
         };
         let spec = request.compiled_execution_plan.clone();
         let Some(endpoint) = spec.endpoint.as_ref() else {
@@ -131,7 +130,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 inspection_identity.as_ref(),
             ) {
                 Ok(plan) => plan,
-                Err(crate::oci::OciError::Io(error))
+                Err(OciError::Io(error))
                     if error.kind() != std::io::ErrorKind::PermissionDenied =>
                 {
                     return temporary_preparation_failure(
@@ -140,7 +139,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         vonk_agent_protocol::generated::OciFailureCategory::Storage.as_str(),
                     );
                 }
-                Err(crate::oci::OciError::ReconciliationBusy) => {
+                Err(OciError::ReconciliationBusy) => {
                     return temporary_preparation_failure(
                         FailureStage::RetainedContainer,
                         "retained_start",
@@ -517,7 +516,7 @@ impl<R> RecipeExecutor<'_, R> {
         load: &crate::page_cache::LoadPhase,
         claim: &AgentClaim,
         arguments: Vec<String>,
-        request: &vonk_agent_protocol::RecipeStartRequest,
+        request: &RecipeStartRequest,
     ) -> Result<(), crate::host_runtime::HostRuntimeError> {
         load.drop_now().await;
         self.execute_host_runtime_plan(claim, arguments, HostRuntimePlan::Start(request.clone()))
@@ -528,6 +527,10 @@ impl<R> RecipeExecutor<'_, R> {
 /// `result` with the page-cache drops of its load, on a failure's diagnostics.
 /// A started workload and an unconfirmed start report none; their drops stay in
 /// the journal.
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "every other error passes through unchanged"
+)]
 fn with_page_cache(
     result: ExecutionResult,
     evidence: Option<vonk_agent_protocol::generated::PageCacheDropEvidence>,

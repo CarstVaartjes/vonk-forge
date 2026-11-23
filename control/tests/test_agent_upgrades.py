@@ -14,6 +14,7 @@ from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, AgentRuntimeIdent
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
+    InvalidRequestReason,
     LifecycleState,
     ObservationCause,
     OutcomeKind,
@@ -28,12 +29,13 @@ from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.retry import schedule_agent_upgrade_retry
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_upgrades import package as agent_upgrades_module
+from vonk_control.agent_upgrades.availability import UpgradeAvailability
 from vonk_control.agent_upgrades.constants import _AGENT_UPGRADE_RECOVERY_FENCE
 from vonk_control.agent_upgrades.contract import (
     AgentUpgradePackage,
     AgentUpgradeRequestIntent,
 )
-from vonk_control.agent_upgrades.errors import AgentUpgradeConflict
+from vonk_control.agent_upgrades.errors import AgentUpgradeConflict, AgentUpgradeInvalid
 from vonk_control.agent_upgrades.intent import _request_intent
 from vonk_control.agent_upgrades.service import AgentUpgradeService
 from vonk_control.agent_upgrades.status import (
@@ -2281,3 +2283,43 @@ def test_upgrade_dispatch_accepts_controller_contact_ahead_of_clock(tmp_path) ->
         request_id=str(uuid.uuid4()),
     )
     assert _operation_nodes(sessions, job.id) == [NODE_A]
+
+
+def _spark(
+    identity: Mapping[str, object] | None, *, state: str = "active"
+) -> AgentNode:
+    node = AgentNode(node_id=NODE_A, state=state)
+    if identity is not None:
+        set_inventory_identity(node, **identity)
+    return node
+
+
+def test_a_spark_has_an_upgrade_only_when_it_differs_and_can_take_it():
+    """The fleet read says 'upgrade available' by the rollout's own rule."""
+    now = [datetime(2026, 11, 23, tzinfo=UTC)]
+    availability = UpgradeAvailability(lambda: now[0], spawn=lambda work: work())
+    release = {"fails": True}
+
+    def read_release() -> AgentUpgradePackage:
+        if release["fails"]:
+            # Any refusal of the channel must leave the next read able to retry.
+            raise AgentUpgradeInvalid(
+                "release is malformed", reason=InvalidRequestReason.MALFORMED
+            )
+        return PACKAGE_MODEL
+
+    availability.bind(read_release)
+    # While the release cannot be read the answer is unknown, never "nothing to upgrade".
+    assert availability.reader()(_spark(OLD_IDENTITY)) is None
+    release["fails"] = False
+    now[0] += timedelta(minutes=2)
+    availability.reader()
+    available = availability.reader()
+
+    assert available(_spark(OLD_IDENTITY)) is True
+    assert available(_spark(NEW_IDENTITY)) is False
+    assert available(_spark(OLD_IDENTITY, state="revoked")) is False
+    other_arch = {**OLD_IDENTITY, "architecture": "linux-amd64"}
+    assert available(_spark(other_arch)) is False
+    # A Spark that has not reported what it runs is unknown, not current.
+    assert available(_spark(None)) is None

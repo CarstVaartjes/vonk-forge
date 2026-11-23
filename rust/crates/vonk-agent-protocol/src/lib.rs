@@ -1,9 +1,17 @@
-#![forbid(unsafe_code)]
 #[rustfmt::skip]
 pub mod compiled_execution_plan;
 pub mod compiled_oci;
 /// The one spelling of the unlimited memlock `--ulimit` value every workload runs with.
 pub const WORKLOAD_MEMLOCK_ULIMIT: &str = "memlock=-1:-1";
+// typify names union variants after the wire models, and a closed word set names
+// every variant with its namespace prefix: the wire words are the contract, not
+// the Rust names.
+#[expect(
+    clippy::large_enum_variant,
+    clippy::enum_variant_names,
+    clippy::if_not_else,
+    reason = "generated wire types mirror the canonical model and word names"
+)]
 pub mod generated {
     include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 }
@@ -46,7 +54,7 @@ pub use generated::{
 
 pub mod operation_progress;
 pub use operation_progress::{
-    OperationCheckpoint, OperationMemberProgress, OperationProgress, ProgressActivity,
+    NetworkFetch, OperationCheckpoint, OperationMemberProgress, OperationProgress, ProgressActivity,
 };
 
 pub mod buddyinfo;

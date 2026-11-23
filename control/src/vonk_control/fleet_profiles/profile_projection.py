@@ -27,6 +27,7 @@ from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignmentView,
     FleetProfileDefinition,
     FleetProfileView,
+    profile_load_due,
 )
 from vonk_control.fleet_profiles.assignment_assessment import (
     _assignment_rows,
@@ -402,7 +403,24 @@ class FleetProfileService:
                 cached=cache_cached, missing=cache_missing, unknown=cache_unknown
             ),
             warnings=sorted(set(warnings)),
-            next_actions=[f"vonkctl --profile {row.number} profile load"],
+            next_actions=[
+                f"vonkctl --profile {row.number} "
+                + (
+                    "profile load"
+                    if profile_load_due(
+                        saved=row.revision,
+                        loaded=loaded_revision,
+                        assignments=list(
+                            zip(
+                                (choice.desired_state for choice in choices),
+                                assignments,
+                                strict=True,
+                            )
+                        ),
+                    )
+                    else "profile endpoint"
+                )
+            ],
             profile_digest=_digest(document),
             created_by=row.created_by,
             created_at=_aware(row.created_at),

@@ -58,6 +58,7 @@ from vonk_control.models.execution import (
 )
 from vonk_control.models.mapping import ClusterMapping
 from vonk_control.recipe_update_batches.notice import RecipeUpdateNotice
+from vonk_control.run_readiness import GroupHealth
 from vonk_control.stored.states import CatalogRevisionState
 from vonk_control.strict_json import StrictModel
 from vonk_control.telemetry.samples import TelemetrySampleView
@@ -410,7 +411,7 @@ class RunPresence(StrictModel):
     rank_state: RunStateField
     rank_age_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
     rank_fresh: bool
-    group_state: Literal["healthy", "degraded", "unavailable"]
+    group_state: GroupHealth
     healthy: bool | None
     projection_issue: str | None = Field(default=None, max_length=256)
     degraded_reason: RunDegradedReason | None = None
@@ -517,6 +518,9 @@ class CapacityReservations(StrictModel):
 
 class FleetNode(StrictModel):
     agent_runtime: AgentRuntimeIdentity | None = None
+    #: Whether the release's agent differs from what this Spark runs and the
+    #: Spark can take it; null while the release or the Spark's build is unknown.
+    agent_upgrade_available: bool | None = None
     gpu_clock_desired: GpuClockRange | None = None
     gpu_clock_policy: GpuClockPolicy = GpuClockPolicy()
     # Desired beside the policy; actual is inventory.host_settings.swap.

@@ -1,3 +1,4 @@
+import { FleetRemovalReason } from "../../api/vocabulary.generated";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 import { LifecycleState, ProgressPhase } from "../../api/vocabulary.generated";
@@ -37,6 +38,8 @@ test("a protected recipe displays the owner blocker and cannot be removed", asyn
         recovery_actions: [],
       },
     ],
+    // The Controller says a blocked review cannot be confirmed.
+    submittable: false,
   });
   const removeRecipe = vi.fn();
   const api = {
@@ -47,7 +50,6 @@ test("a protected recipe displays the owner blocker and cannot be removed", asyn
     <LibraryRecipeRemoveAction api={api} selector={review.selector} onRemoved={() => undefined} />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Remove recipe" }));
-  fireEvent.click(screen.getByRole("button", { name: "Keep the model" }));
   await waitFor(() =>
     expect(screen.getByRole("alert")).toHaveTextContent("Image is used by saved-profile"),
   );
@@ -67,7 +69,6 @@ test("a refused removal reconciles its key and admits fresh reviewed removal", a
   const api = { recipeRemovalReview, removeRecipe, recipeCacheRequest } as unknown as ControlApi;
   render(<LibraryRecipeRemoveAction api={api} selector={review.selector} onRemoved={onRemoved} />);
   fireEvent.click(screen.getByRole("button", { name: "Remove recipe" }));
-  fireEvent.click(screen.getByRole("button", { name: "Keep the model" }));
   fireEvent.click(await screen.findByRole("button", { name: "Confirm remove" }));
   await waitFor(() =>
     expect(recipeCacheRequest).toHaveBeenCalledWith(
@@ -75,7 +76,7 @@ test("a refused removal reconciles its key and admits fresh reviewed removal", a
       expect.anything(),
     ),
   );
-  await waitFor(() => expect(screen.getByRole("button", { name: "Keep the model" })).toBeEnabled());
+  fireEvent.click(await screen.findByRole("button", { name: "Review again" }));
   expect(onRemoved).not.toHaveBeenCalled();
   const originalKey = removeRecipe.mock.calls[0]?.[1];
   removeRecipe.mockImplementationOnce(async (selector, request_key, with_model) => ({
@@ -89,7 +90,6 @@ test("a refused removal reconciles its key and admits fresh reviewed removal", a
     state: LifecycleState.SUCCEEDED,
     progress: { phase: ProgressPhase.COMPLETED },
   }));
-  fireEvent.click(screen.getByRole("button", { name: "Keep the model" }));
   fireEvent.click(await screen.findByRole("button", { name: "Confirm remove" }));
   await waitFor(() => expect(onRemoved).toHaveBeenCalledTimes(1));
   expect(removeRecipe.mock.calls[1]?.[1]).not.toBe(originalKey);
@@ -104,12 +104,19 @@ test("a model revision changed since Library display cannot be silently removed"
         selector: "example/model",
         target_identity: "d".repeat(64),
         with_model: null,
+        fleet: {
+          nas_remove: false,
+          nas_reason: FleetRemovalReason.UNUSED,
+          nas_detail: "",
+          targets: [],
+        },
       }),
     ),
     removeModelCache,
   } as unknown as ControlApi;
   render(
     <LibraryCacheAction
+      fleetOnly
       api={api}
       selector="example/model"
       modelContentSha256={"e".repeat(64)}
@@ -117,7 +124,7 @@ test("a model revision changed since Library display cannot be silently removed"
       onPrepared={() => undefined}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Remove from cache" }));
+  fireEvent.click(screen.getByRole("button", { name: "Remove model from fleet" }));
   await waitFor(() =>
     expect(screen.getByRole("alert")).toHaveTextContent("selected content identity"),
   );
@@ -140,7 +147,6 @@ test("a review for another recipe selector cannot be confirmed", async () => {
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Remove recipe" }));
-  fireEvent.click(screen.getByRole("button", { name: "Keep the model" }));
   await waitFor(() =>
     expect(screen.getByRole("alert")).toHaveTextContent("another selector or resource"),
   );
@@ -181,20 +187,19 @@ test("queued and partial cleanup remain visible until the same owner succeeds", 
   } as unknown as ControlApi;
   render(<LibraryRecipeRemoveAction api={api} selector={review.selector} onRemoved={onRemoved} />);
   fireEvent.click(screen.getByRole("button", { name: "Remove recipe" }));
-  fireEvent.click(screen.getByRole("button", { name: "Keep the model" }));
   fireEvent.click(await screen.findByRole("button", { name: "Confirm remove" }));
   await waitFor(() =>
     expect(screen.getByRole("status")).toHaveTextContent("Removal queued: accepted-cleanup"),
   );
   expect(onRemoved).not.toHaveBeenCalled();
   expect(screen.queryByRole("button", { name: "Remove recipe" })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Refresh removal status" }));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Removal partial"));
   expect(screen.getByLabelText("Cache removal progress")).toHaveTextContent(
     "waiting for model child",
   );
   expect(onRemoved).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Refresh removal status" }));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
   await waitFor(() => expect(onRemoved).toHaveBeenCalledTimes(1));
   expect(recipeCacheOperation).toHaveBeenNthCalledWith(1, accepted.operation_id, expect.anything());
   expect(recipeCacheOperation).toHaveBeenNthCalledWith(2, accepted.operation_id, expect.anything());
@@ -240,7 +245,7 @@ test("an observation of another operation cannot complete accepted cleanup", asy
       onRejected={() => undefined}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Refresh removal status" }));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
   await waitFor(() =>
     expect(screen.getByRole("alert")).toHaveTextContent("different removal operation"),
   );
@@ -271,7 +276,6 @@ test("a receipt for another retention choice is reconciled by key and never repo
   const api = { recipeRemovalReview, removeRecipe, recipeCacheRequest } as unknown as ControlApi;
   render(<LibraryRecipeRemoveAction api={api} selector={review.selector} onRemoved={onRemoved} />);
   fireEvent.click(screen.getByRole("button", { name: "Remove recipe" }));
-  fireEvent.click(screen.getByRole("button", { name: "Keep the model" }));
   fireEvent.click(await screen.findByRole("button", { name: "Confirm remove" }));
   await waitFor(() =>
     expect(screen.getByRole("status")).toHaveTextContent("Removal receipt not yet confirmed"),
@@ -329,7 +333,7 @@ test.each(["disconnect", "timeout"])(
         }
         throw new TypeError("connection lost after Controller acceptance");
       }
-      if (request.method === "GET" && url.pathname.endsWith("/requests/" + accepted.request_key)) {
+      if (request.method === "GET" && url.pathname.endsWith(`/requests/${accepted.request_key}`)) {
         return new Response(JSON.stringify(accepted), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -346,7 +350,6 @@ test.each(["disconnect", "timeout"])(
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Remove recipe" }));
-    fireEvent.click(screen.getByRole("button", { name: "Keep the model" }));
     fireEvent.click(await screen.findByRole("button", { name: "Confirm remove" }));
     await waitFor(() =>
       expect(screen.getByRole("status")).toHaveTextContent("Removal queued: recovered-operation"),
@@ -356,7 +359,7 @@ test.each(["disconnect", "timeout"])(
       calls.filter((call) => call.method === "POST" && call.path.endsWith("/remove")),
     ).toHaveLength(1);
     const requestLookup = calls.find((call) =>
-      call.path.endsWith("/requests/" + accepted.request_key),
+      call.path.endsWith(`/requests/${accepted.request_key}`),
     );
     expect(requestLookup?.method).toBe("GET");
     expect(calls[1]?.body).toEqual({
@@ -412,7 +415,7 @@ test("unreadable removal effects show unknown and preserve the original operatio
       onRejected={vi.fn()}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Refresh removal status" }));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
   expect(await screen.findByText(/Removal effects are unknown/)).toBeVisible();
   expect(screen.getByText("Removal unknown: operation")).toBeVisible();
   expect(

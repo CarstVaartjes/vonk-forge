@@ -128,6 +128,10 @@ fn bounded_text(text: &str) -> String {
 /// An unobserved job effect: the step it stopped at and why travel to the
 /// Controller and into the agent journal. No synthetic process exit is
 /// attached; the callers above say what bounds it.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 fn unconfirmed_job(
     claim: &AgentClaim,
     request: &vonk_agent_protocol::RecipeJobRunRequest,

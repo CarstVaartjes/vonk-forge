@@ -46,9 +46,18 @@ Digest = Annotated[str, Field(pattern=DIGEST_PATTERN)]
 # produces or consumes the value share the alias, so the vocabulary cannot
 # drift apart.
 class CacheOperationKind(StrEnum):
+    """The words for what is done with a cache entry.
+
+    Download, repair and remove are the kinds a stored operation row carries.
+    Cancel and follow are what an operator can do with an operation that is
+    still live; they name actions only and never a stored kind.
+    """
+
     DOWNLOAD = "download"
     REPAIR = "repair"
     REMOVE = "remove"
+    CANCEL = "cancel"
+    FOLLOW = "follow"
 
 
 ModelCacheOperationKind = Literal[

@@ -27,12 +27,11 @@ from cluster_profiles.cli_states import (
     preparation,
 )
 from cluster_profiles.cli_states_generated import (
-    CANCELLED,
-    FAILED,
     NEEDS_OPERATOR,
     READY,
     RUN_RUNNING,
     SUCCEEDED,
+    TERMINAL_LIFECYCLE_STATES,
     JobContractState,
 )
 from cluster_profiles.control_client.errors import (
@@ -84,7 +83,7 @@ _CREATE_FIELDS = {
     "timeout_seconds",
 }
 _INPUT_FIELDS = {"slot", "name"}
-_JOB_TERMINAL_STATES = {SUCCEEDED, FAILED, CANCELLED, NEEDS_OPERATOR}
+_JOB_TERMINAL_STATES = TERMINAL_LIFECYCLE_STATES | {NEEDS_OPERATOR}
 _RECOVERY_ATTEMPTS = 3
 _RUN_KEY_NAMESPACE = uuid.UUID("7d0c9a64-3f0e-5b1a-8c52-1f0b6a9e2d41")
 

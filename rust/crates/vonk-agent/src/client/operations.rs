@@ -82,7 +82,7 @@ impl AgentHttpClient {
     pub async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
         let mut progress = progress.clone();
         if let Some(measured) = progress.progress.as_mut()
-            && crate::vocabulary::is(&measured.phase, ProgressPhase::Executing)
+            && vocabulary::is(&measured.phase, ProgressPhase::Executing)
             && let Some(counters) = self.progress_snapshot(progress.fence)
         {
             measured.phase = counters.phase.to_string();
@@ -90,6 +90,12 @@ impl AgentHttpClient {
                 measured.completed_bytes = counters.bytes.into();
                 measured.total_bytes = counters.total_bytes.map(Into::into);
                 measured.total_bytes_known = counters.total_bytes.is_some();
+            }
+            if let Some((bytes, span)) = counters.fetched {
+                measured.fetched = Some(vonk_agent_protocol::NetworkFetch {
+                    bytes: bytes.into(),
+                    seconds: span.as_secs_f64(),
+                });
             }
         }
         progress.validate().map_err(|_| ClientError::Protocol)?;

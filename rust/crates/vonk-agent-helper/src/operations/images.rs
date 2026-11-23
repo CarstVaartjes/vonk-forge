@@ -12,6 +12,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
     /// signed request; Docker verifies each blob against the manifest while
     /// pulling, and the helper requires the pulled image to be exactly that
     /// config with the platform runtime identity before tagging it locally.
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "every other error passes through unchanged"
+    )]
+    #[expect(
+        clippy::string_slice,
+        reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+    )]
     pub(super) fn runtime_image_pull(&self, arguments: &[String]) -> Result<(), OperationError> {
         let [registry, manifest_digest, config_digest, image_reference] = arguments else {
             return Err(OperationError::InvalidOperation);
@@ -46,6 +54,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if let Some(inspected) = self.inspect_runtime_image_if_present(&local_image)?
             && runtime_identity_valid(&inspected)
         {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the receipt records an image already settled; the next request writes it again"
+            )]
             let _ = self.write_image_receipt(RuntimeImageReceipt {
                 schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
                 platform_manifest_digest: manifest_digest.to_owned(),
@@ -84,6 +96,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // The loopback reference names an ephemeral port; drop it. The image
         // stays under its local tag, and Docker's layer metadata keeps later
         // pulls incremental.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort removal of a temporary tag; the next pass repeats it"
+        )]
         let _ = self.run_docker(&["image".to_owned(), "rm".to_owned(), remote]);
         let Some(inspected) = self.inspect_runtime_image_if_present(&local_image)? else {
             return Err(OperationError::RuntimeImageIdentityInvalid);
@@ -91,6 +107,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if !runtime_identity_valid(&inspected) {
             return Err(OperationError::RuntimeImageIdentityInvalid);
         }
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the receipt records an image already settled; the next request writes it again"
+        )]
         let _ = self.write_image_receipt(RuntimeImageReceipt {
             schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
             platform_manifest_digest: manifest_digest.to_owned(),
@@ -213,19 +233,18 @@ impl<R: CommandRunner> OperationExecutor<R> {
         image_reference: &str,
     ) -> Result<Option<(RuntimeImageInspection, String)>, OperationError> {
         let (local_image, _) = parse_local_image_reference(image_reference)?;
-        match self.inspect_runtime_image_if_present(image_reference)? {
-            Some(inspected) => Ok(Some((inspected, image_reference.to_owned()))),
-            None => {
-                // Docker may discard the digest-qualified alias. Keep the
-                // daemon's surviving managed name: containerd's manifest ID
-                // is an observation identity, not a supported launch name.
-                // The caller compares its content with the signed identity
-                // before use; labels never authorize substituted content.
-                let Some(inspected) = self.inspect_runtime_image_if_present(&local_image)? else {
-                    return Ok(None);
-                };
-                Ok(Some((inspected, local_image)))
-            }
+        if let Some(inspected) = self.inspect_runtime_image_if_present(image_reference)? {
+            Ok(Some((inspected, image_reference.to_owned())))
+        } else {
+            // Docker may discard the digest-qualified alias. Keep the
+            // daemon's surviving managed name: containerd's manifest ID
+            // is an observation identity, not a supported launch name.
+            // The caller compares its content with the signed identity
+            // before use; labels never authorize substituted content.
+            let Some(inspected) = self.inspect_runtime_image_if_present(&local_image)? else {
+                return Ok(None);
+            };
+            Ok(Some((inspected, local_image)))
         }
     }
 }
@@ -277,6 +296,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the call takes ownership at this boundary; the caller's value is consumed"
+    )]
     pub(super) fn write_image_receipt(
         &self,
         receipt: RuntimeImageReceipt,
@@ -308,7 +331,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
             .mode(0o600)
             .open(&staged)?;
         let result = (|| {
@@ -319,6 +342,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
         })();
         drop(file);
         if result.is_err() {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = fs::remove_file(&staged);
         }
         result
@@ -335,6 +362,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return;
         }
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the receipt records an image already settled; the next request writes it again"
+        )]
         let _ = self.write_image_receipt(receipt);
     }
 }
@@ -360,7 +391,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let mut file = OpenOptions::new()
             .read(true)
             .custom_flags(
-                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                    .bits()
+                    .cast_signed(),
             )
             .open(path)
             .map_err(|_| OperationError::RuntimeImageInspectFailed)?;

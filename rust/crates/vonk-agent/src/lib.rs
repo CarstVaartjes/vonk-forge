@@ -1,4 +1,3 @@
-#![forbid(unsafe_code)]
 pub mod runtime_preflight;
 
 pub mod agent_upgrade;
@@ -9,6 +8,7 @@ mod compose_document;
 pub mod config;
 mod display_memory;
 pub mod executor;
+pub mod fabric_traffic;
 pub mod failure_evidence;
 mod gpu_health;
 pub mod health;
@@ -19,6 +19,7 @@ mod host_tuning;
 pub mod identity;
 pub mod image_store;
 pub mod inventory;
+pub mod memory_readings;
 pub mod network;
 pub mod oci;
 pub mod outcome;

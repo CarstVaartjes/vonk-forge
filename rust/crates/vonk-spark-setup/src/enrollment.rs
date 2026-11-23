@@ -71,21 +71,18 @@ pub(super) fn discover_enrollment(
         expected_ca_sha256,
         expected_controller_address,
     )?;
+    let pinned_address = discovered
+        .host_mapping
+        .as_ref()
+        .map(|value| value.address.parse::<Ipv4Addr>())
+        .transpose()
+        .map_err(|_| SetupError::EnrollmentBootstrap)?;
     let directory = secure_tempdir("vonk-enrollment-ca.")?;
     let ca_path = directory.path().join("controller-ca.pem");
     fs::write(&ca_path, &discovered.ca_pem).map_err(SetupError::PrivilegedWrite)?;
     let authenticated = run_checked(
         runner,
-        bootstrap_curl(
-            &bootstrap_url,
-            discovered.host_mapping.as_ref().map(|value| {
-                value
-                    .address
-                    .parse::<Ipv4Addr>()
-                    .expect("validated controller address")
-            }),
-            Some(&ca_path),
-        ),
+        bootstrap_curl(&bootstrap_url, pinned_address, Some(&ca_path)),
     )?
     .stdout;
     let authenticated = parse_enrollment_bootstrap(&authenticated)?;
@@ -93,10 +90,7 @@ pub(super) fn discover_enrollment(
         authenticated,
         expected_enrollment,
         expected_ca_sha256,
-        discovered
-            .host_mapping
-            .as_ref()
-            .map(|value| value.address.parse().expect("validated controller address")),
+        pinned_address,
     )?;
     if verified != discovered {
         return Err(SetupError::EnrollmentBootstrap);
@@ -118,6 +112,10 @@ pub(super) fn bootstrap_curl(
         "--tlsv1.2".to_owned(),
     ];
     if let Some(address) = controller_address {
+        #[expect(
+            clippy::expect_used,
+            reason = "the bootstrap origin was validated as HTTPS with a host"
+        )]
         let hostname = bootstrap_url.host_str().expect("validated HTTPS origin");
         let port = bootstrap_url.port_or_known_default().unwrap_or(443);
         arguments.extend([

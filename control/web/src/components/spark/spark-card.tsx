@@ -90,8 +90,8 @@ export function SparkCard({
   now: Date;
   index: number;
   /** The Spark's rank when it is one of several carrying a single workload. */
-  rank?: number;
-  onOpen?(id: string): void;
+  rank?: number | undefined;
+  onOpen?: ((id: string) => void) | undefined;
 }) {
   const name = nodeDisplayName(node);
   const { status, reasons } = nodeStatus(node, now);

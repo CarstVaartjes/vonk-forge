@@ -47,7 +47,7 @@ fn uncalibrated_memtotal_never_becomes_a_carveout_and_reads_recover() {
     );
     platform(root.path());
     let observed = observe(root.path(), Some(128_000_000_000));
-    assert_eq!(observed.soc_firmware_version, Some(0x02009e0f));
+    assert_eq!(observed.soc_firmware_version, Some(0x0200_9e0f));
     assert_eq!(observed.display_connected, Some(false));
     assert_eq!(observed.device_tree_memory_bytes, Some(128 << 30));
     assert!(observed.carveout_bytes.is_none());
@@ -88,7 +88,7 @@ fn esrt_identity_and_connector_read_failures_remain_unknown_until_reobserved() {
     );
     assert_eq!(
         observe(root.path(), None).soc_firmware_version,
-        Some(0x02009e0f)
+        Some(0x0200_9e0f)
     );
     put(
         root.path(),
@@ -120,6 +120,8 @@ fn agent_unknown_observation_matches_the_controller_shared_vector() {
         gpu_clock_support: None,
         swap: None,
         tuning: None,
+        memory_fragmentation: None,
+        fabric_devices: Vec::new(),
     };
     let vectors: Vec<HostSettings> = serde_json::from_str(include_str!(
         "../../../../../agent_protocol/src/vonk_agent_protocol/vectors/display-memory.json"
@@ -162,7 +164,7 @@ fn root_observation_keeps_the_peer_gate_and_rejects_client_paths() {
             .unwrap()
             .unwrap()
             .carveout_bytes,
-        Some(0x20000000)
+        Some(0x2000_0000)
     );
     peer.primary_gid = 43;
     assert!(inspect(&raw, &verifier, &peer, root.path()).is_err());
@@ -187,11 +189,11 @@ fn owner_iomem_dumps_calibrate_only_the_measured_display_reservation() {
     for (dump, expected) in [
         (
             include_str!("../../tests/fixtures/spark-2297-before.iomem"),
-            0x80000000,
+            0x8000_0000,
         ),
         (
             include_str!("../../tests/fixtures/spark-2297-after.iomem"),
-            0x20000000,
+            0x2000_0000,
         ),
     ] {
         put(root.path(), "proc/iomem", dump);

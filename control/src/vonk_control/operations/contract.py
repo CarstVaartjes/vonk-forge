@@ -177,6 +177,7 @@ _CARRIED_PROGRESS_FIELDS = (
     "activity_sequence",
     "total_items",
     "checkpoint",
+    "fetched",
     "members",
 )
 
@@ -242,7 +243,7 @@ def validate_progress_update(
                 continue
             if key == "members":
                 document[key] = [item.model_dump(mode="python") for item in carried]
-            elif key == "checkpoint":
+            elif key in {"checkpoint", "fetched"}:
                 document[key] = carried.model_dump(mode="python")
             else:
                 document[key] = carried

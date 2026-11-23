@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConnectionExamples } from "../ui/connection-examples";
 import type { MouseEvent, ReactNode } from "react";
 import {
   addWire,
   compareWire,
-  displayRatio,
   formatWire,
   isWireNumber,
   materialize,
@@ -13,7 +12,12 @@ import {
 import type { WireNumber } from "../../api/contract-numeric";
 import { validateControlParameters } from "../../api/contract-json";
 import { ApiError } from "../../api/client";
-import { ProfileAction, ProfileDocumentState } from "../../api/vocabulary.generated";
+import {
+  ProfileAction,
+  ProfileDocumentState,
+  ProfileLoadAction,
+  TERMINAL_LIFECYCLE_STATES,
+} from "../../api/vocabulary.generated";
 import { canonicalRecipeSelector, readableProfile } from "../../api/types";
 import type {
   ControlApi,
@@ -26,12 +30,14 @@ import type {
   FleetProfilePreview,
   VisualFleetSnapshot,
 } from "../../api/types";
-import { formatBytes, nodeDisplayName } from "../../lib/fleet";
+import { nodeDisplayName } from "../../lib/fleet";
 import type { LibraryRecipeRecord } from "./library-workcell";
 import { CancelOperation } from "../ui/cancel-operation";
 import { ConfirmDialog } from "../ui/confirm-dialog";
 import { StatusPill } from "../ui/status-pill";
 import { WaitingFor } from "../ui/waiting-for";
+import { useLibraryNodeName } from "./library-node-names";
+import { availabilityProgress, LibraryAvailabilityProgress } from "./library-availability-progress";
 import { ObservationNotice } from "../ui/observation-notice";
 import { useOperationObserver } from "../../hooks/use-operation-observer";
 import { EmptyState } from "../ui/empty-state";
@@ -66,10 +72,9 @@ type ProfileDraft = {
 type FleetEntry = { id: string; name: string; state: string };
 type PendingProfileLoad = { requestKey: string; reviewedEffectsDigest: string };
 
-const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled", "superseded"]);
 /** A superseded load that names its successor is not an end: the latest-load observation continues under the successor. */
 const ended = (application: Pick<FleetProfileApplicationView, "state" | "superseded_by">) =>
-  TERMINAL_STATES.has(application.state) &&
+  TERMINAL_LIFECYCLE_STATES.has(application.state) &&
   !(application.state === "superseded" && application.superseded_by);
 
 function stringField(value: unknown, key: string): string {
@@ -179,24 +184,28 @@ function inputFromDraft(
     name: draft.name,
     description: draft.description,
     expected_revision: draft.revision ?? 0,
-    installation_policy: draft.installationPolicy,
-    labels: draft.labels,
+    ...(draft.installationPolicy ? { installation_policy: draft.installationPolicy } : {}),
+    ...(draft.labels ? { labels: draft.labels } : {}),
     favorite: draft.favorite,
-    assignments: draft.assignments.map((assignment) => ({
-      recipe_selector: assignment.recipeSelector.trim(),
-      spark_ids: [...new Set(assignment.sparkIds)].sort(),
-      assignment_name: assignment.assignmentName.trim() || undefined,
-      model_variant: assignment.modelVariant.trim() || undefined,
-      desired_state: assignment.desiredState,
-      ...(assignment.gpuClock ? { gpu_clock: assignment.gpuClock } : {}),
-      // Every option the recipe declares is sent explicitly, defaults included.
-      option_choices: optionsBySelector[assignment.recipeSelector.trim()]
-        ? effectiveChoices(
-            optionsBySelector[assignment.recipeSelector.trim()],
-            assignment.optionChoices,
-          )
-        : assignment.optionChoices,
-    })),
+    assignments: draft.assignments.map((assignment) => {
+      const selectorOptions = optionsBySelector[assignment.recipeSelector.trim()];
+      return {
+        recipe_selector: assignment.recipeSelector.trim(),
+        spark_ids: [...new Set(assignment.sparkIds)].sort(),
+        ...(assignment.assignmentName.trim()
+          ? { assignment_name: assignment.assignmentName.trim() }
+          : {}),
+        ...(assignment.modelVariant.trim()
+          ? { model_variant: assignment.modelVariant.trim() }
+          : {}),
+        ...(assignment.desiredState ? { desired_state: assignment.desiredState } : {}),
+        ...(assignment.gpuClock ? { gpu_clock: assignment.gpuClock } : {}),
+        // Every option the recipe declares is sent explicitly, defaults included.
+        option_choices: selectorOptions
+          ? effectiveChoices(selectorOptions, assignment.optionChoices)
+          : assignment.optionChoices,
+      };
+    }),
   };
   return input;
 }
@@ -269,12 +278,12 @@ function stoppedAliases(preview: FleetProfilePreview | undefined): string[] {
   return [...new Set(aliases)].sort();
 }
 
-/** A load is offered when it can be admitted now, or once the Controller has prepared what it lacks. */
+/** The Controller's one answer for the plan: load it, load it after confirming stops, nothing to change, or blocked. */
 const loadable = (preview: FleetProfilePreview | undefined) =>
-  preview?.allowed === true || preview?.waits_for_preparation === true;
-
-const bytes = (value: unknown) =>
-  isWireNumber(value) && compareWire(value, 0) >= 0 ? formatBytes(value) : undefined;
+  preview?.next_action === ProfileLoadAction.LOAD ||
+  preview?.next_action === ProfileLoadAction.LOAD_STOPPING;
+const nothingToChange = (preview: FleetProfilePreview | undefined) =>
+  preview?.next_action === ProfileLoadAction.NOTHING_TO_CHANGE;
 
 function ProfileProgress({
   application,
@@ -282,20 +291,14 @@ function ProfileProgress({
   notice,
 }: {
   application: FleetProfileApplicationView;
-  cancel?(requestKey: string): Promise<unknown>;
+  cancel?: ((requestKey: string) => Promise<unknown>) | undefined;
   notice?: ReactNode;
 }) {
   const progress = applicationProgressRecord(application);
-  const completed = bytes(progress.bytes);
-  const total = bytes(progress.total_bytes);
-  const value =
-    isWireNumber(progress.bytes) &&
-    isWireNumber(progress.total_bytes) &&
-    compareWire(progress.total_bytes, 0) > 0
-      ? Math.min(100, Math.max(0, displayRatio(progress.bytes, progress.total_bytes) * 100))
-      : undefined;
-  const phase =
-    typeof progress.phase === "string" ? progress.phase.replaceAll("-", " ") : "Profile load";
+  // The child's measured operation carries bytes, rate, ETA and a bar per Spark. The child's
+  // own byte counts are the whole-load budget, a different quantity, so they are not shown here.
+  const measured = availabilityProgress(progress.operation ?? { phase: progress.phase });
+  const nodeName = useLibraryNodeName();
   const nodeIds = Array.isArray(progress.node_ids)
     ? progress.node_ids.filter((id): id is string => typeof id === "string")
     : [];
@@ -306,34 +309,14 @@ function ProfileProgress({
       aria-label="Profile load progress"
     >
       <div className="library-profile-application-heading">
-        <div>
-          <strong>{phase}</strong>
-          <span>{application.state.replaceAll("-", " ")}</span>
-        </div>
-        {completed && (
-          <span>
-            {completed}
-            {total ? ` of ${total}` : ""}
-          </span>
-        )}
+        <span>{application.state.replaceAll("-", " ")}</span>
       </div>
-      <div
-        className={`library-profile-application-progress${value === undefined ? " is-indeterminate" : ""}`}
-        role="progressbar"
-        aria-label="Profile load progress"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        {...(value === undefined
-          ? { "aria-valuetext": "Progress total unavailable" }
-          : { "aria-valuenow": value })}
-      >
-        <span style={value === undefined ? undefined : { transform: `scaleX(${value / 100})` }} />
-      </div>
-      {nodeIds.length > 0 && (
+      <LibraryAvailabilityProgress progress={measured} />
+      {nodeIds.length > 0 && measured.members.length <= 1 && (
         <ul className="library-profile-application-members" aria-label="Profile load targets">
           {nodeIds.map((nodeId) => (
             <li key={nodeId}>
-              <span>{nodeId}</span>
+              <span>{nodeName(nodeId)}</span>
               <small>Participating</small>
             </li>
           ))}
@@ -352,7 +335,11 @@ function ProfileProgress({
           )}
         </p>
       )}
-      <WaitingFor blockers={application.blockers} nextAttemptAt={application.next_attempt_at} />
+      <WaitingFor
+        blockers={application.blockers}
+        nextAttemptAt={application.next_attempt_at}
+        phase={measured.phase}
+      />
       {notice}
       {cancel && (
         <CancelOperation
@@ -392,16 +379,18 @@ function ProfileReview({ preview }: { preview: FleetProfilePreview }) {
           ].join(" · ")}
         </p>
       )}
-      {!loadable(preview) && preview.reasons[0] && (
+      {preview.next_action === ProfileLoadAction.BLOCKED && preview.reasons[0] && (
         <p className="library-profile-plain-error" role="alert">
           {preview.reasons[0].detail}
         </p>
       )}
-      {(preview.reasons ?? []).slice(loadable(preview) ? 0 : 1).map((reason) => (
-        <p key={`${reason.code}:${reason.detail}`} className="library-profile-plain-note">
-          {reason.detail}
-        </p>
-      ))}
+      {(preview.reasons ?? [])
+        .slice(preview.next_action === ProfileLoadAction.BLOCKED ? 1 : 0)
+        .map((reason) => (
+          <p key={`${reason.code}:${reason.detail}`} className="library-profile-plain-note">
+            {reason.detail}
+          </p>
+        ))}
       {(preview.effects.gpu_clocks ?? []).map((effect) => (
         <p key={effect.node_id}>
           GPU range on {effect.node_id}: {formatWire(effect.desired.min_mhz)}–
@@ -452,6 +441,7 @@ function ProfileReview({ preview }: { preview: FleetProfilePreview }) {
         </dl>
         <ul>
           {(preview.resolved_assignments ?? []).map((assignment, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: a read-only preview list without ids
             <li key={index}>
               <strong>{assignment.recipe_title}</strong> ·{" "}
               <code>
@@ -494,14 +484,17 @@ export function LibraryProfilesView({
 }: {
   api: ControlApi;
   entries: LibraryRecipeRecord[];
-  fleet?: VisualFleetSnapshot;
+  fleet?: VisualFleetSnapshot | undefined;
   initialCreate?: boolean;
-  onBusyChange?(busy: boolean): void;
+  onBusyChange?: ((busy: boolean) => void) | undefined;
   onNavigate: Navigate;
 }) {
   const [profiles, setProfiles] = useState<FleetProfileRead[]>([]);
   const [selectedNumber, setSelectedNumber] = useState<FleetProfileNumber>();
   const [draft, setDraft] = useState<ProfileDraft>();
+  // The opening load reads the draft as it is when the profiles arrive, not as it was at render.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const [editing, setEditing] = useState(initialCreate);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -511,7 +504,7 @@ export function LibraryProfilesView({
   const [pendingLoad, setPendingLoad] = useState<PendingProfileLoad>();
   const [error, setError] = useState("");
   const [optionsBySelector, setOptionsBySelector] = useState<Record<string, RecipeOption[]>>({});
-  const [confirmingReload, setConfirmingReload] = useState(false);
+  const [confirmingStops, setConfirmingStops] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const toast = useToast();
@@ -618,6 +611,7 @@ export function LibraryProfilesView({
     const number = selectedNumber;
     observer.start(next, (signal) => api.profileProgress(number, signal));
   };
+  const selectedProfileId = selectedProfile?.id;
   const dirty = Boolean(draft && isDirty(draft, selectedProfile));
   useEffect(() => {
     if (!draft) return;
@@ -633,7 +627,7 @@ export function LibraryProfilesView({
       .then((result) => {
         if (!result) return;
         const first = openingProfile(result.profiles);
-        if (!initialCreate && first && !draft) {
+        if (!initialCreate && first && !draftRef.current) {
           const kept = unsavedDrafts.get(formatWire(first.number));
           setDraft(kept ?? draftFromProfile(first));
           setEditing(Boolean(kept));
@@ -651,7 +645,7 @@ export function LibraryProfilesView({
   }, [refreshProfiles, initialCreate]);
 
   useEffect(() => {
-    if (selectedNumber === undefined || !selectedProfile || editing) {
+    if (selectedNumber === undefined || selectedProfileId === undefined || editing) {
       setPreview(undefined);
       return;
     }
@@ -666,7 +660,7 @@ export function LibraryProfilesView({
           setError(value instanceof Error ? value.message : "The profile preview is unavailable.");
       });
     return () => controller.abort();
-  }, [api, editing, selectedNumber, selectedProfile?.id]);
+  }, [api, editing, selectedNumber, selectedProfileId]);
 
   const loadedNumber =
     selectedProfile?.status === "loaded" && !editing ? selectedProfile.number : undefined;
@@ -846,9 +840,14 @@ export function LibraryProfilesView({
       ? [{ selector: assignment.selector, detail: assignment.recipe_update.detail }]
       : [],
   );
-  async function reload() {
+  /** One rule for Load and Reload: confirm only when the plan stops a workload, else apply at once. */
+  function loadOrConfirm() {
+    if (preview?.next_action === ProfileLoadAction.LOAD_STOPPING) setConfirmingStops(true);
+    else void load();
+  }
+  async function confirmedLoad() {
     await load();
-    setConfirmingReload(false);
+    setConfirmingStops(false);
   }
 
   async function deleteSelected() {
@@ -895,9 +894,6 @@ export function LibraryProfilesView({
           </p>
         </div>
         <div className="library-profile-header-actions">
-          <button type="button" className="button secondary" onClick={startNew}>
-            New profile
-          </button>
           <a
             className="button secondary"
             href="/library?view=models"
@@ -1089,15 +1085,18 @@ export function LibraryProfilesView({
                 </div>
                 <span>{availableFleet.length} Sparks</span>
               </div>
-              <div className="library-profile-scope-list" role="list" aria-label="Enrolled Sparks">
-                {availableFleet.map((item) => (
-                  <div key={item.id} role="listitem">
-                    <strong>{item.name}</strong>
-                    <small>{item.state}</small>
-                  </div>
-                ))}
-                {availableFleet.length === 0 && <p>No enrolled Sparks are visible yet.</p>}
-              </div>
+              {availableFleet.length === 0 ? (
+                <p>No enrolled Sparks are visible yet.</p>
+              ) : (
+                <ul className="library-profile-scope-list" aria-label="Enrolled Sparks">
+                  {availableFleet.map((item) => (
+                    <li key={item.id}>
+                      <strong>{item.name}</strong>
+                      <small>{item.state}</small>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
             <section className="library-profile-assignments" aria-label="Profile assignments">
               <header>
@@ -1249,21 +1248,21 @@ export function LibraryProfilesView({
               disabled={
                 loadingProfile || applicationRunning || (!loadable(preview) && !pendingLoad)
               }
-              onClick={() => setConfirmingReload(true)}
+              onClick={loadOrConfirm}
             >
               Reload profile
             </button>
           </section>
         )}
-        {confirmingReload && selectedProfile && (
+        {confirmingStops && selectedProfile && (
           <ConfirmDialog
-            title="Reload this profile?"
-            consequence="Reloads the profile with the newest recipe revisions. Running workloads that use an older revision restart to apply it; nothing restarts until you confirm."
-            confirmLabel="Reload profile"
+            title="Load this profile?"
+            consequence={`Loading stops ${stoppedAliases(preview).join(", ") || "running workloads"}; requests to ${stoppedAliases(preview).length === 1 ? "it" : "them"} are interrupted. Nothing stops until you confirm.`}
+            confirmLabel="Load profile"
             command={`vonkctl --profile ${formatWire(selectedProfile.number)} profile load`}
             busy={loadingProfile}
-            onConfirm={() => void reload()}
-            onCancel={() => setConfirmingReload(false)}
+            onConfirm={() => void confirmedLoad()}
+            onCancel={() => setConfirmingStops(false)}
           />
         )}
         {confirmingDelete && selectedProfile && (
@@ -1283,33 +1282,38 @@ export function LibraryProfilesView({
             aria-label={`Profile ${formatWire(selectedProfile.number)} saved profile`}
           >
             <header>
-              <div>
-                <span>Saved profile</span>
-                <h3>{selectedProfile.name}</h3>
-              </div>
-              <div>
+              <h3>{selectedProfile.name}</h3>
+              <div className="library-profile-actions">
+                {nothingToChange(preview) && !pendingLoad ? (
+                  <small className="library-profile-stops">Loaded, nothing to change</small>
+                ) : (
+                  <button
+                    type="button"
+                    className="button compact"
+                    disabled={
+                      loadingProfile || applicationRunning || (!loadable(preview) && !pendingLoad)
+                    }
+                    onClick={loadOrConfirm}
+                  >
+                    {loadingProfile ? "Loading…" : "Load profile"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="button compact secondary"
+                  onClick={() => setEditing(true)}
+                >
+                  Edit profile
+                </button>
                 <ProfileExport api={api} number={selectedProfile.number} />
                 <button
                   type="button"
-                  className="button secondary"
+                  className="button compact quiet"
                   onClick={() => setConfirmingDelete(true)}
                 >
                   Delete profile
                 </button>
-                <button type="button" className="button secondary" onClick={() => setEditing(true)}>
-                  Edit profile
-                </button>
-                <button
-                  type="button"
-                  className="button"
-                  disabled={
-                    loadingProfile || applicationRunning || (!loadable(preview) && !pendingLoad)
-                  }
-                  onClick={() => void load()}
-                >
-                  {loadingProfile ? "Loading…" : "Load profile"}
-                </button>
-                {preview && (
+                {preview && !nothingToChange(preview) && (
                   <small className="library-profile-stops">
                     {stoppedAliases(preview).length > 0
                       ? `Will stop: ${stoppedAliases(preview).join(", ")}`
@@ -1335,7 +1339,7 @@ export function LibraryProfilesView({
             <ul>
               {selectedProfile.assignments.map((assignment) => (
                 <li key={assignment.selector}>
-                  <strong>{assignment.display_name}</strong>
+                  <strong>{assignment.display_name}</strong>{" "}
                   <span>
                     {assignment.recipe_selector} ·{" "}
                     {assignment.spark_ids.map((id) => names[id] ?? id).join(" + ")} ·{" "}

@@ -242,7 +242,7 @@ fn protected_front_page_does_not_starve_cleanup_of_the_tail() {
 
 #[test]
 fn owned_front_page_refuses_start_but_does_not_starve_removable_tail() {
-    let mut containers: Vec<_> = leaked_jobs(MAX_LISTED as u32 + 1)
+    let mut containers: Vec<_> = leaked_jobs(u32::try_from(MAX_LISTED).unwrap() + 1)
         .into_iter()
         .map(|mut job| {
             job.run = RUN_A.to_owned();

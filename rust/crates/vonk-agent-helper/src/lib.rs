@@ -1,4 +1,3 @@
-#![forbid(unsafe_code)]
 mod held_lock;
 mod runtime_fabric;
 pub mod runtime_logs;

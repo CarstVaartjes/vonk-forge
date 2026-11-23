@@ -31,7 +31,11 @@ impl AgentHttpClient {
             ));
         }
         // The body's own error (a stall, a transport loss) is the cause.
-        bounded_body_limit(response, expected_bytes as usize).await
+        bounded_body_limit(
+            response,
+            usize::try_from(expected_bytes).unwrap_or(usize::MAX),
+        )
+        .await
     }
 
     /// Download one job input. The Controller serves inputs whole (no range),
@@ -103,6 +107,10 @@ impl AgentHttpClient {
         }
         .await;
         if result.is_err() {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = tokio::fs::remove_file(&temporary).await;
         }
         result
@@ -147,7 +155,9 @@ impl AgentHttpClient {
                 let file = tokio::fs::OpenOptions::new()
                     .read(true)
                     .custom_flags(
-                        (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+                        (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                            .bits()
+                            .cast_signed(),
                     )
                     .open(path)
                     .await
@@ -250,6 +260,7 @@ impl AgentHttpClient {
         F: Fn(u64) + Send + Sync + 'static,
     {
         use futures_util::StreamExt;
+        use tokio::io::AsyncSeekExt;
         let progress = Arc::new(progress);
         if !valid_oci_digest(image_digest)
             || !valid_sha256(oci_layout_sha256)
@@ -267,7 +278,6 @@ impl AgentHttpClient {
                 "local image length differs from the declared bytes",
             ));
         }
-        use tokio::io::AsyncSeekExt;
         let endpoint = self.endpoint(&format!("/agent/recipe-builds/{build_id}/image"))?;
         // Retry from the Controller's persisted cursor, never from optimistic sent bytes.
         for attempt in 0..3 {

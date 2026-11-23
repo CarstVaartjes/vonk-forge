@@ -10,7 +10,7 @@ pub fn parse_compiled_execution_plan(document: &[u8]) -> Result<CompiledExecutio
     Ok(plan)
 }
 
-/// Validate the compiled plan of an Install, Start or JobRun request. The one
+/// Validate the compiled plan of an Install, Start or `JobRun` request. The one
 /// validation of a plan entering the agent: dispatch and the wire probes call
 /// it right after `RecipeOperationRequest::parse`. A refusal carries the rule.
 pub fn refuse_invalid_plan(request: &RecipeOperationRequest) -> Option<ExecutionResult> {
@@ -30,7 +30,12 @@ pub fn refuse_invalid_plan(request: &RecipeOperationRequest) -> Option<Execution
             FailureStage::JobState,
             &value.compiled_execution_plan,
         ),
-        _ => return None,
+        RecipeOperationRequest::RuntimePreflight(_)
+        | RecipeOperationRequest::Build(_)
+        | RecipeOperationRequest::BuildCleanup(_)
+        | RecipeOperationRequest::Stop(_)
+        | RecipeOperationRequest::Uninstall(_)
+        | RecipeOperationRequest::Reconcile(_) => return None,
     };
     plan.validate()
         .err()
@@ -72,7 +77,17 @@ pub(super) fn exact_stop_plan_from_claim(
             job.plan_digest.clone(),
             job.compiled_execution_plan.clone(),
         ),
-        _ => return None,
+        vonk_agent_protocol::generated::AgentClaimPayload::RuntimePreflightRequest(_)
+        | vonk_agent_protocol::generated::AgentClaimPayload::AgentUpgradePayload(_)
+        | vonk_agent_protocol::generated::AgentClaimPayload::ArtifactDistributionPayload(_)
+        | vonk_agent_protocol::generated::AgentClaimPayload::RecipeBuildRequest(_)
+        | vonk_agent_protocol::generated::AgentClaimPayload::RecipeBuildCleanupRequest(_)
+        | vonk_agent_protocol::generated::AgentClaimPayload::RecipeInstallPayload(_)
+        | vonk_agent_protocol::generated::AgentClaimPayload::RecipeStopPayload(_)
+        | vonk_agent_protocol::generated::AgentClaimPayload::RecipeReconcilePayload(_)
+        | vonk_agent_protocol::generated::AgentClaimPayload::RecipeUninstallPayload(_) => {
+            return None;
+        }
     };
     if run_id.to_string() != expected_run_id {
         return None;

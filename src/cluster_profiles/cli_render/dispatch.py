@@ -29,7 +29,12 @@ from cluster_profiles.cli_render.common import (
     _words,
 )
 from cluster_profiles.cli_render.fleet import _fleet_overview, _node
-from cluster_profiles.cli_render.library import _library
+from cluster_profiles.cli_render.library import (
+    LibraryNoun,
+    _library,
+    recipe_cut_note,
+    top_recipes,
+)
 from cluster_profiles.cli_render.metrics import _metric_list, _metric_series
 from cluster_profiles.cli_render.operations import (
     _application,
@@ -68,6 +73,7 @@ def render_payload(
     *,
     action: str | None = None,
     wide: bool = False,
+    show_all: bool = False,
     technical: bool = False,
     activity_filters: Mapping[str, object] | None = None,
     artifact_job_action: str | None = None,
@@ -85,6 +91,7 @@ def render_payload(
                 noun,
                 action=action,
                 wide=wide,
+                show_all=show_all,
                 technical=technical,
                 activity_filters=activity_filters,
                 artifact_job_action=artifact_job_action,
@@ -189,7 +196,17 @@ def render_payload(
             elif action == "preview":
                 _cache_removal_review(payload, verbose=wide)
             elif action in {None, "library", "detail"}:
-                _library(payload, noun, detail=action == "detail", wide=wide)
+                rows = (
+                    _records(payload, "recipes") if noun == LibraryNoun.RECIPE else []
+                )
+                if action is None and rows and not (wide or show_all):
+                    top = top_recipes(rows)
+                    _library(
+                        {**payload, "recipes": top}, noun, detail=False, wide=False
+                    )
+                    recipe_cut_note(len(rows), len(top))
+                else:
+                    _library(payload, noun, detail=action == "detail", wide=wide)
             else:
                 _operation(payload, noun)
         elif noun == "key":

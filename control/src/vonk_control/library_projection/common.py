@@ -127,6 +127,7 @@ def compose_recipe_state(
         controller=lowest.controller,
         running_on=sorted(set(cache.running_on) | set(assets.running_on)),
         preparation=cache.preparation or assets.preparation,
+        installed_on_sparks=cache.installed_on_sparks or assets.installed_on_sparks,
     )
 
 
@@ -145,6 +146,7 @@ def highest_state(
         controller=best.controller,
         running_on=sorted(set(first.running_on) | set(second.running_on)),
         preparation=second.preparation or first.preparation,
+        installed_on_sparks=first.installed_on_sparks or second.installed_on_sparks,
     )
 
 

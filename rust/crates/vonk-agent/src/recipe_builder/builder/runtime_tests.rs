@@ -9,7 +9,7 @@ fn fresh_rootless_podman_can_switch_from_agent_to_build_runtime() {
     // user service's different XDG_RUNTIME_DIR. An explicit --tmpdir
     // skips Podman's creation of the default rootless pause directory.
     let root = tempfile::tempdir().unwrap();
-    let runtime = super::super::budget::owned_directory(root.path(), "r").unwrap();
+    let runtime = owned_directory(root.path(), "r").unwrap();
     let runroot = build_runroot(&runtime, Uuid::new_v4()).unwrap();
     let storage = root.path().join("storage");
     let config = root.path().join("storage.conf");
@@ -20,7 +20,7 @@ fn fresh_rootless_podman_can_switch_from_agent_to_build_runtime() {
                 runtime.display(), root.path().display()
             ),
         ).unwrap();
-    let arguments = super::super::images::podman_storage_arguments(&storage, &runroot);
+    let arguments = podman_storage_arguments(&storage, &runroot);
     for xdg in [&runtime, &runroot] {
         let output = Command::new("/usr/bin/podman")
             .env_clear()

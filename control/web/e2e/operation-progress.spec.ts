@@ -94,18 +94,27 @@ for (const width of [1440, 390]) {
     await page.route("**/api/jobs/transfer-1?*", (route) => route.fulfill({ json: detail }));
     await page.goto("/activity");
     await page.getByText("View operation progress").click();
-    const copying = page.getByRole("region", { name: "Copying progress" });
-    const verifying = page.getByRole("region", { name: "Verifying progress" });
-    await expect(copying.locator("strong")).toHaveText("Copying");
-    await expect(verifying.locator("strong")).toHaveText("Verifying");
-    const copyingBar = copying.getByRole("progressbar", { name: "Copying transfer" });
+    // Two Sparks in different phases: each keeps its own region, phase and bar.
+    const bars = page.getByRole("progressbar", { name: / transfer$/ });
+    await expect(bars).toHaveCount(2);
+    const copyingBar = bars.nth(0);
+    const verifyingBar = bars.nth(1);
+    await expect(copyingBar).toBeVisible();
+    await expect(verifyingBar).toBeVisible();
+    expect(await copyingBar.getAttribute("aria-label")).not.toBe(
+      await verifyingBar.getAttribute("aria-label"),
+    );
+    const copying = copyingBar.locator("xpath=ancestor::section[1]");
+    const verifying = verifyingBar.locator("xpath=ancestor::section[1]");
+    expect(await copying.getAttribute("aria-label")).not.toBe(
+      await verifying.getAttribute("aria-label"),
+    );
     // 42,000,000 of 168,000,000 bytes is one quarter. ARIA exposes the
     // normalized percentage while its value text retains the byte quantities.
     await expect(copyingBar).toHaveAttribute("aria-valuemin", "0");
     await expect(copyingBar).toHaveAttribute("aria-valuemax", "100");
     await expect(copyingBar).toHaveAttribute("aria-valuenow", "25");
-    await expect(copyingBar).toHaveAttribute("aria-valuetext", "40.1 MiB / 160.2 MiB");
-    const verifyingBar = verifying.getByRole("progressbar", { name: "Verifying transfer" });
+    await expect(copyingBar).toHaveAttribute("aria-valuetext", /^40\.1 MiB \/ 160\.2 MiB/);
     await expect(verifyingBar).not.toHaveAttribute("aria-valuenow");
     await expect(verifyingBar).not.toHaveAttribute("aria-valuemax");
     await expect(verifyingBar).toHaveAttribute("aria-valuetext", "40.1 MiB / 160.2 MiB");

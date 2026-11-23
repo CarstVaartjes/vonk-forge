@@ -10,7 +10,7 @@ test("keeps byte progress and rate separate from file counts", () => {
         phase: "downloading",
         completed_bytes: 42_000_000,
         total_bytes: 168_000_000,
-        bytes_per_second: 87_000_000,
+        smoothed_bytes_per_second: 87_000_000,
         eta_seconds: 24 * 60,
       })}
     />,
@@ -44,7 +44,7 @@ test("verification clears transfer ETA and keeps known transfer counters indeter
         phase: "verifying",
         completed_bytes: 100,
         total_bytes: 100,
-        bytes_per_second: 50,
+        smoothed_bytes_per_second: 50,
         eta_seconds: 2,
         completed_items: 2,
         total_items: 3,
@@ -63,7 +63,7 @@ test("advisory stall and last observation are visible without presenting stale s
       progress={availabilityProgress({
         phase: "copying",
         completed_bytes: 10,
-        bytes_per_second: 50,
+        smoothed_bytes_per_second: 50,
         eta_seconds: 2,
         activity: "possibly_stalled",
         last_progress_at: "2026-09-08T12:00:00Z",
@@ -96,5 +96,59 @@ test("displays exact item counts and a bounded accessible wide-byte ratio", () =
 test("missing measured bytes stay unknown instead of inventing zero progress", () => {
   render(<LibraryAvailabilityProgress progress={availabilityProgress({ phase: "copying" })} />);
   expect(screen.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
-  expect(screen.getByText("Not reported received")).toBeInTheDocument();
+  expect(screen.queryByText(/received/)).not.toBeInTheDocument();
+});
+
+test("shows the phase in plain words and one bar per Spark from the server fields", () => {
+  render(
+    <LibraryAvailabilityProgress
+      progress={availabilityProgress({
+        phase: "transfer",
+        completed_bytes: 50,
+        total_bytes: 200,
+        total_bytes_known: true,
+        smoothed_bytes_per_second: 1024,
+        eta_seconds: 90,
+        members: [
+          {
+            member_id: "spark-a",
+            phase: "transfer",
+            completed_bytes: 40,
+            total_bytes: 100,
+            smoothed_bytes_per_second: 2048,
+            eta_seconds: 30,
+          },
+          { member_id: "spark-b", phase: "transfer", completed_bytes: 10, total_bytes: 100 },
+        ],
+      })}
+    />,
+  );
+  expect(screen.queryByText("transfer")).not.toBeInTheDocument();
+  const bars = screen.getAllByRole("progressbar");
+  expect(bars).toHaveLength(3);
+  expect(bars[0]).toHaveAttribute("aria-valuenow", "25");
+  expect(bars[1]).toHaveAttribute("aria-valuenow", "40");
+  expect(bars[2]).toHaveAttribute("aria-valuenow", "10");
+  expect(screen.getByText(/2\.0 KiB\/s/)).toBeInTheDocument();
+  const [overall, first, second] = screen.getAllByRole("progressbar");
+  // 1m 30s overall and 30s for the first Spark; the second reports none.
+  expect(overall).toHaveAttribute("aria-valuetext", expect.stringMatching(/30s/));
+  expect(first).toHaveAttribute("aria-valuetext", expect.stringMatching(/30s/));
+  expect(second?.getAttribute("aria-valuetext")).not.toMatch(/\ds\b/);
+});
+
+test("a rate is shown only from the smoothed field", () => {
+  render(
+    <LibraryAvailabilityProgress
+      progress={availabilityProgress({
+        phase: "downloading",
+        completed_bytes: 10,
+        total_bytes: 100,
+        total_bytes_known: true,
+        bytes_per_second: 50,
+        rate: 50,
+      })}
+    />,
+  );
+  expect(screen.queryByText(/\/s/)).not.toBeInTheDocument();
 });

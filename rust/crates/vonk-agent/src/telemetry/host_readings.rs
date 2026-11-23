@@ -46,7 +46,7 @@ const MAX_TEMPERATURE_C: u32 = 150;
 const MAX_FAN_RPM: u32 = 100_000;
 const MAX_FABRIC_PORTS: u32 = 16;
 const MAX_DIRECTORY_ENTRIES: usize = 256;
-/// `/proc/stat` counts in USER_HZ, which is 100 on every Linux ABI we run.
+/// `/proc/stat` counts in `USER_HZ`, which is 100 on every Linux ABI we run.
 const CLOCK_TICKS_PER_SECOND: f64 = 100.0;
 
 pub fn read_host(roots: &HostRoots, store: &Path) -> HostReadings {
@@ -78,6 +78,10 @@ pub fn read_host(roots: &HostRoots, store: &Path) -> HostReadings {
 
 /// (busy, total) seconds from the aggregate `cpu` line: user nice system idle
 /// iowait irq softirq steal. Busy is all of it except idle and I/O wait.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "clock ticks converted to seconds; f64 precision is ample"
+)]
 fn parse_cpu(text: &str) -> Option<(f64, f64)> {
     let line = text.lines().find(|line| line.starts_with("cpu "))?;
     let ticks = line
@@ -144,6 +148,62 @@ struct Fabric {
     ports_active: u32,
 }
 
+/// One RDMA device's port 1: its state and counters (4-byte words, as bytes).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FabricDeviceReading {
+    pub name: String,
+    /// The PCI bus:slot.function behind the device, shared by the two devices
+    /// of one cabled port (their PCI domains differ); `None` when unreadable.
+    pub port: Option<String>,
+    pub active: bool,
+    pub rx_bytes: Option<u64>,
+    pub tx_bytes: Option<u64>,
+}
+
+/// Every RDMA device under `root` (`/sys/class/infiniband`), by name; `None`
+/// on a host without any.
+pub fn read_fabric_devices(root: &Path) -> Option<Vec<FabricDeviceReading>> {
+    let devices = sorted_entries(root)?;
+    if devices.is_empty() {
+        return None;
+    }
+    Some(
+        devices
+            .into_iter()
+            .map(|device| {
+                let port = device.join("ports/1");
+                let words = |name: &str| {
+                    read_bounded_text(&port.join("counters").join(name))?
+                        .trim()
+                        .parse::<u64>()
+                        .ok()?
+                        .checked_mul(4)
+                };
+                FabricDeviceReading {
+                    name: device
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                    port: pci_function(&device),
+                    active: read_bounded_text(&port.join("state"))
+                        .is_some_and(|state| state.trim_start().starts_with("4:")),
+                    rx_bytes: words("port_rcv_data"),
+                    tx_bytes: words("port_xmit_data"),
+                }
+            })
+            .collect(),
+    )
+}
+
+/// `bus:slot.function` of the PCI device a `device` symlink names
+/// (`0002:01:00.1` gives `01:00.1`).
+fn pci_function(device: &Path) -> Option<String> {
+    let target = std::fs::canonicalize(device.join("device")).ok()?;
+    let address = target.file_name()?.to_str()?;
+    let (_, function) = address.split_once(':')?;
+    Some(function.to_owned())
+}
+
 /// RDMA traffic of all ports (a port going down must not make the counters
 /// drop) and the number of ACTIVE ports. The fabric's netdev counters miss it
 /// (RDMA bypasses them); the port counters are in 4-byte words.
@@ -153,27 +213,12 @@ fn read_fabric(root: &Path) -> Option<Fabric> {
         tx_bytes: 0,
         ports_active: 0,
     };
-    // A host without RDMA devices has no fabric to report.
-    let devices = sorted_entries(root)?;
-    if devices.is_empty() {
-        return None;
-    }
-    for device in devices {
-        let port = device.join("ports/1");
-        let active = read_bounded_text(&port.join("state"))
-            .is_some_and(|state| state.trim_start().starts_with("4:"));
-        let words = |name: &str| {
-            read_bounded_text(&port.join("counters").join(name))?
-                .trim()
-                .parse::<u64>()
-                .ok()?
-                .checked_mul(4)
-        };
-        if let (Some(rx), Some(tx)) = (words("port_rcv_data"), words("port_xmit_data")) {
+    for device in read_fabric_devices(root)? {
+        if let (Some(rx), Some(tx)) = (device.rx_bytes, device.tx_bytes) {
             fabric.rx_bytes = fabric.rx_bytes.checked_add(rx)?;
             fabric.tx_bytes = fabric.tx_bytes.checked_add(tx)?;
         }
-        fabric.ports_active += u32::from(active);
+        fabric.ports_active += u32::from(device.active);
     }
     (fabric.rx_bytes <= COUNTER_MAX
         && fabric.tx_bytes <= COUNTER_MAX
@@ -213,7 +258,7 @@ struct Hwmon {
 }
 
 /// Sensors are chosen by the chip `name`: the ACPI thermal zones (the hottest
-/// is the board sensor), the NVMe composite, the NIC ASICs and the ACPI fans.
+/// is the board sensor), the `NVMe` composite, the NIC ASICs and the ACPI fans.
 fn read_hwmon(root: &Path) -> Hwmon {
     let mut found = Hwmon::default();
     for chip in sorted_entries(root).unwrap_or_default() {
@@ -234,7 +279,7 @@ fn read_hwmon(root: &Path) -> Hwmon {
                 found.fan_rpm = number("fan1_input")
                     .and_then(|rpm| u32::try_from(rpm).ok())
                     .filter(|rpm| *rpm <= MAX_FAN_RPM)
-                    .max(found.fan_rpm)
+                    .max(found.fan_rpm);
             }
             _ => {}
         }

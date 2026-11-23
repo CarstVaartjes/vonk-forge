@@ -94,6 +94,10 @@ pub(super) fn ordered_environment(
     Ok(environment)
 }
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the Result keeps the signature shared with its sibling operations"
+)]
 pub(super) fn publications(plan: &CompiledExecutionPlan) -> Result<Vec<String>, CompiledOciError> {
     if plan.security.network_mode.as_str() == "host" {
         return Ok(Vec::new());

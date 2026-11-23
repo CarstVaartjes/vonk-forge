@@ -34,7 +34,7 @@ from sqlalchemy import select
 from tests.subprocess_environment import install_cli_wheel, isolated_environment
 from vonk_control.models.fleet import FleetProfileApplication
 
-from .test_profile_load_submission import _profile_api
+from .test_profile_load_submission import _profile_api, _stopping_profile_api
 
 KEY = "11111111-1111-4111-8111-111111111111"
 
@@ -433,7 +433,9 @@ def test_installed_interactive_review_recovers_the_original_load_after_edit(
     postgres_engine,
     tmp_path: Path,
 ) -> None:
-    sessions, api, _codec, headers, preview = _profile_api(postgres_engine)
+    sessions, api, _codec, headers, preview = _stopping_profile_api(
+        tmp_path, postgres_engine
+    )
     digest = preview.get("plan_digest")
     assert isinstance(digest, str)
     with _https_api_peer(tmp_path, api, headers, drop_load_answer=True) as (

@@ -36,6 +36,12 @@ impl Host {
             counters: Counters::default(),
         }
     }
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss,
+        clippy::cast_sign_loss,
+        reason = "test arithmetic on small rates"
+    )]
     fn tick(&mut self) -> Sample {
         let seconds = SAMPLE_INTERVAL.as_secs_f64();
         let step = |rate: u64| (rate as f64 * seconds) as u64;
@@ -98,10 +104,10 @@ fn run_with_line(
 }
 
 fn ticks(duration: Duration) -> u32 {
-    (duration.as_millis() / SAMPLE_INTERVAL.as_millis()) as u32
+    u32::try_from(duration.as_millis() / SAMPLE_INTERVAL.as_millis()).unwrap()
 }
 
-/// A big dual load streaming its staging copies to swap: MemAvailable pinned
+/// A big dual load streaming its staging copies to swap: `MemAvailable` pinned
 /// near the watermark, full PSI from kswapd reclaim, swap filling steadily.
 fn steady_swapping_load() -> Host {
     Host {
@@ -123,7 +129,7 @@ fn a_load_that_swaps_steadily_for_ten_minutes_is_never_killed() {
     for loading in [true, false] {
         let mut host = steady_swapping_load();
         let mut decision = Decision::default();
-        let ten_minutes = ticks(Duration::from_secs(10 * 60));
+        let ten_minutes = ticks(Duration::from_mins(10));
         // 20k pages/s for 10 minutes moves ~45 GiB: the 64 GiB swap absorbs it.
         assert_eq!(
             run(
@@ -155,7 +161,7 @@ fn a_real_runaway_is_killed_within_the_memory_and_swap_bound() {
     ));
     // Swap filled within ~84 s at 200k pages/s; the kill follows within its
     // sustain bound, not minutes later.
-    let filled = ((host.swap_total - host.swap_free) / PAGE / 200_000) as u32;
+    let filled = u32::try_from((host.swap_total - host.swap_free) / PAGE / 200_000).unwrap();
     assert!(
         tick <= ticks(Duration::from_secs(90)) + ticks(SWAP_FILLING_SUSTAIN),
         "{tick} {filled}"
@@ -337,7 +343,7 @@ fn r4_serving_pressure_kills_after_thirty_seconds_and_loading_waits_longer() {
     );
 }
 
-/// The production 2026-10-31 12:20Z reading that killed a MiniMax H3 job on
+/// The production 2026-10-31 12:20Z reading that killed a `MiniMax` H3 job on
 /// spark-3542: reclaim absorbing the load into 64 GiB of free swap.
 fn minimax_h3_reading() -> Host {
     Host {
@@ -624,7 +630,7 @@ fn a_stalled_sampler_neither_hides_a_runaway_nor_invents_a_rate() {
     );
     decision.observe(start + Duration::from_secs(11), later, false, true, false);
     let rates = decision.rates().unwrap();
-    assert_eq!(rates.thrash(), 10_000.0);
+    assert!((rates.thrash() - 10_000.0).abs() < f64::EPSILON);
 }
 
 #[test]
@@ -972,7 +978,7 @@ fn a_load_at_the_usable_swap_bound_is_never_killed_and_one_byte_past_is() {
 }
 
 /// The Inkling dspark load's readings at the 2026-10-29 kill (spark-3542, NVRM
-/// line present throughout): MemAvailable 6420 -> 1006 MiB, MemFree 976 MiB,
+/// line present throughout): `MemAvailable` 6420 -> 1006 MiB, `MemFree` 976 MiB,
 /// 64 GiB swap with 63.1 GiB free, swap-out 148195 pages/s, swap-in 12,
 /// refault 711, loading. `swap_out_per_s` is the only knob the tests vary.
 fn inkling_dspark_kill_readings(swap_out_per_s: u64) -> Host {
@@ -1024,8 +1030,8 @@ fn r5_kills_on_low_memfree_when_swap_is_not_absorbing_the_load() {
     );
 }
 
-/// The DeepSeek V4.1 Flash EXL3 Mia dual load killed at 18:49:40Z on 2026-11-02
-/// (spark-3542, NVRM line present): MemFree 0.96 GiB, MemAvailable 17.4 GiB,
+/// The `DeepSeek` V4.1 Flash EXL3 Mia dual load killed at 18:49:40Z on 2026-11-02
+/// (spark-3542, NVRM line present): `MemFree` 0.96 GiB, `MemAvailable` 17.4 GiB,
 /// 3.7 GiB swap used, swap-out 0/s, PSI full avg10 33%. Page-cache reclaim.
 fn dsv41_mia_dual_readings() -> Host {
     Host {

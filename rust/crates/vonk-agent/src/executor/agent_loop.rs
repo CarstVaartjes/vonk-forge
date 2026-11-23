@@ -34,6 +34,12 @@ impl LoopClient for AgentHttpClient {
             total_bytes: counters.total_bytes.map(Into::into),
             total_bytes_known: counters.total_bytes.is_some(),
             activity_sequence: Some(counters.activity.into()),
+            fetched: counters
+                .fetched
+                .map(|(bytes, span)| vonk_agent_protocol::NetworkFetch {
+                    bytes: bytes.into(),
+                    seconds: span.as_secs_f64(),
+                }),
             ..phase_progress(counters.phase)
         })
     }
@@ -252,6 +258,10 @@ pub(super) async fn execute_claimed<C: LoopClient, E: Executor>(
             }
         },
     };
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the receiving side may already be gone; nobody is waiting for the value"
+    )]
     let _ = stop_heartbeat.send(());
     let heartbeat_result = heartbeat_task
         .await

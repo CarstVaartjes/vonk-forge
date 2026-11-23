@@ -11,7 +11,7 @@ type AdminMenuProps = {
   navigationLocked?: boolean;
   onNavigate(event: ReactMouseEvent<HTMLAnchorElement>, route: "keys"): void;
   onLogout(): void;
-  role: string;
+  operatorRole: string;
   subject: string;
 };
 
@@ -22,7 +22,7 @@ export function AdminMenu({
   navigationLocked = false,
   onNavigate,
   onLogout,
-  role,
+  operatorRole,
   subject,
 }: AdminMenuProps) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -101,7 +101,7 @@ export function AdminMenu({
         className="operator-summary"
         aria-controls={menuId}
         aria-expanded={menuOpen}
-        aria-label={`${subject}, ${role}. Open operator actions`}
+        aria-label={`${subject}, ${operatorRole}. Open operator actions`}
         disabled={navigationLocked}
         title={
           navigationLocked
@@ -115,13 +115,14 @@ export function AdminMenu({
         </span>
         <div>
           <strong>{subject}</strong>
-          <span>{role}</span>
+          <span>{operatorRole}</span>
         </div>
         <span className="operator-disclosure-indicator" aria-hidden="true">
           ⌄
         </span>
       </button>
       {menuOpen && (
+        // biome-ignore lint/a11y/useSemanticElements: role=group names a styled wrapper; fieldset would need a user-agent style reset
         <div
           ref={menu}
           id={menuId}

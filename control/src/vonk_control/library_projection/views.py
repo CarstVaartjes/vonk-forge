@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from sqlalchemy import select
 
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_control.auth import cursor_key
 from vonk_control.catalog.queries import active_head_revision
 from vonk_control.identifiers import _UUID_PATTERN
@@ -27,6 +28,8 @@ from vonk_control.library.contract import (
     RecipeDetailResponse,
     RecipeLibraryResponse,
     _utc,
+    model_actions,
+    recipe_actions,
 )
 from vonk_control.library_projection.common import (
     _LIBRARY_ORDER,
@@ -225,16 +228,22 @@ def models(
         snapshot = self._local_state_snapshot(
             [item.identity.content_sha256 for item in selected]
         )
-        return [
-            item.model_copy(
-                update={
-                    "local": self._local(
-                        item.identity.content_sha256, kind="model", snapshot=snapshot
-                    )
-                }
+        observed = []
+        for item in selected:
+            local = self._local(
+                item.identity.content_sha256,
+                kind=RunSwitchReasonScopeName.MODEL,
+                snapshot=snapshot,
             )
-            for item in selected
-        ]
+            observed.append(
+                item.model_copy(
+                    update={
+                        "local": local,
+                        "actions": model_actions(local, item.cache_usage),
+                    }
+                )
+            )
+        return observed
 
     page, next_cursor = _observed_library_page(
         filtered[:limit],
@@ -511,18 +520,19 @@ def recipe_library(
             snapshot = self._local_state_snapshot(
                 [item.identity.content_sha256 for item in candidates]
             )
-            candidates = [
-                item.model_copy(
-                    update={
-                        "local": self._local(
-                            item.identity.content_sha256,
-                            kind=ReceiptOwner.RECIPE,
-                            snapshot=snapshot,
-                        )
-                    }
+            observed = []
+            for item in candidates:
+                local = self._local(
+                    item.identity.content_sha256,
+                    kind=ReceiptOwner.RECIPE,
+                    snapshot=snapshot,
                 )
-                for item in candidates
-            ]
+                observed.append(
+                    item.model_copy(
+                        update={"local": local, "actions": recipe_actions(local)}
+                    )
+                )
+            candidates = observed
         if assess and not filtering_assessment:
             candidates = self._assessed(candidates, deadline=deadline)
         return candidates

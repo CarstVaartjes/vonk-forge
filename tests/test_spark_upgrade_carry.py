@@ -35,6 +35,7 @@ from vonk_control.fleet_projection.common import (
     NodeConnection,
     RunPresence,
 )
+from vonk_control.run_readiness import GroupHealth
 from vonk_control.run_switch_contract.phase_results import (
     RunSwitchFinalVerifyResult,
 )
@@ -244,7 +245,7 @@ def _serving_fleet(installation_id: str, run_id: str):
         rank_state=RunState.RUNNING,
         rank_age_seconds=0,
         rank_fresh=True,
-        group_state="healthy",
+        group_state=GroupHealth.HEALTHY,
         healthy=True,
     )
     node = FleetNode(

@@ -738,6 +738,19 @@ def _running_profile_api(tmp_path, engine):
     return sessions, api, headers, profile, installed, run, preview.json()
 
 
+def _stopping_profile_api(tmp_path, engine):
+    """The shape of `_profile_api` for a profile whose load stops a serving workload.
+
+    A load that stops nothing needs no consent, so tests of consent and of the
+    reviewed plan changing under the operator use a plan that does stop one.
+    """
+
+    sessions, api, headers, _profile, _installed, _run, preview = _running_profile_api(
+        tmp_path, engine
+    )
+    return sessions, api, None, headers, preview
+
+
 @pytest.mark.parametrize("change", ["run", "installation", "pending-job"])
 def test_workload_change_during_admission_rejects_only_unreviewed_destructive_targets(
     tmp_path, postgres_engine, monkeypatch, change
@@ -1173,7 +1186,9 @@ def test_unreadable_review_binding_reobserves_changed_owner_plan_without_unrevie
     postgres_engine, tmp_path, fault_count
 ):
 
-    sessions, api, _codec, headers, original = _profile_api(postgres_engine)
+    sessions, api, _codec, headers, original = _stopping_profile_api(
+        tmp_path, postgres_engine
+    )
     token = tmp_path / "token"
     token.touch(mode=0o600)
     token.write_text(headers["Authorization"].removeprefix("Bearer "))
@@ -1263,7 +1278,9 @@ def test_conflict_observes_original_owner_receipt_without_effect_replay(
     postgres_engine, tmp_path, monkeypatch, lookup_outage, review
 ):
 
-    sessions, api, _codec, headers, _preview = _profile_api(postgres_engine)
+    sessions, api, _codec, headers, _preview = _stopping_profile_api(
+        tmp_path, postgres_engine
+    )
     token = tmp_path / "token"
     token.touch(mode=0o600)
     token.write_text(headers["Authorization"].removeprefix("Bearer "))

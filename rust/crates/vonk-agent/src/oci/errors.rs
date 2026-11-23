@@ -51,7 +51,15 @@ impl OciError {
             Self::Install { source, .. } | Self::Start { source, .. } => {
                 source.model_store_layout()
             }
-            _ => None,
+            Self::Process(_)
+            | Self::Workload(_)
+            | Self::Runtime
+            | Self::ImageDigest
+            | Self::Artifact
+            | Self::Io(_)
+            | Self::Json(_)
+            | Self::Capacity
+            | Self::ReconciliationBusy => None,
         }
     }
 
@@ -59,9 +67,22 @@ impl OciError {
         match self {
             Self::Process(ProcessError::Cancelled) => true,
             Self::Install { source, .. } | Self::Start { source, .. } => source.is_cancelled(),
-            _ => false,
+            Self::Process(_)
+            | Self::Workload(_)
+            | Self::Runtime
+            | Self::ImageDigest
+            | Self::Artifact
+            | Self::ModelStoreLayout { .. }
+            | Self::Io(_)
+            | Self::Json(_)
+            | Self::Capacity
+            | Self::ReconciliationBusy => false,
         }
     }
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "every other error passes through unchanged"
+    )]
     pub fn safe_start_context(&self) -> (FailureStage, &'static str) {
         let (stage, source) = match self {
             Self::Start { stage, source } => (*stage, source.as_ref()),
@@ -79,6 +100,10 @@ impl OciError {
         (stage, category)
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "every other error passes through unchanged"
+    )]
     pub fn safe_install_context(&self) -> (FailureStage, &'static str) {
         match self {
             Self::Install { stage, source } => (*stage, source.safe_category()),

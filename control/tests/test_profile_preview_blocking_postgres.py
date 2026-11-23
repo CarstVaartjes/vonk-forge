@@ -17,7 +17,7 @@ from vonk_control.catalog.revision_contract import (
     read_catalog_projection,
     write_catalog_projection,
 )
-from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profile_contract.review import FleetProfilePreviewResponse
 from vonk_control.fleet_profiles.read_observation import profile_read
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild
@@ -138,7 +138,9 @@ def test_slow_ingress_finishes_once_and_dual_previews_become_loadable(
                     f"/api/profile/{profile.number}/preview", headers=headers
                 )
                 assert result.status_code == 200, result.text
-                preview = FleetProfilePreview.model_validate_json(result.content)
+                preview = FleetProfilePreviewResponse.model_validate_json(
+                    result.content
+                )
                 assert not preview.allowed
                 assert any(
                     item.code == ProfileReasonCode.PREPARATION_UNAVAILABLE

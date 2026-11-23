@@ -1,6 +1,7 @@
-//! A fake kernel (its /proc/swaps, MemAvailable, disk and the swap commands)
+//! A fake kernel (its /proc/swaps, `MemAvailable`, disk and the swap commands)
 //! with real checkpoint files proves growth, release, refusal and recovery.
 use super::*;
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 const OS_SWAP: &str = "/swap.img";
@@ -104,12 +105,14 @@ impl CommandRunner for Kernel {
             PROC_SWAPS => {
                 let mut text = "Filename\tType\tSize\tUsed\tPriority\n".to_owned();
                 for swap in &state.active {
-                    text.push_str(&format!(
-                        "{}\tfile\t{}\t{}\t-2\n",
+                    writeln!(
+                        text,
+                        "{}\tfile\t{}\t{}\t-2",
                         swap.path.display(),
                         swap.size_bytes / 1024,
                         swap.used_bytes / 1024
-                    ));
+                    )
+                    .unwrap();
                 }
                 text
             }

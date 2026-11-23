@@ -261,6 +261,10 @@ impl<R: ProcessRunner + ?Sized> RuntimePreflight<'_, R> {
                 {
                     // Damaged generated bookkeeping is a miss. Rename the
                     // entry itself; never follow the uncertain target.
+                    #[expect(
+                        clippy::let_underscore_must_use,
+                        reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+                    )]
                     let _ = fs::rename(
                         &cache_path,
                         self.data_root
@@ -313,9 +317,13 @@ impl<R: ProcessRunner + ?Sized> RuntimePreflight<'_, R> {
         };
         // Never extend the observed age when reusing a successful build result.
         let mut cache_result = result.clone();
-        if cached {
-            cache_result.observed_at = previous.as_ref().unwrap().observed_at;
+        if let Some(previous) = previous.as_ref().filter(|_| cached) {
+            cache_result.observed_at = previous.observed_at;
         }
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort cleanup: the next reconciliation pass repeats it"
+        )]
         let _ = (|| -> std::io::Result<()> {
             let temporary = tempfile::NamedTempFile::new_in(self.data_root)?;
             fs::write(
@@ -457,7 +465,9 @@ impl<R: ProcessRunner + ?Sized> RuntimePreflight<'_, R> {
                             ProcessError::OutputLimit => {
                                 Code::PreflightFindingDiagnosticLimitExceeded
                             }
-                            _ => Code::PreflightFindingSubprocessUnavailable,
+                            ProcessError::Io(_) | ProcessError::Cancelled => {
+                                Code::PreflightFindingSubprocessUnavailable
+                            }
                         },
                     ));
                     break;

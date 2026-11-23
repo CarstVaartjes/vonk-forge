@@ -49,6 +49,8 @@ after the agent is stopped): a hook that runs a new program adds it there.
 
 ## Fleet words, vonkctl tests and schema reconciliation
 
+After every completed workload stop that left no GPU compute process running, the agent reads `SecPageTables` (`memory_readings.rs`, `HostSettings.memory_fragmentation`); the Controller alone derives the `host.memory-fragmented` reboot advice (`fleet_projection/memory_fragmentation.py`). The agent also reports per-RDMA-device traffic deltas (`fabric_traffic.rs`, `HostSettings.fabric_devices`) and the Controller derives `network.rails-underused` (`fleet_projection/fabric_rails.py`). See [Spark host checks](operations/spark-host-checks.md#memory-fragmentation-advice-reboot-recommended) and the [fabric runbook](runbooks/fabric.md#rail-observation-network-using-n-of-m-rails).
+
 The Fleet words (vitals, what a Spark serves, the status line, attention items, GPU throttle reasons, host checks) are derived from the same Controller data by the web Fleet page and `vonkctl fleet`. Wording is not tested: no test compares printed or rendered text, and the two clients may word things differently. A secret or terminal control in output, counts, ordering and the `--json` document stay tested. Every vonkctl test decides on
 data: the exit status, the requests sent, a typed result or the `--json` document
 (the `vonkctl_json` fixture). Decisions are tested as data through view functions.

@@ -14,6 +14,7 @@ from typing import Final, cast
 from cluster_profiles.cli_outcome import operation_state
 from cluster_profiles.cli_render.common import _text, _words, terminal_text
 from cluster_profiles.cli_select import SelectorError
+from cluster_profiles.cli_states_generated import PROFILE_NOTHING_TO_CHANGE, SUCCEEDED
 from cluster_profiles.control_client.errors import ControlMalformedResponse
 from cluster_profiles.control_client.schema import validate_control_document
 from cluster_profiles.controller_cli.common import (
@@ -205,8 +206,10 @@ def _run(
         ),
         draft=draft,
     )
-    application_state = operation_state(application)
-    if application_state not in {"succeeded", "completed"}:
+    # A plan that changes nothing submits nothing: the workload already runs.
+    already_running = application.get("next_action") == PROFILE_NOTHING_TO_CHANGE
+    application_state = SUCCEEDED if already_running else operation_state(application)
+    if application_state != SUCCEEDED:
         return {
             "recipe": selector,
             "application": application,

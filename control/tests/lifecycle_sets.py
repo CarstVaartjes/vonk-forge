@@ -25,12 +25,16 @@ own the vocabularies they publish. Only added lines are checked.
 from __future__ import annotations
 
 import ast
+import re
 
 KIND = (
     "hand-spelled set of lifecycle states; use the subject's named predicate "
     "(job_states.LIVE, fleet_profile_states.LIVE, ...) or name it in its *_states.py"
 )
 SCOPE = "control/src/vonk_control/"
+#: vonkctl reads the contract's generated sets (``cli_states_generated``) too.
+CLI_SCOPE = "src/cluster_profiles/"
+WEB_SCOPE = "control/web/src/"
 _OPEN = frozenset({"QUEUED", "RUNNING", "BACKOFF", "OBSERVING", "NEEDS_OPERATOR"})
 _TERMINAL = frozenset({"SUCCEEDED", "FAILED", "CANCELLED", "SUPERSEDED"})
 _ALL = _OPEN | _TERMINAL
@@ -54,12 +58,13 @@ _COMBINE = (ast.Add, ast.BitOr)
 
 def in_scope(path: str) -> bool:
     return (
-        path.startswith(SCOPE)
+        path.startswith((SCOPE, CLI_SCOPE))
         and path.endswith(".py")
         and not path.endswith(
             ("_states.py", "/states.py", "_contract.py", "/contract.py")
         )
         and "_contract/" not in path
+        and not path.endswith(("_generated.py", "/cli_states.py"))
     )
 
 
@@ -146,3 +151,36 @@ def scan_source(source: str) -> list[int]:
         if len(members) >= 2 and frozenset(members) != _ALL:
             hits.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
     return sorted(hits)
+
+
+_WEB_SET = re.compile(r"new Set(?:<[^>]*>)?\(\s*\[(?P<body>[^\]]*)\]", re.DOTALL)
+_WEB_WORD = re.compile(
+    r"LifecycleState\.(?P<member>[A-Z_]+)|[\"'](?P<word>queued|running|backoff|"
+    r"observing|needs-operator|succeeded|cancelled|superseded|failed)[\"']"
+)
+
+
+def in_web_scope(path: str) -> bool:
+    return (
+        path.startswith(WEB_SCOPE)
+        and path.endswith((".ts", ".tsx"))
+        and ".test." not in path
+        and not path.endswith(("vocabulary.generated.ts", "generated.d.ts"))
+    )
+
+
+def scan_web_source(source: str) -> list[int]:
+    """Lines of a ``new Set([...])`` that spells two or more lifecycle states."""
+    hits: list[int] = []
+    for found in _WEB_SET.finditer(source):
+        members = {
+            (match["member"] or _WORDS.get(match["word"], match["word"])).upper()
+            for match in _WEB_WORD.finditer(found["body"])
+            if match["member"] in _ALL
+            or (match["word"] and _WORDS.get(match["word"], "") in _ALL | {"failed"})
+        }
+        if len(members) >= 2:
+            first = source.count("\n", 0, found.start()) + 1
+            last = source.count("\n", 0, found.end()) + 1
+            hits.extend(range(first, last + 1))
+    return hits

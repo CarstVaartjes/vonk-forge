@@ -18,13 +18,11 @@ import type {
   VisualFleetSnapshot,
   RecipeReadinessState,
 } from "../../api/types";
-import { canonicalRecipeSelector } from "../../api/types";
 import { LibraryPath, type LibraryRoute } from "../../lib/library-route";
 import { modelKey, modelLibraryPath, recipeLibraryPath } from "../../lib/library-route";
 import { formatBytes } from "../../lib/fleet";
 import { EmptyState } from "../ui/empty-state";
-import { LibraryRecipeDownloadAction } from "./library-recipe-download-action";
-import { LibraryRecipeRemoveAction } from "./library-recipe-remove-action";
+import { LibraryRecipeActions } from "./library-recipe-actions";
 import { NOT_REPORTED, useCapabilityWords } from "./library-vocabulary";
 import {
   RecipeQualificationBadge,
@@ -429,7 +427,7 @@ export function EmptyLibrary({
   filters: LibraryWorkcellFilters;
   query: string;
   onClear(): void;
-  onRefresh?(): void;
+  onRefresh?: (() => void) | undefined;
   noun?: string;
 }) {
   const filtered = activeFilterSummary(filters, query).length > 0;
@@ -499,10 +497,10 @@ export function LibraryWorkcell({
   snapshot,
 }: {
   api: ControlApi;
-  detail?: LibraryViewRecipeDetail;
+  detail?: LibraryViewRecipeDetail | undefined;
   detailError?: string;
   detailLoading?: boolean;
-  fleet?: VisualFleetSnapshot;
+  fleet?: VisualFleetSnapshot | undefined;
   fleetError?: string;
   filters: LibraryWorkcellFilters;
   onFiltersChange(filters: LibraryWorkcellFilters): void;
@@ -597,7 +595,7 @@ export function LibraryWorkcell({
       <div className="library-workcell-toolbar">
         <LibraryRecipeUpdateAction api={api} onUpdated={refresh} />
       </div>
-      <div className="library-paired-list" aria-label="Model and recipe list">
+      <div className="library-paired-list">
         <div className="library-paired-heading">
           <span>
             Models · {models.length} of {totalModels}
@@ -605,8 +603,8 @@ export function LibraryWorkcell({
           <span>Recipes for selected Model · {selectedRecipes.length}</span>
         </div>
         <div className="library-paired-panes">
-          <div className="library-model-pane" aria-label="Models">
-            <ul>
+          <div className="library-model-pane">
+            <ul aria-label="Models">
               {models.slice(0, limit).map((model) => (
                 <li key={recordModelKey(model)!}>
                   <NavigateLink
@@ -647,7 +645,7 @@ export function LibraryWorkcell({
               />
             )}
           </div>
-          <div
+          <section
             className="library-recipe-pane"
             aria-label="Recipes matching selected Model"
             ref={recipePaneRef}
@@ -725,16 +723,11 @@ export function LibraryWorkcell({
                       </small>
                       <small>{formatBytes(roleBytes)} image + artifact envelope</small>
                     </NavigateLink>
-                    <LibraryRecipeDownloadAction
+                    <LibraryRecipeActions
                       api={api}
+                      recipe={record.recipe!}
                       missingModels={missingModelsFor(record.recipe!)}
-                      onDownloaded={refresh}
-                      selector={canonicalRecipeSelector(record.recipe!)}
-                    />
-                    <LibraryRecipeRemoveAction
-                      api={api}
-                      onRemoved={refresh}
-                      selector={canonicalRecipeSelector(record.recipe!)}
+                      onChanged={refresh}
                     />
                   </li>
                 );
@@ -751,7 +744,7 @@ export function LibraryWorkcell({
             {!selectedModel && (
               <p className="library-empty-state">Select a Model to see matching Recipes.</p>
             )}
-          </div>
+          </section>
         </div>
       </div>
     </section>

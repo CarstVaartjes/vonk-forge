@@ -38,7 +38,9 @@ class Client:
         plan_digest=DIGEST,
         preparation_decisions=None,
         include_receipt_digest=True,
+        next_action=None,
     ):
+        self.next_action = next_action
         self.calls = []
         self.blocked = blocked
         self.plan_digest = plan_digest
@@ -54,6 +56,11 @@ class Client:
                 "profile_revision": 3,
                 "plan_digest": self.plan_digest,
                 "effects_digest": self.plan_digest,
+                **(
+                    {}
+                    if self.next_action is None
+                    else {"next_action": self.next_action}
+                ),
                 "scope": {"node_ids": ["Atlas"], "idle_node_ids": ["Atlas"]},
                 "summary": {"starts": 0, "stops": 0},
                 "assignments": [],
@@ -125,7 +132,10 @@ def test_noninteractive_load_cannot_approve_an_unseen_or_invalid_plan(options):
         cli.main(("--profile", "2", "profile", "load", *options), control_client=client)
         == 2
     )
-    assert client.calls == []
+    # The plan may be read, but nothing is submitted without consent.
+    assert [
+        path for _method, path, _body in client.calls if path.endswith("/load")
+    ] == []
 
 
 def test_json_review_returns_one_blocked_review_without_load(vonkctl_json):
@@ -397,3 +407,32 @@ def test_unbound_load_receipt_is_only_looked_up_and_never_replayed(
     assert "/api/profile/2/preview" not in paths
     assert paths.count("/api/profile/2/load") >= 1
     assert paths.count(f"/api/profile/2/requests/{KEY}") >= 1
+
+
+def _load(client, *options):
+    return cli.main(
+        ("--profile", "2", "profile", "load", "--no-input", "--detach", *options),
+        control_client=client,
+    )
+
+
+def _submitted(client):
+    return [path for _method, path, _body in client.calls if path.endswith("/load")]
+
+
+def test_a_plan_that_changes_nothing_is_not_submitted_and_is_not_a_failure():
+    client = Client(next_action="nothing_to_change")
+    assert _load(client) == 0
+    assert _submitted(client) == []
+
+
+def test_a_plan_that_stops_nothing_loads_without_a_prompt_or_yes():
+    client = Client(next_action="load")
+    assert _load(client) == 0
+    assert _submitted(client) == ["/api/profile/2/load"]
+
+
+def test_a_plan_that_stops_a_workload_needs_consent():
+    client = Client(next_action="load_stopping")
+    assert _load(client) == 2
+    assert _submitted(client) == []

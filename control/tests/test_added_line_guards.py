@@ -502,14 +502,14 @@ def test_a_quote_char_literal_does_not_hide_the_inline_test_module():
     """Catches `'"'` opening a phantom string that swallowed `#[cfg(test)]`.
 
     rust/crates/vonk-agent/src/failure_evidence.rs trims `'"'` above its
-    tests, so every `.expect` added there read as production code.
+    tests, so every exit status added there read as production code.
     """
     source = """fn production() { let _ = text.trim_matches('"'); }
 #[cfg(test)]
 mod tests {
-    fn t() { let lifetime: &'static str = "x"; state.expect("fixture"); }
+    fn t() { let lifetime: &'static str = "x"; ExitCode::from(78); }
 }
-fn later() { state.expect("bookkeeping"); }
+fn later() { ExitCode::from(78); }
 """
     path = "rust/crates/vonk-agent/src/example.rs"
     assert not check_source(path, source, {4}, modes=("noexit",))
@@ -524,10 +524,15 @@ fn later() { state.expect("bookkeeping"); }
         ("packaging/systemd/new.service", "TimeoutStartSec=0\n", 1),
         ("packaging/systemd/new.service", "Restart=no\n", 1),
         ("packaging/debian/postinst", "exit 78\n", 1),
-        ("rust/crates/vonk-agent/src/main.rs", 'state.expect("bookkeeping");\n', 1),
         ("rust/crates/vonk-agent/src/main.rs", "std::process::exit(78);\n", 1),
+        (
+            "rust/crates/vonk-agent/src/main.rs",
+            "fn main() { std::process::exit(78); }\n",
+            1,
+        ),
+        ("rust/crates/vonk-agent/src/main.rs", "std::process::abort();\n", 1),
         ("rust/crates/vonk-agent/src/main.rs", "ExitCode::from(78)\n", 1),
-        ("rust/crates/vonk-agent/src/main.rs", 'panic!("local state");\n', 1),
+        ("rust/crates/vonk-agent/src/main.rs", "unreachable!();\n", 1),
     ],
 )
 def test_new_permanent_process_stop_fails_without_a_debt_count(path, source, line):
@@ -545,7 +550,7 @@ def test_daemon_backoff_and_fault_injection_are_allowed():
     )
     assert not check_source(
         "rust/crates/vonk-agent/src/main.rs",
-        "#[cfg(test)]\nmod tests {\n    std::process::exit(78);\n}\n",
+        "#[cfg(test)]\nmod tests {\n    std::process::abort();\n}\n",
         {3},
         modes=("noexit",),
     )
@@ -851,31 +856,6 @@ def test_a_controller_test_sends_the_agents_pinned_request_never_its_own():
     assert len(check_source(path, source, {1, 2, 3}, modes=("boundaries",))) == 2
     assert not check_source(path, source + "\nx = 1\n", {6}, modes=("boundaries",))
     assert not check_source(AGENT_REQUESTS, source, {1, 2}, modes=("boundaries",))
-
-
-def test_an_exclusive_flock_is_taken_only_through_a_held_lock():
-    # The pre-fix base-image lock: released only by closing its descriptor, a
-    # child forked by another thread kept it held and the next locker was busy.
-    raw = (
-        "match rustix::fs::flock(&lock, rustix::fs::FlockOperation"
-        "::NonBlockingLockExclusive) {\n"
-    )
-    agent = "rust/crates/vonk-agent/src/base_images.rs"
-    assert check_source(agent, raw, {1}, modes=("locks",))
-    assert check_source(
-        agent, "flock(&f, FlockOperation::LockExclusive)?;\n", {1}, modes=("locks",)
-    )
-    assert check_source(
-        agent, "libc::flock(fd, libc::LOCK_EX);\n", {1}, modes=("locks",)
-    )
-    held = "let _held = HeldLock::try_exclusive(lock.try_clone()?)?;\n"
-    assert not check_source(agent, held, {1}, modes=("locks",))
-    owner = "rust/crates/vonk-agent/src/held_lock.rs"
-    assert not check_source(owner, raw, {1}, modes=("locks",))
-    test = "rust/crates/vonk-agent/tests/recipe_builder/base_images.rs"
-    assert not check_source(test, raw, {1}, modes=("locks",))
-    unit = "#[cfg(test)]\nmod tests {\n    fn t() {\n        " + raw + "    }\n}\n"
-    assert not check_source(agent, unit, {4}, modes=("locks",))
 
 
 def test_a_table_wide_lock_is_taken_only_by_its_owners():
@@ -3773,6 +3753,35 @@ def test_a_states_or_contract_module_owns_its_sets(owner: str) -> None:
     source = "LIVE = words(LifecycleState.QUEUED, LifecycleState.RUNNING)\n"
     assert _lifecycle_sets(source, {1})
     assert not _lifecycle_sets(source, {1}, path=owner)
+
+
+@pytest.mark.parametrize(
+    ("path", "source", "flagged"),
+    [
+        ("src/cluster_profiles/x.py", "ENDED = {SUCCEEDED, FAILED, CANCELLED}\n", True),
+        ("src/cluster_profiles/x.py", "ENDED = TERMINAL_LIFECYCLE_STATES\n", False),
+        (
+            "control/web/src/lib/x.ts",
+            'const TERMINAL = new Set(["succeeded", "failed", "cancelled"]);\n',
+            True,
+        ),
+        (
+            "control/web/src/lib/x.ts",
+            "const TERMINAL = new Set([LifecycleState.SUCCEEDED, LifecycleState.FAILED]);\n",
+            True,
+        ),
+        (
+            "control/web/src/lib/x.ts",
+            'const OTHER = new Set(["running", "stopping"]);\n',
+            False,
+        ),
+        ("control/web/src/lib/x.ts", "const T = TERMINAL_LIFECYCLE_STATES;\n", False),
+    ],
+)
+def test_clients_read_the_generated_lifecycle_sets_not_their_own(
+    path: str, source: str, flagged: bool
+) -> None:
+    assert bool(_lifecycle_sets(source, {1}, path=path)) is flagged
 
 
 _INTENT_PATH = "control/src/vonk_control/recipe_operations/persistence.py"

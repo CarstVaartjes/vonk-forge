@@ -31,7 +31,7 @@ impl StoreUpstream for Blob {
         Ok(StoreResponse {
             status: reqwest::StatusCode::OK,
             headers,
-            body: futures_util::stream::iter(chunks).boxed(),
+            body: stream::iter(chunks).boxed(),
         })
     }
 }
@@ -76,7 +76,7 @@ impl Executor for PullingExecutor {
     async fn observe(
         &self,
         _claim: &AgentClaim,
-    ) -> Option<crate::executor::operation_observation::OperationObservation> {
+    ) -> Option<operation_observation::OperationObservation> {
         None
     }
 
@@ -89,7 +89,7 @@ impl Executor for PullingExecutor {
         self.http
             .set_progress_phase(claim.fence, ProgressPhase::Pulling);
         let pulled = Inactivity::new(Duration::from_secs(60));
-        let progress = super::super::runtime::pull_progress(&self.http, claim.fence, &pulled);
+        let progress = runtime::pull_progress(&self.http, claim.fence, &pulled);
         let store = LoopbackImageStore::bind().await.unwrap();
         let digest = format!("sha256:{DIGEST}");
         let address = store.pull_arguments(&digest, &digest)[0].clone();
@@ -115,7 +115,7 @@ impl Executor for PullingExecutor {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn image_pull_bytes_reach_the_order_heartbeat() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir().unwrap();
     let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
     let http = AgentHttpClient::for_http_test("http://127.0.0.1:1/", NODE_ID);
     let client = PullingClient {
@@ -202,7 +202,7 @@ async fn refused_pull(status: u16) -> crate::host_runtime::HostRuntimeError {
             })
         })
         .await;
-    super::super::runtime::with_store_failure(pulled.unwrap_err(), failure)
+    runtime::with_store_failure(pulled.unwrap_err(), failure)
 }
 
 // P6: Docker only sees a 502; before, the Controller's answer behind it stayed

@@ -222,7 +222,22 @@ impl RecipeBuildError {
                 .stage(*stage)
                 .diagnostic(diagnostic.to_string())
                 .process_logs(Some((**logs).clone())),
-            _ => failure,
+            Self::Source(_)
+            | Self::Evidence
+            | Self::BaseImageContent
+            | Self::BaseImageManifest
+            | Self::BaseImageBlob
+            | Self::BaseImageArchive
+            | Self::BaseImageInspect
+            | Self::ImageInspect
+            | Self::AdapterInvalid
+            | Self::AdapterInspect
+            | Self::OutputLimit
+            | Self::NetworkPolicy
+            | Self::Io(_)
+            | Self::CleanupPending { .. }
+            | Self::CleanupPath { .. }
+            | Self::CleanupBlocked(_) => failure,
         }
     }
 }

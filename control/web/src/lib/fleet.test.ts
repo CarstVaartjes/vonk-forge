@@ -1,4 +1,4 @@
-import { ProfileReasonSeverity, ProjectionCode } from "../api/vocabulary.generated";
+import { GroupHealth, ProfileReasonSeverity, ProjectionCode } from "../api/vocabulary.generated";
 import { parseContractJson, materialize, type WireNumber } from "../api/contract-numeric";
 import type { VisualFleetNode } from "../api/types";
 import {
@@ -12,6 +12,7 @@ import {
   nodeSwap,
   offlineReasonLabel,
   telemetryFreshnessAt,
+  workloadStateUnconfirmed,
 } from "./fleet";
 
 const NOW = new Date("2026-08-15T12:00:00Z");
@@ -217,7 +218,7 @@ test("retains wide memory counters while deriving only a presentation ratio", ()
   });
   expect(nodeMemory(observed)).toMatchObject({ usedPercent: 50, totalBytes: total });
   expect(formatBytes(total)).toBe("16777216.0 TiB");
-  expect(formatBytes(wireInteger("1" + "0".repeat(400)))).toBe("1" + "0".repeat(400) + " B");
+  expect(formatBytes(wireInteger(`1${"0".repeat(400)}`))).toBe(`1${"0".repeat(400)} B`);
 });
 
 test("GPU reset warnings retain the operator fix while a Spark remains online", () => {
@@ -318,4 +319,15 @@ test("two workloads on one Spark are one cluster with that Spark once; separate 
   const { clusters } = groupByWorkload([a, b]);
   expect(clusters.map((c) => c.units.map((u) => u.runId))).toEqual([["run-1", "run-2"], ["run-3"]]);
   expect(clusters[0]!.nodes.map((n) => n.id)).toEqual(["spk_a"]);
+});
+
+describe("workloadStateUnconfirmed", () => {
+  const run = (group_state: string, healthy: boolean | null) =>
+    ({ group_state, healthy }) as unknown as VisualFleetNode["loaded"][number];
+
+  it("does not call a starting group unknown, but still a group with no verdict", () => {
+    expect(workloadStateUnconfirmed(run(GroupHealth.STARTING, null))).toBe(false);
+    expect(workloadStateUnconfirmed(run(GroupHealth.UNAVAILABLE, null))).toBe(true);
+    expect(workloadStateUnconfirmed(run(GroupHealth.HEALTHY, true))).toBe(false);
+  });
 });

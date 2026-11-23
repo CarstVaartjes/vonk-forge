@@ -226,7 +226,11 @@ impl HostRuntimeError {
             Self::HelperProtocolBound {
                 limit, observed, ..
             } => Some((*limit, *observed)),
-            _ => None,
+            Self::Io(_)
+            | Self::Controller(_)
+            | Self::HelperProtocol(_)
+            | Self::StopUncertain
+            | Self::HelperRejected { .. } => None,
         }
     }
 
@@ -241,14 +245,21 @@ impl HostRuntimeError {
             } if !detail.is_empty() => format!("{code} {detail}"),
             Self::Controller(error) => format!("{code} {error}"),
             Self::Io(error) => format!("{code} {error}"),
-            _ => code,
+            Self::HelperProtocol(_)
+            | Self::HelperProtocolBound { .. }
+            | Self::StopUncertain
+            | Self::HelperRejected { .. } => code,
         }
     }
 
     pub fn diagnostic(&self) -> Option<&str> {
         match self {
             Self::HelperRejected { diagnostic, .. } => diagnostic.as_deref(),
-            _ => None,
+            Self::Io(_)
+            | Self::Controller(_)
+            | Self::HelperProtocol(_)
+            | Self::HelperProtocolBound { .. }
+            | Self::StopUncertain => None,
         }
     }
 
@@ -256,7 +267,11 @@ impl HostRuntimeError {
     pub fn process_logs(&self) -> Option<&FailureProcessLogs> {
         match self {
             Self::HelperRejected { process_logs, .. } => process_logs.as_deref(),
-            _ => None,
+            Self::Io(_)
+            | Self::Controller(_)
+            | Self::HelperProtocol(_)
+            | Self::HelperProtocolBound { .. }
+            | Self::StopUncertain => None,
         }
     }
 }

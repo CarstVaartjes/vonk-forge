@@ -377,6 +377,14 @@ class OperationCheckpoint(WireModel):
     digest: Digest | None = None
 
 
+class NetworkFetch(WireModel):
+    """What an attempt received over the network: never present or resumed bytes."""
+
+    bytes: int = Field(strict=True, ge=0)
+    # The span from the first to the last received byte; zero for one chunk.
+    seconds: float = Field(strict=True, ge=0)
+
+
 class OperationMemberProgress(WireModel):
     """Progress for one node, rank, shard, or other operation member."""
 
@@ -444,6 +452,8 @@ class OperationProgress(WireModel):
     completed_items: int | None = Field(default=None, strict=True, ge=0)
     total_items: int | None = Field(default=None, strict=True, ge=0)
     elapsed_seconds: float | None = Field(default=None, strict=True, ge=0)
+    # Only an object transfer reports what it fetched over the network.
+    fetched: NetworkFetch | None = None
     observed_at: str | None = Field(default=None, max_length=64)
     last_progress_at: str | None = Field(default=None, max_length=64)
     activity: Literal["active", "waiting", "possibly_stalled"] | None = None
@@ -496,6 +506,7 @@ __all__ = [
     "CanonicalUUID",
     "DigestText",
     "ErrorCode",
+    "NetworkFetch",
     "OperationCheckpoint",
     "OperationMemberProgress",
     "OperationProgress",

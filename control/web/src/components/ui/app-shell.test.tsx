@@ -193,7 +193,7 @@ test("keeps administrative actions behind the account menu", async () => {
       onNavigate={() => undefined}
       operator={{
         subject: "admin@example.test",
-        role: "Administrator",
+        operatorRole: "Administrator",
         loggingOut: false,
         logoutError: "",
         onDownloadCliToken: vi.fn(async () => ({ expires_at: "" })),

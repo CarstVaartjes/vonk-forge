@@ -30,6 +30,10 @@ pub(super) struct JobContainer {
 
 /// A managed container line: serving is `None`; a line whose identity cannot
 /// be proven is `Some(None)` and is never acted on.
+#[expect(
+    clippy::option_option,
+    reason = "three states: not applicable, applicable but unavailable, and a value"
+)]
 fn parse_job_container(line: &str) -> Option<Option<JobContainer>> {
     let uuid = |value: &str| {
         uuid::Uuid::parse_str(value)
@@ -146,6 +150,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
 
     /// The labels of one listed container: serving is `None`; one that is
     /// unreadable, gone or not exactly labelled is `Some(None)`.
+    #[expect(
+        clippy::option_option,
+        reason = "three states: not applicable, applicable but unavailable, and a value"
+    )]
     fn read_job_container(&self, id: &str) -> Option<Option<JobContainer>> {
         if !lower_hex(id, 64) {
             return Some(None);

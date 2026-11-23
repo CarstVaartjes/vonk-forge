@@ -26,8 +26,8 @@ from vonk_control.fleet_profile_contract.endpoints import FleetProfileEndpointsV
 from vonk_control.fleet_profile_contract.review import (
     FleetProfileApplicationView,
     FleetProfileLoadRequest,
-    FleetProfilePreview,
     FleetProfilePreviewRequest,
+    FleetProfilePreviewResponse,
 )
 from vonk_control.fleet_profiles.contracts import (
     FleetProfileConflict,
@@ -225,7 +225,7 @@ def install_fleet_profile_routes(
 
     @app.post(
         "/api/profile/{number}/preview",
-        response_model=FleetProfilePreview,
+        response_model=FleetProfilePreviewResponse,
         responses=bounded_error_responses(401, 404, 409, 422, 503),
         operation_id="previewProfile",
     )
@@ -234,15 +234,17 @@ def install_fleet_profile_routes(
         number: Annotated[int, Path(ge=1, le=MAX_DATABASE_INTEGER)],
         body: FleetProfilePreviewRequest | None = None,
         actor: Actor = authenticated,
-    ) -> FleetProfilePreview:
+    ) -> FleetProfilePreviewResponse:
         require_mutation(actor, "POST", "/api/profile/{number}/preview")
         try:
             if body is not None:
-                return service().preview_draft(number, body.definition)
+                return FleetProfilePreviewResponse.of(
+                    service().preview_draft(number, body.definition)
+                )
             profile = service().definition_number(number)
             if profile.id is None:
                 raise KeyError(number)
-            return service().preview(profile.id)
+            return FleetProfilePreviewResponse.of(service().preview(profile.id))
         except KeyError:
             raise HTTPException(status_code=404, detail="Profile not found") from None
         except FleetProfileConflict as error:

@@ -34,17 +34,25 @@ from vonk_agent_protocol.agent_operations import AgentFailureKind
 from vonk_agent_protocol.agent_words import (
     Disposition,
     ProfileChildJobKind,
+    ProfileChildPhase,
     ProfileEffectState,
+    ProfileReportedPhase,
+    ProgressPhase,
 )
 from vonk_agent_protocol.disposition import HTTP_STATUS_DISPOSITIONS
 from vonk_agent_protocol.gpu_clock import GpuClockMetric
 from vonk_agent_protocol.lifecycle_vocabulary import (
+    LIVE_LIFECYCLE_STATES,
+    TERMINAL_LIFECYCLE_STATES,
+    UNSUCCESSFUL_LIFECYCLE_STATES,
     ArtifactPreparation,
     FailureCode,
     LifecycleState,
     OutcomeKind,
     StopOutcome,
+    WaitReason,
 )
+from vonk_agent_protocol.phase_words import PHASE_WORDS, WAIT_WORDS
 from vonk_agent_protocol.reason_codes.profiles import (
     PROFILE_REFUSAL_CODES,
     ProfileReasonCode,
@@ -59,6 +67,8 @@ from vonk_agent_protocol.state_machines import (
 )
 from vonk_control.artifact_jobs.job_contract import JobContractState
 from vonk_control.cache_removal_review import ArtifactKind, CacheAssetDisposition
+from vonk_control.fleet_profile_contract.review import ProfileLoadAction
+from vonk_control.model_cache.contract import CacheOperationKind
 
 CLI_WORDS = ROOT / "src/cluster_profiles/cli_states_generated.py"
 HOOK_WORDS = ROOT / "scripts/hook_words_generated.py"
@@ -68,6 +78,8 @@ ROUTE_WORDS = ROOT / "agent_protocol/src/vonk_agent_protocol/route_activation_wo
 def cli_words() -> str:
     words = {
         "STOP_UNCONFIRMED": StopOutcome.UNCONFIRMED,
+        "WAIT_DEPENDENCY_PENDING": WaitReason.DEPENDENCY_PENDING,
+        "WAIT_SPARK_BUSY": WaitReason.SPARK_BUSY,
         "PROFILE_NOT_ISSUED": ProfileEffectState.NOT_ISSUED,
         "ENROLLMENT_PENDING": EnrollmentGrantState.PENDING,
         "UNKNOWN": OutcomeKind.UNKNOWN,
@@ -100,6 +112,12 @@ def cli_words() -> str:
         "ASSET_RETAIN_SHARED": CacheAssetDisposition.RETAIN_SHARED,
         "ASSET_RETAIN_REFERENCED": CacheAssetDisposition.RETAIN_REFERENCED,
         "ASSET_RETAIN_OBSERVATION_UNAVAILABLE": CacheAssetDisposition.RETAIN_OBSERVATION_UNAVAILABLE,
+        "PROFILE_LOAD": ProfileLoadAction.LOAD,
+        "PROFILE_NOTHING_TO_CHANGE": ProfileLoadAction.NOTHING_TO_CHANGE,
+        "ACTION_DOWNLOAD": CacheOperationKind.DOWNLOAD,
+        "ACTION_REMOVE": CacheOperationKind.REMOVE,
+        "ACTION_CANCEL": CacheOperationKind.CANCEL,
+        "ACTION_FOLLOW": CacheOperationKind.FOLLOW,
         "JOB_KIND_CLEANUP": ProfileChildJobKind.CLEANUP,
         "ASSET_VERIFIED": AssetAvailability.VERIFIED,
         **{
@@ -125,6 +143,9 @@ def cli_words() -> str:
         GpuClockMetric,
         RouteState,
         JobContractState,
+        ProgressPhase,
+        ProfileChildPhase,
+        ProfileReportedPhase,
         QualificationStatus,
         QualificationOutcome,
     ):
@@ -141,6 +162,35 @@ def cli_words() -> str:
         f"{name} = {json.dumps(getattr(member, 'value', member))}"
         for name, member in words.items()
     ]
+    for name, states in (
+        ("TERMINAL_LIFECYCLE_STATES", TERMINAL_LIFECYCLE_STATES),
+        ("LIVE_LIFECYCLE_STATES", LIVE_LIFECYCLE_STATES),
+        ("UNSUCCESSFUL_LIFECYCLE_STATES", UNSUCCESSFUL_LIFECYCLE_STATES),
+    ):
+        lines += [
+            "",
+            f"# The lifecycle states that are {name.split('_')[0].lower()}.",
+            f"{name} = frozenset(",
+            "    {",
+            *(
+                f'        "{state.value}",'
+                for state in LifecycleState
+                if state in states
+            ),
+            "    }",
+            ")",
+        ]
+    for name, table in (("PHASE_WORDS", PHASE_WORDS), ("WAIT_WORDS", WAIT_WORDS)):
+        lines += [
+            "",
+            f"# Plain words for a {name.split('_')[0].lower()}, one table for every client.",
+            f"{name}: dict[str, str] = {{",
+            *(
+                f"    {json.dumps(key)}: {json.dumps(text)},"
+                for key, text in table.items()
+            ),
+            "}",
+        ]
     lines += [
         "",
         "# The shared HTTP status disposition table, first match wins:",

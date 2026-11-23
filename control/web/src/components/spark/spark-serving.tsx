@@ -1,21 +1,28 @@
 import { useId, type MouseEvent } from "react";
-import type { VisualFleetNode } from "../../api/types";
+import type { MetricsSeriesResponse, VisualFleetNode } from "../../api/types";
+import { UNITS, formatValue, leadReading } from "../../lib/metric-units";
 import { NOT_REPORTED_TEXT, nodeRuns } from "../../lib/fleet";
 import { sparkPath } from "../../lib/spark-route";
 import { StatusPill } from "../ui/status-pill";
 
 /**
  * What this Spark serves: each run's alias, title and state, its rank and the Sparks it shares the run
- * with (as links), and the decode speed, which no source reports yet. A Spark with no run says so, with
+ * with (as links), and the speed the gateway reports for its alias. A Spark with no run says so, with
  * how many recipes it has installed.
  */
 export function SparkServing({
   node,
   nodes,
+  reads,
   onNavigate,
 }: {
   node: VisualFleetNode;
   nodes: readonly VisualFleetNode[];
+  /** The gateway's per-alias generated tokens and requests, the figures Workloads leads with. */
+  reads: {
+    tokens: MetricsSeriesResponse | null | undefined;
+    requests: MetricsSeriesResponse | null | undefined;
+  };
   onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void;
 }) {
   const id = useId();
@@ -60,9 +67,28 @@ export function SparkServing({
               .
             </p>
           )}
-          <p className="spark-panel-note">Decode speed: {NOT_REPORTED_TEXT}</p>
+          <DecodeSpeed reads={reads} alias={run.alias || null} />
         </div>
       ))}
     </section>
   );
+}
+
+function DecodeSpeed({
+  reads,
+  alias,
+}: {
+  reads: Parameters<typeof leadReading>[0];
+  alias: string | null;
+}) {
+  const { reading, pending } = leadReading(reads, alias);
+  const latest = reading?.series.summary.latest;
+  if (reading && latest != null)
+    return (
+      <p className="spark-panel-note">
+        {reading.data.spec.title}: {formatValue(Number(latest), "")}{" "}
+        {UNITS[reading.data.spec.unit].symbol}
+      </p>
+    );
+  return pending ? null : <p className="spark-panel-note">Speed: {NOT_REPORTED_TEXT}</p>;
 }

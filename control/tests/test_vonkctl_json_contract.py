@@ -207,7 +207,7 @@ def test_every_fleet_and_profile_document_matches_its_published_schema(
     review = _published(
         client, capsys, seen, "--profile", "1", "profile", "load", "--review"
     )
-    assert review["schema_version"] == schema_version(DocumentKind.PROFILE_REVIEW) == 2
+    assert review["schema_version"] == schema_version(DocumentKind.PROFILE_REVIEW) == 3
     _published(
         client,
         capsys,

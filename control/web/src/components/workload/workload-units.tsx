@@ -14,6 +14,7 @@ export function ClusterUnit({
   now,
   live,
   onOpen,
+  compact = false,
 }: {
   api: Pick<ControlApi, "metricsSeries"> & Partial<JobWorkloadApi>;
   cluster: WorkloadCluster;
@@ -22,13 +23,15 @@ export function ClusterUnit({
   reads: WorkloadReads;
   now: Date;
   live: boolean;
-  onOpen?(id: string): void;
+  onOpen?: ((id: string) => void) | undefined;
+  /** Opened under its own row: no repeated header and figures. */
+  compact?: boolean;
 }) {
   // A rank means something only when one workload spans several Sparks.
   const [only] = cluster.units;
   const ranked = cluster.units.length === 1 && cluster.nodes.length > 1 ? only : undefined;
   return (
-    <WorkloadUnit api={api} cluster={cluster} reads={reads} live={live}>
+    <WorkloadUnit api={api} cluster={cluster} reads={reads} live={live} compact={compact}>
       {cluster.nodes.map((node) => (
         <SparkCard
           key={node.id}
@@ -59,7 +62,7 @@ export function WorkloadUnits({
   reads: WorkloadReads;
   now: Date;
   live: boolean;
-  onOpen?(id: string): void;
+  onOpen?: ((id: string) => void) | undefined;
 }) {
   const { clusters, idle } = groupByWorkload(nodes);
   const order = new Map(nodes.map((node, index) => [node.id, index]));

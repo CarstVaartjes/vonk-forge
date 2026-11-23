@@ -27,7 +27,7 @@ export function useSort<T, K extends string>(
       return sort.descending ? -order : order;
     });
     // `values` is a stable literal per table; rows and sort are the inputs.
-  }, [rows, sort]);
+  }, [rows, sort, values]);
   const toggle = (key: K) =>
     setSort((current) => ({ key, descending: current.key === key && !current.descending }));
   return { sorted, sort, toggle };

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { vi } from "vitest";
+import { CacheOperationKind } from "../../api/vocabulary.generated";
 import type { ControlApi } from "../../api/types";
-import { cacheRemovalReview } from "../../test-fixtures/cache-removal";
 import { libraryViewSnapshot } from "../../test-fixtures/library";
 import { buildLibraryRecipeRecords, EMPTY_LIBRARY_WORKCELL_FILTERS } from "./library-workcell";
 import { LibraryModelsView } from "./library-models-view";
@@ -80,7 +80,7 @@ test("groups model revisions and keeps recipe links and downloads bound to the s
     target: { value: `${older.model.publisher}/${older.model.slug}@${older.model.content_sha256}` },
   });
   expect(within(list).queryByRole("link", { name: current.recipes[0]!.title })).toBeNull();
-  fireEvent.click(within(list).getByRole("button", { name: "Download model" }));
+  fireEvent.click(within(list).getByRole("button", { name: "Download" }));
   await waitFor(() =>
     expect(api.prepareModelCache).toHaveBeenCalledWith(
       `${older.model.publisher}/${older.model.slug}`,
@@ -132,7 +132,7 @@ test("lists the recipes that use a model so a selected model leads to its recipe
 test("prepares the Controller cache for an uncached model", async () => {
   const api = cacheApi();
   renderModels("", api);
-  const button = screen.getAllByRole("button", { name: "Download model" })[0]!;
+  const button = screen.getAllByRole("button", { name: "Download" })[0]!;
   fireEvent.click(button);
   await waitFor(() => expect(api.prepareModelCache).toHaveBeenCalledTimes(1));
   const [selector, requestKey] = (
@@ -142,36 +142,31 @@ test("prepares the Controller cache for an uncached model", async () => {
   expect(requestKey).toMatch(/^[0-9a-f-]{36}$/);
 });
 
-test("removes a cached model only after an explicit confirmation", async () => {
-  const original = libraryViewSnapshot.models[0]!;
-  const base = { ...original, model: { ...original.model, content_sha256: "f".repeat(64) } };
-  const selector = `${base.model.publisher}/${base.model.slug}`;
-  const review = cacheRemovalReview({
-    resource_kind: "model",
-    selector,
-    target_identity: base.model.content_sha256,
-    with_model: null,
-  });
-  const removeModelCache = vi
-    .fn()
-    .mockImplementation(async (submittedSelector: string, requestKey: string) => ({
-      action: "remove" as const,
-      operation_id: "removed-model-operation",
-      request_key: requestKey,
-      selector: submittedSelector,
-      model_content_sha256: base.model.content_sha256,
-      reclaimed_bytes: 1,
-      state: "succeeded" as const,
-      progress: { phase: "complete" },
-    }));
-  const modelRemovalReview = vi.fn().mockResolvedValue(review);
-  const api = { removeModelCache, modelRemovalReview } as unknown as ControlApi;
-  const inventory = [{ ...base, local: { ...base.local, controller: "cached" as const } }];
+test("a model the Controller reports as preparing shows real progress and Cancel after a reload", async () => {
+  const cancelModelOperation = vi.fn().mockResolvedValue({ state: "cancelled" });
+  const operation = "11111111-1111-4111-8111-111111111111";
+  const [first] = libraryViewSnapshot.models;
+  const preparing = {
+    ...first!,
+    local: {
+      controller: "preparing" as const,
+      running_on: [],
+      preparation: {
+        operation_id: operation,
+        state: "running" as const,
+        phase: "downloading",
+        completed_bytes: 256,
+        total_bytes: 1024,
+        blockers: [],
+      },
+    },
+    actions: [CacheOperationKind.CANCEL, CacheOperationKind.FOLLOW],
+  };
   render(
     <LibraryModelsView
-      api={api}
+      api={{ cancelModelOperation } as unknown as ControlApi}
       entries={[]}
-      modelInventory={inventory}
+      modelInventory={[preparing]}
       filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
       onFiltersChange={() => undefined}
       onNavigate={() => undefined}
@@ -181,20 +176,13 @@ test("removes a cached model only after an explicit confirmation", async () => {
       query=""
     />,
   );
-
-  // Removal is destructive, so the first click only asks for confirmation.
-  fireEvent.click(screen.getByRole("button", { name: "Remove from cache" }));
-  expect(removeModelCache).not.toHaveBeenCalled();
-  expect(screen.getByRole("button", { name: "Confirm remove" })).toBeDisabled();
-  await waitFor(() => expect(screen.getByRole("button", { name: "Confirm remove" })).toBeEnabled());
-  expect(screen.getByLabelText("Cache removal review")).toHaveTextContent("42 bytes");
-  expect(removeModelCache).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Confirm remove" }));
-  await waitFor(() => expect(removeModelCache).toHaveBeenCalledTimes(1));
-  expect(removeModelCache).toHaveBeenCalledWith(
-    `${base.model.publisher}/${base.model.slug}`,
-    expect.any(String),
-    expect.anything(),
+  // Bytes and a percentage from the Controller, never a bare "queued".
+  expect(screen.getByRole("status")).toHaveTextContent("25%");
+  expect(screen.queryByText("queued")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel model download" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Confirm cancel model download/ }));
+  await waitFor(() =>
+    expect(cancelModelOperation).toHaveBeenCalledWith(operation, expect.any(String)),
   );
 });
 
@@ -359,4 +347,76 @@ test("a model with no lineage is not a Model: no Model link, named in the header
   expect(screen.getByText("1 of 1 models · 1 variants · 1 other models")).toBeVisible();
   const heading = screen.getByRole("heading", { name: /helper-draft/ });
   expect(heading.closest("a")).toBeNull();
+});
+
+describe("row actions follow the Controller's actions", () => {
+  const base = libraryViewSnapshot.models[0]!;
+  const row = (
+    controller: "cached" | "not_cached" | "preparing",
+    actions: (typeof CacheOperationKind.DOWNLOAD | typeof CacheOperationKind.REMOVE)[],
+    state: "succeeded" | "running" | null = controller === "preparing" ? "running" : null,
+  ) =>
+    render(
+      <LibraryModelsView
+        api={cacheApi()}
+        entries={[]}
+        modelInventory={[
+          {
+            ...base,
+            local: {
+              ...base.local,
+              controller,
+              preparation: state ? { state } : null,
+            },
+            actions,
+          },
+        ]}
+        filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+        onFiltersChange={() => undefined}
+        onNavigate={() => undefined}
+        onQueryChange={() => undefined}
+        onRefresh={async () => undefined}
+        path="/library?view=models"
+        query=""
+      />,
+    );
+  const download = () => screen.queryByRole("button", { name: "Download" });
+  const remove = () => screen.queryByRole("button", { name: "Remove model from fleet" });
+
+  test("absent shows Download only", () => {
+    row("not_cached", [CacheOperationKind.DOWNLOAD]);
+    expect(download()).toBeVisible();
+    expect(remove()).toBeNull();
+  });
+
+  test("fully present and current shows Remove only", () => {
+    row("cached", [CacheOperationKind.REMOVE]);
+    expect(download()).toBeNull();
+    expect(remove()).toBeVisible();
+  });
+
+  test("partial or stale shows both", () => {
+    row("not_cached", [CacheOperationKind.DOWNLOAD, CacheOperationKind.REMOVE]);
+    expect(download()).toBeVisible();
+    expect(remove()).toBeVisible();
+  });
+
+  test("a cached model with a succeeded preparation still shows Remove only", () => {
+    row("cached", [CacheOperationKind.REMOVE], "succeeded");
+    expect(download()).toBeNull();
+    expect(remove()).toBeVisible();
+  });
+
+  test("an idle partial set can be resumed and removed", () => {
+    row("preparing", [CacheOperationKind.DOWNLOAD, CacheOperationKind.REMOVE], null);
+    expect(download()).toBeEnabled();
+    expect(remove()).toBeVisible();
+  });
+
+  test("a download in progress shows its state, not a button that cannot apply", () => {
+    row("preparing", []);
+    expect(download()).toBeNull();
+    expect(screen.getByRole("button", { name: /^Downloading/ })).toBeDisabled();
+    expect(remove()).toBeNull();
+  });
 });

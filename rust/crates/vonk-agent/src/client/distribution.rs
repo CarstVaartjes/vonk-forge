@@ -21,7 +21,9 @@ impl AgentHttpClient {
         let file = tokio::fs::OpenOptions::new()
             .read(true)
             .custom_flags(
-                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                    .bits()
+                    .cast_signed(),
             )
             .open(path)
             .await?;
@@ -39,7 +41,7 @@ impl AgentHttpClient {
 
     /// Download one object from the Controller's assignment-bound delivery
     /// API. A `.partial` destination is a resumable checkpoint; the assignment,
-    /// ETag, length, and range are checked on every response.
+    /// `ETag`, length, and range are checked on every response.
     pub async fn download_distribution_object(
         &self,
         plan_digest: &str,
@@ -231,15 +233,15 @@ impl AgentHttpClient {
                         |bytes, _step| {
                             tracker
                                 .lock()
-                                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                                .report(index, object, bytes, false);
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .report(index, object, bytes, false, governor.fetched());
                         },
                     )
                     .await?;
                     tracker
                         .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
-                        .report(index, object, object.bytes, true);
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .report(index, object, object.bytes, true, governor.fetched());
                     Ok::<_, ClientError>((index, path))
                 }
             })
@@ -255,7 +257,7 @@ impl AgentHttpClient {
         }
         let downloaded_bytes = tracker
             .into_inner()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .bytes;
         Ok(DistributionDownloadEvidence {
             model_digests,
@@ -381,7 +383,7 @@ impl AgentHttpClient {
             let mut progress = transfer
                 .accepted
                 .into_inner()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .progress;
             progress(expected_bytes, ProgressPhase::Copying);
             record.finish().await?;
@@ -522,7 +524,7 @@ impl AgentHttpClient {
                     governor.record_bytes(chunk.len() as u64);
                     accepted
                         .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .add(chunk.len() as u64);
                     // TLS/network chunks can be much smaller than an efficient
                     // disk write. Coalesce them so Tokio does not dispatch a
@@ -557,7 +559,7 @@ impl AgentHttpClient {
                     governor.throttled();
                     accepted
                         .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .report();
                     tokio::time::sleep(error.retry_delay(
                         retries,

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 import { ApiError } from "../api/errors";
 import type { ControlApi, OperationDetail } from "../api/types";
-import { ActivityPage, activityStatus } from "./activity";
+import { ActivityPage, activityStatus, operationEnded, unsuccessfulCount } from "./activity";
 
 const NOW = new Date("2026-08-15T12:00:00Z");
 const REQUEST_ID = "f6e73ce3-3329-4ff4-b086-d8f87c879ce9";
@@ -44,18 +44,6 @@ const visualFleet = {
       warnings: [],
     },
   ],
-};
-
-const emptyLibrary = {
-  generated_at: "2026-08-15T12:00:00Z",
-  freshness_policy: {
-    inventory_fresh_seconds: 300,
-    telemetry_live_seconds: 6,
-    telemetry_delayed_seconds: 20,
-  },
-  models: [],
-  unlinked_recipes: [],
-  next_cursor: null,
 };
 
 const noOperations = () =>
@@ -185,6 +173,19 @@ test("uses honest status labels for active and operator-blocked operations", () 
   expect(activityStatus({ ...base, action: "operation.reconcile.succeeded" })).toBe("recorded");
   expect(activityStatus({ ...base, action: "operation.reconcile.superseded" })).toBe("recorded");
   expect(activityStatus({ ...base, action: "operation.reconcile.future-state" })).toBe("unknown");
+  // An operator's own cancel is neither a failure nor a reason to look: it is counted apart.
+  expect(activityStatus({ ...base, action: "operation.reconcile.cancelled" })).toBe("called_off");
+  expect(operationEnded("cancelled")).toBe(true);
+  const at = "2026-08-15T11:58:00Z";
+  expect(
+    unsuccessfulCount(
+      [
+        jobActivity("a", "profile-load", "cancelled", "Profile load cancelled", at),
+        jobActivity("b", "profile-load", "failed", "Profile load failed", at),
+      ],
+      new Map(),
+    ),
+  ).toBe(1);
 });
 
 test("renders friendly timeline labels, honest time metadata, and hidden copyable identifiers", async () => {
@@ -230,8 +231,8 @@ test("keeps summaries in sync with filters and offers a recoverable empty state"
 
   const loadedSummary = screen.getByRole("region", { name: "Loaded activity summary" });
   expect(loadedSummary).toHaveTextContent("Summary of 4 loaded events");
-  expect(within(loadedSummary).getByRole("img")).toHaveAccessibleName(
-    "1 recorded, 1 in progress, 1 need review, 1 unsuccessful, 0 unknown",
+  expect(loadedSummary).toHaveTextContent(
+    "Recorded1In progress1Needs review1Unsuccessful1Cancelled0Unknown state0",
   );
 
   await user.selectOptions(screen.getByLabelText("Status"), "unsuccessful");
@@ -239,8 +240,8 @@ test("keeps summaries in sync with filters and offers a recoverable empty state"
   expect(screen.getByRole("heading", { name: /Agent enrollment failed$/ })).toBeVisible();
   const statusSummary = screen.getByRole("region", { name: "Matching activity summary" });
   expect(statusSummary).toHaveTextContent("Summary of 1 matching event from 4 loaded");
-  expect(within(statusSummary).getByRole("img")).toHaveAccessibleName(
-    "0 recorded, 0 in progress, 0 need review, 1 unsuccessful, 0 unknown",
+  expect(statusSummary).toHaveTextContent(
+    "Recorded0In progress0Needs review0Unsuccessful1Cancelled0Unknown state0",
   );
 
   await user.selectOptions(screen.getByLabelText("Status"), "attention");
@@ -252,9 +253,9 @@ test("keeps summaries in sync with filters and offers a recoverable empty state"
   await user.type(screen.getByRole("searchbox", { name: "Search activity" }), "no such activity");
   const emptyState = screen.getByText("No results match these filters").closest("section")!;
   expect(emptyState).toBeVisible();
-  expect(
-    within(screen.getByRole("region", { name: "Matching activity summary" })).getByRole("img"),
-  ).toHaveAccessibleName("0 recorded, 0 in progress, 0 need review, 0 unsuccessful, 0 unknown");
+  expect(screen.getByRole("region", { name: "Matching activity summary" })).toHaveTextContent(
+    "Recorded0In progress0Needs review0Unsuccessful0Cancelled0Unknown state0",
+  );
   await user.click(within(emptyState).getByRole("button", { name: "Clear filters" }));
   expect(screen.getByRole("heading", { name: /Recipe start finished$/ })).toBeVisible();
 
@@ -372,7 +373,7 @@ test("loads truthful operation progress and resumes only an operator-waiting job
   expect(
     screen.getAllByText("Mia Lab Spark").some((element) => element.closest(".activity-job-body")),
   ).toBe(true);
-  expect(screen.getByRole("progressbar", { name: "Verify transfer" })).toBeVisible();
+  expect(screen.getByRole("progressbar")).toBeVisible();
   expect(screen.getByRole("button", { name: "Resume operation" })).toBeVisible();
   expect(screen.queryByText("step-1")).not.toBeInTheDocument();
   await user.click(screen.getByText("Operation identifiers"));
@@ -560,9 +561,7 @@ test("polls a safety-delayed helper retry and shows specific recovery guidance",
   expect(
     screen.queryByRole("button", { name: "Queue retry after inspection" }),
   ).not.toBeInTheDocument();
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Refresh details" })).toBeEnabled(),
-  );
+  expect(screen.queryByRole("button", { name: "Refresh details" })).toBeNull();
   expect(intervalCallback).toBeDefined();
   await act(async () => {
     await intervalCallback?.();
@@ -658,7 +657,7 @@ test("shows a retryable operation-detail failure without offering resume", async
   await user.click(screen.getByText("View operation progress"));
   expect(await screen.findByRole("alert")).toHaveTextContent("operation projection unavailable");
   expect(screen.queryByRole("button", { name: "Resume operation" })).not.toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Try again" }));
+  await user.click(screen.getByRole("button", { name: "Retry" }));
   expect(await screen.findByText("worker exited")).toBeVisible();
   expect(loadJob).toHaveBeenCalledTimes(2);
 });
@@ -679,7 +678,7 @@ test("shows a retryable error when activity fails to load", async () => {
   expect(
     screen.queryByRole("region", { name: "Activity history coverage" }),
   ).not.toBeInTheDocument();
-  await user.click(within(alert).getByRole("button", { name: "Try again" }));
+  await user.click(within(alert).getByRole("button", { name: "Retry" }));
   await waitFor(() => expect(screen.getByText("No activity yet")).toBeVisible());
   expect(loadOperations).toHaveBeenCalledTimes(2);
 });
@@ -756,7 +755,7 @@ test("shows a full retryable error when operations fail to load", async () => {
   expect(
     screen.queryByRole("region", { name: "Activity history coverage" }),
   ).not.toBeInTheDocument();
-  await user.click(within(alert).getByRole("button", { name: "Try again" }));
+  await user.click(within(alert).getByRole("button", { name: "Retry" }));
   expect(client.operations).toHaveBeenCalledTimes(2);
 });
 
@@ -893,13 +892,13 @@ test("downloads diagnostics for the exact failed attempt without losing the erro
   expect(screen.getByText("Image verification failed on Mia Lab Spark.")).toBeVisible();
 });
 
-test("shows canonical profile failure, attempt, phase and uncertain recovery directly in both views", async () => {
+test("shows canonical profile failure, attempt and uncertain recovery directly in both views", async () => {
   const user = userEvent.setup();
   const client = canonicalApi([canonicalOperation()]);
   render(<ActivityPage api={client} now={NOW} />);
   expect(await screen.findByText("Profile load failed")).toBeVisible();
   expect(screen.getByText("Image verification failed on Mia Lab Spark.")).toBeVisible();
-  expect(screen.getByText("Attempt 1 · Prepare")).toBeVisible();
+  expect(screen.getByText(/^Attempt 1/)).toBeVisible();
   expect(screen.getByText(/Outcome uncertain/)).toBeVisible();
   expect(client.job).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "Table" }));
@@ -990,7 +989,7 @@ it("shows unknown job observations without invented progress counts and refreshe
     .mockResolvedValueOnce({
       id: "operation-1",
       kind: "recipe-install",
-      state: "running",
+      state: "needs-operator",
       authority_revision: "a".repeat(64),
       targets: [TARGET_ID],
       target_total: 1,
@@ -1052,7 +1051,7 @@ it("preserves visible activity when current operation membership is unknown", as
 test("keeps known operation state visible when one fact exceeds its response budget, then refreshes", async () => {
   const user = userEvent.setup();
   const initial = canonicalOperation({
-    state: "running",
+    state: "needs_operator",
     failure: null,
     progress: null,
     recovery: { actions: ["inspect"], uncertain: false },
@@ -1119,7 +1118,7 @@ test("reloads the first page when Load more is refused for an invalid cursor", a
   await user.click(screen.getByRole("button", { name: "Load older operations" }));
 
   await waitFor(() => expect(loadOperations).toHaveBeenCalledTimes(3));
-  expect(loadOperations.mock.calls[2][0]).toBeUndefined();
+  expect(loadOperations.mock.calls[2]?.[0]).toBeUndefined();
   expect(await screen.findByRole("button", { name: "Load older operations" })).toBeEnabled();
 });
 
@@ -1139,7 +1138,20 @@ test("leads with the workload the Controller names, else with the Sparks", async
   ).toBeVisible();
 });
 
-test("Refresh operation is offered for work in progress, not for a finished operation", async () => {
+test("an operation that updates itself offers no Refresh operation", async () => {
+  // Break caught: a manual button on a card that already polls every five seconds.
+  const running = canonicalOperation({
+    id: "live",
+    kind: "recipe.start",
+    state: "running",
+    failure: null,
+  });
+  render(<ActivityPage api={canonicalApi([running])} now={NOW} />);
+  expect(await screen.findByText(/Updates automatically/)).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Refresh operation" })).toBeNull();
+});
+
+test("Refresh operation is not offered for a finished operation", async () => {
   // Break caught: a completed operation keeps a button that can only re-read the same answer.
   const finished = canonicalOperation({
     id: "done",

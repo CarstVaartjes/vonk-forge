@@ -67,7 +67,7 @@ fn accept<L>(done: &AtomicBool, accept: impl Fn() -> std::io::Result<L>) -> Opti
                 if done.load(Ordering::SeqCst) {
                     return None;
                 }
-                std::thread::sleep(Duration::from_millis(1));
+                thread::sleep(Duration::from_millis(1));
             }
             Err(error) => panic!("peer unavailable: {error}"),
         }
@@ -108,7 +108,11 @@ async fn settle(
 async fn settle_failed(seen: Seen, failed: Failed) -> Settled {
     let grant_status = match failed {
         Failed::RankInspection(status) => status,
-        _ => "503 Unavailable",
+        Failed::Start(_)
+        | Failed::Retained(_)
+        | Failed::Collective(_)
+        | Failed::Loading
+        | Failed::Evidence => "503 Unavailable",
     };
     let grants: Arc<Mutex<Vec<Value>>> = Arc::default();
     let log: Log = Arc::default();
@@ -118,13 +122,12 @@ async fn settle_failed(seen: Seen, failed: Failed) -> Settled {
     let socket = runtime_root.path().join("helper.sock");
     let helper = std::os::unix::net::UnixListener::bind(&socket).unwrap();
     helper.set_nonblocking(true).unwrap();
-    let controller =
-        std::net::TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
+    let controller = TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
     controller.set_nonblocking(true).unwrap();
     let address = controller.local_addr().unwrap();
     let (helper_log, helper_done) = (log.clone(), done.clone());
     let (helper_named, requests) = (named.clone(), runtime_root.path().join("runtime-requests"));
-    std::thread::spawn(move || {
+    thread::spawn(move || {
         while let Some((mut stream, _)) = accept(&helper_done, || helper.accept()) {
             stream.set_nonblocking(false).unwrap();
             let mut prefix = [0; 4];
@@ -135,7 +138,7 @@ async fn settle_failed(seen: Seen, failed: Failed) -> Settled {
                 vonk_agent_protocol::parse_strict(&body).expect("only inspections reach it");
             helper_log.lock().unwrap().push("inspect");
             let inspected: vonk_agent_protocol::HostRuntimeRequest = serde_json::from_slice(
-                &std::fs::read(requests.join(format!("{}.json", request.request_sha256))).unwrap(),
+                &fs::read(requests.join(format!("{}.json", request.request_sha256))).unwrap(),
             )
             .unwrap();
             helper_named.lock().unwrap().push(inspected.run_generation);
@@ -170,16 +173,16 @@ async fn settle_failed(seen: Seen, failed: Failed) -> Settled {
                 Seen::Absent => response.error_code = Some(HelperErrorCode::RuntimeRunMissing),
                 Seen::Unread => continue,
             }
-            let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
+            let body = canonical_generated_json(&response).unwrap();
             stream
-                .write_all(&(body.len() as u32).to_be_bytes())
+                .write_all(&u32::try_from(body.len()).unwrap().to_be_bytes())
                 .unwrap();
             stream.write_all(&body).unwrap();
         }
     });
     let (controller_log, controller_done) = (log.clone(), done.clone());
     let controller_grants = grants.clone();
-    std::thread::spawn(move || {
+    thread::spawn(move || {
         while let Some((mut stream, _)) = accept(&controller_done, || controller.accept()) {
             stream.set_nonblocking(false).unwrap();
             let mut request = Vec::new();
@@ -228,7 +231,7 @@ async fn settle_failed(seen: Seen, failed: Failed) -> Settled {
         },
         runtime_root: runtime_root.path(),
     };
-    let arguments = crate::executor::container_run_target(
+    let arguments = container_run_target(
         &"a".repeat(64),
         &format!("sha256:{}", "b".repeat(64)),
         &format!("sha256:{}", "b".repeat(64)),
@@ -263,6 +266,10 @@ async fn settle_failed(seen: Seen, failed: Failed) -> Settled {
                 .await,
         )),
         Failed::Loading => {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "waits for a task to end; its outcome is observed elsewhere"
+            )]
             let _ = executor.loading_tail(&arguments, GENERATION).await;
             Ok(())
         }
@@ -469,8 +476,8 @@ async fn a_refused_inspection_grant_stops_nothing() {
 /// A Controller that predates generation-bound inspection grants refuses the
 /// grant's shape (422).
 fn refused_inspection_grant() -> HostRuntimeError {
-    HostRuntimeError::Controller(crate::client::ClientError::Controller(Box::new(
-        crate::client::ControllerError::from_status(422),
+    HostRuntimeError::Controller(ClientError::Controller(Box::new(
+        ControllerError::from_status(422),
     )))
 }
 
@@ -597,11 +604,10 @@ async fn the_readiness_reads_name_the_starts_generation() {
 fn a_start_refused_with_a_typed_conflict_ends_with_that_code() {
     // Wrong implementation: only a 403 kept its code and kind; a 409 ended as
     // a generic `helper_grant_unavailable` that reads like a wait.
-    let mut answer = crate::client::ControllerError::from_status(409);
+    let mut answer = ControllerError::from_status(409);
     answer.endpoint = "/agent/host-runtime/grant".into();
     answer.code = "superseded".into();
-    let error =
-        HostRuntimeError::Controller(crate::client::ClientError::Controller(Box::new(answer)));
+    let error = HostRuntimeError::Controller(ClientError::Controller(Box::new(answer)));
     assert!(refused_authority(&error));
     let ExecutionResult::Failed(failure) = runtime_failure(START_FAILED, &error) else {
         panic!("a definite refusal ends the start");

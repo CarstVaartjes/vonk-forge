@@ -29,6 +29,7 @@ that no longer occurs fails as stale.
 | Controller API requests and responses | `control/src/vonk_control/*_contract.py` and the registered API modules below | none (the agent does not call these) | `control/web/src/api/generated.d.ts` from `control/openapi.json` | `src/cluster_profiles/generated_control` (CLI client) |
 | Prometheus metric catalogue, series with summaries, and alert attention | `control/src/vonk_control/metrics/contract.py`; external Prometheus replies in `metrics/prometheus_api.py` | none | generated Controller API types | generated Controller client |
 | Lifecycle and reason-code vocabulary | `lifecycle_vocabulary.py`, `reason_codes/`, `state_machines.py` | `generated.rs` | `control/web/src/api/vocabulary.generated.ts` | the CLI words in `src/cluster_profiles/cli_states_generated.py` |
+| Progress phase and wait words (plain words for a person) | `vonk_agent_protocol/phase_words.py` | none | `control/web/src/api/vocabulary.generated.ts` (`PHASE_WORDS`, `WAIT_WORDS`) | `src/cluster_profiles/cli_states_generated.py` |
 | CLI state words | the vocabulary above | none | none | `src/cluster_profiles/cli_states_generated.py` (`scripts/generate-python-vocabulary`) |
 | Route activation marker | `route_activation.py`; its state words from `GatewayRouteState` | none | none | `route_activation_words.py` (generated), loaded beside `route_activation.py` by the LiteLLM supervisor |
 | CLI token download | `CliTokenDownload` in `auth_api.py` | none | `components["schemas"]["CliTokenDownload"]` | none |

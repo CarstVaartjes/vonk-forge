@@ -238,7 +238,11 @@ fn read_helper_reconciliation_receipt_strict(
 ) -> Result<Option<InstallationReconciliationReceipt>, OperationError> {
     let mut file = match OpenOptions::new()
         .read(true)
-        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
+        .custom_flags(
+            (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                .bits()
+                .cast_signed(),
+        )
         .open(path)
     {
         Ok(file) => file,
@@ -251,7 +255,7 @@ fn read_helper_reconciliation_receipt_strict(
     {
         return Err(OperationError::InvalidArtifact);
     }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    let mut bytes = Vec::with_capacity(usize::try_from(metadata.len()).unwrap_or_default());
     Read::by_ref(&mut file)
         .take(MAX_INSTALLATION_RECONCILIATION_IDENTITY_BYTES + 1)
         .read_to_end(&mut bytes)?;
@@ -273,6 +277,10 @@ fn read_helper_reconciliation_receipt_strict(
     Ok(Some(receipt))
 }
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the Result keeps the signature shared with its sibling operations"
+)]
 pub(super) fn read_helper_reconciliation_receipt(
     path: &Path,
     owner_uid: Option<u32>,
@@ -300,7 +308,7 @@ pub(super) fn write_helper_reconciliation_receipt(
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
-        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
         .mode(0o600)
         .open(&temporary)?;
     file.write_all(&bytes)?;

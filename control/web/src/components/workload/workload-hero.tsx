@@ -41,12 +41,15 @@ export function WorkloadHero({
   unit,
   reads,
   live,
+  compact = false,
 }: {
   /** Reads the recipe and jobs of a job workload; without it the workload shows as a model. */
-  api?: Partial<JobWorkloadApi>;
+  api?: Partial<JobWorkloadApi> | undefined;
   unit: WorkloadGroup;
   reads: WorkloadReads;
   live: boolean;
+  /** Under its own opened row: no header and no figures, which the row already shows. */
+  compact?: boolean;
 }) {
   const jobs = useJobWorkload(api, unit);
   const { reading: hero, pending } = leadReading(reads, unit.alias);
@@ -60,7 +63,7 @@ export function WorkloadHero({
   if (jobs.kind === WorkloadKind.JOBS || (jobs.kind === WorkloadKind.UNREAD && !jobs.error))
     return (
       <div className="workload-hero">
-        <WorkloadHeader unit={unit} />
+        {!compact && <WorkloadHeader unit={unit} />}
         {jobs.kind === WorkloadKind.JOBS ? (
           <WorkloadJobs revision={jobs.revision} adapter={jobs.interface} jobs={jobs.jobs} />
         ) : (
@@ -71,54 +74,56 @@ export function WorkloadHero({
   // While the speed reads are out nothing is claimed; once they are in, no latest value is Not reported.
   return (
     <div className="workload-hero">
-      <WorkloadHeader unit={unit} />
+      {!compact && <WorkloadHeader unit={unit} />}
       {jobs.kind === WorkloadKind.UNREAD && <WorkloadChecking error={jobs.error} />}
       <div className="hero-body">
-        <div className="hero-read">
-          {spec && value !== null ? (
-            <>
-              <p className="hero-num">
-                <Estimate basis={spec.basis}>{formatValue(value, "")}</Estimate>
-                <small>{symbol}</small>
-              </p>
-              <p className="hero-caption">
-                {value === 0 && unit.tone === "ok"
-                  ? "idle, model loaded"
-                  : `${spec.title} · last 30 minutes`}
-                <EstimateTag basis={spec.basis} />
-              </p>
-            </>
-          ) : (
-            !pending && <p className="hero-num hero-missing">{NOT_REPORTED_TEXT}</p>
-          )}
-          <dl className="hero-figures">
-            <div>
-              <dt>Requests</dt>
-              <dd>{queue === undefined ? null : (queue ?? NOT_REPORTED_TEXT)}</dd>
-            </div>
-            {ENGINE_FIGURES.map((metric, index) => {
-              const spec = reads.specs.find((entry) => entry.metric === metric);
-              if (!spec) return null;
-              const read = reads.figures[index];
-              const latest = aliasSeries(read, unit.alias)?.series.summary.latest;
-              const { symbol, scale } = UNITS[spec.unit];
-              return (
-                <div key={metric}>
-                  <dt>{spec.title}</dt>
-                  <dd>
-                    {read === undefined ? null : latest == null ? (
-                      NOT_REPORTED_TEXT
-                    ) : (
-                      <Estimate basis={spec.basis}>
-                        {formatValue(Number(latest) / scale, symbol)}
-                      </Estimate>
-                    )}
-                  </dd>
-                </div>
-              );
-            })}
-          </dl>
-        </div>
+        {!compact && (
+          <div className="hero-read">
+            {spec && value !== null ? (
+              <>
+                <p className="hero-num">
+                  <Estimate basis={spec.basis}>{formatValue(value, "")}</Estimate>
+                  <small>{symbol}</small>
+                </p>
+                <p className="hero-caption">
+                  {value === 0 && unit.tone === "ok"
+                    ? "idle, model loaded"
+                    : `${spec.title} · last 30 minutes`}
+                  <EstimateTag basis={spec.basis} />
+                </p>
+              </>
+            ) : (
+              !pending && <p className="hero-num hero-missing">{NOT_REPORTED_TEXT}</p>
+            )}
+            <dl className="hero-figures">
+              <div>
+                <dt>Requests</dt>
+                <dd>{queue === undefined ? null : (queue ?? NOT_REPORTED_TEXT)}</dd>
+              </div>
+              {ENGINE_FIGURES.map((metric, index) => {
+                const spec = reads.specs.find((entry) => entry.metric === metric);
+                if (!spec) return null;
+                const read = reads.figures[index];
+                const latest = aliasSeries(read, unit.alias)?.series.summary.latest;
+                const { symbol, scale } = UNITS[spec.unit];
+                return (
+                  <div key={metric}>
+                    <dt>{spec.title}</dt>
+                    <dd>
+                      {read === undefined ? null : latest == null ? (
+                        NOT_REPORTED_TEXT
+                      ) : (
+                        <Estimate basis={spec.basis}>
+                          {formatValue(Number(latest) / scale, symbol)}
+                        </Estimate>
+                      )}
+                    </dd>
+                  </div>
+                );
+              })}
+            </dl>
+          </div>
+        )}
         {hero && spec && value !== null && (
           <div className="hero-chart">
             <AreaChart

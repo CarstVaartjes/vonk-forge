@@ -41,13 +41,13 @@ export function LibraryBrowser({
   subview,
 }: {
   api: ControlApi;
-  detail?: LibraryViewRecipeDetail;
+  detail?: LibraryViewRecipeDetail | undefined;
   detailError: string;
   detailLoading: boolean;
-  fleet?: VisualFleetSnapshot;
-  onBusyChange?(busy: boolean): void;
+  fleet?: VisualFleetSnapshot | undefined;
+  onBusyChange?: ((busy: boolean) => void) | undefined;
   onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void;
-  onNavigatePath?(path: string, replace?: boolean): void;
+  onNavigatePath?: ((path: string, replace?: boolean) => void) | undefined;
   onQueryChange(value: string): void;
   onRefresh(signal: AbortSignal): Promise<void>;
   onRetryDetail(): void;
@@ -133,6 +133,7 @@ export function LibraryBrowser({
           api={api}
           detail={detail}
           onBusyChange={onBusyChange}
+          onChanged={() => void onRefresh(new AbortController().signal)}
           onNavigate={onNavigate}
         />
       );

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import RecipeDefinition
 from vonk_forge_contracts.qualification_status import QualificationStatus
 
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import AssetAvailability
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.revision_contract import (
@@ -52,6 +53,8 @@ from vonk_control.library_projection.local_state import (
     _database_local_state,
     _local,
     _local_state_snapshot,
+    _recipe_model_digests,
+    _state_digests,
 )
 from vonk_control.library_projection.views import (
     authoring_recipe_detail,
@@ -144,6 +147,7 @@ class LibraryProjection:
         controller: LibraryControllerState,
         running_on: Sequence[str] = (),
         preparation: LibraryLocalProgress | None = None,
+        installed_on_sparks: bool = False,
     ) -> None:
         if digest is None:
             return
@@ -156,6 +160,7 @@ class LibraryProjection:
         ):
             current.controller = controller
         current.running_on = sorted(set(current.running_on) | set(running_on))
+        current.installed_on_sparks = current.installed_on_sparks or installed_on_sparks
         if preparation is not None:
             # Requests arrive in durable creation order; identity has no recency.
             current.preparation = preparation
@@ -179,7 +184,7 @@ class LibraryProjection:
             model_cache_states.BACKOFF: model_cache_states.BACKOFF,
             "succeeded": "succeeded",
             "failed": "failed",
-            "cancelled": "failed",
+            LifecycleState.CANCELLED.value: LifecycleState.CANCELLED.value,
         }.get(state)
         if projected_state is None:
             _note_unreadable("cache operation state", operation_id, state)
@@ -349,6 +354,8 @@ class LibraryProjection:
 
     _assessed = _assessed
     _local_state_snapshot = _local_state_snapshot
+    _recipe_model_digests = _recipe_model_digests
+    _state_digests = _state_digests
     _local = staticmethod(_local)
     _database_local_state = _database_local_state
     _apply_image_presence = staticmethod(_apply_image_presence)

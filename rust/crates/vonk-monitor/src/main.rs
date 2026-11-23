@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use std::{
     path::{Path, PathBuf},
     time::Duration,
@@ -153,16 +151,18 @@ fn collector_for(
     .ok()
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the remainder is below the interval, which fits u64 nanoseconds"
+)]
 fn next_tick_after(
     started: tokio::time::Instant,
     finished: tokio::time::Instant,
 ) -> tokio::time::Instant {
     finished
-        + (INTERVAL
-            - Duration::from_nanos(
-                (finished.saturating_duration_since(started).as_nanos() % INTERVAL.as_nanos())
-                    as u64,
-            ))
+        + INTERVAL.saturating_sub(Duration::from_nanos(
+            (finished.saturating_duration_since(started).as_nanos() % INTERVAL.as_nanos()) as u64,
+        ))
 }
 
 fn telemetry_paths(config: &AgentConfig) -> TelemetryPaths {
@@ -171,7 +171,7 @@ fn telemetry_paths(config: &AgentConfig) -> TelemetryPaths {
         uptime: PathBuf::from("/proc/uptime"),
         cpu_root: PathBuf::from("/sys/devices/system/cpu"),
         store: config.data_dir.clone(),
-        host: Default::default(),
+        host: vonk_agent::telemetry::host_readings::HostRoots::default(),
     }
 }
 

@@ -13,9 +13,9 @@ export function ObservationNotice({
   subject = "this operation",
 }: {
   connection: "live" | "reconnecting";
-  lastSuccessAt?: number;
+  lastSuccessAt?: number | undefined;
   background?: boolean;
-  onResume?(): void;
+  onResume?: (() => void) | undefined;
   subject?: string;
 }) {
   const [now, setNow] = useState(() => Date.now());
@@ -31,7 +31,7 @@ export function ObservationNotice({
         {ageLabel(lastSuccessAt, now)}.{" "}
         {onResume && (
           <button type="button" onClick={onResume}>
-            Check status
+            Refresh status
           </button>
         )}
       </p>

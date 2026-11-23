@@ -52,7 +52,7 @@ export function StackedArea({
   const y = linearScale([0, top], [H - BOTTOM, TOP]);
   const sums = (point: Point, upTo: number) =>
     (point.values as number[]).slice(0, upTo).reduce((a, b) => a + b, 0);
-  const shapes = layers.map((layer, i) =>
+  const shapes = layers.map((_layer, i) =>
     runs
       .filter((run) => run.length > 1)
       .map((run) => {

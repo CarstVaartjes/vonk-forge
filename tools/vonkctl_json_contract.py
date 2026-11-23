@@ -54,7 +54,7 @@ from vonk_control.fleet_profile_contract.definitions import (
 from vonk_control.fleet_profile_contract.endpoints import FleetProfileEndpointsView
 from vonk_control.fleet_profile_contract.review import (
     FleetProfileApplicationView,
-    FleetProfilePreview,
+    FleetProfilePreviewResponse,
 )
 from vonk_control.fleet_projection.common import FleetSnapshot
 from vonk_control.library.contract import RecipeDetailResponse, RecipeLibraryResponse
@@ -228,7 +228,7 @@ _BASES = (
     (DocumentKind.FLEET, FleetSnapshot),
     (DocumentKind.PROFILE_LIST, FleetProfileList),
     (DocumentKind.PROFILE, FleetProfileReadView),
-    (DocumentKind.PROFILE_REVIEW, FleetProfilePreview),
+    (DocumentKind.PROFILE_REVIEW, FleetProfilePreviewResponse),
     (DocumentKind.PROFILE_APPLICATION, FleetProfileApplicationView),
     (DocumentKind.PROFILE_ENDPOINTS, FleetProfileEndpointsView),
     (DocumentKind.RECIPE_LIBRARY, RecipeLibraryResponse),

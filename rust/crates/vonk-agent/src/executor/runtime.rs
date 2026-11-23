@@ -3,6 +3,10 @@
 use super::*;
 
 impl<R> RecipeExecutor<'_, R> {
+    #[expect(
+        clippy::unused_async,
+        reason = "async to keep one awaitable signature across the trait and its callers"
+    )]
     pub(super) async fn report_phase(&self, claim: &AgentClaim, phase: ProgressPhase) {
         self.client.set_progress_phase(claim.fence, phase);
     }
@@ -21,7 +25,10 @@ impl<R> RecipeExecutor<'_, R> {
                 HostRuntimeAction::ImagePull => ProgressPhase::Pulling,
                 HostRuntimeAction::Start => ProgressPhase::Starting,
                 HostRuntimeAction::Stop => ProgressPhase::Stopping,
-                _ => ProgressPhase::Verifying,
+                HostRuntimeAction::RuntimePreflight
+                | HostRuntimeAction::ImageInspect
+                | HostRuntimeAction::RunInspect
+                | HostRuntimeAction::InstallationCleanup => ProgressPhase::Verifying,
             },
         )
         .await;
@@ -46,7 +53,7 @@ const PULL_INACTIVITY: Duration = Duration::from_secs(610);
 /// contributes transferred bytes, not completed items. Artifact availability
 /// remains established by the distribution's receipt, not this progress.
 pub(super) fn pull_progress<'a>(
-    client: &'a crate::client::AgentHttpClient,
+    client: &'a AgentHttpClient,
     fence: uuid::Uuid,
     pulled: &'a Inactivity,
 ) -> impl Fn(u64) + Sync + 'a {

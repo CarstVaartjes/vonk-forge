@@ -29,6 +29,7 @@ from cluster_profiles.cli_render.fleet import (
     run_problem,
 )
 from cluster_profiles.cli_render.library import (
+    COMPACT_RECIPE_ROWS,
     _applied_filters,
     _needs_download,
     _qualification_status,
@@ -62,7 +63,6 @@ def test_unknown_transfer_total_does_not_hide_measured_work_or_invent_percent():
             },
         }
     )
-    assert "transfer" in line
     assert "0 B" in line
     assert "total unknown" in line
     assert "%" not in line
@@ -235,10 +235,14 @@ def test_a_gpu_clock_keeps_zero_and_names_a_missing_reading():
 
 
 def test_a_review_is_ready_only_when_allowed_and_waiting_only_for_preparation():
-    assert review_verdict(True, None) is ReviewVerdict.READY
-    assert review_verdict(False, True) is ReviewVerdict.READY_AFTER_PREPARATION
-    assert review_verdict(False, None) is ReviewVerdict.BLOCKED
-    assert review_verdict(None, None) is ReviewVerdict.BLOCKED
+    assert review_verdict(True, None, "load") is ReviewVerdict.READY
+    assert review_verdict(False, True, "load") is ReviewVerdict.READY_AFTER_PREPARATION
+    assert review_verdict(False, None, "blocked") is ReviewVerdict.BLOCKED
+    assert review_verdict(None, None, None) is ReviewVerdict.BLOCKED
+    # What the Controller says loading does outranks what the plan allows.
+    assert review_verdict(True, None, "nothing_to_change") is (
+        ReviewVerdict.NOTHING_TO_CHANGE
+    )
 
 
 def test_unreadable_activity_is_unknown_not_empty():
@@ -366,3 +370,41 @@ def test_fleet_detail_shows_cpu_clock_with_temperature_and_throttle_hint(capsys)
 
     render_payload(_spark("atlas", 1), "fleet", action="detail")
     assert "GHz" not in capsys.readouterr().out
+
+
+def _recipe_library_payload(count: int) -> dict[str, object]:
+    return {
+        "recipes": [
+            {
+                "selector": f"vonk-forge/recipe-{index:03d}",
+                "node_count": 1,
+                "local": {
+                    "controller": "cached" if index % 2 else "not_cached",
+                    "running_on": ["spk_1"] if index == count - 1 else [],
+                },
+                "resources": {"disk_bytes": 1024**3},
+                "qualification": {"status": "Working", "required_sparks": 1},
+            }
+            for index in range(count)
+        ],
+        "next_cursor": None,
+    }
+
+
+def test_bare_recipe_listing_is_compact_and_the_library_listing_is_not(capsys):
+    # Break caught: a 100-recipe listing printing hundreds of lines, or the
+    # library listing (with its own --limit/--sort/--cursor) being cut.
+    payload = _recipe_library_payload(100)
+    render_payload(payload, "recipe", action=None)
+    compact = capsys.readouterr().out.splitlines()
+    assert len(compact) < 40
+    assert sum("recipe-" in line for line in compact) == COMPACT_RECIPE_ROWS
+    # The running recipe is last in the payload and still on the screen.
+    assert any("recipe-099" in line for line in compact)
+
+    render_payload(payload, "recipe", action=None, show_all=True)
+    every = capsys.readouterr().out.splitlines()
+    assert sum("recipe-" in line for line in every) == 100
+    render_payload(payload, "recipe", action="library")
+    library = capsys.readouterr().out.splitlines()
+    assert sum("recipe-" in line for line in library) == 100

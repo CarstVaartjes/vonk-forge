@@ -26,6 +26,7 @@ from vonk_control.fleet_profile_contract.definitions import (
 from vonk_control.fleet_profile_contract.effects import (
     FleetProfileRunEffect,
 )
+from vonk_control.fleet_profile_contract.review import FleetProfilePreviewResponse
 from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchChildResult,
@@ -409,7 +410,8 @@ def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(
 
     completed = service.application(application.id)
     payload = {
-        "preview": preview.model_dump(mode="json"),
+        # The canary reads the review endpoint's document, not the stored plan.
+        "preview": FleetProfilePreviewResponse.of(preview).model_dump(mode="json"),
         "application": completed.model_dump(mode="json"),
         "installation_id": installation.owner_id,
         "run_id": run.owner_id,

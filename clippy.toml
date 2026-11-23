@@ -1,0 +1,10 @@
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allowed-wildcard-imports = ["super"]
+disallowed-methods = [
+  { path = "rustix::fs::flock", reason = "take a HeldLock (held_lock.rs)" },
+  { path = "rustix::fs::fcntl_lock", reason = "take a HeldLock (held_lock.rs)" },
+  { path = "std::fs::File::lock", reason = "take a HeldLock (held_lock.rs)" },
+  { path = "std::fs::File::try_lock", reason = "take a HeldLock (held_lock.rs)" },
+]

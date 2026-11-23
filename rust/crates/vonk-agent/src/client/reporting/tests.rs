@@ -5,7 +5,7 @@ use super::*;
 
 #[test]
 fn out_of_contract_inventory_is_clamped_instead_of_refused() {
-    let mut request = vonk_agent_protocol::InventoryRequest {
+    let mut request = InventoryRequest {
         schema_version: 1,
         observed_at: Utc::now().into(),
         disk_total_bytes: 100,
@@ -167,7 +167,7 @@ async fn telemetry_posts_current_contract_without_node_identity() {
     assert!(headers.starts_with("post /agent/telemetry http/1.1\r\n"));
     assert!(headers.contains("content-type: application/json"));
 
-    let body: serde_json::Value = serde_json::from_slice(body).unwrap();
+    let body: Value = serde_json::from_slice(body).unwrap();
     assert_eq!(
         body.as_object()
             .unwrap()
@@ -195,7 +195,7 @@ async fn telemetry_posts_current_contract_without_node_identity() {
         ]
     );
     assert!(!body.to_string().contains("node_id"));
-    assert_eq!(sample["gpu_utilization_percent"], serde_json::Value::Null);
+    assert_eq!(sample["gpu_utilization_percent"], Value::Null);
 }
 
 #[tokio::test]
@@ -220,11 +220,11 @@ async fn telemetry_allows_the_two_second_controller_budget() {
 #[tokio::test]
 async fn telemetry_rejects_empty_or_more_than_sixteen_samples_before_transport() {
     let client = AgentHttpClient {
-        client: Arc::new(RwLock::new(reqwest::Client::new())),
+        client: Arc::new(RwLock::new(Client::new())),
         controller: Url::parse("http://127.0.0.1:9/").unwrap(),
         node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-        identity_content: Default::default(),
-        progress_phase: Default::default(),
+        identity_content: Arc::default(),
+        progress_phase: Arc::default(),
         transfer_inactivity: TRANSFER_INACTIVITY,
         distribution_range_bytes: DISTRIBUTION_RANGE_BYTES,
     };
@@ -281,7 +281,7 @@ async fn an_inventory_returns_the_controllers_verdict_and_an_older_controller_no
     let answer = answer.unwrap();
     assert_eq!(
         answer.untracked_installations,
-        vec![ORPHAN.parse::<uuid::Uuid>().unwrap()]
+        vec![ORPHAN.parse::<Uuid>().unwrap()]
     );
     assert_eq!(answer.untracked_runs, None);
     let sent = finish_capture_peer(server).await;
@@ -293,7 +293,7 @@ async fn an_inventory_returns_the_controllers_verdict_and_an_older_controller_no
         ))
         .await
         .and_then(|verdict| verdict.untracked_runs),
-        Some(vec![ORPHAN.parse::<uuid::Uuid>().unwrap()])
+        Some(vec![ORPHAN.parse::<Uuid>().unwrap()])
     );
 
     // An older Controller answers nothing, and a verdict that cannot be read
@@ -314,9 +314,9 @@ async fn an_inventory_returns_the_controllers_verdict_and_an_older_controller_no
 }
 
 /// The verdict a Controller answering `body` gives an inventory naming runs.
-async fn client_answer(body: String) -> Option<vonk_agent_protocol::generated::InventoryVerdict> {
+async fn client_answer(body: String) -> Option<InventoryVerdict> {
     let mut request = valid_inventory();
-    request.runs = Some(vec![uuid::Uuid::nil()]);
+    request.runs = Some(vec![Uuid::nil()]);
     let (client, server) = request_capture_client(
         200,
         vec!["content-type: application/json".to_owned()],
@@ -331,7 +331,7 @@ async fn client_answer(body: String) -> Option<vonk_agent_protocol::generated::I
 }
 
 /// An inventory with every optional evidence group present.
-fn inventory_with_all_evidence() -> vonk_agent_protocol::InventoryRequest {
+fn inventory_with_all_evidence() -> InventoryRequest {
     let mut request = valid_inventory();
     request.network_interfaces = Some(vec![interface("enP7s7", Some(1000))]);
     request.nas_route_interface = Some("enP7s7".to_owned());
@@ -345,9 +345,11 @@ fn inventory_with_all_evidence() -> vonk_agent_protocol::InventoryRequest {
         display_memory: None,
         swap: None,
         tuning: None,
+        memory_fragmentation: None,
+        fabric_devices: Vec::new(),
     });
-    request.installations = Some(vec![uuid::Uuid::nil()]);
-    request.runs = Some(vec![uuid::Uuid::nil()]);
+    request.installations = Some(vec![Uuid::nil()]);
+    request.runs = Some(vec![Uuid::nil()]);
     request.validate().unwrap();
     request
 }
@@ -368,6 +370,10 @@ fn the_inventory_core_keeps_the_capacity_report_and_no_optional_evidence() {
 
 /// Two exchanges on one listener: answer each request with its status and
 /// return the request bodies.
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 async fn two_answers(
     statuses: [u16; 2],
 ) -> (AgentHttpClient, tokio::task::JoinHandle<Vec<String>>) {
@@ -419,7 +425,7 @@ async fn two_answers(
         "x-vonk-fixture-auth",
         reqwest::header::HeaderValue::from_static("enrolled-agent"),
     );
-    *client.client.write().await = reqwest::Client::builder()
+    *client.client.write().await = Client::builder()
         .default_headers(headers)
         .timeout(CONTROLLER_REQUEST_TIMEOUT)
         .build()

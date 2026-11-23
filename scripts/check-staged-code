@@ -193,11 +193,10 @@ def main() -> None:
         .decode()
         .split("\0")
     )
-    web = [
-        file
-        for file in changed
-        if file.startswith("control/web/") and file.endswith((".ts", ".tsx"))
-    ]
+    # Biome gets every staged control/web path (CSS and its config included) and
+    # applies its own file selection, so the hook checks what CI checks.
+    web_paths = [file for file in changed if file.startswith("control/web/")]
+    web = [file for file in web_paths if file.endswith((".ts", ".tsx"))]
     web_inputs = bool(
         set(changed)
         & {
@@ -210,26 +209,27 @@ def main() -> None:
     )
     rust = any(
         file.endswith(".rs")
-        or file in {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml"}
+        or file in {"Cargo.toml", "Cargo.lock", "clippy.toml", "rust-toolchain.toml"}
         or (file.startswith("rust/") and file.endswith("Cargo.toml"))
         for file in changed
     )
     run(["python3", "scripts/check-staged-python"])
     check_added_lines(changed)
-    if web or web_inputs:
-        directory = ROOT / "control/web"
+    directory = ROOT / "control/web"
+    if web_paths:
         biome = directory / "node_modules/.bin/biome"
         ensure_web(ROOT)
-        if web:
-            run(
-                [
-                    str(biome),
-                    "check",
-                    "--no-errors-on-unmatched",
-                    *[str(ROOT / file) for file in web],
-                ],
-                cwd=directory,
-            )
+        run(
+            [
+                str(biome),
+                "ci",
+                "--no-errors-on-unmatched",
+                *[str(ROOT / file) for file in web_paths],
+            ],
+            cwd=directory,
+        )
+    if web or web_inputs:
+        ensure_web(ROOT)
         run(["npm", "run", "typecheck"], cwd=directory)
     if rust:
         toolchain = tomllib.loads((ROOT / "rust-toolchain.toml").read_text())[
