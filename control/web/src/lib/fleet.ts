@@ -10,6 +10,7 @@ import {
 } from "../api/contract-numeric";
 import type { SwapShortfallEvidence, VisualFleetNode, VisualFleetSnapshot } from "../api/types";
 import {
+  GroupHealth,
   NodeOfflineReason,
   OutcomeKind,
   ProjectionCode,
@@ -117,6 +118,14 @@ export function uptimeText(seconds: number | null | undefined): string | null {
   const hours = Math.floor((minutes % 1440) / 60);
   if (days > 0) return `${days} d ${hours} h`;
   return hours > 0 ? `${hours} h ${minutes % 60} m` : `${minutes} m`;
+}
+
+/** A group still within its start is progress; only a run with no health verdict at all is unknown. */
+export function workloadStateUnconfirmed(run: {
+  healthy?: boolean | null;
+  group_state?: string;
+}): boolean {
+  return run.healthy == null && run.group_state !== GroupHealth.STARTING;
 }
 
 /** One workload's state in a word. Health only qualifies a run that is running; any other run state is shown as is. */

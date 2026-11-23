@@ -103,6 +103,7 @@ def typescript_vocabulary() -> str:
         CacheOperationKind,
         ModelStorageObservationReason,
     )
+    from vonk_control.run_readiness import GroupHealth
     from vonk_forge_contracts.qualification_status import (
         QualificationOutcome,
         QualificationStatus,
@@ -124,6 +125,7 @@ def typescript_vocabulary() -> str:
             ModelStorageObservationReason,
             QualificationStatus,
             QualificationOutcome,
+            GroupHealth,
         )
     )
     for words in word_types:

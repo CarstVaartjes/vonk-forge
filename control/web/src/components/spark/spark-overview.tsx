@@ -7,6 +7,7 @@ import type {
 } from "../../api/types";
 import {
   formatBytes,
+  workloadStateUnconfirmed,
   nodeCpuClock,
   nodeDisplayMemory,
   nodeGpuClock,
@@ -114,10 +115,10 @@ export function SparkOverview({
           <dt>Recipes</dt>
           <dd>
             {node.loaded.filter((item) => item.healthy === true).length}
-            {node.loaded.some((item) => item.healthy == null) ? " confirmed" : ""} running ·{" "}
+            {node.loaded.some(workloadStateUnconfirmed) ? " confirmed" : ""} running ·{" "}
             {node.installed.filter((item) => item.complete === true).length}
             {node.installed.some((item) => item.complete == null) ? " confirmed" : ""} installed
-            {(node.loaded.some((item) => item.healthy == null) ||
+            {(node.loaded.some(workloadStateUnconfirmed) ||
               node.installed.some((item) => item.complete == null)) && (
               <> · some workload state unknown</>
             )}

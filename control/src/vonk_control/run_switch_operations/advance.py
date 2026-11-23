@@ -15,7 +15,7 @@ from vonk_agent_protocol.agent_words import (
     ProfileEffectState,
 )
 from vonk_agent_protocol.contracts import AgentOperation
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
 from vonk_control.run_switch_operations.results import _persisted_result
@@ -49,7 +49,10 @@ from ..persisted_waits import schedule_wait, wait_due
 from ..recipe_builds.cancellation import needs_container_build
 from ..recipe_builds.common import RecipeBuildAdmissionBusy
 from ..recipe_operations.interfaces import RecipeOperationView
-from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.operations import (
+    RunSwitchOperation,
+    RunSwitchOperationResult,
+)
 from ..run_switch_contract.phase_results import RunSwitchDistributionChildResult
 from ..run_switch_contract.progress_view import (
     RECOVERY_STALL_WINDOW,
@@ -566,20 +569,26 @@ class AdvanceMixin:
                         reason=status_reason,
                         wait_blockers=[
                             make_blocker(
-                                RunSwitchCode.EFFECT_UNCERTAIN,
+                                RunSwitchCode.EFFECT_UNCERTAIN
+                                if progress.retry_reason
+                                == RunSwitchCode.EFFECT_UNCERTAIN
+                                else WaitReason.DEPENDENCY_PENDING,
                                 status_reason or "Awaiting the exact child effect",
                                 node_ids=job.targets,
                             ).model_copy(
                                 update={
                                     "operation": BlockingOperation(
                                         id=child_id,
-                                        kind=AgentOperation.ARTIFACT_DISTRIBUTION.value,
+                                        kind=child.kind
+                                        if isinstance(
+                                            child,
+                                            RecipeOperationView | RunSwitchOperation,
+                                        )
+                                        else AgentOperation.ARTIFACT_DISTRIBUTION.value,
                                     )
                                 }
                             )
-                        ]
-                        if progress.retry_reason == RunSwitchCode.EFFECT_UNCERTAIN
-                        else None,
+                        ],
                     )
                     job.result = _persisted_result(progress)
                     job.updated_at = now
