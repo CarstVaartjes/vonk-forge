@@ -37,7 +37,7 @@ from vonk_control.models.catalog import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
 )
-from vonk_control.models.execution import RecipeInstallation
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.mapping import ClusterMapping
 from vonk_control.run_switch_operations.artifact_inspection import (
@@ -772,3 +772,107 @@ def test_cache_resolution_loads_documents_only_where_it_reads_them(
         if re.search(r"catalog_document_revisions\.document\b(?!_id)", item)
     ]
     assert len(document_reads) == 4
+
+
+SPARK = "spk_" + "a" * 32
+
+
+def _serve(world: _World, sessions: sessionmaker[Session]) -> None:
+    """An installed recipe whose running run names no model in its plan."""
+
+    mapping_id = str(uuid.uuid4())
+    installation_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    with write_guard_mode(strict=False), sessions.begin() as session:
+        session.add(AgentNode(node_id=SPARK, state="active"))
+        session.add(
+            ClusterMapping(
+                id=mapping_id,
+                recipe_revision_id=world.recipe_revision_id,
+                topology_name="single",
+                generation=1,
+                node_count=1,
+                state="ready",
+                parameters={},
+                placement_digest="f" * 64,
+                endpoint_owner_node_id=SPARK,
+                created_by="test",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.flush()
+        session.add(
+            RecipeInstallation(
+                id=installation_id,
+                recipe_revision_id=world.recipe_revision_id,
+                model_content_sha256=world.model_digests[0],
+                mapping_id=mapping_id,
+                mapping_generation=1,
+                recipe_build_id=None,
+                image_digest="sha256:" + "e" * 64,
+                plan_digest="1" * 64,
+                plan={"schema_version": 2},
+                state="installed",
+                actor="test",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.flush()
+        session.add(
+            RecipeRun(
+                id=run_id,
+                installation_id=installation_id,
+                mapping_id=mapping_id,
+                mapping_generation=1,
+                run_generation=1,
+                alias="serving",
+                plan_digest="2" * 64,
+                plan={"schema_version": 1},
+                state="running",
+                route_state="published",
+                actor="test",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.flush()
+        session.add(
+            RunNode(
+                run_id=run_id,
+                node_id=SPARK,
+                rank=0,
+                role="worker",
+                state="running",
+                port=8000,
+                reserved_memory_bytes=0,
+                updated_at=NOW,
+            )
+        )
+
+
+def test_a_models_cache_state_is_the_same_in_every_view_and_shows_where_it_runs(
+    cache,
+):
+    """A model's state is read from its recipes' evidence whichever page asked.
+
+    The list, the cached list and the detail ask for different digests; each must
+    name the node a serving model runs on, even when the run's plan carries no
+    model digest of its own.
+    """
+
+    service, sessions = cache
+    world = _World(sessions, count=1)
+    with sessions.begin() as session:
+        session.add(world.recipe_set(service, "cached"))
+    _serve(world, sessions)
+    projection = _projection(sessions)
+
+    selector = "vonk-forge/resolver-model"
+    detail = projection.model_detail(selector)
+    (listed,) = projection.models(limit=10).models
+    (cached,) = projection.models(limit=10, cached=True).models
+    assert detail.local.running_on == [SPARK]
+    assert listed.local == cached.local == detail.local
+    assert listed.actions == cached.actions == detail.actions
