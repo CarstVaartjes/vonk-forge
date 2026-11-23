@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import DistributionObject
+from vonk_agent_protocol.distribution import DistributionObject
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import CompositeObjectSource

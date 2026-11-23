@@ -9,30 +9,34 @@ from dataclasses import replace
 import pytest
 from controller_cli_support import FakeClient, run
 
-from cluster_profiles import cli, controller_cli
+from cluster_profiles import cli
 from cluster_profiles.cli_states_generated import OBSERVING, QUEUED, SUCCEEDED
-from cluster_profiles.control_client import (
+from cluster_profiles.control_client.errors import (
     ControlHTTPError,
     ControlMalformedResponse,
     ControlTransportError,
     ControlUnavailable,
-    validate_control_document,
 )
+from cluster_profiles.control_client.schema import validate_control_document
+from cluster_profiles.controller_cli import fleet as fleet_module
+from cluster_profiles.controller_cli import observation as observation_module
+from cluster_profiles.controller_cli import profile_load as profile_load_module
+from cluster_profiles.controller_cli import selection
 from cluster_profiles.error_reporting import protocol_context
 
 KEY = "11111111-1111-4111-8111-111111111111"
 FRESH = "22222222-2222-4222-8222-222222222222"
 NODE = "spk_" + "a" * 32
 # Malformed observations retry with jitter until this deadline, not a count.
-BUDGET = controller_cli.observation._bounded_timeout(argparse.Namespace())
+BUDGET = observation_module._bounded_timeout(argparse.Namespace())
 
 
 @pytest.fixture(autouse=True)
 def bounded_clock(monkeypatch):
     clock = [0.0]
-    monkeypatch.setattr(controller_cli.observation.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(observation_module.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(
-        controller_cli.observation.time,
+        observation_module.time,
         "sleep",
         lambda delay: clock.__setitem__(0, clock[0] + delay),
     )
@@ -126,7 +130,7 @@ def test_exact_spark_id_does_not_scan_unrelated_damaged_roster():
     client = FakeClient(
         {("GET", "/api/fleet"): ControlMalformedResponse("unrelated node")}
     )
-    assert controller_cli._resolve_spark_selectors(client, [NODE]) == [NODE]
+    assert selection._resolve_spark_selectors(client, [NODE]) == [NODE]
     assert client.calls == []
 
 
@@ -161,7 +165,7 @@ def test_delivery_io_repairs_with_bounded_attempts_then_fresh_io_succeeds(tmp_pa
             raise OSError("temporary storage loss")
         return PrivateOutput(destination)
 
-    with controller_cli.fleet._delivery_io(repairable) as output:
+    with fleet_module._delivery_io(repairable) as output:
         output.write({"grant_id": KEY})
     assert json.loads(destination.read_text()) == {"grant_id": KEY}
     assert len(attempts) == 3
@@ -172,12 +176,12 @@ def test_delivery_io_repairs_with_bounded_attempts_then_fresh_io_succeeds(tmp_pa
 
     before = len(attempts)
     try:
-        controller_cli.fleet._delivery_io(unavailable)
+        fleet_module._delivery_io(unavailable)
     except OSError:
         pass
     assert len(attempts) - before == 3
     fresh = tmp_path / "fresh.json"
-    with controller_cli.fleet._delivery_io(lambda: PrivateOutput(fresh)) as output:
+    with fleet_module._delivery_io(lambda: PrivateOutput(fresh)) as output:
         output.write({"grant_id": FRESH})
     assert json.loads(fresh.read_text()) == {"grant_id": FRESH}
     assert json.loads(destination.read_text()) == {"grant_id": KEY}
@@ -417,15 +421,12 @@ def test_malformed_upgrade_replays_same_owner_request_without_new_effect():
             ]
         }
     )
-    result = controller_cli.profile_load._submit_fleet_upgrade(
-        args, client, lambda: KEY
-    )
+    result = profile_load_module._submit_fleet_upgrade(args, client, lambda: KEY)
     assert result == receipt
     assert len(client.calls) == 2
     assert client.calls[0][2] == client.calls[1][2]
     assert (
-        controller_cli.profile_load._submit_fleet_upgrade(args, client, lambda: KEY)
-        == receipt
+        profile_load_module._submit_fleet_upgrade(args, client, lambda: KEY) == receipt
     )
 
 
@@ -518,7 +519,7 @@ def test_profile_save_keeps_typed_cause_after_inconclusive_reconciliation(
     vonkctl_json,
 ):
     """Catches replacing an intact owner wait with a bare exit-2 observation."""
-    from vonk_agent_protocol import ProfileReasonCode
+    from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 
     definition = {"name": "original", "assignments": []}
     view = {"id": KEY, "number": 1, "revision": 3, "definition": definition}

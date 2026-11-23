@@ -14,12 +14,9 @@ from typing import TYPE_CHECKING, Protocol
 from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    InstallationState,
-    LifecycleState,
-    RunState,
-    RunSwitchCode,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.state_machines import InstallationState, RunState
 
 from ..fleet_profile_contract.definitions import FleetProfileAssignmentInput
 from ..jobs import states as job_states

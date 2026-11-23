@@ -12,16 +12,14 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    AgentOperation,
+from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
+from vonk_agent_protocol.state_machines import (
     DesiredAssignmentState,
     EndpointState,
-    LifecycleState,
     RouteState,
     RunState,
-    UnknownError,
-    UnknownOutcomeError,
-    WaitReason,
 )
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract.endpoints import (

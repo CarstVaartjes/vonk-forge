@@ -30,18 +30,19 @@ from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.exc import OperationalError as DatabaseOperationalError
 from sqlalchemy.exc import TimeoutError as DatabasePoolTimeout
 from sqlalchemy.orm.exc import StaleDataError
-from vonk_agent_protocol import (
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.contracts import AgentFailureKind
+from vonk_agent_protocol.disposition import (
     FAILURE_KIND_DISPOSITION,
-    SECURITY_REFUSAL_SUFFIXES,
     WAIT_REASON_DISPOSITION,
-    AgentFailureKind,
-    ControllerErrorCode,
-    Disposition,
-    SecurityRefusalError,
-    UnknownOutcomeError,
-    WaitReason,
     http_status_disposition,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    SECURITY_REFUSAL_SUFFIXES,
+    WaitReason,
+)
+from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 
 from .security_edges import SECURITY_REFUSAL_EDGES
 

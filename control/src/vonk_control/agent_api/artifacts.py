@@ -11,14 +11,11 @@ from typing import cast
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import ValidationError
-from vonk_agent_protocol import (
-    DistributionAssignment,
-    DistributionCode,
-    SecurityRefusalError,
-    UnknownOutcomeError,
-    WaitReason,
-)
+from vonk_agent_protocol.distribution import DistributionAssignment
 from vonk_agent_protocol.http_failure import TransientReason
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 
 from ..distribution.types import DistributionError, DistributionUnknown
 from ..download_contract import download_responses, upload_request_body

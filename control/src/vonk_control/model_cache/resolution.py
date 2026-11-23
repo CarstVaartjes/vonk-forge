@@ -11,9 +11,12 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import ColumnElement, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import ModelCacheBlockerCode, ModelCacheCode
 from vonk_agent_protocol.agent_words import (
     RunSwitchReasonScopeName,
+)
+from vonk_agent_protocol.reason_codes.model_cache import (
+    ModelCacheBlockerCode,
+    ModelCacheCode,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.model import ModelReference

@@ -23,13 +23,15 @@ from controller_cli_support import (
 )
 from library_route_fixtures import _recipe_projection
 
-from cluster_profiles import cli, controller_cli
-from cluster_profiles.control_client import (
+from cluster_profiles import cli
+from cluster_profiles.control_client.errors import (
     ControlConflict,
     ControlMalformedResponse,
     ControlUnavailable,
 )
-from cluster_profiles.controller_cli import profile_authoring, selection
+from cluster_profiles.controller_cli import common, profile_authoring, selection
+from cluster_profiles.controller_cli import observation as observation_module
+from cluster_profiles.controller_cli import run as run_module
 from cluster_profiles.controller_cli.selection import _read_concurrently
 
 
@@ -239,7 +241,7 @@ def test_definition_read_past_its_deadline_reports_its_own_timed_out_observation
     """
     for _ in range(50):
         clock = _InjectedClock()
-        for module in (controller_cli.observation, selection, profile_authoring):
+        for module in (observation_module, selection, profile_authoring):
             monkeypatch.setattr(module, "time", clock)
         responses = dict(_ADD_RESPONSES)
         responses[("GET", "/api/profile/2/definition")] = ControlUnavailable(
@@ -402,9 +404,9 @@ def _run_command(client: FakeClient) -> None:
     args = cli._parser().parse_args(
         ["--profile", "1", "run", "Qwen Code", "--yes", "--json"]
     )
-    controller_cli._run(
+    run_module._run(
         args,
-        cast(controller_cli.ControllerClient, client),
+        cast(common.ControllerClient, client),
         lambda: "11111111-1111-4111-8111-111111111111",
     )
 

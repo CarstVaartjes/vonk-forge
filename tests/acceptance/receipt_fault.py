@@ -13,12 +13,8 @@ import re
 from pathlib import Path
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
-from vonk_agent_protocol import (
-    AgentResult,
-    OutcomeDone,
-    RecipeStartResult,
-    outcome_body,
-)
+from vonk_agent_protocol.contracts import AgentResult, RecipeStartResult
+from vonk_agent_protocol.outcome import OutcomeDone, outcome_body
 
 _FENCE = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\Z")
 _MAXIMUM_BYTES = 64 * 1024

@@ -14,7 +14,7 @@ from textwrap import dedent
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
     MAX_DOCUMENT_BYTES,
     AgentClaim,
     AgentOperation,
@@ -268,7 +268,8 @@ def test_control_environment_installs_the_workspace_protocol() -> None:
 
 
 def test_control_environment_preserves_the_canonical_zero_byte_model_contract() -> None:
-    from vonk_agent_protocol import AgentProtocolError, DistributionObject
+    from vonk_agent_protocol.contracts import AgentProtocolError
+    from vonk_agent_protocol.distribution import DistributionObject
 
     empty = DistributionObject.parse(
         {
@@ -310,7 +311,8 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
                 """
                 import importlib.metadata, json
                 from importlib.resources import files
-                from vonk_agent_protocol import AgentProtocolError, DistributionObject
+                from vonk_agent_protocol.contracts import AgentProtocolError
+                from vonk_agent_protocol.distribution import DistributionObject
                 from vonk_control.recipe_operations.runtime_specs import compile_runtime_spec
                 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256, read_model, read_recipe
 

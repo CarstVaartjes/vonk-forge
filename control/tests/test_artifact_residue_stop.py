@@ -8,21 +8,20 @@ from datetime import datetime
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select, text
-from vonk_agent_protocol import (
-    AgentResult,
-    AgentResultState,
-    ContainerRuntimeAction,
-    OutcomeKind,
-    OutcomeUnknown,
-    WaitReason,
-    canonical_message,
-    host_helper_grant_signing_bytes,
-)
+from vonk_agent_protocol.contracts import AgentResult, canonical_message
 from vonk_agent_protocol.host_helper import (
+    ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
     HostRuntimeRequest,
     SignedHostHelperGrant,
+    host_helper_grant_signing_bytes,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    AgentResultState,
+    OutcomeKind,
+    WaitReason,
+)
+from vonk_agent_protocol.outcome import OutcomeUnknown
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload, RecipeStopResult
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.host_helper_authority import (

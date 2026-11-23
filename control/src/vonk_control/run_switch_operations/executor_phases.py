@@ -10,17 +10,12 @@ from typing import (
 )
 from typing import cast as typing_cast
 
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import (
-    InstallationState,
-    InstallDegradedReason,
-    InvalidRequestError,
-    InvalidRequestReason,
-    RouteState,
-    RunState,
-    RunSwitchCode,
-    WaitReason,
-)
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
+from vonk_agent_protocol.outcome import InvalidRequestError
+from vonk_agent_protocol.reason_codes.admission import InstallDegradedReason
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.state_machines import InstallationState, RouteState, RunState
 
 from ..cluster_mappings import (
     ClusterMappingPlan,

@@ -8,25 +8,30 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
     AgentClaim,
+    AgentPayload,
     AgentResult,
+    AgentResultPayload,
+    RecipeStartResult,
+    canonical_message,
+)
+from vonk_agent_protocol.contracts import AgentOperation as Kind
+from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     LifecycleState,
     ObservationCause,
+)
+from vonk_agent_protocol.recipe_jobs import (
     RecipeJobEvidence,
     RecipeJobOutputManifest,
     RecipeJobRunRequest,
     RecipeJobRunResult,
-    RecipeStartResult,
-    RecipeStopResult,
-    canonical_message,
-    recipe_job_manifest_sha256,
 )
-from vonk_agent_protocol import (
-    AgentOperation as Kind,
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_sha256 as recipe_job_manifest_sha256,
 )
-from vonk_agent_protocol.contracts import AgentPayload, AgentResultPayload
+from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control.agent_jobs.contracts import StaleAgentFence
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
@@ -55,7 +60,7 @@ def _runtime(kind: Kind) -> tuple[AgentPayload, AgentResultPayload]:
     ).read_bytes()
     claim = AgentClaim.model_validate_json(raw)
     if kind is Kind.RECIPE_START:
-        from vonk_agent_protocol import RecipeStartPayload
+        from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 
         from .agent_jobs_support import canonical_start_payload
         from .test_agent_jobs_postgres import Clock
@@ -260,7 +265,8 @@ def test_shared_observer_covers_every_kind():
 
 
 def _cancelled_job(tmp_path, postgres_engine):
-    from vonk_agent_protocol import OutcomeKind, OutcomeUnknown, WaitReason
+    from vonk_agent_protocol.lifecycle_vocabulary import OutcomeKind, WaitReason
+    from vonk_agent_protocol.outcome import OutcomeUnknown
 
     from .artifact_jobs_support import (
         MutableClock,
@@ -317,7 +323,8 @@ def test_terminal_uncertain_cancel_independently_drives_only_its_exact_stop(
 ):
     # Wrong implementation: terminal cancellation is excluded from idle worker
     # discovery, so its runtime is stopped only after another operator request.
-    from vonk_agent_protocol import RecipeStopPayload, RunState
+    from vonk_agent_protocol.recipe_operations import RecipeStopPayload
+    from vonk_agent_protocol.state_machines import RunState
     from vonk_control.models.execution import ArtifactJob, RecipeRun
 
     sessions, operations, artifacts, queue, _clock, job, run_id, node_id = (
@@ -379,7 +386,7 @@ def test_cancel_cleanup_cannot_adopt_a_revoked_node(tmp_path, postgres_engine):
 def test_worker_recovers_retained_output_receipt_as_delivery_only(service, exit_code):
     # Wrong implementation: only live ingress redrove completed output custody,
     # so a retained receipt needed another report or repeated inference.
-    from vonk_agent_protocol import FailureStage
+    from vonk_agent_protocol.agent_words import FailureStage
     from vonk_agent_protocol.recipe_jobs import RecipeJobEnding
 
     queue, sessions, clock, _owner, operation, claim, receipt = _accepted(
@@ -428,8 +435,11 @@ def test_a_load_on_the_spark_never_holds_a_cancelled_jobs_exact_cleanup(
     # left the cancelled job's container behind. A JobRun's container belongs
     # to its job and run, never to the Spark's intent.
     from cryptography.hazmat.primitives.asymmetric import ed25519
-    from vonk_agent_protocol import ContainerRuntimeAction, RecipeStopPayload
-    from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
+    from vonk_agent_protocol.host_helper import (
+        ContainerRuntimeAction,
+        ExecuteContainerRuntimeRequestOperation,
+    )
+    from vonk_agent_protocol.recipe_operations import RecipeStopPayload
     from vonk_control.host_helper_authority import (
         HostHelperGrantIssuer,
         HostRuntimeAuthorityService,
@@ -486,7 +496,8 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
     # Wrong implementation: an accepted cancellation's Stop kept its grant or
     # receipt after its node was revoked or its exact document changed.
     from cryptography.hazmat.primitives.asymmetric import ed25519
-    from vonk_agent_protocol import ContainerRuntimeAction, RecipeStopPayload
+    from vonk_agent_protocol.host_helper import ContainerRuntimeAction
+    from vonk_agent_protocol.recipe_operations import RecipeStopPayload
     from vonk_control.host_helper_authority import (
         HostHelperAuthorityError,
         HostHelperGrantIssuer,
@@ -588,7 +599,8 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
 def test_definite_runtime_exit_or_refusal_survives_lost_report(service, kind, retained):
     # Wrong implementation: the observer's definite exit/refusal becomes an
     # unending observation after the lease, or another effect attempt.
-    from vonk_agent_protocol import AgentFailureKind, AgentFailureResult, FailureCode
+    from vonk_agent_protocol.contracts import AgentFailureKind, AgentFailureResult
+    from vonk_agent_protocol.lifecycle_vocabulary import FailureCode
 
     queue, sessions, clock, _owner, operation, claim, _receipt = _accepted(
         service, kind
@@ -650,7 +662,7 @@ def test_retained_measured_exit_delivers_storage_failure_without_reexecution(
 ):
     # Wrong implementation: only delivery-stage receipts could be observed,
     # so a retained exit with a storage fault was ignored until another report.
-    from vonk_agent_protocol import FailureStage
+    from vonk_agent_protocol.agent_words import FailureStage
     from vonk_agent_protocol.recipe_jobs import RecipeJobEnding
     from vonk_control.agent_jobs.stored import column_value
 

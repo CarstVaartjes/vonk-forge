@@ -13,7 +13,7 @@ from typing import cast
 import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.bounded_json import require_mapping
 from vonk_control.jobs.documents import (
     AvailabilityJobPayload,

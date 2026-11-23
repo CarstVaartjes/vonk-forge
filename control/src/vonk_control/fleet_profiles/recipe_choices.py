@@ -10,10 +10,11 @@ from typing import cast as _typing_cast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, SessionTransaction
-from vonk_agent_protocol import DesiredAssignmentState, InvalidRequestReason
 from vonk_agent_protocol.agent_words import (
     RunSwitchReasonScopeName,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
+from vonk_agent_protocol.state_machines import DesiredAssignmentState
 
 from ..catalog.queries import WITHOUT_DOCUMENT, active_head_revision
 from ..catalog.revision_contract import RecipeRevisionProjection, read_recipe_projection

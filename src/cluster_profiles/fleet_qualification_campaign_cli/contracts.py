@@ -17,7 +17,7 @@ from ..cli_states import ENDED_STATES, NEEDS_OPERATOR
 from ..fleet_qualification import (
     QualificationObservationUnknown,
 )
-from ..qualification_fixtures import FixtureRegistry
+from ..qualification_fixtures.registry import FixtureRegistry
 
 AUTHORITY_SCHEMA = "qualification-authority-v5.schema.json"
 MANIFEST_SCHEMA = "qualification-campaign-manifest-v2.schema.json"

@@ -6,12 +6,9 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Any, Literal
 
-from vonk_agent_protocol import (
-    OperationFailureCode,
-    OperationProgress,
-    canonical_message,
-)
-from vonk_agent_protocol.contracts import AgentFailureResult
+from vonk_agent_protocol.contracts import AgentFailureResult, canonical_message
+from vonk_agent_protocol.reason_codes.evidence import OperationFailureCode
+from vonk_agent_protocol.wire_model import OperationProgress
 
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 

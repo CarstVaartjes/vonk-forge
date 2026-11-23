@@ -6,9 +6,11 @@ from typing import cast
 import pytest
 from library_route_fixtures import _recipe_projection
 
-from cluster_profiles import cli, controller_cli
+from cluster_profiles import cli
 from cluster_profiles.cli_select import SelectorError
-from cluster_profiles.control_client import ControlClientError
+from cluster_profiles.control_client.errors import ControlClientError
+from cluster_profiles.controller_cli import observation as observation_module
+from cluster_profiles.controller_cli import selection as selection_module
 from control.tests.consumer_outcomes import not_adopted
 
 
@@ -62,7 +64,7 @@ def test_recipe_selection_checks_later_pages_before_accepting_a_title():
         ]
     )
     with not_adopted() as failures:
-        controller_cli._resolve_recipe_selector(client, "Coding")
+        selection_module._resolve_recipe_selector(client, "Coding")
     assert cast(SelectorError, failures[0]).candidates == ("one/code", "two/code")
     assert client.calls[1][3]["query"]["cursor"] == "page-two"
     assert all(call[3]["query"]["assess"] is False for call in client.calls)
@@ -175,7 +177,7 @@ def test_recipe_identity_wins_over_a_matching_display_title(selector):
             {"recipes": [target], "next_cursor": None},
         ]
     )
-    assert controller_cli._resolve_recipe_selector(client, selector) == selector
+    assert selection_module._resolve_recipe_selector(client, selector) == selector
     assert client.calls == []
 
 
@@ -189,14 +191,14 @@ def test_cycle_restarts_complete_selection_and_fresh_selection_works():
             {"recipes": [recipe("two/code", "Fresh")], "next_cursor": None},
         ]
     )
-    assert controller_cli._resolve_recipe_selector(client, "Coding") == "one/code"
+    assert selection_module._resolve_recipe_selector(client, "Coding") == "one/code"
     assert "cursor" not in client.calls[3][3]["query"]
-    assert controller_cli._resolve_recipe_selector(client, "Fresh") == "two/code"
+    assert selection_module._resolve_recipe_selector(client, "Fresh") == "two/code"
 
 
 def test_selection_budget_covers_every_page_and_discards_late_results(monkeypatch):
     clock = [100.0]
-    monkeypatch.setattr(controller_cli.observation.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(observation_module.time, "monotonic", lambda: clock[0])
 
     class SlowPages(Pages):
         def request(self, *args, **kwargs):
@@ -212,14 +214,14 @@ def test_selection_budget_covers_every_page_and_discards_late_results(monkeypatc
     )
     resolved = None
     try:
-        resolved = controller_cli._resolve_recipe_selector(client, "Coding")
+        resolved = selection_module._resolve_recipe_selector(client, "Coding")
     except ControlClientError:
         pass
     assert resolved is None
     assert [call[3]["timeout_seconds"] for call in client.calls] == [30, 10]
     clock[0] = 100
     client.pages = [{"recipes": [recipe("one/code", "Coding")], "next_cursor": None}]
-    assert controller_cli._resolve_recipe_selector(client, "Coding") == "one/code"
+    assert selection_module._resolve_recipe_selector(client, "Coding") == "one/code"
 
 
 @pytest.mark.parametrize("noun,bad_row", [("recipe", None), ("spark", "invalid")])
@@ -229,12 +231,12 @@ def test_malformed_rows_restart_complete_read_before_resolving(noun, bad_row):
         client = Pages(
             [{"recipes": [recipe("one/code", "Coding"), bad_row]}, valid, valid]
         )
-        resolver = lambda: controller_cli._resolve_recipe_selector(client, "Coding")
+        resolver = lambda: selection_module._resolve_recipe_selector(client, "Coding")
         expected = "one/code"
     else:
         valid = {"nodes": [{"id": "spk_" + "a" * 32, "display_name": "Atlas"}]}
         client = Pages([{"nodes": [*valid["nodes"], bad_row]}, valid, valid])
-        resolver = lambda: controller_cli._resolve_spark_selectors(client, ["Atlas"])
+        resolver = lambda: selection_module._resolve_spark_selectors(client, ["Atlas"])
         expected = ["spk_" + "a" * 32]
     assert resolver() == expected
     assert len(client.calls) == 2
@@ -244,7 +246,7 @@ def test_malformed_rows_restart_complete_read_before_resolving(noun, bad_row):
 def test_unavailable_selection_names_its_last_underlying_error():
     client = Pages([{"recipes": [None]}] * 3)
     with pytest.raises(ControlClientError) as raised:
-        controller_cli._resolve_recipe_selector(client, "Coding")
+        selection_module._resolve_recipe_selector(client, "Coding")
     cause = raised.value.__cause__
     assert cause is not None
     assert f"{type(cause).__name__}: {str(cause)[:100]}" in str(raised.value)
@@ -255,10 +257,10 @@ def test_spark_ambiguity_returns_usable_ids_and_exact_id_has_priority():
     first, second = "spk_" + "a" * 32, "spk_" + "b" * 32
     rows = [{"id": node, "display_name": "Atlas"} for node in (first, second)]
     with not_adopted() as failures:
-        controller_cli._resolve_spark_selectors(Pages([{"nodes": rows}]), ["Atlas"])
+        selection_module._resolve_spark_selectors(Pages([{"nodes": rows}]), ["Atlas"])
     assert cast(SelectorError, failures[0]).candidates == (first, second)
     rows[1]["display_name"] = first
-    assert controller_cli._resolve_spark_selectors(
+    assert selection_module._resolve_spark_selectors(
         Pages([{"nodes": rows}]), [first]
     ) == [first]
 
@@ -324,5 +326,5 @@ def test_a_selector_prefix_does_not_select_a_different_variant():
             {"selector": "one/code"},
         ]
     )
-    assert controller_cli._resolve_recipe_selector(client, "one/code") == "one/code"
+    assert selection_module._resolve_recipe_selector(client, "one/code") == "one/code"
     assert client.calls == []

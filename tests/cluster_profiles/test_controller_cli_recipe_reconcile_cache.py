@@ -10,17 +10,20 @@ from pathlib import Path
 
 import pytest
 from controller_cli_support import FakeClient, _model_detail, _removal_review, run
-from vonk_agent_protocol import LifecycleState, OperatorActionName
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OperatorActionName
 
-from cluster_profiles import cli, controller_cli
-from cluster_profiles.cli_render import render_payload
-from cluster_profiles.control_client import (
+from cluster_profiles import cli
+from cluster_profiles.cli_render.dispatch import render_payload
+from cluster_profiles.control_client import schema as schema_module
+from cluster_profiles.control_client.errors import (
     ControlConflict,
     ControlHTTPError,
     ControlNotFound,
     ControlTransportError,
     ControlUnavailable,
 )
+from cluster_profiles.controller_cli import installation as installation_module
+from cluster_profiles.controller_cli import observation as observation_module
 from cluster_profiles.generated_control.models.job_operator_receipt import (
     JobOperatorReceipt,
 )
@@ -142,7 +145,7 @@ def _operation_owner_page(request_key: str) -> dict[str, object]:
 
 
 def _allow_minimal_reconciliation_plan(monkeypatch) -> None:
-    original = controller_cli.validate_control_document
+    original = schema_module.validate_control_document
 
     def validate(contract: str, value: object) -> dict[str, object]:
         if contract == "RunSwitchPlan":
@@ -150,9 +153,7 @@ def _allow_minimal_reconciliation_plan(monkeypatch) -> None:
             return value
         return original(contract, value)
 
-    monkeypatch.setattr(
-        controller_cli.installation, "validate_control_document", validate
-    )
+    monkeypatch.setattr(installation_module, "validate_control_document", validate)
 
 
 def test_recipe_installation_reconcile_review_uses_typed_preview_route(
@@ -316,7 +317,7 @@ def test_recipe_installation_reconcile_bounds_request_lookup_under_submission_de
                 timeout_seconds=timeout_seconds,
             )
 
-    monkeypatch.setattr(controller_cli.observation.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(observation_module.time, "monotonic", lambda: clock[0])
     client = BoundedClient()
 
     status, result = run(

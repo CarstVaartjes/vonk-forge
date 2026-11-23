@@ -10,12 +10,12 @@ from ..cli_artifact_jobs import (
     run_artifact_job,
 )
 from ..cli_render.vocabulary import use_vocabulary
-from ..control_client import (
+from ..control_client.errors import (
     ControlClientError,
     ControlHTTPError,
     ControlNotFound,
+    TransferUnavailable,
 )
-from ..control_client.errors import TransferUnavailable
 from ..generated_control.models.catalog_vocabulary import CatalogVocabulary
 from .cache_removal import _remove_model, _remove_recipe
 from .cache_submission import (

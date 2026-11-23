@@ -54,11 +54,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    Disposition,
-    LifecycleState,
-    WaitOwnerKind,
-)
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitOwnerKind
 
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..fleet_profile_contract.applications import FleetProfileApplicationProgress

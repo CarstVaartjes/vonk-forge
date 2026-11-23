@@ -12,13 +12,11 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
+from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
-from vonk_agent_protocol import (
-    canonical_message,
-)
 from vonk_agent_protocol.compiled_execution_plan import CompiledPlacement
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.compiled_execution_plan import (
     EMPTY_SHA256,
     MAX_COMPILED_EXECUTION_PLAN_BYTES,

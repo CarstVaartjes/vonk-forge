@@ -6,9 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from vonk_agent_protocol import (
-    LifecycleState,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.artifact_jobs.lifecycle import ArtifactIdentity, reserve_removal
 
 from .model_cache_support import cache  # noqa: F401 - pytest fixture

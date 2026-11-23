@@ -13,9 +13,7 @@ from typing import Any
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    RunState,
-)
+from vonk_agent_protocol.state_machines import RunState
 from vonk_control.catalog.revision_collection import operation_tokens
 from vonk_control.models.catalog import (
     CatalogDocumentRevision,

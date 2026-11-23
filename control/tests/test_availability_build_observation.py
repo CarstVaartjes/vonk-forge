@@ -7,17 +7,14 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
+from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.contracts import (
     AgentFailureKind,
     AgentFailureResult,
-    FailureCode,
-    LifecycleState,
-    ProgressPhase,
     canonical_message,
 )
-from vonk_agent_protocol import (
-    AgentOperation as WireAgentOperation,
-)
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
 from vonk_control.availability_production import production as availability_production
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,

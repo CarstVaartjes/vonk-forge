@@ -7,8 +7,8 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReportedPhase
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.models.jobs import Job
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest

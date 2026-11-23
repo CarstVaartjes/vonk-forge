@@ -6,8 +6,9 @@ from datetime import timedelta
 from uuid import uuid4
 
 from sqlalchemy import select
-from vonk_agent_protocol import DesiredAssignmentState, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.state_machines import DesiredAssignmentState
 from vonk_control.agent_contacts import record_contact
 from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignmentInput,

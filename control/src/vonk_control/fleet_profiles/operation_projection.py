@@ -8,13 +8,6 @@ from typing import cast as _typing_cast
 from pydantic import ValidationError
 from sqlalchemy import String, cast, func, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    InvalidRequestReason,
-    LifecycleState,
-    OperationFailureCode,
-    OperationProgress,
-    input_state,
-)
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileCancellationCause,
@@ -23,6 +16,13 @@ from vonk_agent_protocol.agent_words import (
     ProfileProjectionKind,
     ProfileReportedPhase,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    LifecycleState,
+    input_state,
+)
+from vonk_agent_protocol.reason_codes.evidence import OperationFailureCode
+from vonk_agent_protocol.wire_model import OperationProgress
 
 from ..auth import MUTATION_ROLES
 from ..categorized_errors import MissingRecord

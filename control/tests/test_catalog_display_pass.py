@@ -19,7 +19,7 @@ from typing import Self
 import pytest
 from sqlalchemy import Engine, event, func, inspect, select, text
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import CatalogSyncState
+from vonk_agent_protocol.state_machines import CatalogSyncState
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService

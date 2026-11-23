@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import func, select
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleSubject,
-    OperationProgress,
 )
+from vonk_agent_protocol.wire_model import OperationProgress
 
 from ..categorized_errors import InvalidValue, MissingRecord
 from ..models.jobs import Job

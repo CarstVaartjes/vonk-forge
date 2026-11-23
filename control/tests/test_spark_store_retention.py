@@ -7,13 +7,11 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import select, update
-from vonk_agent_protocol import (
-    AgentOperation,
-    InventoryVerdict,
-    LifecycleState,
-    StorageDemandCode,
-)
 from vonk_agent_protocol.agent_words import ProfileDocumentState
+from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.inventory import InventoryVerdict
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.resources import StorageDemandCode
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )

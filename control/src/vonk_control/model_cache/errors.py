@@ -8,16 +8,18 @@ from datetime import UTC, datetime
 from typing import ClassVar
 from urllib.parse import urlsplit
 
-from vonk_agent_protocol import (
-    Disposition,
-    InvalidRequestError,
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
-    ModelCacheCode,
-    SecurityRefusalError,
     SecurityRefusalReason,
-    UnknownOutcomeError,
     WaitReason,
 )
+from vonk_agent_protocol.outcome import (
+    InvalidRequestError,
+    SecurityRefusalError,
+    UnknownOutcomeError,
+)
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 
 from ..artifact_jobs.lifecycle import ArtifactLifecycleError
 from ..failure_classification import is_security_failure

@@ -6,8 +6,8 @@ from collections.abc import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
 )

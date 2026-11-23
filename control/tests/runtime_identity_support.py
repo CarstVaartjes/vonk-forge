@@ -43,7 +43,7 @@ def inventory_items_fixture(
     import hashlib
     from datetime import UTC, datetime
 
-    from vonk_agent_protocol import canonical_message
+    from vonk_agent_protocol.contracts import canonical_message
     from vonk_control.inventory.items_contract import AgentInventoryItems
     from vonk_control.models.telemetry import NodeInventoryItemsSnapshot
 

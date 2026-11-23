@@ -14,13 +14,13 @@ from ..cli_outcome import (
     ObservationStatus,
     operation_state,
 )
-from ..control_client import (
+from ..control_client.common import observation_delay, observation_unknown
+from ..control_client.errors import (
     ControlClientError,
     ControlMalformedResponse,
     ControlTransportError,
     ControlUnavailable,
 )
-from ..control_client.common import observation_delay, observation_unknown
 from .cache_removal import _cache_operation_id
 from .common import (
     ControllerClient,

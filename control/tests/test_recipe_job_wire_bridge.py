@@ -6,16 +6,19 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import (
-    AgentResult,
+from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
     RecipeJobInputRequest,
     RecipeJobOutputLimits,
     RecipeJobRunRequest,
     RecipeJobRunResult,
-    canonical_message,
-    recipe_job_manifest_document,
-    recipe_job_manifest_sha256,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_document as recipe_job_manifest_document,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_sha256 as recipe_job_manifest_sha256,
 )
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.models.operations import AgentOperation

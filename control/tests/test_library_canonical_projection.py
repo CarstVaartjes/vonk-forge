@@ -11,7 +11,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Table, create_engine, select, update
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.catalog.revision_contract import (

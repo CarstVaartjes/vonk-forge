@@ -9,9 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    LifecycleState,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.run_switch_contract.requests import (
@@ -60,7 +58,7 @@ def _probing_switch(tmp_path, *, probe=True, engine=None):
 
 def _probe_ids(switch) -> tuple[str, str] | None:
     """The run-switch's issued probe: its child job and its Spark order."""
-    from vonk_agent_protocol import AgentOperation as OperationKind
+    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 
     with switch.sessions() as session:
         probe = session.scalar(
@@ -180,8 +178,8 @@ def test_a_queued_probe_names_its_spark_holder_as_the_load_reason(tmp_path):
     Incident 2026-10-26: the load kept the reason its probe round started with
     for hours while its probe sat queued behind another order holding the Spark.
     """
-    from vonk_agent_protocol import AgentOperation as OperationKind
-    from vonk_agent_protocol import WaitReason
+    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
     from vonk_control.agent_jobs.waits import refresh_queue_waits
 
     from .test_lifecycle_preflight import _heartbeat, _heartbeating_build

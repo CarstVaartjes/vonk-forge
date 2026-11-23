@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import or_
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import (
     ArtifactPreparation,
     LifecycleState,
     LifecycleSubject,

@@ -11,14 +11,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from vonk_agent_protocol import (
-    AgentResult,
-    OutcomeUnknown,
-    RecipeJobEnding,
-    RecipeJobRunResult,
-    outcome_body,
-    validate_result_for_operation,
-)
+from vonk_agent_protocol.contracts import AgentResult, validate_result_for_operation
+from vonk_agent_protocol.outcome import OutcomeUnknown, outcome_body
+from vonk_agent_protocol.recipe_jobs import RecipeJobEnding, RecipeJobRunResult
 
 VECTORS = Path(__file__).parents[1] / "src/vonk_agent_protocol/vectors"
 

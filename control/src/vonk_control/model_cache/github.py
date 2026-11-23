@@ -8,11 +8,11 @@ from urllib.parse import urljoin
 
 import httpx2
 from pydantic import ValidationError
-from vonk_agent_protocol import (
-    ModelCacheCode,
+from vonk_agent_protocol.lifecycle_vocabulary import (
     OperatorActionName,
     SecurityRefusalReason,
 )
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 
 from ..bounded_retry import bounded_attempts
 from .artifacts import ArtifactSpec

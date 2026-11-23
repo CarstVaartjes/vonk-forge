@@ -7,17 +7,15 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Annotated
 
 from pydantic import Field, TypeAdapter
-from vonk_agent_protocol import (
-    NodeOfflineReason,
-    ProjectionCode,
-    UnknownOutcomeError,
-)
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.gpu_clock import (
     GpuClockApplyState,
     GpuClockRange,
 )
 from vonk_agent_protocol.inventory import HostSettings
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.evidence import NodeOfflineReason
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.swap import GIB, SwapIntent, swap_satisfied
 

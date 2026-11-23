@@ -5,7 +5,7 @@ import os
 import subprocess
 
 import pytest
-from vonk_agent_protocol import OperationMemberProgress, OperationProgress
+from vonk_agent_protocol.wire_model import OperationMemberProgress, OperationProgress
 
 
 def test_python_progress_crosses_rust_parser_without_losing_measurements():

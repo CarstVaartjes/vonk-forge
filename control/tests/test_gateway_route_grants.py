@@ -1,6 +1,6 @@
 """Published contract route grants, exercised against the real database."""
 
-from vonk_agent_protocol import RouteState
+from vonk_agent_protocol.state_machines import RouteState
 from vonk_control.gateway.route_grants import GatewayInferenceRoute, recipe_key_routes
 
 from .recipe_routes_support import _recipe_run, setup
@@ -62,7 +62,7 @@ def test_route_publication_waits_for_key_grants_then_heals(
     import pytest
     from sqlalchemy import event
     from sqlalchemy.exc import SQLAlchemyError
-    from vonk_agent_protocol import UnknownOutcomeError
+    from vonk_agent_protocol.outcome import UnknownOutcomeError
     from vonk_control.gateway.keys import GatewayKeyCreated, GatewayKeyService
 
     from .test_gateway_keys import MASTER, FakeLiteLlm

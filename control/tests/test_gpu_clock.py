@@ -7,7 +7,7 @@ from importlib.resources import files
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.gpu_clock import (
     GPU_CLOCK_POLICY,
     GpuClockApplyState,
@@ -89,8 +89,8 @@ def test_run_switch_warns_above_default_without_requiring_supported_levels() -> 
 
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
-    from vonk_agent_protocol import RunSwitchCode
     from vonk_agent_protocol.inventory import HostSettings
+    from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
     from vonk_control.gpu.clock_validation import assess_gpu_clock
     from vonk_control.inventory.repository import (
         InventoryRepository,
@@ -175,8 +175,8 @@ def test_uncapped_attention_requires_receipt_and_current_evidence(
 
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
-    from vonk_agent_protocol import ProjectionCode
     from vonk_agent_protocol.gpu_clock import GpuClockObservation
+    from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
     from vonk_control.fleet_projection.service import FleetProjection
     from vonk_control.model_primitives import Base
     from vonk_control.models.fleet import AgentNode
@@ -274,11 +274,11 @@ def test_shared_agent_observation_crosses_controller_storage_projection_and_cli(
     tmp_path, postgres_engine, capsys
 ) -> None:
     """Catches any producer/store/projection/client dropping real clock evidence."""
-    from vonk_agent_protocol import TelemetryRequest
     from vonk_agent_protocol.gpu_clock import GpuClockObservation
+    from vonk_agent_protocol.telemetry import TelemetryRequest
     from vonk_control.fleet_projection.service import FleetProjection
 
-    from cluster_profiles.cli_render import render_payload
+    from cluster_profiles.cli_render.dispatch import render_payload
 
     client, services, _, clock = make_agent_system(tmp_path, engine=postgres_engine)
     vectors = json.loads(
@@ -320,8 +320,11 @@ def test_inventory_without_supported_levels_still_gets_a_clock_reconciliation_gr
     agent_system,
 ) -> None:
     """Catches the silent grant gate when GB10 supported-clock inventory is absent."""
-    from vonk_agent_protocol import InventoryVerdict
-    from vonk_agent_protocol.inventory import HostSettings, InventoryRequest
+    from vonk_agent_protocol.inventory import (
+        HostSettings,
+        InventoryRequest,
+        InventoryVerdict,
+    )
 
     client, services, _, clock = agent_system
     from cryptography.hazmat.primitives.asymmetric import ed25519

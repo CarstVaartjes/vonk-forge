@@ -30,13 +30,13 @@ from vonk_control.observation.transfer import (
 )
 
 from cluster_profiles import cli
-from cluster_profiles.control_client import (
-    ControlClient,
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlTimeout,
-    _RecordingTransport,
+    LocalFilesystemError,
 )
-from cluster_profiles.control_client.transfers import LocalFilesystemError
+from cluster_profiles.control_client.transfers import ControlClient
+from cluster_profiles.control_client.transport import _RecordingTransport
 from cluster_profiles.generated_control.models.fleet_profile_definition import (
     FleetProfileDefinition,
 )
@@ -1514,7 +1514,7 @@ def test_preview_recovery_uses_canonical_transport_before_any_load(
 def test_whole_observation_unavailable_keeps_bytes_unconsumed_and_recovers(
     tmp_path, observation_clock, exhaust_budget
 ):
-    from vonk_agent_protocol.reason_codes import ProjectionCode
+    from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
     from vonk_control.observation.transfer import ObservationTransferError
 
     from cluster_profiles.controller_cli.observation import _poll_path
@@ -1688,12 +1688,12 @@ def test_persistent_timeout_backoff_stays_jittered_and_capped(
 @pytest.mark.parametrize("generated", [False, True])
 def test_typed_internal_error_is_not_retried(tmp_path, generated):
     """A typed deterministic 500 must not be replayed until the request deadline."""
-    from vonk_agent_protocol import ControllerErrorCode
     from vonk_agent_protocol.agent_words import AgentClientDecision
     from vonk_agent_protocol.error_response import (
         BoundedErrorResponse,
         ErrorContextResponse,
     )
+    from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 
     calls = []
     request_id = "47057540-fc9b-494e-ad37-152c0fb154cb"
@@ -1719,7 +1719,7 @@ def test_typed_internal_error_is_not_retried(tmp_path, generated):
     client = ControlClient(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
-    from cluster_profiles.control_client import ControlHTTPError
+    from cluster_profiles.control_client.errors import ControlHTTPError
 
     with pytest.raises(ControlHTTPError) as caught:
         if generated:

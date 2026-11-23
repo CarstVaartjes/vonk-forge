@@ -24,7 +24,7 @@ from .optional_evidence import (
     OptionalEvidenceModel,
     fail_open_on_optional_evidence,
 )
-from .reason_codes import AgentEvidenceCode
+from .reason_codes.evidence import AgentEvidenceCode
 from .wire_model import MAX_TELEMETRY_CAPACITY_BYTES, WireModel
 
 # Authenticated transport memory safeguard.

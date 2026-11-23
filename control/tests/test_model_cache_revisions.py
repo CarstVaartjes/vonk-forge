@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import delete, select
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.catalog.revision_collection import CatalogRevisionCollector

@@ -16,7 +16,8 @@ from types import SimpleNamespace
 import httpx2
 import pytest
 from sqlalchemy.exc import OperationalError
-from vonk_agent_protocol import AgentFailureKind, FailureCode, LifecycleState
+from vonk_agent_protocol.contracts import AgentFailureKind
+from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
 from vonk_control.failure_evidence import FailureEvidenceService
 from vonk_control.models.jobs import Job
 from vonk_control.run_switch_contract.progress import ArtifactVerificationEvidence

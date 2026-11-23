@@ -7,18 +7,19 @@ from typing import cast
 
 import pytest
 
-from cluster_profiles import cli, controller_cli
-from cluster_profiles.control_client import (
+from cluster_profiles import cli
+from cluster_profiles.control_client.errors import (
     ControlConflict,
     ControlHTTPError,
     ControlNotFound,
     ControlUnavailable,
 )
+from cluster_profiles.controller_cli import observation as observation_module
 from cluster_profiles.controller_cli.common import ControllerClient
 from cluster_profiles.controller_cli.profile import _profile
 
 # Observation retries end at this time budget, not after a number of reads.
-BUDGET = controller_cli.observation._bounded_timeout(argparse.Namespace())
+BUDGET = observation_module._bounded_timeout(argparse.Namespace())
 
 
 class _Clock:
@@ -216,7 +217,7 @@ def test_bookkeeping_blockers_do_not_veto_new_removal(code):
 
 
 def test_owner_authorization_denial_does_not_replay_and_a_new_request_is_admitted():
-    from cluster_profiles.control_client import ControlForbidden
+    from cluster_profiles.control_client.errors import ControlForbidden
     from tests.cluster_profiles.controller_cli_support import (
         FakeClient,
         _recipe_removal_receipt,
@@ -331,10 +332,10 @@ def test_peer_broken_submission_response_reconciles_the_original_without_replay(
 def test_initial_request_lookup_recovers_or_ends_then_fresh_observer_is_admitted(
     monkeypatch, repair, fault
 ):
-    from vonk_agent_protocol.reason_codes import ProjectionCode
+    from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 
     from cluster_profiles.cli_states_generated import SUCCEEDED
-    from cluster_profiles.control_client import ControlObservationUnavailable
+    from cluster_profiles.control_client.errors import ControlObservationUnavailable
     from tests.cluster_profiles.controller_cli_support import FakeClient, run
 
     key = "11111111-1111-4111-8111-111111111111"

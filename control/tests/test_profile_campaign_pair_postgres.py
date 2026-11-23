@@ -9,7 +9,8 @@ import pytest
 from httpx2 import Response
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState, canonical_message
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileChildOperation,

@@ -9,16 +9,16 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
+from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
-    ModelCacheCode,
-    OperationProgress,
-    ProgressPhase,
-    RecipeImageCode,
     WaitReason,
-    canonical_message,
 )
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
+from vonk_agent_protocol.wire_model import OperationProgress
 
 from ..catalog.queries import active_head_revision
 from ..jobs import states as job_states

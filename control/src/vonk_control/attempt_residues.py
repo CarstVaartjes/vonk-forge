@@ -64,15 +64,15 @@ from typing import Protocol
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.state_machines import (
+    DistributionAssignmentState,
     InstallationNodeState,
     InstallationState,
     RunState,
-    UnknownOutcomeError,
-    WaitReason,
 )
-from vonk_agent_protocol.agent_words import ProfileChildJobKind
-from vonk_agent_protocol.state_machines import DistributionAssignmentState
 
 from .agent_operation_facts import aware as _aware
 from .covered_installation_claims import release_covered_installation_claims

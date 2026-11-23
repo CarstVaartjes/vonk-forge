@@ -11,8 +11,12 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import WaitOwnerKind, WaitReason, WaitResumeCondition
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    WaitOwnerKind,
+    WaitReason,
+    WaitResumeCondition,
+)
 
 from .. import agent_operation_states
 from ..agent_operation_facts import attempt_is_live, aware

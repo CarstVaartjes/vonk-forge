@@ -9,21 +9,21 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
     AgentFailureResult,
     AgentInstallResult,
-    InstallationNodeState,
-    LifecycleState,
-    RecipeOperationCode,
-    RecipeReconcilePayload,
-    RecipeStartPayload,
     RecipeStartResult,
-    RunState,
-    SupersedeCode,
-    WaitReason,
     canonical_message,
 )
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.reason_codes.recipes import RecipeOperationCode
+from vonk_agent_protocol.reason_codes.runs import SupersedeCode
+from vonk_agent_protocol.recipe_operations import (
+    RecipeReconcilePayload,
+    RecipeStartPayload,
+)
+from vonk_agent_protocol.state_machines import InstallationNodeState, RunState
 
 from ..admission_locking import (
     AdmissionLockBusy,

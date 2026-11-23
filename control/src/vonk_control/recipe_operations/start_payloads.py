@@ -6,15 +6,13 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from vonk_agent_protocol import (
-    InvalidRequestError,
-    RecipeStartPayload,
-    canonical_message,
-)
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.outcome import InvalidRequestError
+from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 
 from ..failure_classification import error_detail
 from ..harnesses.canonical import places_from_environment

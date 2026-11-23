@@ -18,9 +18,7 @@ from fastapi.testclient import TestClient
 from httpx2 import ASGITransport, AsyncClient, Response
 from sqlalchemy import event
 from starlette.types import Message
-from vonk_agent_protocol import (
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
@@ -89,7 +87,7 @@ def test_incomplete_observation_warns_with_counts_and_recovers_in_fleet_health(
     # delivery failures disappear from fleet health while evidence is lost.
     import logging
 
-    from vonk_agent_protocol import ProjectionCode
+    from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
     from vonk_control.fleet_projection.service import FleetProjection
 
     client, services, _, clock = agent_system
@@ -256,7 +254,7 @@ def test_builder_can_download_only_its_authorized_canonical_source_bundle(
             )
         )
 
-    from vonk_agent_protocol import SourceBundleCode
+    from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
     from vonk_control.source_bundles import SourceBundleUnknown
 
     exact_get = services.source_bundles.get

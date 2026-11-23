@@ -6,16 +6,16 @@ from datetime import datetime
 from typing import TYPE_CHECKING, get_args
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
-    OperationReason,
     OperatorActionName,
     ProgressAlarmCode,
     WaitOwnerKind,
     WaitReason,
     WaitResumeCondition,
-    canonical_message,
 )
+from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
 
 from .agent_operation_facts import aware
 from .models.waits import ScheduledWaitOwner

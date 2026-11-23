@@ -6,13 +6,11 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
-from vonk_agent_protocol import (
-    AgentOperation,
-    GatewayRouteState,
-    LifecycleState,
-    UnknownError,
-)
+from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.route_activation import ActivationMarker, SupervisorPhase
+from vonk_agent_protocol.state_machines import GatewayRouteState
 from vonk_control.gateway.litellm import render_empty_config
 from vonk_control.gateway.route_bundle_contract import RouteBundleDocument
 from vonk_control.gateway.route_runtime import (

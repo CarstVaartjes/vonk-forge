@@ -11,7 +11,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 
-from .control_client import MAX_CONTROL_DOCUMENT_BYTES
+from cluster_profiles.generated_control.limits import MAX_CONTROL_DOCUMENT_BYTES
 
 
 def _delivery_io[T](perform: Callable[[], T]) -> T:

@@ -24,6 +24,7 @@ AREA_JOBS = {
     "repository": ("repository",),
     "control": (
         "control",
+        "corpus-acceptance",
         "client-compatibility-report",
         "installed-cli-proof",
         "model-cache-unknown-expiry",

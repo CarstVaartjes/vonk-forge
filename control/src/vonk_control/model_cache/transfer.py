@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING, cast
 import httpx2
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import LifecycleState, OperationMemberProgress
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import OperationMemberProgress
 
 from ..categorized_faults import OperationInterrupted
 from ..fleet_profiles.read_observation import observing_profile

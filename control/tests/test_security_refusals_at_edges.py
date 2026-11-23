@@ -18,15 +18,14 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    ContainerRuntimeAction,
-    InvalidRequestError,
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.host_helper import ContainerRuntimeAction
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
-    ModelCacheCode,
-    SecurityRefusalError,
-    canonical_message,
 )
+from vonk_agent_protocol.outcome import InvalidRequestError, SecurityRefusalError
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.failure_classification import (
     error_code,
     is_definite,

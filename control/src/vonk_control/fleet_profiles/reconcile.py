@@ -7,21 +7,21 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy import case, func, select, true
-from vonk_agent_protocol import (
-    LifecycleState,
-    ProfileReasonCode,
-    SupersedeCode,
-    UnknownOutcomeError,
-    WaitOwnerKind,
-    WaitReason,
-    canonical_message,
-)
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileChildPhase,
     ProfileChildSource,
     ProfileReasonSeverity,
 )
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    WaitOwnerKind,
+    WaitReason,
+)
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 
 from ..failure_classification import error_code, is_definite, is_security_failure
 from ..fleet_profile_contract.applications import (

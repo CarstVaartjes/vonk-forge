@@ -12,10 +12,8 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    LifecycleState,
-    RunState,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.state_machines import RunState
 from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleGate
 from vonk_control.catalog.revision_collection import GRACE
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
@@ -73,7 +71,7 @@ from .unused_storage_collection_support import (
 
 def _queued_load(world: Catalog, installation_id: str) -> None:
     """A load that has been accepted and names this exact installation."""
-    from vonk_agent_protocol import AgentOperation as OperationKind
+    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
     from vonk_control.jobs.documents import RecipeInstallParent
 
     with world.sessions.begin() as session:
@@ -265,7 +263,7 @@ def test_unknown_removal_is_deferred_and_retried_without_blocking_other_items(
     world, monkeypatch
 ):
     """Catches treating temporary ownership uncertainty as a refusal or hot loop."""
-    from vonk_agent_protocol import WaitReason
+    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
     from vonk_control.recipe_operations.errors import RecipeRetryLater
 
     old = world.revision("glm", 1)

@@ -33,7 +33,7 @@ from .optional_evidence import (
     fail_open_on_optional_evidence,
     redacted_prose,
 )
-from .reason_codes import AgentEvidenceCode
+from .reason_codes.evidence import AgentEvidenceCode
 from .wire_model import ErrorCode, OperationProgress, WireEnum, WireModel
 
 # Backstop above a full 4096-object distribution assignment (~0.5 MiB); the
@@ -1428,3 +1428,16 @@ def validate_schema_message(schema_name: str, raw: Any) -> Any:
     except KeyError as error:
         raise AgentProtocolError(f"unknown protocol schema: {schema_name}") from error
     return parser(raw)
+
+
+# The helper request refers to the recipe payloads by name only: they import
+# this module, so the references resolve once everything is loaded.
+from .host_helper import HostRuntimeRequest
+
+HostRuntimeRequest.model_rebuild(
+    _types_namespace={
+        "RecipeStartPayload": RecipeStartPayload,
+        "RecipeJobRunRequest": RecipeJobRunRequest,
+        "RecipeStopPayload": RecipeStopPayload,
+    }
+)

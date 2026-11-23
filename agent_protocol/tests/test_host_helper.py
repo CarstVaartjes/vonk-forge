@@ -5,15 +5,12 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol import (
-    RecipeStartPayload,
-    RecipeStopPayload,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.host_helper import (
     ExecuteContainerRuntimeRequestOperation,
     HostRuntimeRequest,
 )
+from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 
 
 def start_plan(*, large_environment: bool = False) -> RecipeStartPayload:
@@ -320,7 +317,7 @@ def test_runtime_cleanup_identity_is_required_only_for_cleanup(model) -> None:
 def test_runtime_reconciliation_identity_is_bound_to_cleanup_request_and_grant() -> (
     None
 ):
-    from vonk_agent_protocol import RecipeReconciliationIdentity
+    from vonk_agent_protocol.host_helper import RecipeReconciliationIdentity
 
     identity = {
         "installation_id": "70000000-0000-4000-8000-000000000007",

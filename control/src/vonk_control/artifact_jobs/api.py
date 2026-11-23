@@ -16,23 +16,24 @@ from fastapi import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import StreamingResponse
-from vonk_agent_protocol import (
-    AgentProtocolError,
-    InvalidRequestError,
-    InvalidRequestReason,
-    RecipeJobInputRequest,
-    RecipeJobOutputLimits,
-    SecurityRefusalError,
-    SecurityRefusalReason,
-    UnknownOutcomeError,
-    WaitReason,
-)
+from vonk_agent_protocol.contracts import AgentProtocolError
 from vonk_agent_protocol.job_limits import (
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
     MAX_OUTPUT_FILE_BYTES,
     MAX_TIMEOUT_SECONDS,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    SecurityRefusalReason,
+    WaitReason,
+)
+from vonk_agent_protocol.outcome import (
+    InvalidRequestError,
+    SecurityRefusalError,
+    UnknownOutcomeError,
+)
+from vonk_agent_protocol.recipe_jobs import RecipeJobInputRequest, RecipeJobOutputLimits
 
 from ..auth import Actor, agent_identity_from_scope
 from ..compiled_artifact_contract import ParameterScalar

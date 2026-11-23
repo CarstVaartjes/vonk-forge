@@ -9,14 +9,18 @@ from datetime import datetime, timedelta
 from typing import NamedTuple
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentOperation,
     AgentProgress,
     AgentResult,
-    InvalidRequestError,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
+)
+from vonk_agent_protocol.outcome import (
+    InvalidRequestError,
     SecurityRefusalError,
     UnknownOutcomeError,
 )

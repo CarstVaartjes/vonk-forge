@@ -11,12 +11,13 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
-from vonk_agent_protocol import AgentResult, LifecycleState
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.failure_evidence import LOG_TAIL_BYTES, FailureDiagnostics
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.optional_evidence import EvidenceDrop
-from vonk_agent_protocol.reason_codes import AgentEvidenceCode
+from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.failure_evidence import (
@@ -1385,13 +1386,8 @@ def test_oversized_failure_evidence_keeps_the_container_diagnostics():
 
 def test_subprocess_exit_and_final_stderr_survive_store_and_evidence_download(tmp_path):
     # A classifier label cannot replace the opaque command's own explanation.
-    from vonk_agent_protocol import (
-        FailureCode,
-        OutcomeEvidence,
-        OutcomeFailed,
-        OutcomeKind,
-    )
-    from vonk_agent_protocol.outcome import outcome_body
+    from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, OutcomeKind
+    from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeFailed, outcome_body
 
     value = item(ProtocolAgentOperation.RECIPE_BUILD.value)
     diagnostics = collect_failure(

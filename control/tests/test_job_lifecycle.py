@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState, OperatorActionName
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OperatorActionName
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.queue import JobService
 from vonk_control.lifecycle.core import transition

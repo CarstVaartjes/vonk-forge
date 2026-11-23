@@ -9,18 +9,20 @@ from pathlib import Path
 
 import pytest
 
-from cluster_profiles import cli, controller_cli
+from cluster_profiles import cli
 from cluster_profiles.cli_files import read_json_document, write_private_document
-from cluster_profiles.control_client import MAX_CONTROL_DOCUMENT_BYTES, ControlHTTPError
+from cluster_profiles.control_client.errors import ControlHTTPError
+from cluster_profiles.controller_cli import observation as observation_module
+from cluster_profiles.generated_control.limits import MAX_CONTROL_DOCUMENT_BYTES
 from control.tests.consumer_outcomes import not_adopted
 
 
 @pytest.fixture(autouse=True)
 def bounded_clock(monkeypatch):
     clock = [0.0]
-    monkeypatch.setattr(controller_cli.observation.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(observation_module.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(
-        controller_cli.observation.time,
+        observation_module.time,
         "sleep",
         lambda delay: clock.__setitem__(0, clock[0] + delay),
     )

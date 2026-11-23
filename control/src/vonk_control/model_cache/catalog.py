@@ -6,7 +6,8 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import ModelCacheCode, canonical_message
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
 from ..catalog.queries import WITHOUT_DOCUMENT

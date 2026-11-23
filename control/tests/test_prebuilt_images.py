@@ -16,14 +16,11 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import (
-    ImageStoreCode,
-    LifecycleState,
-    PrebuiltImageCode,
-    RecipeBuildCode,
-    canonical_message,
-)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.images import ImageStoreCode, PrebuiltImageCode
+from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_control.auth import TokenCodec
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,

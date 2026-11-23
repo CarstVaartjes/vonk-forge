@@ -4,11 +4,8 @@ from __future__ import annotations
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    InstallAdmissionCode,
-    InvalidRequestReason,
-    WaitReason,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
+from vonk_agent_protocol.reason_codes.admission import InstallAdmissionCode
 
 from ..models.catalog import CatalogDocumentRevision
 from ..stored.states import CatalogRevisionState

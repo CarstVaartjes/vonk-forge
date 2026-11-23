@@ -4,8 +4,10 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from vonk_agent_protocol import AgentInstallResult, LifecycleState, RecipeStopResult
 from vonk_agent_protocol.agent_words import FailureStage, ProfileEffectState
+from vonk_agent_protocol.contracts import AgentInstallResult
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distribution.service import DistributionService

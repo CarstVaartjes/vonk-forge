@@ -12,8 +12,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import event, func, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.jobs.queue import JobService

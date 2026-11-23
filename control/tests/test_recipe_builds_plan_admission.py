@@ -10,15 +10,10 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import Table, select
-from vonk_agent_protocol import (
-    AgentClaim,
-    ProgressPhase,
-    RecipeBuildRequest,
-    canonical_message,
-)
-from vonk_agent_protocol import (
-    AgentOperation as ProtocolOperation,
-)
+from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.build_import import RecipeBuildRequest
+from vonk_agent_protocol.contracts import AgentClaim, canonical_message
+from vonk_agent_protocol.contracts import AgentOperation as ProtocolOperation
 from vonk_control.agent_jobs.retry import superseded_cancellation_deadline
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.availability_production.production import (

@@ -7,9 +7,10 @@ import sys
 import time
 from collections.abc import Mapping, Sequence
 
-from ..cli_render import terminal_text
+from ..cli_render.common import terminal_text
 from ..cli_select import SelectorError
-from ..control_client import ControlMalformedResponse, validate_control_document
+from ..control_client.errors import ControlMalformedResponse
+from ..control_client.schema import validate_control_document
 from .common import ControllerClient, _quoted
 from .selection import _observe_selection, _selection_remaining
 

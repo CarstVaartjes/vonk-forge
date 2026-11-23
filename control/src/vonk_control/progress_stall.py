@@ -63,8 +63,9 @@ from typing import TypeGuard
 
 from pydantic import ValidationError
 from sqlalchemy import event, inspect
-from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
 from .fleet_profile_contract.applications import FleetProfileApplicationProgress
 from .models.fleet import FleetProfileApplication
@@ -347,7 +348,7 @@ def observe_application_progress(
     # Progress producers may replace their typed blockers after the lifecycle
     # transition. Publish those exact causes with the same SQL update and clock.
     if target.next_action_at is not None and progress.blockers:
-        from vonk_agent_protocol import WaitReason
+        from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 
         from .persisted_waits import schedule_wait, typed_wait_reason
 

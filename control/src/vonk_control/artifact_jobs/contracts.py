@@ -12,28 +12,11 @@ from typing import Literal, NoReturn
 
 from pydantic import ConfigDict, Field, TypeAdapter
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    AgentProtocolError,
-    ArtifactPreparation,
-    InvalidRequestError,
-    InvalidRequestReason,
-    LifecycleState,
-    RecipeJobFile,
-    RecipeJobInputFile,
-    RecipeJobInputRequest,
-    RecipeJobOutputLimits,
-    RecipeJobOutputMapping,
-    SecurityRefusalError,
-    SecurityRefusalReason,
-    UnknownOutcomeError,
-    WaitReason,
-    canonical_message,
-    recipe_job_manifest_sha256,
-)
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
+from vonk_agent_protocol.contracts import AgentProtocolError, canonical_message
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_agent_protocol.job_limits import (
     MAX_INPUT_FILE_BYTES,
@@ -43,6 +26,28 @@ from vonk_agent_protocol.job_limits import (
     MAX_OUTPUT_FILES,
     MAX_OUTPUT_TOTAL_BYTES,
     MAX_TIMEOUT_SECONDS,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    ArtifactPreparation,
+    InvalidRequestReason,
+    LifecycleState,
+    SecurityRefusalReason,
+    WaitReason,
+)
+from vonk_agent_protocol.outcome import (
+    InvalidRequestError,
+    SecurityRefusalError,
+    UnknownOutcomeError,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    RecipeJobFile,
+    RecipeJobInputFile,
+    RecipeJobInputRequest,
+    RecipeJobOutputLimits,
+    RecipeJobOutputMapping,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_sha256 as recipe_job_manifest_sha256,
 )
 from vonk_forge_contracts import RecipeDefinition, RecipeDisplay, read_recipe
 

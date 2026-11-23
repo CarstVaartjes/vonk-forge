@@ -34,7 +34,6 @@ from urllib.parse import urlsplit
 
 import yaml
 from pydantic import ValidationError
-from vonk_agent_protocol import RunSwitchCode, canonical_message
 from vonk_agent_protocol.agent_state import (
     NativeRenewalAction,
     NativeRenewalEvidence,
@@ -44,6 +43,8 @@ from vonk_agent_protocol.agent_state import (
 )
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.route_activation import (
     ROUTE_SHUTDOWN_SECONDS,
     ROUTE_STARTUP_SECONDS,

@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
-from vonk_agent_protocol.reason_codes import ProjectionCode
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 

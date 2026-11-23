@@ -6,8 +6,8 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import ReservationState, RunState
 from vonk_agent_protocol.inventory import MemoryPool
+from vonk_agent_protocol.state_machines import ReservationState, RunState
 
 from .fleet_profiles.capacity import (
     profile_build_memory_claims,

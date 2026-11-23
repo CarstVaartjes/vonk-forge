@@ -13,13 +13,10 @@ from typing import Final, cast
 from ..cli_outcome import (
     operation_state,
 )
-from ..cli_render import terminal_text
-from ..cli_render.common import _text, _words
+from ..cli_render.common import _text, _words, terminal_text
 from ..cli_select import SelectorError
-from ..control_client import (
-    ControlMalformedResponse,
-    validate_control_document,
-)
+from ..control_client.errors import ControlMalformedResponse
+from ..control_client.schema import validate_control_document
 from ..generated_control.models.fleet_profile_effects import FleetProfileEffects
 from ..generated_control.models.fleet_profile_run_effect_action import (
     FleetProfileRunEffectAction,

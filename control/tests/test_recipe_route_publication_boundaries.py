@@ -340,7 +340,7 @@ def test_lost_acknowledgement_reconciles_the_same_generation(tmp_path, fault):
 
 
 def test_ended_run_does_not_gate_a_fresh_operation(tmp_path):
-    from vonk_agent_protocol import RunState
+    from vonk_agent_protocol.state_machines import RunState
 
     from .observed_actions import observe_action
 
@@ -363,7 +363,7 @@ def test_unknown_evidence_has_durable_backoff_and_recovers_without_a_new_request
     """Unknown evidence must not spin on every tick or need manual publication."""
     from datetime import UTC, timedelta
 
-    from vonk_agent_protocol import RouteState
+    from vonk_agent_protocol.state_machines import RouteState
 
     clock = MutableClock(NOW)
     service, _publisher, _applied, run_id = setup(tmp_path, clock=clock)
@@ -446,7 +446,7 @@ def test_bookkeeping_evidence_is_typed_temporary_and_repaired_in_place(tmp_path,
 
 def test_damaged_endpoint_projection_keeps_the_verified_serving_route(tmp_path):
     """Corrupt SQL evidence cannot revoke a checksum-verified working route."""
-    from vonk_agent_protocol import RouteState
+    from vonk_agent_protocol.state_machines import RouteState
     from vonk_control.models.execution import RunNode
 
     base, _publisher, _applied, run_id = setup(tmp_path / "database")
@@ -464,7 +464,7 @@ def test_damaged_endpoint_projection_keeps_the_verified_serving_route(tmp_path):
 def test_publication_recovers_after_repeated_unknown_evidence_across_restart(tmp_path):
     from datetime import UTC, timedelta
 
-    from vonk_agent_protocol import RouteState, RunState
+    from vonk_agent_protocol.state_machines import RouteState, RunState
     from vonk_control.models.execution import RunNode
 
     clock = MutableClock(NOW)
@@ -500,7 +500,8 @@ def test_publication_recovers_after_repeated_unknown_evidence_across_restart(tmp
 
 
 def test_security_acknowledgement_is_never_retried_or_adopted(tmp_path):
-    from vonk_agent_protocol import SecurityRefusalError, SecurityRefusalReason
+    from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
+    from vonk_agent_protocol.outcome import SecurityRefusalError
 
     base, _publisher, _applied, run_id = setup(tmp_path)
     calls = []
@@ -588,7 +589,7 @@ def test_postgres_stale_executor_is_fenced_before_first_activation(
 
 
 def test_target_change_during_activation_owes_cleanup_across_restart(tmp_path):
-    from vonk_agent_protocol import RoutePublicationState, RunState
+    from vonk_agent_protocol.state_machines import RoutePublicationState, RunState
     from vonk_control.gateway.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
     from vonk_control.models.execution import RecipeRun
 
@@ -650,7 +651,7 @@ def test_target_change_during_activation_owes_cleanup_across_restart(tmp_path):
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_owner_scoped_damage_never_blocks_an_unrelated_publication(tmp_path, damage):
     from sqlalchemy import select, update
-    from vonk_agent_protocol import LifecycleState
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
     from vonk_control.models.catalog import CatalogDocumentRevision
     from vonk_control.models.execution import RecipeInstallation, RunNode
     from vonk_control.models.jobs import Job
@@ -819,7 +820,9 @@ def _exhaust_publication(tmp_path, *, stale_reason=None):
     """
     from datetime import UTC, timedelta
 
-    from vonk_agent_protocol import AgentOperation, LifecycleState, RunState
+    from vonk_agent_protocol.contracts import AgentOperation
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+    from vonk_agent_protocol.state_machines import RunState
     from vonk_control.models.jobs import Job
     from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 
@@ -882,7 +885,7 @@ def test_exhausted_publication_ends_the_start_with_its_own_reason(tmp_path):
     On main the end kept the existing reason, so an earlier retry note
     survived instead of the publication error.
     """
-    from vonk_agent_protocol import LifecycleState
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
     state, reason, result = _exhaust_publication(
         tmp_path, stale_reason="retry scheduled at 2026-01-01T00:00:00Z"

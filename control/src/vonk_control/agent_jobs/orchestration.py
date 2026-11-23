@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentClaim, AgentOperation, InvalidRequestReason
-from vonk_agent_protocol.contracts import canonical_payload
+from vonk_agent_protocol.contracts import AgentClaim, AgentOperation, canonical_payload
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..admission_locking import acquire_admission_keys, node_admission_key

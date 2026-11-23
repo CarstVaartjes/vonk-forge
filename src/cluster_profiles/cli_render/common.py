@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 
 from ..cli_states_generated import ENDPOINT_UNAVAILABLE
 from ..cli_telemetry_render import size as _size
-from ..control_client import ControlMalformedResponse
+from ..control_client.errors import ControlMalformedResponse
 from ..generated_control.models.swap_shortfall_evidence import SwapShortfallEvidence
 
 

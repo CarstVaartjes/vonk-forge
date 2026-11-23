@@ -14,17 +14,19 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, Protocol
 
 from pydantic import Field, ValidationError
-from vonk_agent_protocol import (
-    InvalidRequestError,
-    InvalidRequestReason,
-    RuntimeImageCode,
-    SecurityRefusalError,
-    SecurityRefusalReason,
-    UnknownOutcomeError,
-    WaitReason,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    SecurityRefusalReason,
+    WaitReason,
+)
+from vonk_agent_protocol.outcome import (
+    InvalidRequestError,
+    SecurityRefusalError,
+    UnknownOutcomeError,
+)
+from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
 from vonk_agent_protocol.wire_model import Digest, WireModel
 
 from ..categorized_faults import security_reason

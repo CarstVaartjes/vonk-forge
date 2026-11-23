@@ -9,7 +9,7 @@ unreadable stored state.
 
 from __future__ import annotations
 
-from vonk_agent_protocol import InvalidRequestError
+from vonk_agent_protocol.outcome import InvalidRequestError
 
 
 class RequestFault(InvalidRequestError, ValueError):

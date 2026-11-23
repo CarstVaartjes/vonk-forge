@@ -9,8 +9,8 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
 from ..categorized_errors import (
     MissingRecord,

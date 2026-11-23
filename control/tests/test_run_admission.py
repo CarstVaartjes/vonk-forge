@@ -7,9 +7,10 @@ from importlib import resources
 import pytest
 from sqlalchemy import create_engine, inspect, select, update
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import ProjectionCode, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.inventory import GpuHealth, MemoryPool
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.inventory.repository import (
     InventoryRepository,

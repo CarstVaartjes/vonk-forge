@@ -13,14 +13,16 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel
-from vonk_agent_protocol import (
-    EnrollmentGrantState,
-    InvalidRequestError,
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     OperatorActionName,
+)
+from vonk_agent_protocol.outcome import (
+    InvalidRequestError,
     UnknownError,
     UnknownOutcomeError,
 )
+from vonk_agent_protocol.state_machines import EnrollmentGrantState
 
 from .api_availability import AVAILABILITY_ERRORS
 from .auth import Actor

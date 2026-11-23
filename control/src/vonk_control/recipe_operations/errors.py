@@ -5,13 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from vonk_agent_protocol import (
-    Disposition,
-    InvalidRequestError,
-    InvalidRequestReason,
-    UnknownOutcomeError,
-    WaitReason,
-)
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
+from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 
 from ..failure_classification import disposition, error_detail, is_definite
 

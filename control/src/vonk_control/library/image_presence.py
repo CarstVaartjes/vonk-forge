@@ -21,7 +21,7 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from typing import Literal
 
-from vonk_agent_protocol import RuntimeImageCode
+from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
 
 #: Stored images are keyed by their address (manifest digest) and stored size.
 ImageKey = tuple[str, int]

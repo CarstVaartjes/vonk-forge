@@ -23,7 +23,7 @@ from sqlalchemy import (
     literal_column,
 )
 from sqlalchemy.orm import Mapped, Session, mapped_column
-from vonk_agent_protocol import machine_check
+from vonk_agent_protocol.state_machines import machine_check
 from vonk_forge_contracts import (
     ModelDisplay,
     RecipeDisplay,

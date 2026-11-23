@@ -8,19 +8,21 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
+from vonk_agent_protocol.build_import import RecipeBuildRequest
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import (
+    AgentFailureResult,
     AgentOperation,
     AgentResult,
+    canonical_message,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import (
     FailureCode,
     InvalidRequestReason,
     LifecycleState,
-    RecipeBuildCode,
-    RecipeBuildRequest,
     WaitReason,
-    canonical_message,
 )
-from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentFailureResult
+from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from .. import agent_operation_states
@@ -443,7 +445,7 @@ def dispatch_wait(
     """
     from datetime import timedelta
 
-    from vonk_agent_protocol import RunAdmissionCode
+    from vonk_agent_protocol.lifecycle_vocabulary import RunAdmissionCode
     from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 
     from ..agent_operation_facts import (

@@ -9,21 +9,24 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
+from vonk_agent_protocol.agent_words import (
+    ProfileChildPhase,
+    ProfileEffectState,
+    ProgressPhase,
+)
+from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentResult,
-    AgentResultState,
     ArtifactDistributionResult,
-    DistributionObject,
+)
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.distribution import DistributionObject
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    AgentResultState,
     LifecycleState,
-    OperationProgress,
-    ProgressPhase,
     WaitReason,
 )
-from vonk_agent_protocol import (
-    AgentOperation as OperationKind,
-)
-from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileEffectState
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource

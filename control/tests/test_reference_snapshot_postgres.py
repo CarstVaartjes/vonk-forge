@@ -9,8 +9,8 @@ from threading import Event, current_thread
 from uuid import uuid4
 
 from sqlalchemy import Engine, event, select
-from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.gpu_clock import GpuClockRange
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.admission_locking import report_admission_locks
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.distribution.service import DistributionService

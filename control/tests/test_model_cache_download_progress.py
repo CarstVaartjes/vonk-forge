@@ -13,7 +13,8 @@ from types import SimpleNamespace
 import httpx2
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState, ProgressPhase
+from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.model_cache.artifacts import ArtifactSetManifest
 from vonk_control.model_cache.constants import _CHUNK_BYTES

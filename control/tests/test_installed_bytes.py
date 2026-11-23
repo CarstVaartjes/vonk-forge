@@ -10,11 +10,9 @@ import uuid
 from pathlib import Path
 
 from sqlalchemy import create_engine, select
-from vonk_agent_protocol import (
-    InstallationBytes,
-    InstallationNodeState,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.inventory import InstallationBytes
+from vonk_agent_protocol.state_machines import InstallationNodeState
 from vonk_control.installed_bytes import refresh_installed_bytes
 from vonk_control.model_primitives import Base
 from vonk_control.models.execution import InstallationNode
@@ -78,11 +76,11 @@ def test_postgres_missing_installation_inventory_allows_reinstall_without_releas
     # so deleted installations stay installed forever and are reused on apply.
     from datetime import timedelta
 
-    from vonk_agent_protocol import InstallationState, RunState
     from vonk_agent_protocol.inventory import (
         MAX_REPORTED_INSTALLATIONS,
         InventoryRequest,
     )
+    from vonk_agent_protocol.state_machines import InstallationState, RunState
     from vonk_control.inventory.repository import (
         InventoryRepository,
         NodeInventoryReport,

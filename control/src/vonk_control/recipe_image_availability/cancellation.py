@@ -10,12 +10,12 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
-    RecipeImageCode,
     WaitReason,
 )
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 
 from ..categorized_errors import InvalidValue, MissingRecord
 from ..jobs import states as job_states

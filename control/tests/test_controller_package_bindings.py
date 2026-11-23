@@ -4,7 +4,7 @@ from typing import cast
 
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import RecipeBuildCode
+from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_control.recipe_builds.common import RecipeBuildUnknown
 from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.source_bundles import SourceBundleStoreProtocol

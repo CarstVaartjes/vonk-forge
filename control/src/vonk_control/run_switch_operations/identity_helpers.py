@@ -8,7 +8,7 @@ from typing import (
     TypeGuard,
 )
 
-from vonk_agent_protocol import WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_forge_contracts import read_recipe
 from vonk_forge_contracts.recipe import RecipeDefinition
 

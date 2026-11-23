@@ -9,10 +9,8 @@ from typing import (
 from typing import cast as typing_cast
 
 from sqlalchemy import String, and_, cast, func, literal, or_, select
-from vonk_agent_protocol import (
-    LifecycleState,
-    RunSwitchCode,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
 from ..bounded_json import require_integer
 from ..failure_classification import error_code, error_detail, is_definite

@@ -20,7 +20,8 @@ from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol import GatewayRouteState, RoutePublicationState, UnknownError
+from vonk_agent_protocol.outcome import UnknownError
+from vonk_agent_protocol.state_machines import GatewayRouteState, RoutePublicationState
 from vonk_control.gateway import route_model_info as module
 from vonk_control.gateway.litellm import (
     LiteLlmConfig,
@@ -436,7 +437,7 @@ def test_a_bug_in_the_builder_is_not_swallowed_as_missing_facts(
 
 def test_a_serving_route_keeps_its_facts_until_it_changes(tmp_path: Path) -> None:
     """New facts never rewrite a running route's gateway entry (no restart)."""
-    from vonk_agent_protocol import RouteState as RunRouteState
+    from vonk_agent_protocol.state_machines import RouteState as RunRouteState
 
     from .recipe_routes_support import (
         NOW,
@@ -497,7 +498,7 @@ def test_a_recovery_restart_of_the_same_run_applies_the_current_facts(
 ) -> None:
     """A restarted run is a route change: its facts are read again, not frozen."""
     from sqlalchemy import update
-    from vonk_agent_protocol import RouteState as RunRouteState
+    from vonk_agent_protocol.state_machines import RouteState as RunRouteState
     from vonk_control.models.execution import RecipeRun, RunNode
 
     from .recipe_routes_support import NOW, MutableClock, atomic_service, setup

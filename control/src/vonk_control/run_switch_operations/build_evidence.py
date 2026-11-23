@@ -4,10 +4,8 @@ from __future__ import annotations
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    LifecycleState,
-    RunSwitchCode,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
 from ..disk_reservations import runtime_images_named_on_nodes
 from ..inventory.items import inventory_items

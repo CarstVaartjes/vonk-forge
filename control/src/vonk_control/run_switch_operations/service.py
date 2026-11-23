@@ -6,9 +6,7 @@ from collections.abc import Callable
 from datetime import datetime
 
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    InvalidRequestReason,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
 from ..categorized_errors import (

@@ -13,10 +13,8 @@ from types import SimpleNamespace
 import pytest
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select, update
-from vonk_agent_protocol import (
-    LifecycleState,
-    RunSwitchCode,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.catalog import CatalogDocumentRevision
@@ -874,8 +872,8 @@ def test_profile_admits_unpublished_cache_observation(tmp_path, monkeypatch, mis
     """A paused first receipt must wait in preparation, never refuse a load."""
     from threading import Event
 
-    from vonk_agent_protocol import WaitReason
     from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReasonSeverity
+    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
     from vonk_control.categorized_errors import BookkeepingUnknown
     from vonk_control.distribution_executor.preparation import (
         CompositeDistributionPhaseExecutor,

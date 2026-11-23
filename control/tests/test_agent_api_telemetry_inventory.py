@@ -15,27 +15,25 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
 from starlette.types import Message
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
-    InstallVonkDebOperation,
-    InventoryVerdict,
-    PackageRollbackAuthority,
-    SignedHostHelperGrant,
-    canonical_message,
-)
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.host_helper import (
     HostRuntimeRequest,
+    InstallVonkDebOperation,
     RecipeReconciliationIdentity,
+    SignedHostHelperGrant,
     host_helper_grant_signing_bytes,
 )
 from vonk_agent_protocol.inventory import (
     GpuHealth,
     HostSettings,
     InventoryRequest,
+    InventoryVerdict,
     NetworkInterface,
 )
+from vonk_agent_protocol.package_upgrade import PackageRollbackAuthority
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,

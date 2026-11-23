@@ -12,12 +12,10 @@ from typing import cast
 import pytest
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import (
-    ArtifactLifecycleCode,
-    Disposition,
-    LifecycleState,
-    RecipeImageCode,
-)
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_control.artifact_jobs.lifecycle import ArtifactReferenceUnsettled
 from vonk_control.failure_classification import disposition
 from vonk_control.jobs.documents import AvailabilityJobPayload

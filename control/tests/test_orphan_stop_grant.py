@@ -14,9 +14,9 @@ from datetime import timedelta
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
-from vonk_agent_protocol import SignedHostHelperGrant
 from vonk_agent_protocol.host_helper import (
     ExecuteContainerRuntimeRequestOperation,
+    SignedHostHelperGrant,
     host_helper_grant_signing_bytes,
 )
 from vonk_control.host_helper_authority import (

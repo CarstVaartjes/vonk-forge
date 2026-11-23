@@ -11,16 +11,16 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
+from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.state_machines import (
     InstallationNodeState,
     InstallationState,
+    NodeIdentityState,
     RouteState,
     RunState,
-    RunSwitchCode,
-    WaitReason,
 )
-from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
-from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..machine_states import rank_installed
 from ..models.catalog import CatalogDocumentRevision

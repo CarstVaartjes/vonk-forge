@@ -8,18 +8,20 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy import select, true
-from vonk_agent_protocol import (
-    DesiredAssignmentState,
-    InvalidRequestReason,
-    LifecycleState,
-    ObservedAssignmentState,
-    SupersedeCode,
-    WaitReason,
-    canonical_message,
-)
 from vonk_agent_protocol.agent_words import (
     ProfileCancellationCause,
     ProfileOperationKind,
+)
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    LifecycleState,
+    WaitReason,
+)
+from vonk_agent_protocol.reason_codes.runs import SupersedeCode
+from vonk_agent_protocol.state_machines import (
+    DesiredAssignmentState,
+    ObservedAssignmentState,
 )
 
 from ..categorized_errors import MissingRecord

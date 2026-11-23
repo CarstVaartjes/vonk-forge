@@ -6,20 +6,22 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
-from vonk_agent_protocol import (
-    ControllerErrorCode,
-    InvalidRequestError,
-    InvalidRequestReason,
-    RunState,
-    SecurityRefusalError,
-    SecurityRefusalReason,
-    UnknownOutcomeError,
-    WaitReason,
-)
 from vonk_agent_protocol.error_response import (
     BoundedErrorResponse,
     RequestValidationProblem,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    SecurityRefusalReason,
+    WaitReason,
+)
+from vonk_agent_protocol.outcome import (
+    InvalidRequestError,
+    SecurityRefusalError,
+    UnknownOutcomeError,
+)
+from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
+from vonk_agent_protocol.state_machines import RunState
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.categorized_errors import InvalidType, SecurityRefused

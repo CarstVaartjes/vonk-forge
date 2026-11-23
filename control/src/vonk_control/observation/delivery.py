@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
-from vonk_agent_protocol import WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 
 from ..agent_api.common import AgentApiServices
 from ..agent_contacts import record_observation_delivery

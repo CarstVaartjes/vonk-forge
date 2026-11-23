@@ -9,12 +9,9 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import (
-    LifecycleState,
-    ProgressPhase,
-    RecipeImageCode,
-    WaitReason,
-)
+from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_control.jobs.documents import AvailabilityJobPayload
 from vonk_control.lifecycle.image_availability import (
     CANCEL_BUDGET,

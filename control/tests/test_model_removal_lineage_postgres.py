@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select, update
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.fleet_model_removal_contract import FleetRemovalReason
 from vonk_control.model_cache.contract import ModelCacheRemovalResult

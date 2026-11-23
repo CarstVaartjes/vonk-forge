@@ -57,6 +57,7 @@ MARKERS = {
     "needs_backup_container": "requires the opt-in PostgreSQL backup container lane (VONK_RUN_BACKUP_CONTAINER_TEST=1)",
     "needs_cli_dependencies": "requires the CLI dependency environment from scripts/sync-cli-dependencies",
     "postgres": "provisions a disposable PostgreSQL server through Docker (Linux lane)",
+    "corpus_acceptance": "whole-corpus acceptance that runs alone in its own CI lane (scripts/test acceptance), never in the control shards",
     "built_image": "checks a prebuilt Controller or worker image named by VONK_TEST_CONTROLLER_IMAGE or VONK_TEST_WORKER_IMAGE",
 }
 

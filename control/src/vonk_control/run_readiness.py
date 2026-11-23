@@ -17,7 +17,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from vonk_agent_protocol import RouteState, RunDegradedReason, RunState
+from vonk_agent_protocol.reason_codes.evidence import RunDegradedReason
+from vonk_agent_protocol.state_machines import RouteState, RunState
 
 
 def run_not_ready_for_profile(

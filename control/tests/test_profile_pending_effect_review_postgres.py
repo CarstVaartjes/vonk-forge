@@ -11,15 +11,14 @@ import hashlib
 from copy import deepcopy
 
 from sqlalchemy import select, update
-from vonk_agent_protocol import (
-    AgentResult,
+from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     LifecycleState,
     OutcomeKind,
-    OutcomeUnknown,
     WaitReason,
-    canonical_message,
 )
+from vonk_agent_protocol.outcome import OutcomeUnknown
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 from vonk_control import agent_operation_states
 from vonk_control.agent_jobs.service import AgentJobService

@@ -12,7 +12,9 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
-from vonk_agent_protocol import InstallationState, UnknownOutcomeError, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.state_machines import InstallationState
 
 from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,

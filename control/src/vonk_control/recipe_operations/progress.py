@@ -13,17 +13,16 @@ if TYPE_CHECKING:
 from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session, object_session
-from vonk_agent_protocol import (
-    OperationMemberProgress,
-    OperationProgress,
-    RecipeBuildCleanupRequest,
+from vonk_agent_protocol.build_import import RecipeBuildCleanupRequest
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.recipe_operations import (
     RecipeInstallPayload,
     RecipeReconcilePayload,
     RecipeStartPayload,
     RecipeStopPayload,
     RecipeUninstallPayload,
-    canonical_message,
 )
+from vonk_agent_protocol.wire_model import OperationMemberProgress, OperationProgress
 from vonk_forge_contracts import RecipeDefinition, read_model, read_recipe
 
 from ..distributed_lifecycle import (

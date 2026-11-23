@@ -8,20 +8,19 @@ from collections.abc import Mapping
 from typing import cast as _typing_cast
 
 from pydantic import TypeAdapter
-from vonk_agent_protocol import (
-    InstallationState,
-    LifecycleState,
-    ObservedAssignmentState,
-    ProfileReasonCode,
-    RecipeImageCode,
-    ResourceBlockerCode,
-    RunState,
-    RunSwitchCode,
-)
 from vonk_agent_protocol.agent_words import (
     ProfileChildPhase,
     ProfileEffectState,
     ProfileReportedPhase,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, ResourceBlockerCode
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.state_machines import (
+    InstallationState,
+    ObservedAssignmentState,
+    RunState,
 )
 
 from ..child_phases import FleetProfileChildPhase

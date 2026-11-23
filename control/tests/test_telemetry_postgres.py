@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import event, func, insert, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control.inventory.items_contract import InventorySnapshotKind
 from vonk_control.model_primitives import Base

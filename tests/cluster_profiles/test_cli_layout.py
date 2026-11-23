@@ -15,16 +15,13 @@ from typing import Any
 
 import pytest
 
-from cluster_profiles.cli_render import (
-    _activity,
-    _artifact_job,
-    _catalog_sync,
-    _library_item,
-    render_payload,
-)
 from cluster_profiles.cli_render import library as library_render
+from cluster_profiles.cli_render.activity import _activity
+from cluster_profiles.cli_render.administration import _catalog_sync
+from cluster_profiles.cli_render.artifact_jobs import _artifact_job
 from cluster_profiles.cli_render.common import _utc
-from cluster_profiles.cli_render.library import _model_counts
+from cluster_profiles.cli_render.dispatch import render_payload
+from cluster_profiles.cli_render.library import _library_item, _model_counts
 from cluster_profiles.cli_render.profile import _key_expired, _profile
 
 _FIXTURES = Path(__file__).parents[1] / "fixtures"

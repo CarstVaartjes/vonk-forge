@@ -9,13 +9,13 @@ from typing import cast
 
 from pydantic import ValidationError
 from sqlalchemy.orm import object_session
-from vonk_agent_protocol import (
+from vonk_agent_protocol.http_failure import TransientReason
+from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
+from vonk_agent_protocol.reason_codes.model_cache import (
     ModelAccessReason,
     ModelCacheCode,
     ModelCacheFailureCode,
-    SecurityRefusalReason,
 )
-from vonk_agent_protocol.http_failure import TransientReason
 
 from ..lifecycle.evidence import (
     BookkeepingReason,

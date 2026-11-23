@@ -33,11 +33,9 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from vonk_agent_protocol import (
-    Disposition,
-    RecipeUpdateCode,
-    WaitOwnerKind,
-)
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import WaitOwnerKind
+from vonk_agent_protocol.reason_codes.recipes import RecipeUpdateCode
 
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..jobs import states as job_states

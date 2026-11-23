@@ -32,14 +32,13 @@ import httpx2
 from fastapi import FastAPI, HTTPException, Query, status
 from fastapi import Path as PathParameter
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import (
     ErrorCategory,
     InvalidRequestReason,
     SecurityRefusalReason,
-    UnknownError,
-    UnknownOutcomeError,
     WaitReason,
 )
+from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
 from vonk_forge_contracts import EndpointAlias
 
 from ..auth import MUTATION_ROLES, Actor

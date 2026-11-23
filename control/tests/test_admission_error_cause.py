@@ -10,12 +10,9 @@ import errno
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    AgentOperation,
-    Disposition,
-    InvalidRequestError,
-    UnknownOutcomeError,
-)
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_control import run_admission
 from vonk_control.failure_classification import disposition
 from vonk_control.models.execution import RecipeInstallation, RecipeRun

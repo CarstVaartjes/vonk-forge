@@ -11,11 +11,8 @@ from typing import TYPE_CHECKING
 from ..cli_states import (
     CANCEL_ACCEPTED_STATES,
 )
-from ..control_client import (
-    ControlClientError,
-    ControlMalformedResponse,
-    validate_control_document,
-)
+from ..control_client.errors import ControlClientError, ControlMalformedResponse
+from ..control_client.schema import validate_control_document
 
 if TYPE_CHECKING:
     from ..generated_control.models.model_cache_operator_response import (

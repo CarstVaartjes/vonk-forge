@@ -24,7 +24,7 @@ from typing import Any, cast
 
 from sqlalchemy import CursorResult, update
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import InstallationState
+from vonk_agent_protocol.state_machines import InstallationState
 
 from .models.execution import RecipeInstallation
 

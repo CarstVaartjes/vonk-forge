@@ -13,12 +13,12 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    LifecycleState,
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.recipe_operations import (
     RecipeInstallPayload,
     RecipeStartPayload,
     RecipeStopPayload,
-    canonical_message,
 )
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.bounded_json import require_mapping, require_sequence

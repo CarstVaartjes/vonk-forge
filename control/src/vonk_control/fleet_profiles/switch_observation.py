@@ -6,18 +6,18 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    InvalidRequestReason,
-    LifecycleState,
-    RunSwitchCode,
-    WaitOwnerKind,
-    WaitReason,
-    WaitResumeCondition,
-)
 from vonk_agent_protocol.agent_words import (
     ProfileChildPhase,
     ProfileSwitchChildKind,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    LifecycleState,
+    WaitOwnerKind,
+    WaitReason,
+    WaitResumeCondition,
+)
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
 from ..agent_jobs.service import AgentJobService
 from ..categorized_errors import MissingRecord

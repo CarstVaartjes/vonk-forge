@@ -14,13 +14,9 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import (
-    AgentClaim,
-    AgentOperation,
-    RecipeBuildEvidence,
-    WaitReason,
-    canonical_message,
-)
+from vonk_agent_protocol.build_import import RecipeBuildEvidence
+from vonk_agent_protocol.contracts import AgentClaim, AgentOperation, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 from vonk_control.agent_jobs.contracts import OFF_LANE_OPERATIONS

@@ -10,17 +10,15 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import (
-    InstallationNodeState,
-    InstallationState,
-    InvalidRequestReason,
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
+from vonk_agent_protocol.reason_codes.recipes import ReconcileCode
+from vonk_agent_protocol.recipe_operations import (
     RecipeReconcilePayload,
     RecipeUninstallPayload,
-    ReconcileCode,
-    WaitReason,
-    canonical_message,
 )
+from vonk_agent_protocol.state_machines import InstallationNodeState, InstallationState
 
 from ..admission_locking import (
     AdmissionLockBusy,

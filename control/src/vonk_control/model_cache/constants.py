@@ -6,7 +6,11 @@ import hashlib
 import logging
 from enum import StrEnum
 
-from vonk_agent_protocol import ModelAccessReason, ModelCacheCode, SecurityRefusalReason
+from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
+from vonk_agent_protocol.reason_codes.model_cache import (
+    ModelAccessReason,
+    ModelCacheCode,
+)
 
 SCHEMA_VERSION = 2
 

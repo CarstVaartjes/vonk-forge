@@ -239,7 +239,7 @@ def seed_idle_spark(sessions, node_id, now, *, pool="shared", size=10**12):
 def _backing_off_load(postgres_engine, pool, *, hold):
     """A load whose child is live but whose claims were released when it backed
     off; ``hold`` is memory another workload took meanwhile (None: none)."""
-    from vonk_agent_protocol import LifecycleState
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
     from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
     from vonk_control.fleet_profiles.service import FleetProfileService
     from vonk_control.model_primitives import Base

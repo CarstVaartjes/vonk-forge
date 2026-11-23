@@ -18,14 +18,14 @@ from sqlalchemy import (
     values,
 )
 from sqlalchemy.orm import load_only
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.outcome import SecurityRefusalError
+from vonk_agent_protocol.state_machines import (
     AssetAvailability,
     InstallationState,
-    LifecycleState,
     RunState,
-    SecurityRefusalError,
     adopt_machine_state,
-    canonical_message,
 )
 
 from ..api_availability import AVAILABILITY_ERRORS

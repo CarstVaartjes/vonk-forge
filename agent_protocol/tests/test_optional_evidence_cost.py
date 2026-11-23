@@ -11,7 +11,7 @@ from vonk_agent_protocol.optional_evidence import (
     OptionalEvidenceModel,
     fail_open_on_optional_evidence,
 )
-from vonk_agent_protocol.reason_codes import AgentEvidenceCode
+from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 
 GROUPS = 8
 

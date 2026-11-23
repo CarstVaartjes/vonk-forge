@@ -5,10 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    LifecycleState,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
 from ..journal_models import RunSwitchJournalRepairPending
 from ..models.jobs import Job

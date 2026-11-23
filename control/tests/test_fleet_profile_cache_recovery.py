@@ -10,9 +10,11 @@ from typing import cast
 
 import pytest
 from sqlalchemy import select, text
-from vonk_agent_protocol import LifecycleState, RuntimeImageCode, canonical_message
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profile_contract.switch_state import (

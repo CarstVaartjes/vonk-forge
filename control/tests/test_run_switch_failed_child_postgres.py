@@ -5,8 +5,9 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from vonk_agent_protocol import DistributionCode, LifecycleState, WaitReason
 from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 from vonk_control.run_switch_contract.phase_results import (
     RunSwitchDistributionEndedResult,
 )

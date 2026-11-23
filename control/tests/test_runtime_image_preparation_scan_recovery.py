@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import SecurityRefusalReason
+from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
 from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImagePreparationRefused,
 )
@@ -90,7 +90,7 @@ def test_unknown_receipt_attempt_ends_without_blocking_fresh_preparation(
 
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
-    from vonk_agent_protocol import LifecycleState
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
     from vonk_control.model_primitives import Base
     from vonk_control.models.cache import RecipeBuild
     from vonk_control.models.jobs import Job
@@ -226,12 +226,9 @@ def test_observation_budget_is_owned_by_request_across_restart_for_all_unknowns(
 
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
-    from vonk_agent_protocol import (
-        LifecycleState,
-        RecipeImageCode,
-        RuntimeImageCode,
-        WaitReason,
-    )
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+    from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
+    from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
     from vonk_control.model_primitives import Base
     from vonk_control.models.jobs import Job
     from vonk_control.recipe_image_availability.contracts import BuildUnsettled
@@ -357,7 +354,8 @@ def test_postgres_concurrent_owner_newer_intent_fences_stale_claim_and_restarts(
     from datetime import UTC, datetime, timedelta
 
     from sqlalchemy.orm import sessionmaker
-    from vonk_agent_protocol import LifecycleState, RecipeImageCode, WaitReason
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+    from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
     from vonk_control.jobs.documents import AvailabilityJobResult
     from vonk_control.model_primitives import Base
     from vonk_control.models.jobs import Job

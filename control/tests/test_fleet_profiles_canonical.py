@@ -12,8 +12,9 @@ import pytest
 from sqlalchemy import create_engine, event, select, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol import DesiredAssignmentState, ModelCacheBlockerCode
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheBlockerCode
+from vonk_agent_protocol.state_machines import DesiredAssignmentState
 from vonk_control.catalog.revision_contract import (
     rederive_projection,
     write_catalog_projection,
@@ -1759,7 +1760,7 @@ def test_profile_storage_wait_is_bounded_and_recovers(
     """A stalled receipt cannot hold a profile response or be called per assignment."""
     from threading import Event
 
-    from vonk_agent_protocol import ProfileReasonCode
+    from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
     from vonk_control.categorized_errors import BookkeepingUnknown
     from vonk_control.fleet_profiles.read_observation import (
         observe_storage,
@@ -1929,7 +1930,7 @@ def test_profile_observation_reuses_only_fresh_results(monkeypatch):
 
 def test_profile_read_preserves_observer_progress_and_next_check():
     """Catches dropping the observer's progress in a generic unknown warning."""
-    from vonk_agent_protocol import WaitReason
+    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
     from vonk_control.categorized_errors import BookkeepingUnknown
 
     sessions = _sessions()
@@ -1963,11 +1964,12 @@ def test_profile_read_preserves_observer_progress_and_next_check():
 
 def test_profile_preview_preserves_cache_inspection_progress():
     """Catches replacing the inspector's actual wait with a generic cache message."""
-    from vonk_agent_protocol import ProfileReasonCode, RunSwitchCode
     from vonk_agent_protocol.agent_words import (
         ProfileReasonSeverity,
         RunSwitchReasonScopeName,
     )
+    from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+    from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
     from vonk_control.run_switch_contract.evidence import RunSwitchReason
 
     from tests.fleet_profiles_support import _assessment, _exact_preparation

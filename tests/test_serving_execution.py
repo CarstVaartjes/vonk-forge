@@ -7,7 +7,7 @@ from threading import Thread
 
 import pytest
 
-from cluster_profiles.cli_states import FAILED, SUCCEEDED
+from cluster_profiles.cli_states_generated import FAILED, SUCCEEDED
 from cluster_profiles.serving_execution import (
     MAX_HTTP_RESPONSE_BYTES,
     HttpObservation,

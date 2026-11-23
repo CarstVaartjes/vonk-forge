@@ -10,16 +10,13 @@ from typing import NamedTuple
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, load_only
-from vonk_agent_protocol import (
-    LifecycleState,
-    RunSwitchCode,
-    WaitReason,
-)
 from vonk_agent_protocol.agent_words import (
     ProfileChildJobKind,
     ProfileReasonSeverity,
     RunSwitchReasonScopeName,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import PlacementInstallState
 
 from ..categorized_errors import BookkeepingUnknown

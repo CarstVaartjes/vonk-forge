@@ -17,7 +17,10 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from vonk_agent_protocol import RuntimePreflightCode, RuntimePreflightFindingCode
+from vonk_agent_protocol.reason_codes.runtime import (
+    RuntimePreflightCode,
+    RuntimePreflightFindingCode,
+)
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightFinding,
     RuntimePreflightRequest,

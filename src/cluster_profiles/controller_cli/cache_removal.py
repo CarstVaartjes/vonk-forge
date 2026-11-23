@@ -16,14 +16,14 @@ from ..cli_outcome import (
     Submission,
     SubmissionAcceptance,
 )
-from ..cli_render import render_payload
-from ..control_client import (
+from ..cli_render.dispatch import render_payload
+from ..control_client.errors import (
     ControlClientError,
     ControlConflict,
     ControlMalformedResponse,
     ControlNotFound,
-    validate_control_document,
 )
+from ..control_client.schema import validate_control_document
 from .common import ControllerClient, _quoted, _request_key
 from .confirmation import _can_prompt, _confirm_action
 from .submission import _known_http_refusal_status, _submit_idempotent_request

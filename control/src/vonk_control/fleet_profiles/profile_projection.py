@@ -9,11 +9,12 @@ from typing import cast as _typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AssetAvailability, ModelCacheBlockerCode
 from vonk_agent_protocol.agent_words import (
     ProfileDocumentState,
     RunSwitchReasonScopeName,
 )
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheBlockerCode
+from vonk_agent_protocol.state_machines import AssetAvailability
 
 from ..catalog.revision_contract import RecipeRevisionProjection
 from ..fleet_profile_contract.definitions import (

@@ -13,11 +13,9 @@ import pytest
 import vonk_control.availability_production.production as availability_production_module
 import vonk_control.runtime.adapters as runtime_adapters_module
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    LifecycleState,
-    canonical_message,
-)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,

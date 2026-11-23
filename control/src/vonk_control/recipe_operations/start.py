@@ -10,17 +10,17 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.gpu_clock import GpuClockRange
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
+from vonk_agent_protocol.outcome import (
     InvalidRequestError,
-    InvalidRequestReason,
-    RecipeStartPayload,
-    RunState,
     SecurityRefusalError,
     UnknownOutcomeError,
-    canonical_message,
 )
-from vonk_agent_protocol.gpu_clock import GpuClockRange
+from vonk_agent_protocol.recipe_operations import RecipeStartPayload
+from vonk_agent_protocol.state_machines import RunState
 
 from ..admission_locking import (
     AdmissionLockBusy,

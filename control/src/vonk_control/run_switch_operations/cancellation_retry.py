@@ -10,12 +10,12 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
-    RunSwitchCode,
     WaitReason,
 )
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
 from ..admission_locking import admission_attempts
 from ..artifact_jobs.lifecycle import (

@@ -9,29 +9,34 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    AgentClaim,
-    AgentInstallResult,
-    AgentResult,
-    AgentResultState,
-    CompiledExecutionPlan,
-    LifecycleState,
-    ObservationCause,
+from vonk_agent_protocol.build_import import (
     RecipeBuildCleanupEvidence,
     RecipeBuildCleanupRequest,
     RecipeBuildEvidence,
     RecipeBuildRequest,
+)
+from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
+from vonk_agent_protocol.contracts import (
+    AgentClaim,
+    AgentInstallResult,
+    AgentPayload,
+    AgentResult,
+    AgentResultPayload,
+    canonical_message,
+)
+from vonk_agent_protocol.contracts import AgentOperation as Kind
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    AgentResultState,
+    LifecycleState,
+    ObservationCause,
+)
+from vonk_agent_protocol.recipe_operations import (
+    RecipeInstallPayload,
     RecipeReconcilePayload,
     RecipeReconcileResult,
     RecipeUninstallPayload,
     RecipeUninstallResult,
-    canonical_message,
 )
-from vonk_agent_protocol import (
-    AgentOperation as Kind,
-)
-from vonk_agent_protocol.contracts import AgentPayload, AgentResultPayload
-from vonk_agent_protocol.recipe_operations import RecipeInstallPayload
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
     RuntimePreflightResult,

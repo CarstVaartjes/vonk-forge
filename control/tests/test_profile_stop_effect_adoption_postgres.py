@@ -12,8 +12,9 @@ from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import AgentResult, LifecycleState, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
@@ -420,7 +421,7 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
     # The old observer's budget has elapsed while the adopted exact effect is
     # still unresolved. Polling before a fresh receipt must preserve that same
     # Stop, not retire it and make the later receipt impossible to consume.
-    from vonk_agent_protocol import RunSwitchCode
+    from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
     from vonk_control.run_switch_operations.result_helpers import (
         _persisted_result,
         _read_progress,

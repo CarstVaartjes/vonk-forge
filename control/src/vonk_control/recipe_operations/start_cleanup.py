@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import event
 from sqlalchemy.orm import Session, SessionTransaction
-from vonk_agent_protocol import RunState
+from vonk_agent_protocol.state_machines import RunState
 
 from ..admission_locking import set_admission_timeout
 from ..models.execution import RecipeRun

@@ -14,25 +14,22 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from hypothesis import example, given
 from hypothesis import strategies as st
 from sqlalchemy import event, select
-from vonk_agent_protocol import (
-    ControllerErrorCode,
-    LifecycleState,
-    RouteState,
-    UnknownOutcomeError,
-    WaitReason,
-    canonical_message,
-)
 from vonk_agent_protocol.agent_words import (
     AgentClientDecision,
 )
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.error_response import BoundedErrorResponse
 from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
 from vonk_agent_protocol.inventory import (
     HostSettings,
     InventoryRequest,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
+from vonk_agent_protocol.state_machines import RouteState
 from vonk_control.agent_api.common import (
     _ENROLLMENT_TOKEN,
 )
@@ -233,10 +230,10 @@ def test_display_memory_agent_vectors_reobserve_through_http_store_and_cli(
     agent_system, capsys
 ):
     """Catches lost JSON enum evidence, sticky advice, or inventing unknown bytes."""
-    from vonk_agent_protocol import ProjectionCode
+    from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
     from vonk_control.fleet_projection.service import FleetProjection
 
-    from cluster_profiles.cli_render import render_payload
+    from cluster_profiles.cli_render.dispatch import render_payload
 
     client, services, _, clock = agent_system
     vectors = json.loads(

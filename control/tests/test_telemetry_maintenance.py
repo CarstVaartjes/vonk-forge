@@ -8,8 +8,8 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine, delete, select, update
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
-from vonk_agent_protocol.reason_codes import ProjectionCode
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection.service import FleetProjection

@@ -8,17 +8,17 @@ from typing import TYPE_CHECKING
 
 from fastapi import Response
 from sqlalchemy import select
-from vonk_agent_protocol import (
+from vonk_agent_protocol.claims import ClaimRequest
+from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentDirective,
     AgentProgress,
     AgentResult,
-    RecipeRunObservationsWire,
     canonical_message,
 )
-from vonk_agent_protocol.claims import ClaimRequest
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.enrollment import ActivateRequest, IssuedCertificateResponse
+from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 from vonk_agent_protocol.state_machines import CertificateRecordState
 from vonk_agent_protocol.telemetry import TelemetryRequest
 

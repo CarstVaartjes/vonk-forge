@@ -13,12 +13,14 @@ Usage: scripts/test SUITE [--markers EXPR] [--shard I/N] [--durations FILE] [-- 
 SUITE is one of:
   guards      fast cross-area checks in tests/repository_guards.py
   repository  tests/, excluding guards
-  control     control/tests, except the built-image checks, the Rust wire
+  control     control/tests, except the built-image and corpus-acceptance checks, the Rust wire
               bridges and the consumer corpus boundaries (those run in their
               own lanes)
   corpus      the consumer corpus boundaries, against the native probe named
               by VONK_CONSUMER_CORPUS_PROBE
   compose     deploy/compose/tests
+  acceptance  control/tests -m corpus_acceptance, alone, against the built
+              recipe library and disposable PostgreSQL
   images      control/tests -m built_image, against the images named by
               VONK_TEST_CONTROLLER_IMAGE / VONK_TEST_WORKER_IMAGE
 
@@ -64,7 +66,7 @@ case "$suite" in
         paths=(tests) selection=() parallel=(-n auto --dist worksteal) prefix= suite_markers=
         ;;
     control)
-        paths=(control/tests) prefix=control/ suite_markers="not built_image"
+        paths=(control/tests) prefix=control/ suite_markers="not built_image and not corpus_acceptance"
         # The corpus boundaries run where the native probe is built (corpus),
         # so the shards never wait for that build.
         selection=(--ignore-glob='*_wire_bridge.py' --ignore=control/tests/test_consumer_corpus_boundaries.py)
@@ -78,6 +80,10 @@ case "$suite" in
         ;;
     images)
         paths=(control/tests) selection=() parallel=() prefix=control/ suite_markers=built_image
+        ;;
+    acceptance)
+        # Alone (no -n): the whole-corpus import is timed against its own budget.
+        paths=(control/tests) selection=() parallel=() prefix=control/ suite_markers=corpus_acceptance
         ;;
     *)
         usage >&2

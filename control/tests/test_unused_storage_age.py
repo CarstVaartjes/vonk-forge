@@ -5,7 +5,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import InstallationState, RunState
+from vonk_agent_protocol.state_machines import InstallationState, RunState
 
 from .test_catalog_revision_collection import NOW, Catalog
 from .unused_storage_collection_support import (
@@ -83,7 +83,7 @@ def test_age_uninstall_binds_model_retention_in_real_queue(
 ) -> None:
     """Catches preview retaining models while acceptance still asks the agent to erase them."""
     from sqlalchemy import select
-    from vonk_agent_protocol import AgentOperation as Operation
+    from vonk_agent_protocol.contracts import AgentOperation as Operation
     from vonk_control.models.execution import RecipeInstallation
     from vonk_control.models.operations import AgentOperation
     from vonk_control.models.telemetry import NodeInventorySnapshot

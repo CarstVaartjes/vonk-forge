@@ -8,13 +8,13 @@ from typing import cast as typing_cast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.state_machines import (
     InstallationNodeState,
     InstallationState,
     ReservationState,
     RunState,
-    WaitReason,
 )
 
 from ..jobs import states as job_states

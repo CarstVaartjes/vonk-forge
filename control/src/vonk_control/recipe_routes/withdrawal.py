@@ -9,15 +9,11 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    AgentOperation,
-    RoutePublicationState,
-    RunState,
-    WaitReason,
-)
-from vonk_agent_protocol import RouteState as RunRouteState
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.route_activation import SupervisorPhase
+from vonk_agent_protocol.state_machines import RoutePublicationState, RunState
+from vonk_agent_protocol.state_machines import RouteState as RunRouteState
 
 from ..gateway.litellm import LiteLlmGeneration, ServedModelInfo
 from ..gateway.route_runtime import RECIPE_ROUTE_AUTHORITY_ID

@@ -12,18 +12,17 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import (
-    AgentResult,
+from vonk_agent_protocol.contracts import AgentResult
+from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     LifecycleState,
-    OutcomeDone,
     OutcomeKind,
-    ProfileReasonCode,
-    RecipeStopResult,
-    ReservationState,
-    RunState,
     WaitReason,
 )
+from vonk_agent_protocol.outcome import OutcomeDone
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_agent_protocol.recipe_operations import RecipeStopResult
+from vonk_agent_protocol.state_machines import ReservationState, RunState
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs.evidence import read_result_evidence
 from vonk_control.auth import Actor, TokenCodec

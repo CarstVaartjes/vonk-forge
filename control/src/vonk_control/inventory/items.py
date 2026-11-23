@@ -5,8 +5,10 @@ import logging
 from collections.abc import Callable
 from datetime import datetime
 
-from vonk_agent_protocol import UnknownOutcomeError, WaitReason, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 
 from ..models.fleet import AgentNode

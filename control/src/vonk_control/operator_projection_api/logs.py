@@ -8,11 +8,8 @@ from typing import Any
 
 from sqlalchemy import ColumnElement, or_, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    LifecycleState,
-    ObservationCause,
-)
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, ObservationCause
 
 from .. import agent_operation_states
 from ..catalog.revision_collection import GRACE

@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import select, update
-from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.fleet_profile_contract.definitions import UnavailableFleetProfileView
 from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchAdapterState,
@@ -408,7 +408,7 @@ def test_the_exact_identity_fence_of_a_recovery_still_refuses() -> None:
             "model": accepted.model.model_copy(update={"artifact_set_sha256": "e" * 64})
         }
     )
-    from vonk_agent_protocol import UnknownOutcomeError
+    from vonk_agent_protocol.outcome import UnknownOutcomeError
 
     admitted = False
     try:
@@ -428,7 +428,7 @@ def test_the_exact_identity_fence_of_a_recovery_still_refuses() -> None:
 def test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted(damage) -> None:
     from types import SimpleNamespace
 
-    from vonk_agent_protocol import LifecycleState
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
     from .non_blocking import assert_ended_without_blocking
 
@@ -500,7 +500,7 @@ def test_planner_observation_damage_admits_load_and_reobserves(damage):
     """Catches an internal assessment becoming a caller refusal or dispatch."""
     from datetime import timedelta
 
-    from vonk_agent_protocol import LifecycleState
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
     from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
 
     from .fleet_profiles_support import _assessment
@@ -562,7 +562,7 @@ def test_permanent_planner_unknown_waits_past_the_old_cap_until_a_fresh_request(
     """
     from datetime import timedelta
 
-    from vonk_agent_protocol import LifecycleState
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
     from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
 
     from .fleet_profiles_support import _assessment
@@ -621,8 +621,8 @@ def test_damaged_newest_pending_plan_does_not_starve_readable_admission():
     """Catches a damaged batch head keeping admission pending while healthy work waits."""
     from datetime import timedelta
 
-    from vonk_agent_protocol import LifecycleState
     from vonk_agent_protocol.agent_words import ProfileOperationKind
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
     sessions = _database()
     _, revision_id = _seed(sessions)
@@ -673,8 +673,8 @@ def test_damaged_retry_projection_cannot_hide_a_waiting_admission():
     """
     from datetime import timedelta
 
-    from vonk_agent_protocol import LifecycleState
     from vonk_agent_protocol.agent_words import ProfileOperationKind
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
     from vonk_control.stored.json_values import write_guard_mode
 
     sessions = _database()

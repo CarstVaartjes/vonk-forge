@@ -1519,7 +1519,7 @@ def test_edge_body_limit_errors_are_distinct_from_proxied_controller_limits(tmp_
     import http.client
     import time
 
-    from vonk_agent_protocol import ControllerErrorCode
+    from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 
     text = DEV_CADDYFILE.read_text()
     snippets = []

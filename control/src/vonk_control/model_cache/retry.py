@@ -6,13 +6,15 @@ import hashlib
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
-from vonk_agent_protocol import (
+from vonk_agent_protocol.http_failure import TransientReason
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
+)
+from vonk_agent_protocol.reason_codes.model_cache import (
     ModelAccessReason,
     ModelCacheCode,
 )
-from vonk_agent_protocol.http_failure import TransientReason
 
 from ..admission_locking import admitting
 from ..lifecycle.types import Effect, Outcome, Reported

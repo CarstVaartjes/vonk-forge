@@ -16,15 +16,14 @@ from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    Disposition,
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.enrollment import NodeId
+from vonk_agent_protocol.lifecycle_vocabulary import (
     OperatorActionName,
-    SecurityRefusalError,
     SecurityRefusalReason,
-    UnknownOutcomeError,
     WaitReason,
 )
-from vonk_agent_protocol.enrollment import NodeId
+from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 
 from ..admission_locking import ConstraintReplay, admitting
 from ..bounded_retry import REQUEST_PAUSES, bounded_attempts

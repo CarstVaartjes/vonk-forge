@@ -8,16 +8,12 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    InstallAdmissionCode,
-    InvalidRequestError,
-    InvalidRequestReason,
-    UnknownOutcomeError,
-    WaitReason,
-)
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
+from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.admission import InstallAdmissionCode
 
 from ..categorized_errors import (
     BookkeepingUnknown,

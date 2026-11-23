@@ -10,16 +10,15 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, load_only
-from vonk_agent_protocol import (
-    ArtifactLifecycleCode,
-    Disposition,
-    InstallationState,
+from vonk_agent_protocol.agent_words import Disposition, RunSwitchReasonScopeName
+from vonk_agent_protocol.inventory import ModelStoreObject
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
-    ModelCacheCode,
 )
-from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-from vonk_agent_protocol.inventory import ModelStoreObject
+from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
+from vonk_agent_protocol.state_machines import InstallationState
 from vonk_forge_contracts import ModelDefinition
 
 from ..admission_locking import (

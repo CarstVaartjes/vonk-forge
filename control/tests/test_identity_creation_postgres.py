@@ -13,13 +13,13 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import event, select, update
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import (
-    AgentOperation,
+from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.fleet import DistributionCode
+from vonk_agent_protocol.state_machines import (
     DistributionAssignmentState,
-    DistributionCode,
-    LifecycleState,
+    NodeIdentityState,
 )
-from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.admission_locking import AdmissionLockKey, node_admission_key
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.service import CatalogService

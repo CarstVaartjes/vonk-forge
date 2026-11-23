@@ -9,11 +9,8 @@ cause dropped, and the run-switch re-entered the start phase forever.
 
 import pytest
 from sqlalchemy import select, update
-from vonk_agent_protocol import (
-    AgentOperation,
-    InvalidRequestError,
-    UnknownOutcomeError,
-)
+from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_control.failure_classification import error_detail, is_definite
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.fleet import AgentNodeContact

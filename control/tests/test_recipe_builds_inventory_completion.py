@@ -8,10 +8,8 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import Table, select
-from vonk_agent_protocol import (
-    LifecycleState,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,
 )
@@ -385,7 +383,8 @@ def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
         assert parent is not None and parent.request_id == "source-read-recovery"
     assert rederived == []
     fault[0] = "permission"
-    from vonk_agent_protocol import Disposition, SecurityRefusalError
+    from vonk_agent_protocol.agent_words import Disposition
+    from vonk_agent_protocol.outcome import SecurityRefusalError
     from vonk_control.recipe_image_availability.contracts import (
         availability_disposition,
     )

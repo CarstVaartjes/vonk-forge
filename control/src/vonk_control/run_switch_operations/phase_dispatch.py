@@ -12,17 +12,14 @@ from typing import cast as typing_cast
 import httpx2
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    LifecycleState,
-    OperationProgress,
-    RouteState,
-    RunState,
-    RunSwitchCode,
-    RuntimePreflightCode,
-    UnknownOutcomeError,
-    run_switch_code,
-)
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReportedPhase
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
+from vonk_agent_protocol.reason_codes.vocabulary import run_switch_code
+from vonk_agent_protocol.state_machines import RouteState, RunState
+from vonk_agent_protocol.wire_model import OperationProgress
 
 from ..admission_locking import (
     AdmissionLockBusy,

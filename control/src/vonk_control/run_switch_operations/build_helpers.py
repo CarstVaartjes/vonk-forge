@@ -5,10 +5,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from pydantic import ValidationError
-from vonk_agent_protocol import (
-    RunSwitchCode,
-    WaitReason,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
 from ..models.cache import RecipeBuild
 from ..run_switch_contract.evidence import FreshnessEvidence

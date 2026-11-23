@@ -9,17 +9,6 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    InstallationState,
-    InvalidRequestReason,
-    RecipeJobInputRequest,
-    RecipeJobOutputLimits,
-    RecipeJobRunRequest,
-    RunState,
-    UnknownOutcomeError,
-    WaitReason,
-    recipe_job_manifest_sha256,
-)
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
@@ -33,6 +22,17 @@ from vonk_agent_protocol.job_limits import (
     MAX_OUTPUT_TOTAL_BYTES,
     MAX_TIMEOUT_SECONDS,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.recipe_jobs import (
+    RecipeJobInputRequest,
+    RecipeJobOutputLimits,
+    RecipeJobRunRequest,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_sha256 as recipe_job_manifest_sha256,
+)
+from vonk_agent_protocol.state_machines import InstallationState, RunState
 
 from .. import agent_operation_states as aos
 from ..admission_locking import ConstraintReplay, admitting

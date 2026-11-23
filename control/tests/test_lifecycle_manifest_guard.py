@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from vonk_agent_protocol import ContainerRuntimeAction
+from vonk_agent_protocol.host_helper import ContainerRuntimeAction
 from vonk_control.host_helper_authority import HostRuntimeAuthorityService
 from vonk_control.recipe_operations.constants import _MANIFEST_BOUND_KINDS
 from vonk_control.recipe_operations.errors import RecipeRequestInvalid

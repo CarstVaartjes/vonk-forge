@@ -7,8 +7,9 @@ from typing import cast
 import pytest
 from sqlalchemy import Column, MetaData, Table, select, text
 from sqlalchemy.engine import Engine
-from vonk_agent_protocol import RecipeRunObservationsWire, canonical_message
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.inventory import InventoryRequest
+from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.model_cache.contract import CacheManifest, ModelCacheTransfer
 from vonk_control.models.execution import RecipeInstallation

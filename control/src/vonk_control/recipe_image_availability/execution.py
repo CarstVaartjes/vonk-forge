@@ -9,12 +9,9 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    LifecycleState,
-    RecipeImageCode,
-    UnknownOutcomeError,
-    WaitReason,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_forge_contracts import RecipeDefinition
 
 from ..failure_classification import is_security_failure

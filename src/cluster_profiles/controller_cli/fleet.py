@@ -23,14 +23,14 @@ from ..cli_states_generated import (
     PROFILE_NOT_ISSUED,
     STOP_UNCONFIRMED,
 )
-from ..control_client import (
+from ..control_client.errors import (
     ControlClientError,
     ControlForbidden,
     ControlMalformedResponse,
     ControlNotFound,
     ControlUnauthorized,
-    validate_control_document,
 )
+from ..control_client.schema import validate_control_document
 from .common import (
     ControllerClient,
     _log_since,

@@ -20,13 +20,10 @@ from hypothesis import strategies as st
 from sqlalchemy import create_engine, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import (
-    CatalogSyncState,
-    RecipeBuildCode,
-    RecipePackageCode,
-    WaitReason,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode, RecipePackageCode
+from vonk_agent_protocol.state_machines import CatalogSyncState
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping
 from vonk_control.catalog.service import CatalogService

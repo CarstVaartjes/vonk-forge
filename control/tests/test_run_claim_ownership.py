@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import RunState
+from vonk_agent_protocol.state_machines import RunState
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service

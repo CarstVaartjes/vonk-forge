@@ -8,7 +8,7 @@ from pathlib import Path
 
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleGate
 from vonk_control.model_cache.contract import ModelCacheRemovalResult
 from vonk_control.model_cache.service import ModelCacheService

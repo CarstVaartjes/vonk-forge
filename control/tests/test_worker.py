@@ -7,7 +7,8 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import Disposition, LifecycleState
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.queue import JobService
@@ -47,7 +48,8 @@ def test_shutdown_retries_unknown_closer_and_continues_other_services(
     tmp_path, monkeypatch
 ):
     """Catches abandoning remaining executors after one checkpoint is busy."""
-    from vonk_agent_protocol import UnknownOutcomeError, WaitReason
+    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+    from vonk_agent_protocol.outcome import UnknownOutcomeError
     from vonk_control.worker import loop as module
 
     calls = []
@@ -711,7 +713,7 @@ def test_a_wait_keeps_its_five_second_cadence(tmp_path):
 
 
 def test_a_security_refusal_stays_refused_until_its_cause_clears(tmp_path, monkeypatch):
-    from vonk_agent_protocol import SecurityRefusalError
+    from vonk_agent_protocol.outcome import SecurityRefusalError
 
     now = [datetime(2026, 8, 3, tzinfo=UTC)]
     monkeypatch.setattr(
@@ -857,7 +859,11 @@ def test_coordinator_fault_has_durable_api_custody_and_restart_resume(
     postgres_engine, fault
 ):
     """Catches JobService-coupled custody, volatile waits and unchanged retries."""
-    from vonk_agent_protocol import Disposition, WaitOwnerKind, WaitResumeCondition
+    from vonk_agent_protocol.agent_words import Disposition
+    from vonk_agent_protocol.lifecycle_vocabulary import (
+        WaitOwnerKind,
+        WaitResumeCondition,
+    )
     from vonk_control.coordinator_contract import CoordinatorFailureEvidence
     from vonk_control.due_waits import DueWaitBackstop, WaitSource
     from vonk_control.models.coordinator import CoordinatorFailure

@@ -6,7 +6,8 @@ import json
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import RecipeStartResult, RouteState, canonical_message
+from vonk_agent_protocol.contracts import RecipeStartResult, canonical_message
+from vonk_agent_protocol.state_machines import RouteState
 from vonk_control.bounded_json import require_mapping
 from vonk_control.jobs.documents import (
     DistributedRecoveryMarker,
@@ -159,7 +160,7 @@ def test_profile_stop_authorization_documents_round_trip():
     """Catch partial serialization losing Stop scope or profile parent defaults."""
     import hashlib
 
-    from vonk_agent_protocol import RecipeStopPayload
+    from vonk_agent_protocol.recipe_operations import RecipeStopPayload
     from vonk_control.fleet_profiles.stop_authority import (
         JobRunStopScope,
         ProfileJobRunStopAuthorization,

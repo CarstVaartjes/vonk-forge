@@ -30,10 +30,8 @@ from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    DistributionAssignmentState,
-    ImageStoreCode,
-)
+from vonk_agent_protocol.reason_codes.images import ImageStoreCode
+from vonk_agent_protocol.state_machines import DistributionAssignmentState
 
 from .artifact_jobs.lifecycle import (
     ArtifactIdentity,
