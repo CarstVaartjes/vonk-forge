@@ -194,6 +194,7 @@ def _recipe_projection(
             title=title,
         ),
         local=LibraryLocalState(controller=UNKNOWN),
+        actions=[],
         model_selectors=models,
         node_count=1,
         resources=LibraryResourceProjection(),

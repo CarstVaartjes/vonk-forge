@@ -8,25 +8,21 @@ the words come from ``cli_states_generated``, generated from the contract by
 from __future__ import annotations
 
 from .cli_states_generated import (
-    BACKOFF,
     CANCELLED,
     FAILED,
+    LIVE_LIFECYCLE_STATES,
     NEEDS_OPERATOR,
     OBSERVING,
-    QUEUED,
-    RUNNING,
-    SUCCEEDED,
+    TERMINAL_LIFECYCLE_STATES,
 )
 
 # -- artifact jobs ---------------------------------------------------------------
 
-ENDED_STATES = frozenset({SUCCEEDED, FAILED, CANCELLED})
+ENDED_STATES = TERMINAL_LIFECYCLE_STATES
 #: Ended and left no result: running the same request again starts a new job.
 ENDED_WITHOUT_RESULT = frozenset({FAILED, CANCELLED})
 #: Every lifecycle state an artifact job may report.
-ARTIFACT_JOB_STATES = frozenset(
-    {QUEUED, RUNNING, BACKOFF, OBSERVING, NEEDS_OPERATOR, *ENDED_STATES}
-)
+ARTIFACT_JOB_STATES = LIVE_LIFECYCLE_STATES | TERMINAL_LIFECYCLE_STATES
 
 
 def preparation(job: dict[str, object]) -> str | None:
@@ -50,7 +46,7 @@ def lifecycle_state(job: dict[str, object]) -> object:
 
 
 #: Artifact-job states a CLI user reconnects to (the job is still in flight).
-ARTIFACT_JOB_IN_FLIGHT = frozenset({QUEUED, RUNNING, BACKOFF, OBSERVING})
+ARTIFACT_JOB_IN_FLIGHT = LIVE_LIFECYCLE_STATES - {NEEDS_OPERATOR}
 
 # -- operations ------------------------------------------------------------------
 

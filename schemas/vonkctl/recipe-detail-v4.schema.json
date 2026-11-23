@@ -1,6 +1,20 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
+    "actions": {
+      "items": {
+        "enum": [
+          "download",
+          "remove",
+          "cancel",
+          "follow"
+        ],
+        "type": "string"
+      },
+      "maxItems": 4,
+      "title": "Actions",
+      "type": "array"
+    },
     "alignment": {
       "anyOf": [
         {
@@ -126,7 +140,7 @@
       "$ref": "definitions.schema.json#/$defs/LibraryResourceProjection"
     },
     "schema_version": {
-      "const": 3,
+      "const": 4,
       "title": "Schema Version",
       "type": "integer"
     },
@@ -161,6 +175,7 @@
     "usage",
     "resources",
     "local",
+    "actions",
     "updated_at",
     "node_count",
     "engine",
@@ -168,6 +183,6 @@
     "model_documents",
     "schema_version"
   ],
-  "title": "vonkctl recipe-detail document (schema_version 3)",
+  "title": "vonkctl recipe-detail document (schema_version 4)",
   "type": "object"
 }

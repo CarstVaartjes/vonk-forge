@@ -1,11 +1,21 @@
-import { LifecycleState } from "../../api/vocabulary.generated";
+import {
+  LibraryCacheState as CacheWord,
+  LifecycleState,
+  TERMINAL_LIFECYCLE_STATES,
+} from "../../api/vocabulary.generated";
 import { compareWire, displayRatio } from "../../api/contract-numeric";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CacheRemovalReview, ControlApi, ModelCacheOperatorResponse } from "../../api/types";
+import type {
+  CacheRemovalReview,
+  ControlApi,
+  LibraryViewModel,
+  ModelCacheOperatorResponse,
+} from "../../api/types";
 
 import { failureNotice } from "../../lib/error-display";
 import { CancelOperation } from "../ui/cancel-operation";
 import { WaitingFor } from "../ui/waiting-for";
+import { LibraryPreparation } from "./library-preparation";
 import { useToast } from "../ui/toast";
 import { CacheRemovalProgress } from "../cache-removal/cache-removal-progress";
 import {
@@ -17,9 +27,7 @@ import {
 } from "../cache-removal/cache-removal-operations";
 import { CacheRemovalReviewDetails } from "../cache-removal/cache-removal-review";
 
-const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
 const POLL_INTERVAL_MS = 1_000;
-const MAX_POLL_ATTEMPTS = 180;
 
 export type LibraryCacheState = "cached" | "preparing" | "not_cached" | "failed" | "unknown";
 
@@ -53,6 +61,7 @@ export function LibraryCacheAction({
   state,
   onPrepared,
   fleetOnly = false,
+  preparation,
 }: {
   api: ControlApi;
   selector: string;
@@ -60,6 +69,8 @@ export function LibraryCacheAction({
   state: LibraryCacheState;
   onPrepared(): void;
   fleetOnly?: boolean;
+  /** The live preparation the Controller reports (its `cancel` action), read after a reload. */
+  preparation?: LibraryViewModel["local"]["preparation"];
 }) {
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -102,26 +113,16 @@ export function LibraryCacheAction({
       toast.info("Model download queued.");
       setOperationId(current.operation_id ?? "");
       setWaiting(current);
-      let attempts = 0;
-      while (
-        !TERMINAL_STATES.has(current.state) &&
-        current.operation_id &&
-        attempts < MAX_POLL_ATTEMPTS
-      ) {
+      // The operation is followed until it ends; leaving the page stops only this observation.
+      while (!TERMINAL_LIFECYCLE_STATES.has(current.state) && current.operation_id) {
         await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
         if (controller.signal.aborted) return;
         current = await api.modelCacheOperation(current.operation_id, controller.signal);
-        attempts += 1;
         setPhase(progressLabel(current));
         setWaiting(current);
       }
       if (controller.signal.aborted) return;
       setBusy(false);
-      if (!TERMINAL_STATES.has(current.state)) {
-        // Still queued or retrying: the Controller carries on without this page.
-        setPhase("Still preparing; the Controller keeps going in the background.");
-        return;
-      }
       if (current.state === "succeeded") {
         setPhase("");
         toast.success("Model downloaded.");
@@ -236,7 +237,7 @@ export function LibraryCacheAction({
             <button
               type="button"
               className="button secondary compact"
-              disabled={busy || !review || review.blockers.length > 0}
+              disabled={busy || !review?.submittable}
               onClick={() => void remove()}
             >
               Confirm remove
@@ -294,8 +295,14 @@ export function LibraryCacheAction({
             ? "Retry download"
             : "Download"}
       </button>
-      {(busy || state === "preparing") && <span role="status">{phase || "queued"}</span>}
-      {(busy || state === "preparing") && (
+      {/* This page started it: its own observation. Otherwise the Controller's. */}
+      {!busy && preparation && (
+        <LibraryPreparation api={api} preparation={preparation} what="model download" />
+      )}
+      {(busy || (state === CacheWord.PREPARING && !preparation)) && (
+        <span role="status">{phase || LifecycleState.QUEUED}</span>
+      )}
+      {(busy || (state === CacheWord.PREPARING && !preparation)) && (
         <WaitingFor blockers={waiting.blockers} nextAttemptAt={waiting.next_attempt_at} />
       )}
       {busy && operationId && (

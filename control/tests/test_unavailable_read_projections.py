@@ -19,7 +19,7 @@ from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileView,
     UnavailableFleetProfileView,
 )
-from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profile_contract.review import FleetProfilePreviewResponse
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import FleetProfile
 from vonk_control.models.jobs import Job
@@ -286,7 +286,9 @@ def test_corrupt_saved_definition_does_not_become_empty_or_hide_other_profiles(
     reviewed = client.post("/api/profile/1/preview", headers=headers)
     assert reviewed.status_code == 200, reviewed.text
     assert (
-        FleetProfilePreview.model_validate_json(reviewed.content).profile_definition
+        FleetProfilePreviewResponse.model_validate_json(
+            reviewed.content
+        ).profile_definition
         == saved.definition
     )
     # Equal content keeps the existing no-op replay at the committed revision.

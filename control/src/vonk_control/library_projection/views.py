@@ -29,6 +29,7 @@ from ..library.contract import (
     RecipeLibraryResponse,
     _utc,
     model_actions,
+    recipe_actions,
 )
 from ..model_cache.resolution import ResolutionMixin
 from ..model_cache.source_helpers import _model_selector
@@ -518,18 +519,19 @@ def recipe_library(
             snapshot = self._local_state_snapshot(
                 [item.identity.content_sha256 for item in candidates]
             )
-            candidates = [
-                item.model_copy(
-                    update={
-                        "local": self._local(
-                            item.identity.content_sha256,
-                            kind=ReceiptOwner.RECIPE,
-                            snapshot=snapshot,
-                        )
-                    }
+            observed = []
+            for item in candidates:
+                local = self._local(
+                    item.identity.content_sha256,
+                    kind=ReceiptOwner.RECIPE,
+                    snapshot=snapshot,
                 )
-                for item in candidates
-            ]
+                observed.append(
+                    item.model_copy(
+                        update={"local": local, "actions": recipe_actions(local)}
+                    )
+                )
+            candidates = observed
         if assess and not filtering_assessment:
             candidates = self._assessed(candidates, deadline=deadline)
         return candidates

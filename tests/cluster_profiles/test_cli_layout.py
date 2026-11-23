@@ -456,3 +456,75 @@ def test_a_cached_model_with_a_succeeded_preparation_still_hints_remove(printed)
     )
     assert any("vonkctl model remove p/m" in line for line in lines)
     assert not any("vonkctl model download" in line for line in lines)
+
+
+@pytest.mark.parametrize("noun", ["model", "recipe"])
+def test_a_live_preparation_is_followed_and_cancelled_through_the_model_operation(
+    printed, noun
+):
+    """A recipe's preparation is a model-cache operation too, so both nouns name it."""
+
+    operation = "11111111-1111-4111-8111-111111111111"
+    live = {"state": "running", "phase": "downloading", "operation_id": operation}
+    item = _model_item("preparing", ["cancel", "follow"], live)
+    lines = printed(_library_item, item, noun, detail=False)
+    assert any(f"vonkctl model progress {operation} --follow" in l for l in lines)
+    assert any(f"vonkctl model cancel {operation} --yes" in l for l in lines)
+    assert not any(f"vonkctl {noun} download" in line for line in lines)
+
+
+def test_a_recipe_offers_the_actions_the_controller_lists(printed):
+    lines = printed(
+        _library_item, _model_item("cached", ["remove"]), "recipe", detail=False
+    )
+    assert any("vonkctl recipe remove p/m" in line for line in lines)
+    lines = printed(
+        _library_item, _model_item("not_cached", ["download"]), "recipe", detail=False
+    )
+    assert any("vonkctl recipe download p/m" in line for line in lines)
+
+
+def test_a_serving_model_row_names_the_sparks_it_runs_on():
+    item = _model_item("cached", ["remove"]) | {
+        "local": {"controller": "cached", "running_on": ["spk_1"], "preparation": None},
+        "resources": {},
+    }
+    row = library_render._library_row(item, "model")
+    assert "1 Spark" in row
+    assert "no" not in row
+
+
+def _activity_lines(printed, state):
+    owner = {"kind": "job", "id": "job-1"}
+    payload = {
+        "operations": [
+            {
+                "id": "op-1",
+                "owner": owner,
+                "kind": "profile.load",
+                "state": state,
+                "created_at": "2026-11-23T00:00:00Z",
+                "node_ids": [],
+            }
+        ],
+        "total": 1,
+        "next_cursor": None,
+    }
+    return printed(_activity, payload, None)
+
+
+@pytest.mark.parametrize(
+    ("state", "outcome", "reconnect"),
+    [
+        ("running", "in progress", True),
+        ("failed", "unsuccessful", False),
+        ("cancelled", "cancelled", False),
+        ("succeeded", "recorded", False),
+    ],
+)
+def test_activity_groups_a_cancel_apart_and_reconnects_only_live_work(
+    printed, state, outcome, reconnect
+):
+    lines = _activity_lines(printed, state)
+    assert f"Outcome: {outcome}" in lines
+    assert any(line.startswith("Reconnect:") for line in lines) is reconnect

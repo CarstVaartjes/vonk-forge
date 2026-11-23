@@ -92,11 +92,18 @@ def _review(
         ],
         "observed_at": "2026-09-24T10:00:00Z",
         "review_digest": digest,
+        "submittable": False,
     }
 
 
 def _unblocked_review(review: dict[str, object]) -> dict[str, object]:
-    return {**review, "references": [], "active_work": [], "blockers": []}
+    return {
+        **review,
+        "references": [],
+        "active_work": [],
+        "blockers": [],
+        "submittable": True,
+    }
 
 
 class _FakeController:
@@ -719,3 +726,21 @@ def test_fleet_review_is_read_only_and_submission_binds_its_scope(
     replay = dispatch_module.run_controller(args, client, lambda: _REQUEST_KEY)
     assert replay["operation_id"] == result["operation_id"]
     assert sum(method == "POST" for method, *_ in client.calls) == 1
+
+
+def test_confirm_is_offered_only_for_a_review_the_controller_calls_submittable(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A blocked review that frees nothing must not print a command to confirm it."""
+
+    render_payload(_review("model", "publisher/model"), "model", action="preview")
+    blocked = capsys.readouterr().out
+    render_payload(
+        _unblocked_review(_review("model", "publisher/model")),
+        "model",
+        action="preview",
+    )
+    clear = capsys.readouterr().out
+
+    assert "Confirm:" not in blocked
+    assert "Confirm:" in clear
