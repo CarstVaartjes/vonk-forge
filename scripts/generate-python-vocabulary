@@ -41,7 +41,6 @@ def cli_words() -> str:
     )
     from vonk_agent_protocol.lifecycle_vocabulary import (
         LifecycleState,
-        OperatorActionName,
         OutcomeKind,
         StopOutcome,
     )
@@ -53,6 +52,8 @@ def cli_words() -> str:
     from vonk_agent_protocol.state_machines import RouteState, RunState
     from vonk_control.artifact_jobs.job_contract import JobContractState
     from vonk_control.cache_removal_review import ArtifactKind, CacheAssetDisposition
+    from vonk_control.library.contract import LibraryCacheState
+    from vonk_control.model_cache.contract import CacheOperationKind
     from vonk_forge_contracts.qualification_status import (
         QualificationOutcome,
         QualificationStatus,
@@ -92,8 +93,10 @@ def cli_words() -> str:
         "ASSET_RETAIN_SHARED": CacheAssetDisposition.RETAIN_SHARED,
         "ASSET_RETAIN_REFERENCED": CacheAssetDisposition.RETAIN_REFERENCED,
         "ASSET_RETAIN_OBSERVATION_UNAVAILABLE": CacheAssetDisposition.RETAIN_OBSERVATION_UNAVAILABLE,
-        "ACTION_DOWNLOAD": OperatorActionName.DOWNLOAD,
-        "ACTION_REMOVE": OperatorActionName.REMOVE,
+        "ACTION_DOWNLOAD": CacheOperationKind.DOWNLOAD,
+        "ACTION_REMOVE": CacheOperationKind.REMOVE,
+        "CACHE_NOT_CACHED": LibraryCacheState.NOT_CACHED,
+        "CACHE_FAILED": LibraryCacheState.FAILED,
         "JOB_KIND_CLEANUP": ProfileChildJobKind.CLEANUP,
         "ASSET_VERIFIED": AssetAvailability.VERIFIED,
         **{

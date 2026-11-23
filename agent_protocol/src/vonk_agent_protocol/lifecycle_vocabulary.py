@@ -164,8 +164,6 @@ class LifecycleEventKind(WireEnum):
 class OperatorActionName(WireEnum):
     """The operator actions a row can advertise and the core accepts."""
 
-    DOWNLOAD = "download"
-    REMOVE = "remove"
     RESUME = "resume"
     RETIRE = "retire"
     RETRY = "retry"

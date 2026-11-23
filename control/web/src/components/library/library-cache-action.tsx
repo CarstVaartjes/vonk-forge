@@ -153,10 +153,8 @@ export function LibraryCacheAction({
     setBusy(true);
     setError("");
     try {
-      const current = fleetOnly
-        ? await api.modelRemovalReview(selector, controller.signal, true)
-        : await api.modelRemovalReview(selector, controller.signal);
-      if (fleetOnly && !current.fleet) throw new Error("Fleet removal review is unavailable.");
+      const current = await api.modelRemovalReview(selector, controller.signal, true);
+      if (!current.fleet) throw new Error("Fleet removal review is unavailable.");
       if (controller.signal.aborted) return;
       validateRemovalReview(current, { kind: "model", selector, modelContentSha256 });
       setReview(current);
@@ -166,15 +164,10 @@ export function LibraryCacheAction({
     } finally {
       if (!controller.signal.aborted) setBusy(false);
     }
-  }, [api, modelContentSha256, selector, fleetOnly]);
+  }, [api, modelContentSha256, selector]);
 
   const remove = useCallback(async () => {
-    if (
-      !review ||
-      (!review.fleet && review.blockers.length) ||
-      review.target_identity !== modelContentSha256
-    )
-      return;
+    if (!review || review.target_identity !== modelContentSha256) return;
     abort.current?.abort();
     const controller = new AbortController();
     abort.current = controller;
@@ -192,21 +185,11 @@ export function LibraryCacheAction({
       setBusy(false);
       setConfirming(false);
       setReview(null);
-      if (review.fleet) {
-        toast.info(
-          result.state === LifecycleState.SUCCEEDED
-            ? "Fleet cleanup completed; retained parts are shown below."
-            : "Fleet model removal queued.",
-        );
-        setRemoval({ intent, initial: result });
-        return;
-      }
-      if (result.state === "succeeded") {
-        toast.success("Model removed from the cache.");
-        onPrepared();
-        return;
-      }
-      toast.info("Model removal queued.");
+      toast.info(
+        result.state === LifecycleState.SUCCEEDED
+          ? "Fleet cleanup completed; retained parts are shown below."
+          : "Fleet model removal queued.",
+      );
       setRemoval({ intent, initial: result });
     } catch (value) {
       if (controller.signal.aborted) return;
@@ -234,7 +217,6 @@ export function LibraryCacheAction({
         initial={removal.initial}
         initialError={removal.initialError}
         onComplete={() => {
-          if (!fleetOnly) setRemoval(null);
           onPrepared();
         }}
         onDismiss={() => setRemoval(null)}

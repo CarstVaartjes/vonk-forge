@@ -1,4 +1,4 @@
-import { OperatorActionName } from "../../api/vocabulary.generated";
+import { CacheOperationKind, LibraryCacheState } from "../../api/vocabulary.generated";
 import { addWire, compareWire, formatWire, type WireNumber } from "../../api/contract-numeric";
 import type { MouseEvent } from "react";
 import { useState } from "react";
@@ -191,7 +191,13 @@ function ModelRevisionsRow({
   const running = (model.local.running_on ?? []).length;
   const preparation = model.local.preparation;
   // One rule, decided by the Controller: download or remove, never a button that cannot apply.
-  const actions = model.actions ?? [];
+  const actions = model.actions;
+  const downloadable = actions.includes(CacheOperationKind.DOWNLOAD);
+  // An idle partial set reads as preparing but can be resumed; only a live preparation cannot.
+  const downloadState =
+    downloadable && model.local.controller === LibraryCacheState.PREPARING
+      ? LibraryCacheState.NOT_CACHED
+      : model.local.controller;
   // A recipe may reference the same model in more than one selection with
   // different roles, so list each recipe once per model.
   const recipes = [
@@ -249,17 +255,17 @@ function ModelRevisionsRow({
           </label>
         )}
         <div className="library-model-actions">
-          {(actions.includes(OperatorActionName.DOWNLOAD) || preparation) && (
+          {(downloadable || model.local.controller === LibraryCacheState.PREPARING) && (
             <LibraryCacheAction
               key={key}
               api={api}
               onPrepared={onPrepared}
               selector={`${model.model.publisher}/${model.model.slug}`}
               modelContentSha256={model.model.content_sha256}
-              state={model.local.controller}
+              state={downloadState}
             />
           )}
-          {actions.includes(OperatorActionName.REMOVE) && (
+          {actions.includes(CacheOperationKind.REMOVE) && (
             <LibraryCacheAction
               fleetOnly
               key={`${key}-fleet`}

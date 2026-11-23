@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { vi } from "vitest";
-import { LifecycleState } from "../../api/vocabulary.generated";
+import { CacheOperationKind } from "../../api/vocabulary.generated";
 import type { ControlApi } from "../../api/types";
 import { cacheRemovalReview } from "../../test-fixtures/cache-removal";
 import { libraryViewSnapshot } from "../../test-fixtures/library";
@@ -143,11 +143,175 @@ test("prepares the Controller cache for an uncached model", async () => {
   expect(requestKey).toMatch(/^[0-9a-f-]{36}$/);
 });
 
+test("offers the same model filters as vonkctl model library", () => {
+  renderModels();
+  fireEvent.click(screen.getByText("Filters"));
+  for (const name of [
+    "Filter capabilities",
+    "Filter family",
+    "Filter version",
+    "Filter quantization",
+    "Filter publisher",
+    "Filter alignment",
+    "Filter exact model",
+  ]) {
+    expect(screen.getByRole("combobox", { name })).toBeVisible();
+  }
+});
+
+test("offers the same server ordering controls as vonkctl model library", () => {
+  // Break caught: the Models view keeps only the client-side filters, so its
+  // order and recency can no longer match the request the Library page makes.
+  const onFiltersChange = vi.fn();
+  render(
+    <LibraryModelsView
+      api={cacheApi()}
+      entries={[]}
+      modelInventory={[libraryViewSnapshot.models[0]!]}
+      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+      onFiltersChange={onFiltersChange}
+      onNavigate={() => undefined}
+      onQueryChange={() => undefined}
+      onRefresh={async () => undefined}
+      path="/library?view=models"
+      query=""
+    />,
+  );
+  fireEvent.click(screen.getByText("Filters"));
+  for (const name of ["Sort Library", "Filter updated"]) {
+    expect(screen.getByRole("combobox", { name })).toBeVisible();
+  }
+  fireEvent.change(screen.getByRole("combobox", { name: "Sort Library" }), {
+    target: { value: "name" },
+  });
+  expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ sort: "name" }));
+  fireEvent.change(screen.getByRole("combobox", { name: "Filter updated" }), {
+    target: { value: "31d" },
+  });
+  expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ updated: "31d" }));
+});
+
+test("filters models by exact selector and preserves the current route shape", () => {
+  const onFiltersChange = vi.fn();
+  render(
+    <LibraryModelsView
+      api={cacheApi()}
+      entries={buildLibraryRecipeRecords(libraryViewSnapshot)}
+      modelInventory={[libraryViewSnapshot.models[0]!]}
+      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+      onFiltersChange={onFiltersChange}
+      onNavigate={() => undefined}
+      onQueryChange={() => undefined}
+      onRefresh={async () => undefined}
+      path="/library?view=models"
+      query=""
+    />,
+  );
+  fireEvent.click(screen.getByText("Filters"));
+  fireEvent.change(screen.getByRole("combobox", { name: "Filter exact model" }), {
+    target: {
+      value:
+        libraryViewSnapshot.models[0]!.model.publisher +
+        "/" +
+        libraryViewSnapshot.models[0]!.model.slug +
+        "@" +
+        libraryViewSnapshot.models[0]!.model.content_sha256,
+    },
+  });
+  expect(onFiltersChange).toHaveBeenCalledWith(
+    expect.objectContaining({ model: expect.stringContaining("@") }),
+  );
+});
+
+test("searches model titles without invoking update endpoints", () => {
+  renderModels("Ling 3.0 Flash DSpark companion");
+  expect(screen.getByRole("heading", { name: "Ling 3.0 Flash DSpark companion" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: /update/i })).toBeNull();
+});
+
+test("counts Models, not quantization variants, and bounds the list with Show more", () => {
+  const base = libraryViewSnapshot.models[0]!;
+  const quantized = {
+    ...base,
+    model: { ...base.model, slug: `${base.model.slug}-q8` },
+    quantization: "q8",
+  };
+  const more = Array.from({ length: 45 }, (_, index) => ({
+    ...base,
+    model: { ...base.model, slug: `bulk-${index}` },
+    model_document: {
+      ...base.model_document,
+      identity: {
+        ...base.model_document.identity,
+        model: { ...base.model_document.identity.model, slug: `bulk-${index}` },
+      },
+    },
+    model_display: {
+      ...base.model_display!,
+      lineage: { ...base.model_display!.lineage!, model: `bulk-${index}` },
+    },
+  }));
+  render(
+    <LibraryModelsView
+      api={cacheApi()}
+      entries={[]}
+      modelInventory={[base, quantized, ...more]}
+      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+      onFiltersChange={() => undefined}
+      onNavigate={() => undefined}
+      onQueryChange={() => undefined}
+      onRefresh={async () => undefined}
+      path="/library?view=models"
+      query=""
+    />,
+  );
+  expect(screen.getByText("46 of 46 models · 47 variants")).toBeVisible();
+  const list = screen.getByLabelText("Model library");
+  expect(within(list).getAllByRole("article")).toHaveLength(40);
+  fireEvent.click(screen.getByRole("button", { name: "Show more (7 more rows)" }));
+  expect(within(list).getAllByRole("article")).toHaveLength(47);
+});
+
+test("a model with no lineage is not a Model: no Model link, named in the header", () => {
+  const base = libraryViewSnapshot.models[0]!;
+  const helper = {
+    ...base,
+    model: { ...base.model, slug: "helper-draft" },
+    model_document: {
+      ...base.model_document,
+      identity: {
+        ...base.model_document.identity,
+        model: { ...base.model_document.identity.model, slug: "helper-draft" },
+      },
+    },
+    model_display: null,
+    recipes: [],
+  };
+  render(
+    <LibraryModelsView
+      api={cacheApi()}
+      entries={[]}
+      modelInventory={[base, helper]}
+      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+      onFiltersChange={() => undefined}
+      onNavigate={() => undefined}
+      onQueryChange={() => undefined}
+      onRefresh={async () => undefined}
+      path="/library?view=models"
+      query=""
+    />,
+  );
+  expect(screen.getByText("1 of 1 models · 1 variants · 1 other models")).toBeVisible();
+  const heading = screen.getByRole("heading", { name: /helper-draft/ });
+  expect(heading.closest("a")).toBeNull();
+});
+
 describe("row actions follow the Controller's actions", () => {
   const base = libraryViewSnapshot.models[0]!;
   const row = (
     controller: "cached" | "not_cached" | "preparing",
-    actions: ("download" | "remove")[],
+    actions: (typeof CacheOperationKind.DOWNLOAD | typeof CacheOperationKind.REMOVE)[],
+    state: "succeeded" | "running" | null = controller === "preparing" ? "running" : null,
   ) =>
     render(
       <LibraryModelsView
@@ -159,7 +323,7 @@ describe("row actions follow the Controller's actions", () => {
             local: {
               ...base.local,
               controller,
-              preparation: controller === "preparing" ? { state: LifecycleState.RUNNING } : null,
+              preparation: state ? { state } : null,
             },
             actions,
           },
@@ -177,20 +341,32 @@ describe("row actions follow the Controller's actions", () => {
   const remove = () => screen.queryByRole("button", { name: "Remove model from fleet" });
 
   test("absent shows Download only", () => {
-    row("not_cached", ["download"]);
+    row("not_cached", [CacheOperationKind.DOWNLOAD]);
     expect(download()).toBeVisible();
     expect(remove()).toBeNull();
   });
 
   test("fully present and current shows Remove only", () => {
-    row("cached", ["remove"]);
+    row("cached", [CacheOperationKind.REMOVE]);
     expect(download()).toBeNull();
     expect(remove()).toBeVisible();
   });
 
   test("partial or stale shows both", () => {
-    row("not_cached", ["download", "remove"]);
+    row("not_cached", [CacheOperationKind.DOWNLOAD, CacheOperationKind.REMOVE]);
     expect(download()).toBeVisible();
+    expect(remove()).toBeVisible();
+  });
+
+  test("a cached model with a succeeded preparation still shows Remove only", () => {
+    row("cached", [CacheOperationKind.REMOVE], "succeeded");
+    expect(download()).toBeNull();
+    expect(remove()).toBeVisible();
+  });
+
+  test("an idle partial set can be resumed and removed", () => {
+    row("preparing", [CacheOperationKind.DOWNLOAD, CacheOperationKind.REMOVE], null);
+    expect(download()).toBeEnabled();
     expect(remove()).toBeVisible();
   });
 
