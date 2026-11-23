@@ -17,6 +17,7 @@ import pytest
 from vonk_agent_protocol.contracts import AgentFailureResult, AgentResult
 from vonk_agent_protocol.outcome import OutcomeUnknown
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
+from vonk_agent_protocol.wire_model import OperationProgress
 
 VECTORS = Path(__file__).parents[1] / "src/vonk_agent_protocol/vectors"
 
@@ -75,7 +76,6 @@ def test_inventory_health_shared_vectors_survive_ingress() -> None:
 
 
 def test_operation_progress_fetched_vector_is_strict() -> None:
-    from vonk_agent_protocol.wire_model import OperationProgress
 
     vector = _vector("operation-progress-fetched-v1.json")
     for document in vector["valid"]:
