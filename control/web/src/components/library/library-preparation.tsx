@@ -1,21 +1,9 @@
-import { compareWire, displayRatio } from "../../api/contract-numeric";
 import type { ControlApi, LibraryViewModel } from "../../api/types";
-import { formatBytes } from "../../lib/fleet";
-import { phaseWords } from "../../lib/phase-words";
 import { CancelOperation } from "../ui/cancel-operation";
+import { availabilityProgress, LibraryAvailabilityProgress } from "./library-availability-progress";
 import { WaitingFor } from "../ui/waiting-for";
 
 type Preparation = NonNullable<LibraryViewModel["local"]["preparation"]>;
-
-/** The one line a live preparation reads as: phase, then how much of it is done. */
-export function preparationLabel(preparation: Preparation): string {
-  const phase = phaseWords(preparation.phase ?? preparation.state);
-  const total = preparation.total_bytes;
-  if (total == null || compareWire(total, 0) <= 0) return phase;
-  const completed = preparation.completed_bytes ?? 0;
-  const percent = Math.min(100, Math.round(displayRatio(completed, total) * 100));
-  return `${phase} · ${formatBytes(completed)} of ${formatBytes(total)} · ${percent}%`;
-}
 
 /**
  * A preparation the Controller reports as live: its progress, what it waits for
@@ -35,7 +23,12 @@ export function LibraryPreparation({
   const operationId = preparation.operation_id;
   return (
     <div className="library-preparation">
-      <span role="status">{preparationLabel(preparation)}</span>
+      <LibraryAvailabilityProgress
+        progress={availabilityProgress({
+          ...preparation,
+          phase: preparation.phase ?? preparation.state,
+        })}
+      />
       <WaitingFor
         blockers={preparation.blockers}
         nextAttemptAt={preparation.next_attempt_at}

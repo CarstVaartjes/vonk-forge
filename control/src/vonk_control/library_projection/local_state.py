@@ -544,6 +544,8 @@ def _database_local_state(
                 phase=progress.measurement.phase,
                 completed=progress.measurement.completed_bytes,
                 total=progress.measurement.total_bytes,
+                rate=progress.measurement.smoothed_bytes_per_second,
+                eta=progress.measurement.eta_seconds,
                 wait=read_wait(cache_operation),
             )
         if state in model_cache_states.words(LifecycleState.CANCELLED):

@@ -73,7 +73,9 @@ def _manifest(model: str, recipe: str | None, verified: Iterable[str]) -> object
     )
 
 
-def _progress(completed: int) -> object:
+def _progress(
+    completed: int, rate: float | None = None, eta: float | None = None
+) -> object:
     return serialize_json_value(
         ModelCacheOperationProgress(
             phase="downloading",
@@ -89,6 +91,8 @@ def _progress(completed: int) -> object:
                 total_bytes_known=True,
                 completed_items=0,
                 total_items=1,
+                smoothed_bytes_per_second=rate,
+                eta_seconds=eta,
             ),
         )
     )
@@ -115,7 +119,13 @@ def _cache_set(
 
 
 def _operation(
-    set_id: str | None, *, kind: str, state: str, at: datetime, completed: int
+    set_id: str | None,
+    *,
+    kind: str,
+    state: str,
+    at: datetime,
+    completed: int,
+    measured: tuple[float, float] | None = None,
 ) -> ModelCacheOperation:
     # Download and repair payloads carry their identity in the artifact set
     # (ModelCacheDownloadPayload has no top-level digests); ``{}`` is the
@@ -127,7 +137,7 @@ def _operation(
         state=state,
         artifact_set_sha256=set_id,
         payload={},
-        progress=_progress(completed),
+        progress=_progress(completed, *(measured or ())),
         actor="test",
         created_at=at,
         updated_at=at,
@@ -425,6 +435,43 @@ def test_a_waiting_download_shows_its_typed_wait_in_the_preparation(tmp_path):
     assert [item.code for item in local.preparation.blockers] == ["access_denied"]
     assert url in local.preparation.blockers[0].detail
     assert local.preparation.next_attempt_at == retry
+
+
+def test_a_preparation_shows_the_sampled_rate_and_eta(tmp_path):
+    """The Controller's own measurement reaches the library view."""
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'rate.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    wanted = _digest("wanted")
+    with sessions.begin() as session:
+        session.add(
+            _cache_set(
+                _digest("good"),
+                wanted,
+                None,
+                "downloading",
+                _manifest(wanted, None, [wanted]),
+            )
+        )
+        session.add(
+            _operation(
+                _digest("good"),
+                kind="download",
+                state="running",
+                at=NOW,
+                completed=40,
+                measured=(2.5, 24.0),
+            )
+        )
+    preparation = (
+        _projection(sessions)._database_local_state([wanted])[wanted].preparation
+    )
+    assert preparation is not None
+    assert (preparation.smoothed_bytes_per_second, preparation.eta_seconds) == (
+        2.5,
+        24.0,
+    )
 
 
 def _plan_work(node: dict[str, object]) -> int:
