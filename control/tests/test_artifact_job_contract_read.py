@@ -41,14 +41,14 @@ from cluster_profiles.generated_control.models.artifact_job_contract_response im
     ArtifactJobContractResponse as ClientArtifactJobContractResponse,
 )
 
-from .artifact_jobs_support import (
-    artifact_create_request,
-    create_artifact_job,
-    running_artifact_service,
-)
 from .test_agent_api import Jobs
 from .test_artifact_job_uncompilable_contract import (
     _required_input_without_required_slot,
+)
+from .test_artifact_jobs import (
+    artifact_create_request,
+    create_artifact_job,
+    running_artifact_service,
 )
 from .test_recipe_operations import NOW, installed_recipe, setup_services
 

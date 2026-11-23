@@ -15,7 +15,7 @@ from vonk_agent_protocol import InstallationState, LifecycleState, RunState
 from vonk_control.models import ArtifactJob, Base, RecipeInstallation
 from vonk_control.untracked_installations import untracked_installations, untracked_runs
 
-from .artifact_jobs_support import running_artifact_service, submitted_artifact_job
+from .test_artifact_jobs import running_artifact_service, submitted_artifact_job
 from .test_catalog_revision_collection import NODE, Catalog
 
 

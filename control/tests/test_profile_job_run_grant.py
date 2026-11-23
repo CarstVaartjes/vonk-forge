@@ -44,10 +44,10 @@ from vonk_control.models import AgentNode, Job, RecipeRun
 from vonk_control.stored.json_values import read_row_column
 
 from .agent_grant_requests import job_run_grant_request
-from .artifact_jobs_support import _configure_artifact_recipe, submitted_artifact_job
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.world import SOLO, World, build_world
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
+from .test_artifact_jobs import _configure_artifact_recipe, submitted_artifact_job
 from .test_profile_job_member import _load
 
 

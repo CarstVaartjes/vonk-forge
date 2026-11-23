@@ -42,7 +42,10 @@ from vonk_control.models import (
 from vonk_control.recipe_operations import RecipeOperationView
 
 from .agent_fences import fenced_operation
-from .artifact_jobs_support import (
+from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
+from .runtime_identity_support import claim_agent
+from .test_artifact_jobs import (
+    NOW,
     MutableClock,
     artifact_create_request,
     cancellation_result,
@@ -50,9 +53,6 @@ from .artifact_jobs_support import (
     running_artifact_service,
     submitted_artifact_job,
 )
-from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
-from .runtime_identity_support import claim_agent
-from .test_artifact_jobs_part1 import NOW
 
 CANCEL_KEY = "00000000-0000-4000-8000-000000000301"
 OTHER_KEY = "00000000-0000-4000-8000-000000000302"
@@ -168,7 +168,7 @@ def test_stored_jobs_map_onto_the_core(tmp_path) -> None:
 
 def test_unsubmitted_jobs_have_nothing_to_stop(tmp_path) -> None:
     sessions, _ops, _queue, service, run_id, _node = running_artifact_service(tmp_path)
-    from .artifact_jobs_support import artifact_create_request
+    from .test_artifact_jobs import artifact_create_request
 
     draft = create_artifact_job(
         service,

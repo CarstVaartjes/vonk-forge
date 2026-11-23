@@ -21,9 +21,9 @@ import pytest
 from sqlalchemy import select
 from vonk_control.models import RecipeRun
 
-from .artifact_jobs_support import _configure_artifact_recipe
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.world import SOLO, build_world
+from .test_artifact_jobs import _configure_artifact_recipe
 
 
 @pytest.mark.parametrize("drift", ["blocked", "changed"])

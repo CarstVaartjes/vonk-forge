@@ -40,9 +40,9 @@ from vonk_control.models import (
     ResourceReservation,
 )
 
-from .artifact_jobs_support import cancellation_result, submitted_artifact_job
 from .runtime_identity_support import claim_agent
 from .test_artifact_job_lifecycle import CANCEL_KEY, _drive, _issued_job
+from .test_artifact_jobs import cancellation_result, submitted_artifact_job
 
 
 @pytest.mark.parametrize("damaged_evidence", [False, True, "omitted"])

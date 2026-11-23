@@ -28,8 +28,8 @@ from vonk_control.strict_json import ControllerAPIRoute
 
 from cluster_profiles.cli_json_contract import DocumentKind
 
-from .artifact_jobs_support import _configure_artifact_recipe
 from .conftest import load_tools_module
+from .test_artifact_jobs import _configure_artifact_recipe
 from .test_profile_load_installed_cli import (
     _https_api_peer,
     _process_environment,

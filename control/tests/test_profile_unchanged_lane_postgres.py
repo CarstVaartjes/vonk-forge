@@ -21,9 +21,9 @@ from vonk_control.host_helper_authority import (
 )
 from vonk_control.models import AgentNode, Job, RecipeRun, ResourceReservation, RunNode
 
-from .artifact_jobs_support import _configure_artifact_recipe, submitted_artifact_job
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.world import SOLO, SOLO_B, build_world
+from .test_artifact_jobs import _configure_artifact_recipe, submitted_artifact_job
 from .test_profile_job_run_grant import (
     _claimed_job,
     _grant_start,

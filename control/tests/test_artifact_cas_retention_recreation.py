@@ -21,14 +21,14 @@ from vonk_control.models import (
     ArtifactJobFile,
 )
 
-from .artifact_jobs_support import (
+from .non_blocking import assert_no_orphaned_holds
+from .runtime_identity_support import claim_agent
+from .test_artifact_jobs import (
     MutableClock,
     artifact_create_request,
     create_artifact_job,
     running_artifact_service,
 )
-from .non_blocking import assert_no_orphaned_holds
-from .runtime_identity_support import claim_agent
 from .test_recipe_operations import NOW
 
 

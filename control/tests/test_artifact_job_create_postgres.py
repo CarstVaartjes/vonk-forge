@@ -9,7 +9,7 @@ from vonk_agent_protocol.error_response import RequestValidationProblem
 from vonk_control.artifact_job_api import ArtifactJobCreate
 from vonk_control.models import ArtifactJob
 
-from .artifact_jobs_support import artifact_create_request, running_artifact_service
+from .test_artifact_jobs import artifact_create_request, running_artifact_service
 from .test_operator_acceptance_postgres import _api, _receipt
 
 

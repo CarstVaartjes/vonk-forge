@@ -21,9 +21,9 @@ from sqlalchemy import select
 from vonk_control.models import RecipeRun
 from vonk_control.recipe_operations import job_run_stop
 
-from .artifact_jobs_support import _configure_artifact_recipe
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.world import SOLO, build_world
+from .test_artifact_jobs import _configure_artifact_recipe
 
 
 def test_a_job_member_whose_run_changed_before_its_stop_is_re_planned(

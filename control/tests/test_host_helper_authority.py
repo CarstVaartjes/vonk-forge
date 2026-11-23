@@ -402,7 +402,7 @@ def runtime_service(
     )
     recipe_raw["identity"].update(publisher="vonk-forge", slug="authority-test")
     if operation_kind == "recipe.job.run.v1":
-        from .artifact_jobs_support import _configure_artifact_recipe
+        from .test_artifact_jobs import _configure_artifact_recipe
 
         _configure_artifact_recipe(recipe_raw)
     recipe = RecipeDefinition.model_validate_json(canonical_message(recipe_raw))
