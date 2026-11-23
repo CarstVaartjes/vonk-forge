@@ -35,7 +35,9 @@ from vonk_control.models.catalog import (
 )
 from vonk_control.models.execution import RecipeInstallation
 from vonk_control.models.fleet import FleetProfile
-from vonk_control.recipe_execution_contract import parse_stored_installation_plan
+from vonk_control.recipe_operations.execution_contract import (
+    parse_stored_installation_plan,
+)
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,

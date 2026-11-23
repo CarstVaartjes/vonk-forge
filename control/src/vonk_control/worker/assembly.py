@@ -92,7 +92,7 @@ def assemble_production_worker(
     from ..lifecycle.agent_operation import AgentOperationAdapter
     from ..lifecycle.artifact_job import ArtifactJobAdapter
     from ..recipe_builds.service import RecipeBuildService
-    from ..recipe_operation_worker import RecipeOperationWorker
+    from ..recipe_operations.operation_worker import RecipeOperationWorker
     from ..recipe_operations.service import RecipeOperationService
     from ..recipe_routes.publisher import AtomicRecipeRoutePublisher
     from ..recipe_routes.service import RecipeRouteService

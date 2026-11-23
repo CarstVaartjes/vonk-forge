@@ -57,17 +57,17 @@ from ..owner_liveness import OwnerKind
 from ..profile_stop_authority import (
     ProfileJobRunStopJob,
 )
-from ..recipe_execution_contract import (
-    RecipeExecutionContractError,
-    parse_stored_build_plan,
-    parse_stored_build_policy,
-)
-from ..recipe_lifecycle_contract import JOB_ACTIVATION
 from ..reservation_owners import run_has_live_operation
 from ..stored.json_values import read_row_column
 from ..stored.states import CatalogRevisionState, RecipeBuildState
 from ..strict_json import read_stored_model
 from .errors import RecipeRetryLater
+from .execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_build_plan,
+    parse_stored_build_policy,
+)
+from .lifecycle_contract import JOB_ACTIVATION
 from .results import _RANK_FAILED
 
 

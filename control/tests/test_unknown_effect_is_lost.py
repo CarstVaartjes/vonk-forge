@@ -28,7 +28,7 @@ from vonk_control.distributed_recovery.common import (
 from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
 from vonk_control.models.operations import AgentOperation
 from vonk_control.recipe_operations import run_transitions
-from vonk_control.recipe_stop_payloads import RecipeStopAuthorityError
+from vonk_control.recipe_operations.stop_payloads import RecipeStopAuthorityError
 
 from .test_absent_run_release import _report_absent
 from .test_agent_api import NODE_A, agent_headers, agent_system  # noqa: F401

@@ -43,7 +43,7 @@ from ..legal_admission import stored_model_display, territorial_admission
 from ..models.cache import RecipeBuild
 from ..models.fleet import AgentNode
 from ..models.mapping import ClusterMapping, ClusterMappingNode
-from ..recipe_runtime_specs import (
+from ..recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     recipe_topology,
     resolve_recipe_entities,

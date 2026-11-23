@@ -27,7 +27,7 @@ from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.models.jobs import Job
-from vonk_control.recipe_runtime_specs import compile_runtime_spec
+from vonk_control.recipe_operations.runtime_specs import compile_runtime_spec
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 

@@ -17,7 +17,7 @@ from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.execution import RecipeInstallation, RecipeRun
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation as StoredAgentOperation
-from vonk_control.recipe_execution_contract import parse_stored_run_plan
+from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
 
 from .test_recipe_operations import (
     NOW,

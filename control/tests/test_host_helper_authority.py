@@ -60,7 +60,7 @@ from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
-from vonk_control.recipe_execution_contract import (
+from vonk_control.recipe_operations.execution_contract import (
     StoredInstallationPlan,
     StoredInstallNodePlan,
     StoredRunNodePlan,
@@ -68,14 +68,16 @@ from vonk_control.recipe_execution_contract import (
     installation_plan_document,
     run_plan_document,
 )
-from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
-from vonk_control.recipe_start_payloads import (
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
+from vonk_control.recipe_operations.start_payloads import (
     RecipeStartPayloadError,
     RecipeStartPlacement,
     build_recipe_start_payload,
     start_peer_addresses,
 )
-from vonk_control.recipe_stop_payloads import (
+from vonk_control.recipe_operations.stop_payloads import (
     stop_payload_from_start,
 )
 from vonk_forge_contracts import RecipeDefinition, document_sha256

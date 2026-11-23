@@ -34,7 +34,7 @@ from vonk_control.recipe_builds.common import (
     _available_build_memory,
 )
 from vonk_control.recipe_builds.service import RecipeBuildService
-from vonk_control.recipe_execution_contract import run_plan_document
+from vonk_control.recipe_operations.execution_contract import run_plan_document
 from vonk_control.run_admission import _node_document
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.plans import RunSwitchPlan

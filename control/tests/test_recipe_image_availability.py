@@ -78,7 +78,6 @@ from vonk_control.operations.contract import (
     AvailabilityRecoveryAction,
 )
 from vonk_control.persisted_waits import schedule_wait
-from vonk_control.recipe_availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_image_availability.api import (
     _recipe_error,
     _view_document,
@@ -98,6 +97,7 @@ from vonk_control.recipe_image_availability.view_contract import (
     RecipeCacheRemovalStatus,
     RecipeImageAvailabilityView,
 )
+from vonk_control.recipe_operations.availability_intent import RecipeRevisionIntent
 from vonk_control.runtime_image_preparation.contracts import (
     PulledImageEvidence,
     RuntimeImagePreparationError,
@@ -4637,7 +4637,9 @@ def test_preparation_expiry_preserves_download_but_explicit_cancel_still_owns_it
     tmp_path: Path, postgres_engine, checkpointed: bool
 ) -> None:
     from vonk_agent_protocol import RecipeImageCode, WaitReason
-    from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
+    from vonk_control.recipe_operations.lifecycle_contract import (
+        RecipeOperationCancellationResult,
+    )
 
     from .test_model_removal_worker_postgres import _prepare_removal_target
 

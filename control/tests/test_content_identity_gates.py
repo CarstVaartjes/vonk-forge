@@ -22,7 +22,9 @@ from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.execution import InstallationNode, RecipeInstallation
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.preparation_contract import RuntimeImageIdentity
-from vonk_control.recipe_execution_contract import installation_matches_runtime_image
+from vonk_control.recipe_operations.execution_contract import (
+    installation_matches_runtime_image,
+)
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_contract.evidence import RunSwitchPhase

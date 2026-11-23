@@ -311,7 +311,7 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
                 import importlib.metadata, json
                 from importlib.resources import files
                 from vonk_agent_protocol import AgentProtocolError, DistributionObject
-                from vonk_control.recipe_runtime_specs import compile_runtime_spec
+                from vonk_control.recipe_operations.runtime_specs import compile_runtime_spec
                 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256, read_model, read_recipe
 
                 def rejects(value):

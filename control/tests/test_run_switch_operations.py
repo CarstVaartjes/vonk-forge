@@ -81,13 +81,13 @@ from vonk_control.recipe_builds.common import RecipeBuildPlan
 from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_operations.errors import RecipeOperationConflict
 from vonk_control.recipe_operations.interfaces import RecipeOperationView
-from vonk_control.recipe_operations.service import RecipeOperationService
-from vonk_control.recipe_runtime_specs import (
+from vonk_control.recipe_operations.runtime_specs import (
     RUNTIME_INTERFACE,
     compile_runtime_spec,
     resolve_recipe_entities,
     split_option_choices,
 )
+from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionBusy
 from vonk_control.run_switch_contract.evidence import RunSwitchPhase, RunSwitchReason
 from vonk_control.run_switch_contract.operations import (
@@ -7759,7 +7759,7 @@ def test_planner_entrypoints_return_valid_contracts(
     retention delete can leave the current fit infeasible while the after-Stop
     fit is conditional.
     """
-    from vonk_control.recipe_action_plans import StopPlan
+    from vonk_control.recipe_operations.impact_plans import StopPlan
     from vonk_control.run_switch_operations import resource_fit
 
     world = planner_world

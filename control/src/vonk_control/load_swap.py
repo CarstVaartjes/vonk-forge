@@ -19,7 +19,7 @@ from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.swap import GIB
 
 from .models.execution import RecipeRun, RunNode
-from .recipe_execution_contract import (
+from .recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     StoredRunPlan,
     parse_stored_run_plan,

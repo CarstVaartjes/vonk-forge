@@ -51,7 +51,7 @@ from ..models.jobs import Job
 from ..models.mapping import ClusterMappingNode
 from ..models.operations import AgentOperation
 from ..owner_liveness import OwnerKind, OwnerRef, owner
-from ..recipe_execution_contract import (
+from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
     parse_stored_run_plan,

@@ -52,7 +52,6 @@ from vonk_control.recipe_builds.common import (
     _build_effective_settings,
 )
 from vonk_control.recipe_builds.service import RecipeBuildService
-from vonk_control.recipe_execution_contract import parse_stored_build_plan
 from vonk_control.recipe_image_availability.availability_contract import (
     AvailabilityBuildReceipt,
 )
@@ -63,6 +62,7 @@ from vonk_control.recipe_image_availability.removal_contract import (
 from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
+from vonk_control.recipe_operations.execution_contract import parse_stored_build_plan
 from vonk_control.recipe_operations.observation_helpers import record_build_evidence
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService

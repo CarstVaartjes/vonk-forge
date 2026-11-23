@@ -31,10 +31,6 @@ from vonk_control.operator_acceptance import (
     OperatorReceiptResolver,
 )
 from vonk_control.operator_receipt_contract import ReceiptPolicy
-from vonk_control.recipe_availability_intent import (
-    RecipeRevisionIntent,
-    RecipeSelectorIntent,
-)
 from vonk_control.recipe_image_availability import requests
 from vonk_control.recipe_image_availability.contracts import (
     OPERATION_KIND,
@@ -43,6 +39,10 @@ from vonk_control.recipe_image_availability.contracts import (
 )
 from vonk_control.recipe_image_availability.view_contract import (
     RecipeImageAvailabilityView,
+)
+from vonk_control.recipe_operations.availability_intent import (
+    RecipeRevisionIntent,
+    RecipeSelectorIntent,
 )
 
 from .test_fleet_profile_api import _headers

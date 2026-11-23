@@ -38,7 +38,9 @@ from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.jobs import Job
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS
-from vonk_control.recipe_execution_contract import parse_stored_installation_plan
+from vonk_control.recipe_operations.execution_contract import (
+    parse_stored_installation_plan,
+)
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_switch_contract.phase_results import (
     RunSwitchInstallationVerifyResult,

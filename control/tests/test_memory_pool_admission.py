@@ -12,7 +12,7 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.mapping import ClusterMapping
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.recipe_builds.service import RecipeBuildService
-from vonk_control.recipe_execution_contract import parse_stored_build_plan
+from vonk_control.recipe_operations.execution_contract import parse_stored_build_plan
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.resource_planning.capacity import plan_capacity
 from vonk_control.resource_planning.memory import memory_capacity_snapshot

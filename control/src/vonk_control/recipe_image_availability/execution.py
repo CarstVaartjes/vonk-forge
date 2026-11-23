@@ -37,7 +37,7 @@ from ..operations.contract import (
     AvailabilityRecoveryAction,
 )
 from ..persisted_waits import schedule_wait, wait_due
-from ..recipe_availability_intent import (
+from ..recipe_operations.availability_intent import (
     RecipeRetryIntent,
 )
 from ..stored.json_values import Residue, read_row_column

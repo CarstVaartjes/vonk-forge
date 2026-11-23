@@ -29,12 +29,12 @@ from ..profile_capacity import (
     sibling_profile_ports,
     sibling_profile_runs,
 )
-from ..recipe_execution_contract import (
+from ..recipe_operations.errors import RecipeOperationConflict
+from ..recipe_operations.execution_contract import (
     installation_matches_runtime_image,
     parse_stored_installation_plan,
 )
-from ..recipe_operations.errors import RecipeOperationConflict
-from ..recipe_runtime_specs import (
+from ..recipe_operations.runtime_specs import (
     RUNTIME_INTERFACE,
 )
 from ..resource_planning.settings import resolve_effective_settings

@@ -110,17 +110,17 @@ from ..model_cache.contract import (
 )
 from ..operator_receipt_contract import ReceiptOwner
 from ..profile_stop_authority import ProfileJobRunStopJob
-from ..recipe_execution_contract import (
+from ..recipe_image_availability.removal_contract import (
+    RecipeCacheRemovalOwner,
+    RecipeCacheRemovalResult,
+)
+from ..recipe_operations.execution_contract import (
     StoredBuildPolicyReport,
     StoredInstallationPlan,
     StoredRunEndpoint,
     StoredRunPlan,
 )
-from ..recipe_image_availability.removal_contract import (
-    RecipeCacheRemovalOwner,
-    RecipeCacheRemovalResult,
-)
-from ..recipe_lifecycle_contract import (
+from ..recipe_operations.lifecycle_contract import (
     JOB_ACTIVATION,
     RecipeOperationActivatedResult,
     RecipeOperationCancellationResult,

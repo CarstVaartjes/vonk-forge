@@ -40,7 +40,7 @@ from .distribution.sources import verified_model_receipts
 from .models.cache import RecipeBuild
 from .models.catalog import CatalogDocumentRevision
 from .models.mapping import ClusterMappingNode
-from .recipe_runtime_specs import (
+from .recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     ResolvedRecipe,
     compile_runtime_spec,

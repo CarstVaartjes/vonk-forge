@@ -24,10 +24,10 @@ from ..model_cache.service import ModelCacheService
 from ..preparation_contract import (
     RuntimeImageIdentity,
 )
-from ..recipe_operations.service import RecipeOperationService
-from ..recipe_runtime_specs import (
+from ..recipe_operations.runtime_specs import (
     recipe_topology,
 )
+from ..recipe_operations.service import RecipeOperationService
 from ..run_switch_contract.plans import RunSwitchPlan
 from ..run_switch_contract.requests import (
     RunSwitchPreviewRequest,

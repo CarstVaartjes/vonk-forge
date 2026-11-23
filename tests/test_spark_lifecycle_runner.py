@@ -1656,11 +1656,11 @@ def test_recipe_download_consumes_typed_terminal_receipt() -> None:
     )
     lifecycle = _module()
     from vonk_agent_protocol import OperationProgress
-    from vonk_control.recipe_availability_intent import RecipeSelectorIntent
     from vonk_control.recipe_image_availability.api import (
         RecipeImageAvailabilityResponse,
         RecipeImageAvailabilityResult,
     )
+    from vonk_control.recipe_operations.availability_intent import RecipeSelectorIntent
 
     recipe_digest = "a" * 64
     model_digest = "b" * 64
@@ -1732,11 +1732,11 @@ def test_recipe_download_timeout_preserves_durable_progress(monkeypatch, state) 
         AvailabilityOperationFailure,
         AvailabilityRecoveryAction,
     )
-    from vonk_control.recipe_availability_intent import RecipeSelectorIntent
     from vonk_control.recipe_image_availability.api import (
         RecipeImageAvailabilityAction,
         RecipeImageAvailabilityResponse,
     )
+    from vonk_control.recipe_operations.availability_intent import RecipeSelectorIntent
 
     recipe_digest = "a" * 64
     pending = RecipeImageAvailabilityResponse(
@@ -2014,7 +2014,7 @@ def test_lost_start_probe_binds_produced_placement_to_owned_interface(
     foreign_host: bool,
 ) -> None:
     from vonk_agent_protocol import CompiledExecutionPlan, RecipeStartPayload
-    from vonk_control.recipe_start_payloads import (
+    from vonk_control.recipe_operations.start_payloads import (
         RecipeStartPlacement,
         build_recipe_start_payload,
     )

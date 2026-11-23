@@ -36,7 +36,7 @@ from ..models.fleet import AgentNode
 from ..models.mapping import ClusterMapping, ClusterMappingNode
 from ..preparation_contract import RuntimeImageIdentity
 from ..profile_capacity import serving_run
-from ..recipe_execution_contract import (
+from ..recipe_operations.execution_contract import (
     installation_matches_runtime_image,
     installation_serves_authorised_ports,
 )

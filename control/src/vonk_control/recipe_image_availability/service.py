@@ -41,12 +41,12 @@ from ..models.cache import ModelCacheOperation, RecipeBuild
 from ..models.catalog import CatalogDocumentRevision
 from ..models.jobs import Job
 from ..operations.blockers import OperationBlocker
-from ..recipe_availability_intent import (
+from ..recipe_operations.availability_intent import (
     RecipeAvailabilityIntent,
     RecipeRevisionIntent,
     RecipeSelectorIntent,
 )
-from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
+from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
 from ..recipe_update_batches.contract import RecipeUpdateResponse
 from ..runtime_image_preparation.contracts import (
     OCIImageTransport,

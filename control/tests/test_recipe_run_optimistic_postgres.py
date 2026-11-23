@@ -19,7 +19,7 @@ from vonk_control.failure_classification import disposition
 from vonk_control.models.execution import RecipeRun, RunNode
 from vonk_control.models.routes import RoutePublicationOwner
 from vonk_control.optimistic import Applied, transition
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recovery_policy import ROUTE_RECOVERY, WAIT_STEP
 
 from .node_contacts import contact_row

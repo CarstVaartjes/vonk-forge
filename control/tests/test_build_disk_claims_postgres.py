@@ -19,7 +19,7 @@ from vonk_control.models.execution import ResourceReservation
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.owner_liveness import OwnerKind
-from vonk_control.recipe_execution_contract import parse_stored_build_plan
+from vonk_control.recipe_operations.execution_contract import parse_stored_build_plan
 
 from .test_disk_reservations import _record_disk
 from .test_recipe_operations import NOW, setup_services

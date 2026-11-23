@@ -54,13 +54,13 @@ from ..models.jobs import Job
 from ..models.operations import AgentOperation
 from ..operations.blockers import BlockingOperation, make_blocker
 from ..persisted_waits import read_wait, schedule_wait, write_wait
-from ..recipe_execution_contract import (
+from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     RouteWithdrawalFollowUp,
     StoredRunPlan,
     parse_stored_run_plan,
 )
-from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
+from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
 from ..recovery_policy import DISTRIBUTED_RECOVERY, schedule
 from ..reservation_owners import run_has_live_operation
 from ..stored.json_values import read_row_column

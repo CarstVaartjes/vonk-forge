@@ -33,7 +33,7 @@ from .models.jobs import Job
 from .models.mapping import ClusterMapping, ClusterMappingNode
 from .models.operations import AgentOperation
 from .own_cleanup import own_runtime_target
-from .recipe_execution_contract import (
+from .recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_plan,
 )

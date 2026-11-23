@@ -26,7 +26,7 @@ from ..models.execution import RecipeRun
 from ..models.jobs import Job
 from ..models.routes import RoutePublication, RoutePublicationOwner
 from ..persisted_waits import schedule_wait
-from ..recipe_execution_contract import RouteWithdrawalFollowUp
+from ..recipe_operations.execution_contract import RouteWithdrawalFollowUp
 from .shared import (
     _FOLLOW_UP_REASONS,
     _HEALTH_RECOVERY_ERROR,

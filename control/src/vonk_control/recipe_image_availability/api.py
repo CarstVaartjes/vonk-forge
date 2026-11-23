@@ -39,8 +39,8 @@ from ..operator_acceptance import (
     ReceiptPolicy,
     operator_acceptance,
 )
-from ..recipe_availability_intent import RecipeAvailabilityIntent
-from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
+from ..recipe_operations.availability_intent import RecipeAvailabilityIntent
+from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
 from ..recipe_update_batches.contract import RecipeUpdateRequest, RecipeUpdateResponse
 from ..stored.json_values import Residue
 from ..strict_json import StrictJSONModel, read_stored_model

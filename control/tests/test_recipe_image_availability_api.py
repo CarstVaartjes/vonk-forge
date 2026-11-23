@@ -20,7 +20,6 @@ from vonk_control.cache_removal_review import (
 )
 from vonk_control.jobs.documents import AvailabilityJobResult, AvailabilityModelChild
 from vonk_control.lifecycle.evidence import BookkeepingReason, Residue
-from vonk_control.recipe_availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_image_availability.api import (
     RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS,
     _child,
@@ -35,7 +34,10 @@ from vonk_control.recipe_image_availability.view_contract import (
     RecipeCacheRemovalStatus,
     RecipeImageAvailabilityView,
 )
-from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
+from vonk_control.recipe_operations.availability_intent import RecipeRevisionIntent
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
 
 
 @pytest.mark.parametrize(

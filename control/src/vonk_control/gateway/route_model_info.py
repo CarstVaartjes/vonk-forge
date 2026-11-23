@@ -50,7 +50,7 @@ from ..catalog.revision_contract import (
 from ..models.catalog import CatalogDocumentRevision
 from ..models.execution import RecipeInstallation, RecipeRun
 from ..models.mapping import ClusterMapping
-from ..recipe_runtime_specs import (
+from ..recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     _compiled_arguments,
     split_option_choices,

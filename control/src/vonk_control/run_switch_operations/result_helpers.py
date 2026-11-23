@@ -27,8 +27,8 @@ from ..models.jobs import Job
 from ..operations.blockers import OperationBlocker
 from ..operations.progress import sample_progress
 from ..persisted_waits import read_wait
-from ..recipe_lifecycle_contract import RecipeLifecycleResult
 from ..recipe_operations.interfaces import RecipeOperationView
+from ..recipe_operations.lifecycle_contract import RecipeLifecycleResult
 from ..recovery_policy import (
     FailureKind,
     kind_for_failure_fields,

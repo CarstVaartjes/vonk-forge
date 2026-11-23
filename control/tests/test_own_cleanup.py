@@ -47,7 +47,9 @@ from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.own_cleanup import CLEANUP_ACTIONS, CLEANUP_KINDS, EFFECT_ACTIONS
-from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
 from vonk_control.recipe_operations.service import RecipeOperationService
 
 from .agent_fences import fenced_operation

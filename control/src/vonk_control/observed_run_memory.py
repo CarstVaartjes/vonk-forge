@@ -40,7 +40,7 @@ from .models.execution import (
     RunNode,
 )
 from .models.telemetry import NodeInventoryResourceSnapshot
-from .recipe_execution_contract import parse_stored_run_plan
+from .recipe_operations.execution_contract import parse_stored_run_plan
 from .settings import PROFILE_STALL_WINDOW_SECONDS
 
 

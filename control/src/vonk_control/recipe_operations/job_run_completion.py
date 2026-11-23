@@ -37,8 +37,8 @@ from ..profile_stop_authority import (
     issued_order_link,
     jobrun_stop_key,
 )
-from ..recipe_progress import _parent_execution_mode
 from ..stored.json_values import read_row_column
+from .progress import _parent_execution_mode
 from .rank_authority import _profile_jobrun_parent
 
 

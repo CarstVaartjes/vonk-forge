@@ -40,13 +40,13 @@ from ..lifecycle.evidence import Residue
 from ..models.catalog import CatalogDocument, CatalogDocumentRevision
 from ..models.jobs import Job
 from ..operations.blockers import IdentityConflict, OperationBlocker, make_blocker
-from ..recipe_availability_intent import (
-    RecipeRevisionIntent,
-    RecipeSelectorIntent,
-)
 from ..recipe_builds.cancellation import (
     BuildConsumerError,
     lock_availability_build_dependency,
+)
+from ..recipe_operations.availability_intent import (
+    RecipeRevisionIntent,
+    RecipeSelectorIntent,
 )
 from ..revision_images import revision_archives
 from ..stored.json_values import read_row_column

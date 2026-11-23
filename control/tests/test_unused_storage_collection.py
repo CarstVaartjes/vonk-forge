@@ -3646,7 +3646,9 @@ def test_installation_content_references_hold_but_provenance_does_not(
     """Catches keeping only UUIDs, or treating recipe/build provenance as use."""
     from dataclasses import replace
 
-    from vonk_control.recipe_execution_contract import parse_stored_installation_plan
+    from vonk_control.recipe_operations.execution_contract import (
+        parse_stored_installation_plan,
+    )
     from vonk_control.unused_storage_collection.references import _installation_kept
 
     sessions, _, installation_id, _ = _real_lifecycle(tmp_path, engine=postgres_engine)
@@ -3715,7 +3717,9 @@ def test_shared_file_does_not_pin_an_unrelated_installation(
     from vonk_agent_protocol.recipe_operations import RecipeInstallPayload
     from vonk_control.jobs.documents import InstallPhaseOperation, RecipeInstallParent
     from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
-    from vonk_control.recipe_execution_contract import parse_stored_installation_plan
+    from vonk_control.recipe_operations.execution_contract import (
+        parse_stored_installation_plan,
+    )
 
     sessions, _, installation_id, nodes = _real_lifecycle(
         tmp_path, engine=postgres_engine

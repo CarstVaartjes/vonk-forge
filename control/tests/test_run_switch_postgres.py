@@ -24,7 +24,7 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.models.telemetry import NodeInventorySnapshot
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.run_switch_contract.phase_results import RunSwitchFinalVerifyResult
 from vonk_control.run_switch_contract.progress import ArtifactVerificationEvidence
 from vonk_control.run_switch_contract.requests import (

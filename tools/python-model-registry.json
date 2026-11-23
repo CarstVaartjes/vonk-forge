@@ -416,7 +416,7 @@
       "reason": "Typed internal Prometheus query and response protocol owned by the read-only adapter."
     },
     {
-      "module": "control/src/vonk_control/recipe_availability_intent.py",
+      "module": "control/src/vonk_control/recipe_operations/availability_intent.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
@@ -426,7 +426,7 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
-      "module": "control/src/vonk_control/recipe_execution_contract.py",
+      "module": "control/src/vonk_control/recipe_operations/execution_contract.py",
       "kind": "controller-contract"
     },
     {
@@ -459,7 +459,7 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/recipe_lifecycle_contract.py",
+      "module": "control/src/vonk_control/recipe_operations/lifecycle_contract.py",
       "kind": "controller-contract"
     },
     {

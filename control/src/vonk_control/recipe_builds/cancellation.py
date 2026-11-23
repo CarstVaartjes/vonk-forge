@@ -33,8 +33,8 @@ from ..jobs import states as job_states
 from ..models.cache import RecipeBuild
 from ..models.fleet import AgentNode, FleetProfileApplication
 from ..models.jobs import Job
-from ..recipe_availability_intent import read_availability_intent
-from ..recipe_lifecycle_contract import (
+from ..recipe_operations.availability_intent import read_availability_intent
+from ..recipe_operations.lifecycle_contract import (
     RecipeOperationCancellationResult,
     parse_recipe_lifecycle_result,
 )

@@ -65,12 +65,12 @@ from vonk_control.models.execution import (
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
-from vonk_control.recipe_execution_contract import parse_stored_run_plan
 from vonk_control.recipe_operations.constants import _WORKLOAD_INTENT_KINDS
 from vonk_control.recipe_operations.errors import (
     RecipeArtifactJobCancellationPending,
     RecipeRequestInvalid,
 )
+from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
 from vonk_control.recipe_operations.interfaces import RecipeOperationView
 from vonk_control.workload_intent import allocate_workload_intent
 from vonk_forge_contracts import RecipeDefinition, document_sha256

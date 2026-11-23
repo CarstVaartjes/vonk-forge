@@ -71,11 +71,11 @@ from .profile_capacity import (
     reservation_visible,
     sibling_profile_ports,
 )
-from .recipe_execution_contract import (
+from .recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     run_plan_document,
 )
-from .recipe_runtime_specs import (
+from .recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     recipe_topology,
     resolve_recipe_entities,

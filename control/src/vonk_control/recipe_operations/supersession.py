@@ -20,12 +20,6 @@ from ..lifecycle.recipe_operation import RecipeOperationAdapter
 from ..lifecycle.types import CancelRequested
 from ..models.fleet import AgentNode
 from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..recipe_progress import (
-    _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
-)
-from ..recipe_progress import (
-    _parent_intent as _parent_intent,  # noqa: PLC0414 -- shared helper export
-)
 from ..recovery_policy import FailureKind
 from .errors import RecipeRequestInvalid
 from .intent import (
@@ -38,6 +32,12 @@ from .intent import (
 )
 from .interfaces import IssuedWorkloadReconciliation
 from .observation_helpers import _aware
+from .progress import (
+    _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
+)
+from .progress import (
+    _parent_intent as _parent_intent,  # noqa: PLC0414 -- shared helper export
+)
 
 if TYPE_CHECKING:
     from .service import RecipeOperationService

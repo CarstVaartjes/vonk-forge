@@ -33,7 +33,7 @@ from ..models.execution import RecipeInstallation, RecipeRun, RunNode
 from ..models.fleet import AgentNode
 from ..models.mapping import ClusterMapping
 from ..presence import ManagementAddressPolicy, PresenceError
-from ..recipe_execution_contract import (
+from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_endpoint,
     parse_stored_run_plan,

@@ -25,7 +25,7 @@ from ..distribution.types import content_objects, plan_objects
 from ..distribution_assignment import NodeDistributionAssignment
 from ..models.execution import RecipeInstallation
 from ..oci_image_store import StoreUnknown
-from ..recipe_execution_contract import (
+from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )

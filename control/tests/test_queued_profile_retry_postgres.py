@@ -22,7 +22,7 @@ from vonk_control.models.fleet import (
     FleetProfileApplication,
     FleetProfileSelection,
 )
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.worker.loop import Worker
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture

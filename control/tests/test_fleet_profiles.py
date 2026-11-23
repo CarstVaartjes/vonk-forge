@@ -83,7 +83,7 @@ from vonk_control.preparation_contract import (
     RuntimeImagePreparation,
     TargetAssetState,
 )
-from vonk_control.recipe_execution_contract import installation_plan_document
+from vonk_control.recipe_operations.execution_contract import installation_plan_document
 from vonk_control.run_switch_contract.evidence import (
     RunSwitchReason,
     SparkFit,

@@ -43,7 +43,7 @@ from ..model_cache.service import ModelCacheService
 from ..observation.platform import PlatformObserver
 from ..operator_projection_api.wiring import build_fleet_operator_services
 from ..recipe_builds.service import RecipeBuildService
-from ..recipe_operation_worker import RecipeOperationWorker
+from ..recipe_operations.operation_worker import RecipeOperationWorker
 from ..recipe_operations.service import RecipeOperationService
 from ..run_switch_operations.service import RunSwitchOperationService
 from ..settings import (

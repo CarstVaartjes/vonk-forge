@@ -52,7 +52,7 @@ from ..models.catalog import CatalogDocumentRevision
 from ..models.fleet import AgentNode, FleetProfile, FleetProfileApplication
 from ..preparation_contract import RolloutPreparation, RuntimeImageIdentity
 from ..profile_capacity import plan_kept_runs, sibling_runs
-from ..recipe_runtime_specs import recipe_topology
+from ..recipe_operations.runtime_specs import recipe_topology
 from ..run_switch_contract.plans import RunSwitchAssessment
 from .assessment_support import (
     _assignments_needing_preparation,

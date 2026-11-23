@@ -52,13 +52,16 @@ from ..profile_stop_authority import (
     OfflineStopIntent,
     ProfileStopOwnerBinding,
 )
-from ..recipe_availability_intent import RecipeAvailabilityIntent, RecipeBuildDependency
 from ..recipe_builds.cancellation import RecipeBuildIntent
 from ..recipe_image_availability.availability_contract import (
     RecipeImageAvailabilityArtifact,
     RecipeImageAvailabilityState,
 )
-from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
+from ..recipe_operations.availability_intent import (
+    RecipeAvailabilityIntent,
+    RecipeBuildDependency,
+)
+from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
 from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_contract.plans import RunSwitchPlan
 from ..run_switch_contract.progress import RunSwitchMemberReceipt

@@ -33,11 +33,11 @@ from ..models.mapping import ClusterMapping, ClusterMappingNode
 from ..preparation_contract import (
     RuntimeImageIdentity,
 )
-from ..recipe_execution_contract import (
+from ..recipe_operations.execution_contract import (
     StoredInstallationPlan,
     installation_serves_authorised_ports,
 )
-from ..recipe_runtime_specs import (
+from ..recipe_operations.runtime_specs import (
     OPTION_CHOICES_KEY,
     RUNTIME_INTERFACE,
     RecipeRuntimeSpecError,

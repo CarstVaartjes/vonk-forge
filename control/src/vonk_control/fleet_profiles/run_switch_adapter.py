@@ -42,7 +42,7 @@ from ..models.fleet import FleetProfileApplication
 from ..models.telemetry import NodeInventorySnapshot
 from ..preparation_contract import RuntimeImageIdentity
 from ..profile_capacity import plan_kept_runs
-from ..recipe_runtime_specs import resolve_recipe_entities
+from ..recipe_operations.runtime_specs import resolve_recipe_entities
 from ..run_switch_contract.operations import RunSwitchOperation
 from ..run_switch_contract.plans import RunSwitchAssessment
 from ..run_switch_contract.requests import (

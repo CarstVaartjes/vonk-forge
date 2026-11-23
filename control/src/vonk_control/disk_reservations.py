@@ -20,7 +20,7 @@ from .models.cache import RecipeBuild
 from .models.execution import InstallationNode, RecipeInstallation, ResourceReservation
 from .owner_liveness import OwnerKind, build_holds_disk
 from .profile_capacity import reservation_visible
-from .recipe_execution_contract import (
+from .recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )

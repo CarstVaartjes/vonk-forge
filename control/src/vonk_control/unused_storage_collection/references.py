@@ -29,7 +29,7 @@ from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun
 from ..models.fleet import AgentNode, FleetProfile, FleetProfileApplication
 from ..models.jobs import Job
 from ..models.telemetry import NodeInventorySnapshot
-from ..recipe_execution_contract import (
+from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )

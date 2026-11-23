@@ -35,8 +35,8 @@ from vonk_control.compiled_execution_plan import (
 )
 from vonk_control.execution_plan_service import _bind_runtime_artifacts, _placement
 from vonk_control.models.mapping import ClusterMappingNode
-from vonk_control.recipe_runtime_specs import compile_runtime_spec
-from vonk_control.recipe_start_payloads import start_peer_addresses
+from vonk_control.recipe_operations.runtime_specs import compile_runtime_spec
+from vonk_control.recipe_operations.start_payloads import start_peer_addresses
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,

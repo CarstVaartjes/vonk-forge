@@ -23,11 +23,11 @@ from ..logging import redact_text
 from ..models.catalog import CatalogDocumentRevision
 from ..models.jobs import Job
 from ..persisted_waits import schedule_wait, wait_due
-from ..recipe_availability_intent import RecipeRevisionIntent
 from ..recipe_image_availability.contracts import (
     RecipeImageAvailabilityRefused,
     RecipeImageAvailabilityUnknown,
 )
+from ..recipe_operations.availability_intent import RecipeRevisionIntent
 from ..reservation_owners import OwnerKind, OwnerRef, owner
 from ..stall_window import progress_deadline
 from ..strict_json import serialize_json_value

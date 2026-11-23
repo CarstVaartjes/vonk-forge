@@ -47,7 +47,7 @@ from ..observed_run_memory import observed_role_peaks, recent_best_available
 from ..profile_capacity import (
     reservation_visible,
 )
-from ..recipe_runtime_specs import (
+from ..recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     recipe_topology,
 )

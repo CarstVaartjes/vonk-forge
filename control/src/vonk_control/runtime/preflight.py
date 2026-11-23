@@ -47,7 +47,7 @@ def recipe_requirements(
     minimum_free_bytes: int,
 ) -> RuntimePreflightRequest:
     """Read the canonical topology; engine arguments are not an allowlist."""
-    from ..recipe_runtime_specs import recipe_topology
+    from ..recipe_operations.runtime_specs import recipe_topology
 
     fabric = recipe_topology(document)
     return RuntimePreflightRequest(

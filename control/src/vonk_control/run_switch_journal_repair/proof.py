@@ -19,7 +19,7 @@ from ..models.fleet import AgentCertificate, FleetProfileApplication
 from ..models.jobs import Job
 from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..operations.progress import stored_progress
-from ..recipe_progress import current_recipe_progress_attribution
+from ..recipe_operations.progress import current_recipe_progress_attribution
 from ..run_switch_contract.journal import (
     JournalRepairPurpose,
     NativeProgressWitness,

@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import ConfigDict, Field, TypeAdapter, model_validator
 
-from .strict_json import StrictJSONModel
+from ..strict_json import StrictJSONModel
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 

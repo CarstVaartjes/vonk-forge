@@ -38,7 +38,7 @@ from vonk_control.models.execution import ArtifactJob, RecipeRun, ResourceReserv
 from vonk_control.models.fleet import AgentNode, FleetProfileApplication
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
-from vonk_control.recipe_execution_contract import parse_stored_run_plan
+from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.phase_results import RunSwitchRuntimeInstallResult
 from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor

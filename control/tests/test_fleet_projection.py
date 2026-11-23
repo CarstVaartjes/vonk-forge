@@ -64,7 +64,7 @@ from vonk_control.models.telemetry import (
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
-from vonk_control.recipe_execution_contract import installation_plan_document
+from vonk_control.recipe_operations.execution_contract import installation_plan_document
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from tests.observation_transfer_peer import observation_document

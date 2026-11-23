@@ -32,16 +32,16 @@ from ..offline_stops import pending_run_stop_nodes
 from ..profile_capacity import (
     prepared_profile_installation,
 )
-from ..recipe_execution_contract import (
-    RecipeExecutionContractError,
-    parse_stored_installation_plan,
-)
-from ..recipe_lifecycle_contract import JOB_ACTIVATION
 from ..recipe_operations.errors import (
     RecipeArtifactJobCancellationPending,
     RecipeInstallPreflightExpired,
     RecipeOperationConflict,
 )
+from ..recipe_operations.execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_installation_plan,
+)
+from ..recipe_operations.lifecycle_contract import JOB_ACTIVATION
 from ..run_admission import (
     RunAdmissionBusy,
 )

@@ -43,20 +43,20 @@ from ..lifecycle.evidence import (
 )
 from ..models.execution import InstallationNode, RecipeInstallation
 from ..models.jobs import Job
-from ..recipe_execution_contract import (
-    RecipeExecutionContractError,
-    parse_stored_installation_plan,
-)
-from ..recipe_progress import (
-    _parent_intent as _parent_intent,  # noqa: PLC0414 -- shared helper export
-)
 from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value
 from .errors import RecipeRetryLater, retry_later_unless_deterministic
+from .execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_installation_plan,
+)
 from .interfaces import RecipeOperationView
 from .observation_helpers import (
     _active_recipe_revision,
     wait_for_installation_upkeep,
+)
+from .progress import (
+    _parent_intent as _parent_intent,  # noqa: PLC0414 -- shared helper export
 )
 
 if TYPE_CHECKING:

@@ -29,7 +29,7 @@ from ..preparation_contract import (
     controller_assets_ready,
 )
 from ..recipe_operations.errors import RecipeOperationConflict
-from ..recipe_runtime_specs import (
+from ..recipe_operations.runtime_specs import (
     RUNTIME_INTERFACE,
 )
 from ..run_switch_contract.evidence import (

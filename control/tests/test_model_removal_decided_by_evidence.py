@@ -30,7 +30,7 @@ from vonk_control.models.cache import (
     ModelCacheSet,
 )
 from vonk_control.models.execution import RecipeInstallation
-from vonk_control.recipe_execution_contract import installation_plan_document
+from vonk_control.recipe_operations.execution_contract import installation_plan_document
 from vonk_control.recovery_policy import RecoveryPolicy
 
 from .test_catalog_revision_collection import NODE, NOW, Catalog

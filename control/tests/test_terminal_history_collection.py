@@ -23,7 +23,10 @@ from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNod
 from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.models.jobs import Job, JobAttempt
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
-from vonk_control.recipe_execution_contract import StoredRunNodePlan, StoredRunPlan
+from vonk_control.recipe_operations.execution_contract import (
+    StoredRunNodePlan,
+    StoredRunPlan,
+)
 from vonk_control.terminal_history_collection import (
     BACKLOG_PAUSE,
     TerminalHistoryCollector,

@@ -38,8 +38,8 @@ from ..models.routes import (
 from ..optimistic import Stale, transition
 from ..persisted_waits import schedule_wait
 from ..presence import ManagementAddressPolicy
-from ..recipe_execution_contract import RouteWithdrawalFollowUp
-from ..recipe_lifecycle_contract import RecipeOperationResult
+from ..recipe_operations.execution_contract import RouteWithdrawalFollowUp
+from ..recipe_operations.lifecycle_contract import RecipeOperationResult
 from ..recovery_policy import ROUTE_RECOVERY, schedule
 from ..stored.documents import RouteClaimMarker
 from . import candidate

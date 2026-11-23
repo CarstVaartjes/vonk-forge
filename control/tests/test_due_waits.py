@@ -578,7 +578,7 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
         )
     saved_result = None
     if missing_receipt:
-        from vonk_control.recipe_lifecycle_contract import (
+        from vonk_control.recipe_operations.lifecycle_contract import (
             RecipeOperationProgressResult,
             RecipeOperationResult,
         )

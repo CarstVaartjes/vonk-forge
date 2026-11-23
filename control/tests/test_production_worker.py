@@ -18,7 +18,7 @@ from vonk_control.jobs.queue import JobService
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.presence import ManagementAddressPolicy
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
 from vonk_control.run_switch_operations.service import RunSwitchOperationService

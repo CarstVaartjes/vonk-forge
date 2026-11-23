@@ -44,7 +44,7 @@ from vonk_control.owner_liveness import (
     referencing_active_job,
 )
 from vonk_control.presence import ManagementAddressPolicy
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes.service import RecipeRouteService
 from vonk_control.reservation_owners import ADOPTION_WINDOW
 from vonk_control.run_switch_contract.requests import RunSwitchCleanupApplyRequest

@@ -37,11 +37,11 @@ from ..profile_stop_authority import (
     ProfileStopOwnerBinding,
     validate_profile_stop_owner,
 )
-from ..recipe_action_plans import (
-    StopPlan,
-)
 from ..stored.json_values import read_row_column
 from .errors import RecipeRequestInvalid, RecipeRetryLater
+from .impact_plans import (
+    StopPlan,
+)
 from .interfaces import new_recipe_job
 
 if TYPE_CHECKING:

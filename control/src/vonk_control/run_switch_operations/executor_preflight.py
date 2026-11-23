@@ -28,12 +28,12 @@ from ..models.execution import RecipeRun, RunNode
 from ..offline_stops import pending_run_stop_nodes
 from ..owner_liveness import live_build_job
 from ..recipe_builds.common import RecipeBuildAdmissionBusy, RecipeBuildPlan
-from ..recipe_execution_contract import (
+from ..recipe_operations.errors import RecipeOperationConflict
+from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     build_plan_document,
     parse_stored_build_plan,
 )
-from ..recipe_operations.errors import RecipeOperationConflict
 from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_contract.plans import RunSwitchPlan
 from ..stored.states import CatalogRevisionState, RecipeBuildState

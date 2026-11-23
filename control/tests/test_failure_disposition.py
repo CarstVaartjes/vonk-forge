@@ -575,7 +575,7 @@ def test_stale_writer_across_worker_passes_waits_then_publishes(
     from sqlalchemy.orm.exc import StaleDataError
     from vonk_agent_protocol import RouteState
     from vonk_control.models.execution import RecipeRun
-    from vonk_control.recipe_operation_worker import RecipeOperationWorker
+    from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
     from vonk_control.recovery_policy import ROUTE_RECOVERY
 
     from .test_recipe_routes import NOW, setup

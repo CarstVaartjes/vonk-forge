@@ -44,8 +44,8 @@ from vonk_control.jobs.queue import _canonical_payload
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.mapping import ClusterMappingNode
-from vonk_control.recipe_runtime_specs import ResolvedRecipe
-from vonk_control.recipe_start_payloads import (
+from vonk_control.recipe_operations.runtime_specs import ResolvedRecipe
+from vonk_control.recipe_operations.start_payloads import (
     RecipeStartPlacement,
     bind_compiled_execution_plan,
 )

@@ -29,7 +29,7 @@ from ..recipe_builds.cancellation import (
     lock_build_dependency,
     request_build_cancellation,
 )
-from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
+from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
 from ..recipe_update_batches.contract import UPDATE_KIND, RecipeUpdateResponse
 from ..stored.json_values import Residue, read_row_column
 from ..strict_json import serialize_json_value

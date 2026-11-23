@@ -28,15 +28,15 @@ from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..operations.blockers import OperationBlocker, make_blocker
 from ..prebuilt_images import PrebuiltDecision
 from ..recipe_builds.common import _valid_succeeded_receipt
-from ..recipe_execution_contract import (
-    RecipeExecutionContractError,
-    parse_stored_build_policy,
-)
 from ..recipe_image_availability.contracts import (
     BuildUnsettled,
     RecipeImageAvailabilityError,
 )
-from ..recipe_runtime_specs import (
+from ..recipe_operations.execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_build_policy,
+)
+from ..recipe_operations.runtime_specs import (
     ResolvedRecipe,
     compile_runtime_spec,
 )

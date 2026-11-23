@@ -56,7 +56,7 @@ from vonk_control.models.routes import (
 )
 from vonk_control.operation_api.durable import durable_operation_services
 from vonk_control.presence import ManagementAddressPolicy
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
 from vonk_control.recipe_routes.shared import (

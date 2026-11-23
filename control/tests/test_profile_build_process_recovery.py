@@ -43,8 +43,10 @@ from vonk_control.models.operations import AgentOperation
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_builds.service import RecipeBuildService
-from vonk_control.recipe_execution_contract import parse_stored_installation_plan
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.execution_contract import (
+    parse_stored_installation_plan,
+)
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recipe_routes.service import RecipeRouteService
 from vonk_control.run_admission import RunAdmissionService

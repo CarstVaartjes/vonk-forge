@@ -20,13 +20,13 @@ from vonk_control.jobs.queue import JobService
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocument
 from vonk_control.models.jobs import Job
-from vonk_control.recipe_availability_intent import RecipeRetryIntent
 from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityError,
 )
 from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
+from vonk_control.recipe_operations.availability_intent import RecipeRetryIntent
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition
 

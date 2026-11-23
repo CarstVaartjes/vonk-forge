@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
 
 from ..categorized_faults import security_reason
 from ..failure_classification import is_definite
-from ..recipe_runtime_specs import (
+from ..recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
 )
 from ..runtime_image_preparation.contracts import (

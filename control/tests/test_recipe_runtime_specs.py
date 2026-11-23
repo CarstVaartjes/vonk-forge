@@ -7,7 +7,7 @@ import json
 from importlib.resources import files
 
 import pytest
-from vonk_control.recipe_runtime_specs import (
+from vonk_control.recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     compile_runtime_spec,
 )

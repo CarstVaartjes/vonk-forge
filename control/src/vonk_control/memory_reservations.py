@@ -18,7 +18,7 @@ from .profile_capacity import (
     profile_memory_replacements,
     reservation_visible,
 )
-from .recipe_execution_contract import parse_stored_run_plan
+from .recipe_operations.execution_contract import parse_stored_run_plan
 from .resource_planning.memory_kinds import memory_reservation_kinds
 from .resource_planning.types import (
     MemoryClaimHolder,

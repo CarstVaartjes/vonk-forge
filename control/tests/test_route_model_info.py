@@ -44,9 +44,9 @@ from vonk_control.gateway.route_runtime import (
     verify_active_route_bundle,
 )
 from vonk_control.presence import ManagementAddressPolicy
+from vonk_control.recipe_operations.runtime_specs import split_option_choices
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.shared import _RecipeEndpoint
-from vonk_control.recipe_runtime_specs import split_option_choices
 from vonk_forge_contracts import read_recipe, read_recipe_api
 
 FIXTURES = Path(__file__).parent / "fixtures" / "route_model_info"

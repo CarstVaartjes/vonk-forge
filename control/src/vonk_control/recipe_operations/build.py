@@ -51,15 +51,15 @@ from ..recipe_builds.cancellation import (
     read_build_intent,
 )
 from ..recipe_builds.common import RecipeBuildAdmissionBusy, RecipeBuildPlan
-from ..recipe_lifecycle_contract import (
-    RecipeOperationCancellationResult,
-)
 from ..source_policy import SourcePolicyReport
 from ..stored.json_values import read_row_column
 from ..stored.states import RecipeBuildState
 from ..strict_json import serialize_json_value
 from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .interfaces import RecipeOperationView, new_recipe_job
+from .lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
 from .results import _recorded_result, _recorded_result_document
 
 if TYPE_CHECKING:

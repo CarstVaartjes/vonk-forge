@@ -21,8 +21,8 @@ from ..model_cache.contract import (
     ModelCacheCancellation,
     ModelCacheDownloadPreviewResponse,
 )
-from ..recipe_availability_intent import RecipeAvailabilityIntent
-from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
+from ..recipe_operations.availability_intent import RecipeAvailabilityIntent
+from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
 from ..strict_json import read_stored_document
 from .clocks_contract import readable_or_none
 

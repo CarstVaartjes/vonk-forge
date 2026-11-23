@@ -26,7 +26,7 @@ from .models.execution import ArtifactJob
 from .models.fleet import AgentNode
 from .models.jobs import Job
 from .models.operations import AgentOperation
-from .recipe_stop_payloads import stop_payload_from_job_run
+from .recipe_operations.stop_payloads import stop_payload_from_job_run
 from .stored.json_values import read_row_column
 
 if TYPE_CHECKING:

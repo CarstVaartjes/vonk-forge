@@ -27,8 +27,8 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 
-from .library.contract import NodeId, UuidId
-from .strict_json import StrictJSONModel
+from ..library.contract import NodeId, UuidId
+from ..strict_json import StrictJSONModel
 
 
 class LifecycleModel(StrictJSONModel):

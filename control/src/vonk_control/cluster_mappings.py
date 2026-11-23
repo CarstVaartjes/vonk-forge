@@ -25,7 +25,7 @@ from .models.catalog import CatalogDocumentRevision
 from .models.fleet import AgentNode
 from .models.mapping import ClusterMapping, ClusterMappingNode
 from .models.telemetry import NodeInventorySnapshot
-from .recipe_runtime_specs import (
+from .recipe_operations.runtime_specs import (
     OPTION_CHOICES_KEY,
     RecipeRuntimeSpecError,
     recipe_topology,

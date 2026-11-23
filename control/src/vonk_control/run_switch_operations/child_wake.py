@@ -34,7 +34,7 @@ from ..model_cache import states as model_cache_states
 from ..models.cache import ModelCacheOperation
 from ..models.jobs import Job
 from ..persisted_waits import read_wait, schedule_wait
-from ..recipe_lifecycle_contract import START_CHILD_KINDS
+from ..recipe_operations.lifecycle_contract import START_CHILD_KINDS
 from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..stored.json_values import read_row_column
 from .awaited_children import awaited_jobs, child_job_ids, start_request_key

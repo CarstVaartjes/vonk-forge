@@ -32,7 +32,7 @@ from vonk_control.models.execution import (
     RunNode,
 )
 from vonk_control.models.telemetry import NodeInventorySnapshot
-from vonk_control.recipe_execution_contract import parse_stored_run_plan
+from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
 from vonk_control.run_admission import (
     RETRYABLE_PLAN_BLOCKERS,
     RunAdmissionBusy,

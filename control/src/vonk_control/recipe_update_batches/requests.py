@@ -30,7 +30,7 @@ from ..recipe_image_availability.contracts import (
     RecipeImageAvailabilityRefused,
     RecipeImageAvailabilityUnknown,
 )
-from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
+from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
 from ..revision_images import revision_images
 from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
 from ..stored.states import CatalogRevisionState

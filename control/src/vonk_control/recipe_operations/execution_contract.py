@@ -27,15 +27,15 @@ from vonk_agent_protocol.integer_domains import (
 )
 from vonk_agent_protocol.inventory import MemoryPool
 
-from .content_identity import ImageContent, same_image
-from .library.contract import Digest, ImageDigest, NodeId, Text64, UuidId
-from .operations.blockers import SwapShortfallEvidence
-from .platform_ports import serving_port
-from .strict_json import StrictJSONModel
-from .validation_detail import validation_error_detail
+from ..content_identity import ImageContent, same_image
+from ..library.contract import Digest, ImageDigest, NodeId, Text64, UuidId
+from ..operations.blockers import SwapShortfallEvidence
+from ..platform_ports import serving_port
+from ..strict_json import StrictJSONModel
+from ..validation_detail import validation_error_detail
 
 if TYPE_CHECKING:
-    from .models.execution import RecipeInstallation
+    from ..models.execution import RecipeInstallation
 
 DateTimeString = Annotated[
     str,

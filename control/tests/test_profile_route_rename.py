@@ -22,8 +22,8 @@ from vonk_control.gateway.litellm import ServedModelInfo
 from vonk_control.models.execution import RecipeRun, ResourceReservation
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
-from vonk_control.recipe_execution_contract import parse_stored_run_plan
-from vonk_control.recipe_progress import _parent_identity
+from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
+from vonk_control.recipe_operations.progress import _parent_identity
 from vonk_control.recipe_routes.shared import RecipeRouteNotReady
 
 from .lifecycle_simulation.simulation import Simulation
@@ -384,7 +384,9 @@ def test_crashed_rank_recovery_authority_holds_after_a_rename(
 def test_new_run_plans_carry_no_alias_and_keep_digests_and_routes(
     tmp_path, postgres_engine
 ) -> None:
-    from vonk_control.recipe_execution_contract import RecipeExecutionContractError
+    from vonk_control.recipe_operations.execution_contract import (
+        RecipeExecutionContractError,
+    )
 
     world = build_world(tmp_path, postgres_engine)
     try:

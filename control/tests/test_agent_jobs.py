@@ -63,7 +63,7 @@ from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.recipe_operations.service import RecipeOperationService
-from vonk_control.recipe_start_payloads import (
+from vonk_control.recipe_operations.start_payloads import (
     RecipeStartPlacement,
     bind_compiled_execution_plan,
 )
@@ -4380,7 +4380,9 @@ def test_wrong_fence_cannot_finish_work_and_current_fence_can(service) -> None:
 def test_cancelled_build_waits_for_platform_cleanup_as_an_observation(service) -> None:
     """A rebuildable child cannot turn pending cleanup into a human gate."""
     from vonk_control.jobs.documents import RecipeBuildParent
-    from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
+    from vonk_control.recipe_operations.lifecycle_contract import (
+        RecipeOperationCancellationResult,
+    )
 
     jobs, sessions, clock = service
     job = parent(sessions, clock)

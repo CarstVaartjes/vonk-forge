@@ -12,7 +12,7 @@ from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNod
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations.service import RecipeOperationService
 
 from .test_recipe_operations import (

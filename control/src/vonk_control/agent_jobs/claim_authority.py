@@ -43,7 +43,7 @@ from ..recipe_builds.common import (
     _build_disk_envelope,
     _build_disk_reserve,
 )
-from ..recipe_execution_contract import (
+from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_policy,
 )

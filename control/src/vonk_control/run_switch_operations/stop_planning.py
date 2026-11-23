@@ -27,7 +27,7 @@ from ..lifecycle.evidence import (
 from ..models.cache import RecipeBuild
 from ..models.execution import STOPPABLE_RUN_STATES, RecipeInstallation, RecipeRun
 from ..models.mapping import ClusterMapping, ClusterMappingNode
-from ..recipe_execution_contract import (
+from ..recipe_operations.execution_contract import (
     parse_stored_run_plan,
 )
 from ..run_switch_contract.evidence import RunSwitchReason, StopImpact

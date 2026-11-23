@@ -51,7 +51,7 @@ from ..models.execution import RecipeRun, ResourceReservation, RunNode
 from ..models.fleet import AgentNode
 from ..prebuilt_images import PrebuiltDecision
 from ..profile_capacity import profile_build_memory_claims
-from ..recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
+from ..recipe_operations.runtime_specs import RecipeRuntimeSpecError, recipe_topology
 from ..resource_planning.memory import memory_capacity_snapshot
 from ..runtime.adapters import (
     RuntimeAdapter,

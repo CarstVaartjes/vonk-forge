@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .machine_states import rank_installed
+from ..machine_states import rank_installed
 
 SharedCachePolicy = Literal["retain-shared-download-cache"]
 

@@ -32,7 +32,7 @@ from ..prebuilt_images import (
     PrebuiltDecision,
     executable_build_key,
 )
-from ..recipe_execution_contract import (
+from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     build_plan_document,
     build_policy_document,

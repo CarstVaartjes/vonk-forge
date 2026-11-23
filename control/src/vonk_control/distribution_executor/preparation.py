@@ -311,7 +311,7 @@ class CompositeDistributionPhaseExecutor(
         if plan.recipe_revision_id is None or not plan.spark_group.nodes:
             raise RuntimeError("runtime image preparation identity is unavailable")
         from ..execution_plan_service import _bind_runtime_artifacts
-        from ..recipe_runtime_specs import (
+        from ..recipe_operations.runtime_specs import (
             RecipeRuntimeSpecError,
             compile_runtime_spec,
             resolve_recipe_entities,

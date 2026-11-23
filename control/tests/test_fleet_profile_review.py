@@ -913,7 +913,9 @@ def test_deferred_target_builder_review_refreshes_inventory_before_admission(
     """Catch t0 builder freshness overriding t1 residual evidence on resume."""
     from vonk_agent_protocol.agent_words import ProfileOperationKind
     from vonk_control.models.fleet import FleetProfile
-    from vonk_control.recipe_execution_contract import parse_stored_installation_plan
+    from vonk_control.recipe_operations.execution_contract import (
+        parse_stored_installation_plan,
+    )
 
     from .test_profile_build_memory import _accepted_build_profile
 

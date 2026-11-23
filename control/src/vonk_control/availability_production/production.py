@@ -41,7 +41,6 @@ from ..models.jobs import Job
 from ..models.operations import AgentOperation
 from ..operations.blockers import make_blocker
 from ..prebuilt_images import PrebuiltDecision
-from ..recipe_availability_intent import RecipeBuildDependency
 from ..recipe_builds.cancellation import BuildConsumerError, lock_build_dependency
 from ..recipe_builds.common import (
     RecipeBuildAdmissionBusy,
@@ -60,8 +59,9 @@ from ..recipe_image_availability.contracts import (
     RecipeImageAvailabilityRefused,
 )
 from ..recipe_image_availability.service import RecipeImageAvailabilityService
+from ..recipe_operations.availability_intent import RecipeBuildDependency
 from ..recipe_operations.errors import RecipeOperationConflict
-from ..recipe_runtime_specs import (
+from ..recipe_operations.runtime_specs import (
     resolve_recipe_entities,
 )
 from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage

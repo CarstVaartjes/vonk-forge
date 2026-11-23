@@ -24,7 +24,7 @@ from vonk_control.models.fleet import (
     User,
 )
 from vonk_control.models.jobs import Job
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .display_fixtures import reworded

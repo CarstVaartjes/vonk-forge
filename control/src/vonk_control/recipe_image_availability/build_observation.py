@@ -21,7 +21,7 @@ from ..models.cache import RecipeBuild
 from ..models.catalog import CatalogDocumentRevision
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
-from ..recipe_execution_contract import (
+from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_plan,
 )

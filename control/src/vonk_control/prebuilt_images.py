@@ -64,12 +64,12 @@ from .oci_image_store import (
     OciImageStoreError,
     StoreUnknown,
 )
-from .recipe_execution_contract import (
+from .recipe_library_types import RecipeLibraryItem
+from .recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     StoredBuildPolicyReport,
     parse_stored_build_policy,
 )
-from .recipe_library_types import RecipeLibraryItem
 from .source_bundles import GeneratedSourceBundle
 from .stored.states import RecipeBuildState
 

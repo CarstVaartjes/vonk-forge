@@ -78,8 +78,8 @@ from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun
 from ..models.fleet import AgentNode
 from ..models.jobs import Job
 from ..models.telemetry import NodeInventorySnapshot
-from ..recipe_execution_contract import parse_stored_installation_plan
 from ..recipe_operations.errors import RecipeRequestInvalid
+from ..recipe_operations.execution_contract import parse_stored_installation_plan
 from ..strict_json import read_stored_model
 from ..unused_storage_collection.evidence import _Evidence
 from ..unused_storage_collection.references import (

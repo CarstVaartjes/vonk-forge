@@ -17,7 +17,7 @@ from ..jobs import states as job_states
 from ..logging import redact_text
 from ..models.jobs import Job
 from ..persisted_waits import schedule_wait
-from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
+from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
 from ..strict_json import serialize_json_value
 from .contract import (
     UPDATE_KIND,

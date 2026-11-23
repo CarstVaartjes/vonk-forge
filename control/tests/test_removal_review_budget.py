@@ -53,7 +53,9 @@ from vonk_control.models.catalog import (
 from vonk_control.models.execution import RecipeInstallation
 from vonk_control.models.fleet import FleetProfile, FleetProfileApplication
 from vonk_control.models.jobs import Job
-from vonk_control.recipe_execution_contract import parse_stored_installation_plan
+from vonk_control.recipe_operations.execution_contract import (
+    parse_stored_installation_plan,
+)
 from vonk_control.spark_store_retention import store_retention_request
 from vonk_control.unused_storage_collection import evidence as collector_evidence
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256

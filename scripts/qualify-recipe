@@ -333,7 +333,7 @@ def _compile(recipe: object, recipe_digest: str, models: dict[str, object], pack
     if str(control_src) not in sys.path:
         sys.path.insert(0, str(control_src))
     try:
-        from vonk_control.recipe_runtime_specs import compile_runtime_spec
+        from vonk_control.recipe_operations.runtime_specs import compile_runtime_spec
     except ImportError as error:
         raise QualificationError("canonical runtime compiler is unavailable") from error
     package_paths = set(package.paths)

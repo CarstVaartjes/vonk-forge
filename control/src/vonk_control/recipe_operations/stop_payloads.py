@@ -17,17 +17,17 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 
-from .categorized_errors import BookkeepingUnknown
-from .lifecycle.evidence import Residue
-from .models.catalog import CatalogDocumentRevision
-from .models.execution import RecipeInstallation, RecipeRun, RunNode
-from .recipe_action_plans import StopNodeImpact
-from .recipe_execution_contract import (
+from ..categorized_errors import BookkeepingUnknown
+from ..lifecycle.evidence import Residue
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import RecipeInstallation, RecipeRun, RunNode
+from ..stored.json_values import read_row_column
+from ..strict_json import read_stored_model
+from .execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )
-from .stored.json_values import read_row_column
-from .strict_json import read_stored_model
+from .impact_plans import StopNodeImpact
 
 
 class RecipeStopAuthorityError(ValueError):

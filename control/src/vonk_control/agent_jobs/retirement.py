@@ -40,7 +40,7 @@ from ..models.jobs import Job
 from ..models.operations import AgentOperation as StoredOperation
 from ..models.operations import AgentOperationAttempt
 from ..persisted_waits import schedule_wait
-from ..recipe_lifecycle_contract import (
+from ..recipe_operations.lifecycle_contract import (
     RecipeOperationCancellationResult,
 )
 from .contracts import _WORKLOAD_INTENT_OPERATIONS, OperatorRetirementRefused

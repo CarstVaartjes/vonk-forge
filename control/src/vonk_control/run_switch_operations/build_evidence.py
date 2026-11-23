@@ -17,7 +17,7 @@ from ..models.fleet import AgentNode
 from ..preparation_contract import (
     RuntimeImageIdentity,
 )
-from ..recipe_execution_contract import (
+from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_plan,
 )

@@ -24,13 +24,13 @@ from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun, 
 from ..models.fleet import AgentNode
 from ..models.jobs import Job
 from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..recipe_progress import (
+from .errors import RecipeRequestInvalid, RecipeRetryLater
+from .progress import (
     _cancel_requested as _cancel_requested,  # noqa: PLC0414 -- shared helper export
 )
-from ..recipe_progress import (
+from .progress import (
     _parent_intent as _parent_intent,  # noqa: PLC0414 -- shared helper export
 )
-from .errors import RecipeRequestInvalid, RecipeRetryLater
 
 
 def _bound_workload_intent(job: Job) -> int:

@@ -51,7 +51,7 @@ from vonk_control.models.fleet import (
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.operation_api.durable import durable_operation_services
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_operations.service import RunSwitchOperationService

@@ -44,9 +44,6 @@ from ..persisted_waits import schedule_wait
 from ..profile_stop_authority import (
     ProfileJobRunStopJob,
 )
-from ..recipe_action_plans import (
-    StopPlan,
-)
 from ..recipe_routes.shared import RecipeRouteError, route_publication_transaction
 from ..run_admission import RunAdmissionBusy
 from ..stored.json_values import read_row_column
@@ -57,6 +54,9 @@ from .errors import (
     RecipeRetryLater,
     _RouteNotWithdrawn,
     _ServiceStopReplay,
+)
+from .impact_plans import (
+    StopPlan,
 )
 from .intent import _bound_workload_intent
 from .interfaces import RecipeOperationView, UndispatchedStopView

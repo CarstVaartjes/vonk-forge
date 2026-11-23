@@ -23,7 +23,7 @@ from vonk_control.gateway.route_runtime import (
 )
 from vonk_control.models.routes import RoutePublication
 from vonk_control.presence import ManagementAddressPolicy
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
 
@@ -415,7 +415,9 @@ def test_bookkeeping_evidence_is_typed_temporary_and_repaired_in_place(tmp_path,
                 session.query(RunNode).filter_by(run_id=run_id, rank=1).one().node_id
             )
         elif fault == "scheme":
-            from vonk_control.recipe_execution_contract import parse_stored_run_endpoint
+            from vonk_control.recipe_operations.execution_contract import (
+                parse_stored_run_endpoint,
+            )
 
             endpoint = parse_stored_run_endpoint(node.endpoint)
             assert endpoint is not None
@@ -675,7 +677,9 @@ def test_owner_scoped_damage_never_blocks_an_unrelated_publication(tmp_path, dam
         elif damage == "port":
             node.port += 1
         elif damage == "scheme":
-            from vonk_control.recipe_execution_contract import parse_stored_run_endpoint
+            from vonk_control.recipe_operations.execution_contract import (
+                parse_stored_run_endpoint,
+            )
 
             endpoint = parse_stored_run_endpoint(node.endpoint)
             assert endpoint is not None
@@ -817,7 +821,7 @@ def _exhaust_publication(tmp_path, *, stale_reason=None):
 
     from vonk_agent_protocol import AgentOperation, LifecycleState, RunState
     from vonk_control.models.jobs import Job
-    from vonk_control.recipe_operation_worker import RecipeOperationWorker
+    from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 
     base, _publisher, _applied, first = setup(tmp_path)
     fresh = add_running_run(

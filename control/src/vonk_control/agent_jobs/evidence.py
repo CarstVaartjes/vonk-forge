@@ -170,7 +170,7 @@ def _exact_service_stop_receipt_covers_start(
     proves nothing. Current node intent still fences every original Start claim.
     """
     from ..jobs.documents import RecipeStartParent, RecipeStopParent
-    from ..recipe_stop_payloads import (
+    from ..recipe_operations.stop_payloads import (
         durable_run_stop_payloads,
         stop_payload_from_start,
     )

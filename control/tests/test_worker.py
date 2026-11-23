@@ -1439,7 +1439,7 @@ def test_slow_recipe_subtask_is_named_in_the_over_budget_alarm(
     """Catches the coarse `recipes` step hiding which sub-task is slow."""
     from datetime import UTC, datetime
 
-    from vonk_control.recipe_operation_worker import RecipeOperationWorker
+    from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
     from vonk_control.worker.loop import _STEP_BUDGET_SECONDS
 
     monotonic = [1000.0]

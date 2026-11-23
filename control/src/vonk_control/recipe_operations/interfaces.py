@@ -16,11 +16,11 @@ from vonk_agent_protocol import (
 from ..jobs import states as job_states
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
 from ..models.operations import AgentOperation
-from ..recipe_lifecycle_contract import (
-    RecipeLifecycleResult,
-)
 from ..recovery_policy import FailureKind
 from ..strict_json import serialize_json_value
+from .lifecycle_contract import (
+    RecipeLifecycleResult,
+)
 
 
 class AgentJobQueue(Protocol):

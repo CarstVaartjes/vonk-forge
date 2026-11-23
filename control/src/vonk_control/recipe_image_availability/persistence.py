@@ -27,7 +27,7 @@ from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..model_cache.views import ModelCacheRemovalScope
 from ..models.catalog import CatalogDocumentRevision
 from ..models.jobs import Job
-from ..recipe_availability_intent import (
+from ..recipe_operations.availability_intent import (
     RecipeSelectorIntent,
 )
 from ..revision_images import revision_images

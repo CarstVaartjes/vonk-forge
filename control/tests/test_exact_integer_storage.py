@@ -53,7 +53,7 @@ from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
 from vonk_control.models.catalog import CatalogDocumentRevision
-from vonk_control.recipe_action_plans import StopPlan, UninstallPlan
+from vonk_control.recipe_operations.impact_plans import StopPlan, UninstallPlan
 from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 from vonk_forge_contracts import ModelDefinition
 

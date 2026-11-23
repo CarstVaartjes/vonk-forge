@@ -20,7 +20,7 @@ from ..admission_locking import AdmissionLockBusy
 from ..install_admission.contracts import InstallAdmissionBusy
 from ..models.jobs import Job
 from ..recipe_builds.common import RecipeBuildAdmissionBusy
-from ..recipe_lifecycle_contract import START_CHILD_KINDS
+from ..recipe_operations.lifecycle_contract import START_CHILD_KINDS
 from ..reservation_owners import Owner, OwnerKind, OwnerRef, owner
 from ..run_admission import (
     RETRYABLE_PLAN_BLOCKERS,

@@ -16,8 +16,8 @@ from vonk_agent_protocol.compiled_execution_plan import (
 )
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 
-from .failure_classification import error_detail
-from .harnesses.canonical import places_from_environment
+from ..failure_classification import error_detail
+from ..harnesses.canonical import places_from_environment
 
 
 class RecipeStartPayloadError(InvalidRequestError, ValueError):

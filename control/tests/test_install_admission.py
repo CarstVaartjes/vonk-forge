@@ -35,8 +35,10 @@ from vonk_control.models.execution import (
 from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
 from vonk_control.models.telemetry import NodeInventorySnapshot
-from vonk_control.recipe_execution_contract import parse_stored_installation_plan
-from vonk_control.recipe_runtime_specs import ResolvedRecipe
+from vonk_control.recipe_operations.execution_contract import (
+    parse_stored_installation_plan,
+)
+from vonk_control.recipe_operations.runtime_specs import ResolvedRecipe
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,

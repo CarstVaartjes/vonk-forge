@@ -27,7 +27,7 @@ from ..models.cache import RecipeBuild
 from ..models.catalog import CatalogDocumentRevision
 from ..models.fleet import AgentNode
 from ..operator_receipt_contract import ReceiptOwner
-from ..recipe_execution_contract import (
+from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_plan,
     parse_stored_build_policy,

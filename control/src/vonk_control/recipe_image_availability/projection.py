@@ -21,7 +21,7 @@ from ..categorized_errors import InvalidValue, MissingRecord
 from ..jobs.documents import AvailabilityJobPayload, AvailabilityRetry
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..models.jobs import Job
-from ..recipe_availability_intent import (
+from ..recipe_operations.availability_intent import (
     RecipeAvailabilityIntent,
     RecipeRetryIntent,
 )
