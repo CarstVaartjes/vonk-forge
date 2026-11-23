@@ -339,10 +339,8 @@ def test_mapping_preview_is_actor_bound_and_ready_nodes_are_immutable(
     mapping_id = service.materialize(
         service.preview(revision.id, node_ids, {}, "admin"), actor="admin", now=now
     )
-    with (
-        pytest.raises(ValueError),
-        sessions.begin() as session,
-    ):
+
+    def expected_failure(session):
         node = session.scalar(
             select(ClusterMappingNode).where(
                 ClusterMappingNode.mapping_id == mapping_id
@@ -350,6 +348,12 @@ def test_mapping_preview_is_actor_bound_and_ready_nodes_are_immutable(
         )
         assert node is not None
         node.role = "tampered"
+
+    with (
+        pytest.raises(ValueError),
+        sessions.begin() as session,
+    ):
+        expected_failure(session)
     with sessions() as session:
         nodes = tuple(
             session.scalars(

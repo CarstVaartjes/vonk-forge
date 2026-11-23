@@ -107,7 +107,7 @@ def test_session_enqueue_uses_caller_operation_id_and_caller_transaction(queue) 
     service = AgentJobService(sessions, clock=clock)
     operation_id = str(uuid.uuid4())
 
-    with pytest.raises(RuntimeError), sessions.begin() as session:
+    def expected_failure(session):
         stored = service.enqueue_in_session(
             session,
             _parent_id(sessions),
@@ -120,6 +120,9 @@ def test_session_enqueue_uses_caller_operation_id_and_caller_transaction(queue) 
         assert stored.id == operation_id
         assert session.get(AgentOperation, operation_id) is stored
         raise RuntimeError("rollback")
+
+    with pytest.raises(RuntimeError), sessions.begin() as session:
+        expected_failure(session)
 
     with sessions() as session:
         assert session.get(AgentOperation, operation_id) is None

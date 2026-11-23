@@ -277,9 +277,8 @@ def test_cleanup_fault_releases_kernel_owner_and_fresh_upload_reaps_partial(
     with monkeypatch.context() as fault:
         fault.setattr(Path, "unlink", fail_unlink)
         fault.setattr(fcntl, "flock", fail_unlock)
-        with pytest.raises(Exception):  # noqa: B017 -- ending witness; no ingress publication and fresh admission below
-            # A wrong digest ends after owning temporary bytes and a reservation.
 
+        def expected_failure():
             async def chunks():
                 yield b"bad!"
 
@@ -288,6 +287,11 @@ def test_cleanup_fault_releases_kernel_owner_and_fresh_upload_reaps_partial(
                     _digest(b"good"), chunks(), expected_bytes=4, maximum_bytes=4
                 )
             )
+
+        with pytest.raises(Exception):  # noqa: B017 -- ending witness; no ingress publication and fresh admission below
+            # A wrong digest ends after owning temporary bytes and a reservation.
+
+            expected_failure()
     assert not list((tmp_path / "blobs").glob("??/*"))
     fresh = store.put_bytes(_digest(b"ok"), b"ok", maximum_bytes=4)
     assert fresh.path.read_bytes() == b"ok"

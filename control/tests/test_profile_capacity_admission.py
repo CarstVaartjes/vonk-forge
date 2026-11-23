@@ -562,10 +562,8 @@ def test_capacity_writer_is_excluded_until_profile_acceptance_commits(
         )
         try:
             assert checked.wait(30)
-            with (
-                pytest.raises(OperationalError) as refused,
-                sessions.begin() as session,
-            ):
+
+            def expected_failure(session):
                 session.execute(text("SET LOCAL lock_timeout = '100ms'"))
                 if writer == "inventory":
                     row = session.scalar(select(NodeInventorySnapshot))
@@ -576,6 +574,12 @@ def test_capacity_writer_is_excluded_until_profile_acceptance_commits(
                     assert reservation is not None
                     reservation.amount_bytes = 1_000_000
                 session.flush()
+
+            with (
+                pytest.raises(OperationalError) as refused,
+                sessions.begin() as session,
+            ):
+                expected_failure(session)
             assert getattr(refused.value.orig, "sqlstate", None) == "55P03"
         finally:
             release.set()

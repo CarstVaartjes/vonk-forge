@@ -197,7 +197,8 @@ def test_local_distribution_identity_miss_does_not_poison_a_new_request(damage):
         source.runtime_images.clear()
     else:
         source.damaged = True
-    with pytest.raises(Exception) as _ending:
+
+    def expected_failure():
         # A grant needs no NAS manifest; serving its model object reads it.
         if damage in {"opened-identity", "model-manifest"}:
             service.open_object(
@@ -207,6 +208,9 @@ def test_local_distribution_identity_miss_does_not_poison_a_new_request(damage):
             )
         else:
             service.register(assignment)
+
+    with pytest.raises(Exception) as _ending:
+        expected_failure()
     source.register_artifact_set(
         assignment.model_artifact_set_sha256, assignment.objects
     )

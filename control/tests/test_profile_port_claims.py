@@ -315,10 +315,14 @@ def test_restart_adopts_committed_start_before_reassessing_its_owned_ports(
         return result
 
     monkeypatch.setattr(executor, "execute", crash_after_start)
-    with pytest.raises(SystemExit):
+
+    def expected_failure():
         for _ in range(16):
             planner.tick()
             profiles.tick()
+
+    with pytest.raises(SystemExit):
+        expected_failure()
     lifecycle = planner._lifecycle
     assert lifecycle is not None
     with sessions() as session:

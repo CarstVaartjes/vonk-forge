@@ -344,13 +344,16 @@ def test_sqlite_ids_follow_commit_order_not_append_order(tmp_path) -> None:
 def test_repository_rollback_removes_source_event_and_cursor_advance(sessions) -> None:
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
 
+    def expected_failure(session):
+        session.add(_job("job-rollback"))
+        repository.append_in_session(session, _draft(entity_id="job-rollback"))
+        raise RuntimeError("forced rollback")
+
     with (
         pytest.raises(Exception),  # noqa: B017 -- observable effects and recovery establish the rejection
         sessions.begin() as session,
     ):
-        session.add(_job("job-rollback"))
-        repository.append_in_session(session, _draft(entity_id="job-rollback"))
-        raise RuntimeError("forced rollback")
+        expected_failure(session)
 
     with sessions() as session:
         assert session.scalar(select(func.count()).select_from(Job)) == 0
@@ -377,9 +380,12 @@ def test_repository_rollback_removes_source_event_and_cursor_advance(sessions) -
 def test_invalid_draft_fails_the_source_transaction(sessions, draft) -> None:
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
 
-    with pytest.raises(Exception), sessions.begin() as session:  # noqa: B017 -- observable effects and recovery establish the rejection
+    def expected_failure(session):
         session.add(_job("job-invalid"))
         repository.append_in_session(session, draft)
+
+    with pytest.raises(Exception), sessions.begin() as session:  # noqa: B017 -- observable effects and recovery establish the rejection
+        expected_failure(session)
 
     with sessions() as session:
         assert session.scalar(select(func.count()).select_from(Job)) == 0
@@ -773,14 +779,17 @@ def test_recorder_source_flush_and_event_are_rolled_back_together(sessions) -> N
         session.add(_job("job-1"))
     assert len(_event_rows(sessions)) == 1
 
-    with (
-        pytest.raises(Exception),  # noqa: B017 -- observable effects and recovery establish the rejection
-        sessions.begin() as session,
-    ):
+    def expected_failure(session):
         job = session.get(Job, "job-1")
         job.state = "running"
         session.flush()
         raise RuntimeError("forced rollback")
+
+    with (
+        pytest.raises(Exception),  # noqa: B017 -- observable effects and recovery establish the rejection
+        sessions.begin() as session,
+    ):
+        expected_failure(session)
 
     with sessions() as session:
         assert session.get(Job, "job-1").state == "queued"

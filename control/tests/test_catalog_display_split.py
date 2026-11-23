@@ -288,7 +288,8 @@ def test_no_write_path_stores_a_2x_shape(sessions, legacy) -> None:
     with pytest.raises(CatalogValidationError) as revised:
         entities.revise(seed.document_id, document, actor="test")
     assert revised.value.code == CatalogCode.DOCUMENT_INVALID
-    with pytest.raises(CatalogValidationError) as imported:
+
+    def expected_failure():
         if document["kind"] == "model":
             service.import_catalog_models("test", [document])
         else:
@@ -299,6 +300,9 @@ def test_no_write_path_stores_a_2x_shape(sessions, legacy) -> None:
                 document=document,
                 expected_content_sha256=document_sha256(document),
             )
+
+    with pytest.raises(CatalogValidationError) as imported:
+        expected_failure()
     assert imported.value.code in {
         CatalogCode.DOCUMENT_INVALID,
         CatalogCode.MODEL_DOCUMENT_INVALID,

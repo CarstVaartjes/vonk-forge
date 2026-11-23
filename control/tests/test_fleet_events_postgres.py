@@ -192,14 +192,18 @@ def test_failed_commit_time_numbering_rolls_back_and_leaves_no_gap(
                 "WHERE singleton_id = 1 FOR UPDATE"
             )
         )
+
+        def expected_failure():
+            refused.execute(text("SET LOCAL lock_timeout = '200ms'"))
+            refused.add(_job("job-refused"))
+            repository.append_in_session(refused, _draft("draft-refused"))
+
         with (
             write_guard_mode(strict=False),
             pytest.raises(OperationalError, match="lock timeout"),
             refused.begin(),
         ):
-            refused.execute(text("SET LOCAL lock_timeout = '200ms'"))
-            refused.add(_job("job-refused"))
-            repository.append_in_session(refused, _draft("draft-refused"))
+            expected_failure()
         assert not refused.info.get(fleet_events._STAGED_KEY)
         blocker.rollback()
     refused.close()
@@ -228,14 +232,22 @@ def test_savepoint_rollback_discards_only_the_events_it_staged(
     with write_guard_mode(strict=False), sessions.begin() as session:
         session.add(_job("job-outer"))
         session.flush()
-        with pytest.raises(RuntimeError), session.begin_nested():
+
+        def refuse_savepoint():
             session.add(_job("job-rolled-back"))
             session.flush()
             raise RuntimeError("savepoint refused")
+
         with pytest.raises(RuntimeError), session.begin_nested():
+            refuse_savepoint()
+
+        def refuse_outer_savepoint():
             with session.begin_nested():
                 repository.append_in_session(session, _draft("inner-released"))
             raise RuntimeError("outer savepoint refused")
+
+        with pytest.raises(RuntimeError), session.begin_nested():
+            refuse_outer_savepoint()
         with session.begin_nested():
             session.add(_job("job-released"))
 

@@ -366,13 +366,17 @@ def test_install_admission_reschedules_contended_dependencies_without_partial_cl
     }[held_owner]
     with sessions.begin() as holder:
         assert holder.get(owner, identity, with_for_update=True) is not None
-        with pytest.raises(InstallAdmissionBusy), sessions.begin() as admission:
+
+        def expected_failure(admission):
             # The wrong implementation waits and raises a raw SQL error. Bound
             # the regression itself; production configures this centrally.
             admission.execute(text("SET LOCAL lock_timeout = '100ms'"))
             lifecycle._install_admission.accept_install_in_session(
                 admission, plan, actor="admin", now=lifecycle._clock()
             )
+
+        with pytest.raises(InstallAdmissionBusy), sessions.begin() as admission:
+            expected_failure(admission)
         with sessions() as observer:
             assert not tuple(observer.scalars(select(RecipeInstallation)))
             assert not tuple(observer.scalars(select(ResourceReservation)))

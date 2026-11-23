@@ -212,11 +212,15 @@ def test_a_cursor_with_an_old_shape_is_an_invalid_cursor(
         cursors=_OldShape(b"k" * 32),
         clock=lambda: _EPOCH + timedelta(days=1),
     )
-    with pytest.raises(CursorError):
+
+    def expected_failure():
         if kind == "model":
             projection.models(limit=2, sort=sort, cursor="any")
         else:
             projection.recipe_library(limit=2, sort=sort, cursor="any")
+
+    with pytest.raises(CursorError):
+        expected_failure()
 
 
 def test_models_sort_name_and_updated_are_distinct_and_complete(

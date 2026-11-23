@@ -66,10 +66,8 @@ def test_a_restarted_service_that_ticks_on_the_shared_connection_fails_the_net(
     """The shape of the flake: a second service on the fixture's sessions ticks."""
 
     sessions = _shared_connection_sessions()
-    with (
-        pytest.raises(AssertionError, match="use threaded_cache"),
-        _watch_services_on(sessions),
-    ):
+
+    def expected_failure():
         ModelCacheService(
             sessions, tmp_path / "first", free_fraction=0, fixture_sources=True
         )
@@ -77,6 +75,12 @@ def test_a_restarted_service_that_ticks_on_the_shared_connection_fails_the_net(
             sessions, tmp_path / "first", free_fraction=0, fixture_sources=True
         )
         restarted.tick()
+
+    with (
+        pytest.raises(AssertionError, match="use threaded_cache"),
+        _watch_services_on(sessions),
+    ):
+        expected_failure()
 
 
 def test_a_service_that_starts_no_background_work_passes_the_net(tmp_path: Path):

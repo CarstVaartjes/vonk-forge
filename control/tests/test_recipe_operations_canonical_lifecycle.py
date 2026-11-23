@@ -376,8 +376,11 @@ def test_fresh_alembic_head_postgres_runs_canonical_recipe_lifecycle(
         assert canonical_revision.kind == "recipe"
         assert canonical_revision.state == "active"
 
-    with pytest.raises(IntegrityError), sessions.begin() as session:
+    def expected_failure(session):
         installation_row = session.get(RecipeInstallation, installation.owner_id)
         assert installation_row is not None
         installation_row.recipe_revision_id = "missing-canonical-revision"
         session.flush()
+
+    with pytest.raises(IntegrityError), sessions.begin() as session:
+        expected_failure(session)

@@ -442,11 +442,15 @@ def test_result_scope_changed_yields_without_outer_replay(
         raise refused
 
     monkeypatch.setattr(services.operations, "_finish", finish)
-    with pytest.raises(UnknownOutcomeError) as caught:
+
+    def expected_failure():
         if action == "succeed":
             services.operations.succeed("unused-fence", {})
         else:
             services.operations.fail("unused-fence", "invalid result")
+
+    with pytest.raises(UnknownOutcomeError) as caught:
+        expected_failure()
     assert caught.value is refused
     assert len(calls) == 1
 

@@ -266,13 +266,17 @@ def test_a_claimed_job_on_a_profile_activated_run_is_granted_its_exact_start_and
         assert late_stop.runtime_target_id == later.id
         with pytest.raises(HostHelperAuthorityError):
             _grant_start(authority, spark[0], later_claim.fence, later_plan)
+
         # The window bounds the cancelled job: still heartbeating every 20 s,
         # its fence goes stale only once the window has closed.
-        with pytest.raises(StaleAgentFence):
+        def expected_failure():
             for _ in range(5):
                 world.advance(20)
                 orders.heartbeat(later_claim, None, 60)
                 world.tick()
+
+        with pytest.raises(StaleAgentFence):
+            expected_failure()
         assert world.clock() - cancelled_at >= timedelta(
             seconds=SUPERSEDED_CANCELLATION_SECONDS
         )

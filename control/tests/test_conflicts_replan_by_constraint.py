@@ -159,7 +159,7 @@ def test_a_released_port_promised_elsewhere_replans_instead_of_resuming(
             )
         )
 
-    with pytest.raises(ConstraintReplan) as taken, sessions.begin() as session:
+    def expected_failure(session):
         application = session.get(FleetProfileApplication, loaded.id)
         assert application is not None
         profile_claim_restore.restore_released_profile_claims(
@@ -169,6 +169,9 @@ def test_a_released_port_promised_elsewhere_replans_instead_of_resuming(
             memory_floor_bytes=0,
             inventory_max_age_seconds=300,
         )
+
+    with pytest.raises(ConstraintReplan) as taken, sessions.begin() as session:
+        expected_failure(session)
 
     assert taken.value.constraint == "uq_promised_node_port"
     assert not _promises(sessions, loaded.id)

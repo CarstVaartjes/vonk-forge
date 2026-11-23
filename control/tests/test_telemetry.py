@@ -222,13 +222,10 @@ def test_resource_store_rejects_invalid_measurement_without_partial_sample(
         resource = session.scalar(select(NodeInventoryResourceSnapshot))
         assert resource is not None
         identifier = resource.id
+
     # Controller initialization selects warning mode for production writes;
     # this rejection assertion owns its strict scope instead of test order.
-    with (
-        write_guard_mode(strict=True),
-        pytest.raises(ValueError),
-        sessions.begin() as session,
-    ):
+    def expected_failure(session):
         resource = session.get(NodeInventoryResourceSnapshot, identifier)
         assert resource is not None
         resource.host_resources = HostResourceSample.model_construct(
@@ -237,6 +234,13 @@ def test_resource_store_rejects_invalid_measurement_without_partial_sample(
             disk_total_bytes=None,
             disk_free_bytes=None,
         )
+
+    with (
+        write_guard_mode(strict=True),
+        pytest.raises(ValueError),
+        sessions.begin() as session,
+    ):
+        expected_failure(session)
     assert repository.latest((NODE_A,))[NODE_A].memory_available_bytes == 64_000_000_000
 
 

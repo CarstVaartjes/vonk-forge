@@ -511,10 +511,14 @@ def test_build_reconnects_after_child_commit_before_parent_checkpoint(
         return result
 
     monkeypatch.setattr(executor, "execute", crash_after_build)
-    with pytest.raises(SystemExit):
+
+    def expected_failure():
         for _ in range(12):
             profiles.tick()
             planner.tick()
+
+    with pytest.raises(SystemExit):
+        expected_failure()
     with sessions.begin() as session:
         child = session.scalar(select(Job).where(Job.kind == "recipe.build.v1"))
         assert child is not None

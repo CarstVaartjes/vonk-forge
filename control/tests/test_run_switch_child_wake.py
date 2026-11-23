@@ -303,10 +303,13 @@ def test_wake_runs_after_the_ending_connection_is_returned(tmp_path) -> None:
         session.add(_job_row(child_id, "running"))
     assert woken == []
 
-    with pytest.raises(RuntimeError), sessions.begin() as session:
+    def expected_failure(session):
         _get(session, Job, child_id).state = "failed"
         session.flush()
         raise RuntimeError("rolled back")
+
+    with pytest.raises(RuntimeError), sessions.begin() as session:
+        expected_failure(session)
     assert woken == []  # a rolled-back end wakes nobody
 
     with sessions.begin() as session:

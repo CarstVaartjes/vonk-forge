@@ -161,7 +161,8 @@ def test_import_rejects_malformed_batch_before_any_revision_is_written(
     malformed = copy.deepcopy(dependencies[0])
     malformed["identity"] = ["not-a-canonical-identity"]
     try:
-        with pytest.raises(Exception) as _ending:
+
+        def expected_failure():
             if damage == "model":
                 service.import_catalog_models("test", [*dependencies, malformed])
             else:
@@ -178,6 +179,9 @@ def test_import_rejects_malformed_batch_before_any_revision_is_written(
                     expected_content_sha256=digest,
                     dependency_documents=dependencies,
                 )
+
+        with pytest.raises(Exception) as _ending:
+            expected_failure()
         with service._sessions() as session:
             assert session.scalars(select(CatalogDocumentRevision)).all() == []
     finally:

@@ -833,11 +833,14 @@ def test_retired_identity_cannot_mutate_active_attempt_or_record_contact(
         certificate.state = "revoked"
         certificate.revoked_at = clock.now
 
-    with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
+    def expected_failure():
         if agent_action == "heartbeat":
             jobs.heartbeat(claim, {"phase": "checking"}, 60)
         else:
             jobs.succeed(claim, {"healthy": True})
+
+    with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
+        expected_failure()
 
     with sessions() as session:
         node = session.get(AgentNode, NODE_A)

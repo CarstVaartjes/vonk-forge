@@ -243,9 +243,13 @@ def test_a_profile_save_rewrites_its_recipes_in_the_same_flush(
             assert profiles_naming(session, profile_id=profile_id) == {
                 profile_id: frozenset({world.other_recipe[1:]})
             }
-        with pytest.raises((TypeError, ValueError)), world.sessions.begin() as session:
+
+        def expected_failure(session):
             profile = session.get(FleetProfile, profile_id)
             assert profile is not None
             profile.assignments = [{"recipe_selector": "Not A Selector"}]
+
+        with pytest.raises((TypeError, ValueError)), world.sessions.begin() as session:
+            expected_failure(session)
     finally:
         world.cache.close()

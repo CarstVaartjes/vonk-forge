@@ -1074,10 +1074,13 @@ def test_postgres_installed_profile_adopts_committed_child_after_crash(
 
             monkeypatch.setattr(executor, "execute", crash_after_install)
 
-        with pytest.raises(SystemExit):
+        def expected_failure():
             for _ in range(12):
                 planner.tick()
                 service.tick()
+
+        with pytest.raises(SystemExit):
+            expected_failure()
         assert crashed
 
         if boundary == "preparation-checkpoint":
