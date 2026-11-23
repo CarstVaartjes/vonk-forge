@@ -126,7 +126,7 @@ def job_build_files(
     """The build context gains the stub job, installed by the Dockerfile."""
 
     build = recipe["execution"]["build"]  # type: ignore[index]
-    context = build["context"]["path"]  # type: ignore[index]
+    context = build["context"]["path"]
 
     def install_job(dockerfile: bytes) -> bytes:
         user = b"\nUSER "
@@ -136,7 +136,7 @@ def job_build_files(
         return dockerfile.replace(user, copy + user)
 
     return {
-        build["dockerfile"]: install_job,  # type: ignore[index]
+        build["dockerfile"]: install_job,
         f"{context}/{JOB_SCRIPT_NAME}": lambda _absent: JOB_SCRIPT,
     }
 

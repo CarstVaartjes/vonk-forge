@@ -104,13 +104,13 @@ def apply_vector_changes(
         target: object = payload
         for component in path[:-1]:
             assert isinstance(target, (dict, list))
-            target = target[component]  # type: ignore[index]
+            target = target[component]
         assert isinstance(target, (dict, list))
         if change["op"] == "set":
-            target[path[-1]] = deepcopy(change["value"])  # type: ignore[index]
+            target[path[-1]] = deepcopy(change["value"])
         else:
             assert change["op"] == "remove"
-            del target[path[-1]]  # type: ignore[index]
+            del target[path[-1]]
     return payload
 
 
@@ -224,7 +224,7 @@ def test_claim_copies_canonical_payload_before_becoming_frozen() -> None:
         == "00000000-0000-4000-8000-000000000005"
     )
     with pytest.raises(ValidationError):
-        claim.fence = "00000000-0000-4000-8000-000000000009"  # type: ignore[misc]
+        claim.fence = "00000000-0000-4000-8000-000000000009"
 
 
 def test_direct_construction_cannot_bypass_claim_validation_or_serialization() -> None:

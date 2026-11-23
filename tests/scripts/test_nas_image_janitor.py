@@ -429,7 +429,7 @@ def test_container_that_stops_mid_tick_does_not_condemn_a_vanished_network(
             del daemon.networks["vonk-forge_ingress"]
         return request(method, path, body)
 
-    daemon.request = flip  # type: ignore[method-assign]
+    daemon.request = flip
     ticks(reconciler, clock, 1)
     assert daemon.created == []
     assert daemon.mutations == []
@@ -571,11 +571,11 @@ def test_container_that_joined_after_the_shared_snapshot_is_left_alone(
     def request(method: str, path: str, body: Any = None) -> Any:
         row = read(method, path, body)
         if method == "GET" and path.endswith("vonk-forge_agent-proxy"):
-            daemon.request = read  # type: ignore[method-assign]
+            daemon.request = read
             daemon.start(api)  # Compose starts it after the snapshot was taken.
         return row
 
-    daemon.request = request  # type: ignore[method-assign]
+    daemon.request = request
     daemon.mutations.clear()
     ticks(reconciler, clock, 1)
     assert daemon.mutations == []
@@ -599,7 +599,7 @@ def test_container_that_exits_between_its_inspect_and_the_fresh_read_is_left_alo
                 daemon.containers[api]["State"]["Status"] = "exited"
         return row
 
-    daemon.request = request  # type: ignore[method-assign]
+    daemon.request = request
     ticks(reconciler, clock, 1)
     assert len(reads) == 2
     assert daemon.mutations == []
@@ -651,7 +651,7 @@ def test_sigterm_unwinds_through_the_start(tmp_path: Path) -> None:
         if action == "disconnect":
             janitor.terminate(signal.SIGTERM, None)
 
-    daemon._mutate = terminated  # type: ignore[method-assign]
+    daemon._mutate = terminated
     with pytest.raises(SystemExit):
         ticks(reconciler, clock, 1)
     assert daemon.running(caddy)

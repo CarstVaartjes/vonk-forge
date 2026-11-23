@@ -44,14 +44,14 @@ def _recipe(
         .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
-    document["identity"]["publisher"] = "vonk"  # type: ignore[index]
-    document["identity"]["slug"] = slug  # type: ignore[index]
+    document["identity"]["publisher"] = "vonk"
+    document["identity"]["slug"] = slug
     topology = document["topology"]
-    topology["node_count"] = nodes  # type: ignore[index]
-    topology["name"] = "solo" if nodes == 1 else "dual"  # type: ignore[index]
-    topology["mode"] = "single" if nodes == 1 else "distributed"  # type: ignore[index]
-    roles = topology["roles"]  # type: ignore[index]
-    roles[0]["count"] = nodes  # type: ignore[index]
+    topology["node_count"] = nodes
+    topology["name"] = "solo" if nodes == 1 else "dual"
+    topology["mode"] = "single" if nodes == 1 else "distributed"
+    roles = topology["roles"]
+    roles[0]["count"] = nodes
     if recipe_id is not None:
         document["__recipe_id"] = recipe_id
     if revision_id is not None:

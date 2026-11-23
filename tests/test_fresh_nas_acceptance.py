@@ -921,7 +921,7 @@ def test_tailnet_serve_status_requires_the_exact_selected_routes() -> None:
     wrong_target = _serve_status()
     wrong_target["Services"]["svc:vonk-forge"]["Web"][  # type: ignore[index]
         "vonk-forge.acceptance.example.test:443"
-    ]["Handlers"]["/"]["Proxy"] = "http://other:8080"  # type: ignore[index]
+    ]["Handlers"]["/"]["Proxy"] = "http://other:8080"
     invalid.append(wrong_target)
     wrong_port = _serve_status()
     wrong_port["Services"]["svc:vonk-forge"]["TCP"] = {"8443": {"HTTPS": True}}  # type: ignore[index]
@@ -996,8 +996,8 @@ def test_tailnet_service_probe_uses_an_independent_host_client(
     ]
 
     local_status = _tailscale_status()
-    local_status["Self"]["CapMap"] = {}  # type: ignore[index]
-    local_status["Self"]["PrimaryRoutes"] = []  # type: ignore[index]
+    local_status["Self"]["CapMap"] = {}
+    local_status["Self"]["PrimaryRoutes"] = []
     responses = iter(
         (
             json.dumps(local_status),
@@ -1025,8 +1025,8 @@ def test_no_client_accepts_only_exact_pending_ephemeral_advertisement(
     compose.chmod(0o755)
     monkeypatch.setenv("VONK_ACCEPTANCE_REFERENCE_COMPOSE", str(compose))
     local_status = _tailscale_status()
-    local_status["Self"]["CapMap"] = {}  # type: ignore[index]
-    local_status["Self"]["PrimaryRoutes"] = []  # type: ignore[index]
+    local_status["Self"]["CapMap"] = {}
+    local_status["Self"]["PrimaryRoutes"] = []
 
     responses = iter((json.dumps(local_status), "{}", '{"version":"0.0.1"}'))
 

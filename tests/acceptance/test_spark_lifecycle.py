@@ -802,7 +802,7 @@ def _derived_fixture(
         source_commit=index["source_commit"],
         slug=str(entry["document"]["identity"]["slug"]),  # type: ignore[index]
         recipe_content_sha256=digest,
-        recipe=entry["document"],  # type: ignore[arg-type]
+        recipe=entry["document"],
     )
 
 
@@ -842,7 +842,7 @@ def _sibling_recipes(
             source_commit=commit,
             slug=str(entry["document"]["identity"]["slug"]),  # type: ignore[index]
             recipe_content_sha256=str(entry["content_sha256"]),
-            recipe=entry["document"],  # type: ignore[arg-type]
+            recipe=entry["document"],
         )
         for entry, package_bytes in built
     )

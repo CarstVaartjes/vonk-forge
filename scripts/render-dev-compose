@@ -150,7 +150,7 @@ def _compose_document(path: Path, seen: set[Path] | None = None) -> dict[str, ob
         child = _compose_document(path.parent / included_path, seen)
         prefix = str(Path(included_path).parent)
         if prefix != ".":
-            child = _rebase_relative_paths(child, prefix)  # type: ignore[assignment]
+            child = _rebase_relative_paths(child, prefix)
         merged = _merge_values(merged, child)  # type: ignore[assignment]
     for key, value in document.items():
         merged = _merge_values(merged, {key: value})  # type: ignore[assignment]
