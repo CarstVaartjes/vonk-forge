@@ -27,17 +27,7 @@ from vonk_control.jobs.documents import (
     AvailabilityRetry,
     AvailabilityRuntime,
 )
-from vonk_control.lifecycle import (
-    STOP_BUDGET,
-    CancelRequested,
-    Effect,
-    Lifecycle,
-    Outcome,
-    Reported,
-    State,
-    Tick,
-    transition,
-)
+from vonk_control.lifecycle.core import STOP_BUDGET, transition
 from vonk_control.lifecycle.image_availability import (
     CANCEL_BUDGET,
     OPERATION_KIND,
@@ -45,12 +35,27 @@ from vonk_control.lifecycle.image_availability import (
     ImageAvailabilityAdapter,
     PrebuiltImageAdapter,
 )
-from vonk_control.models import Base, Job, User
-from vonk_control.recipe_availability_intent import RecipeRevisionIntent
-from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
-from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
-from vonk_control.recipe_update_contract import UPDATE_KIND
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.lifecycle.types import (
+    CancelRequested,
+    Effect,
+    Lifecycle,
+    Outcome,
+    Reported,
+    State,
+    Tick,
+)
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import User
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
+)
+from vonk_control.recipe_operations.availability_intent import RecipeRevisionIntent
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
+from vonk_control.recipe_update_batches.contract import UPDATE_KIND
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import serialize_json_value
 
 from .test_recipe_image_availability import (

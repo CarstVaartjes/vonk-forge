@@ -10,22 +10,16 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import DistributionObject, canonical_message
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.distribution import (
-    DistributionService,
-    MemoryObjectSource,
-)
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.distribution_assignment import NodeDistributionAssignment
-from vonk_control.distribution_executor import DurableDistributionPhaseExecutor
-from vonk_control.models import Base
-from vonk_control.run_switch_contract import (
-    RunSwitchOperationResult,
-    RunSwitchPhase,
-    RunSwitchPlan,
-)
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
-)
+from vonk_control.distribution_executor.durable import DurableDistributionPhaseExecutor
+from vonk_control.model_primitives import Base
+from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .test_distribution_executor import _receipt_json
 from .test_runtime_image_preparation import (
@@ -190,10 +184,8 @@ def test_built_image_receipt_flows_from_prepare_to_target_verify(
 def _archive_gate_service(tmp_path: Path):
     """A distribution service whose source carries a real image cache."""
 
-    from vonk_control.distribution import (
-        DistributionService,
-        RecipeBuildObjectSource,
-    )
+    from vonk_control.distribution.filesystem import RecipeBuildObjectSource
+    from vonk_control.distribution.service import DistributionService
 
     storage = FilesystemRuntimeImageStorage(tmp_path)
     receipt = _prepare(storage=storage)
@@ -271,12 +263,16 @@ def test_target_copy_to_a_spark_holding_the_model_needs_no_nas_copy(
     """After the NAS evicted a model, a Spark that holds its files but lacks
     the image still gets its copy: the grant names the files the persisted
     plan compiled (the agent keeps those it holds) and the image."""
-    from vonk_control.distribution import CompositeObjectSource
     from vonk_control.distribution.model_cache import ModelCacheObjectSource
+    from vonk_control.distribution.sources import CompositeObjectSource
     from vonk_control.distribution_executor.receipts import RuntimeImagePull
-    from vonk_control.model_cache import ModelCacheService
-    from vonk_control.models import AgentNode, Job, RecipeInstallation
-    from vonk_control.recipe_execution_contract import parse_stored_installation_plan
+    from vonk_control.model_cache.service import ModelCacheService
+    from vonk_control.models.execution import RecipeInstallation
+    from vonk_control.models.fleet import AgentNode
+    from vonk_control.models.jobs import Job
+    from vonk_control.recipe_operations.execution_contract import (
+        parse_stored_installation_plan,
+    )
 
     from .test_recipe_operations import NOW, installed_recipe, setup_services
 

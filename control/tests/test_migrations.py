@@ -22,15 +22,15 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.telemetry import HostResourceSample
-from vonk_control.db import initialize_database, verify_schema_is_current
 from vonk_control.db.schema_helpers import SchemaDriftKind
-from vonk_control.models import (
-    AgentNode,
-    Base,
-    Job,
+from vonk_control.db.startup import initialize_database, verify_schema_is_current
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.routes import RoutePublicationOwner
+from vonk_control.models.telemetry import (
     NodeInventoryResourceSnapshot,
     NodeTelemetrySample,
-    RoutePublicationOwner,
 )
 
 from .telemetry_support import telemetry_with_resources
@@ -49,8 +49,10 @@ def test_startup_retires_unproven_distribution_identity_and_allows_redistributio
     """NULL identity must not block tightening or poison the next exact grant."""
     from uuid import uuid4
 
-    from vonk_control.distribution import DistributionService, MemoryObjectSource
-    from vonk_control.models import AgentNode, ArtifactDistributionAssignment
+    from vonk_control.distribution.service import DistributionService
+    from vonk_control.distribution.sources import MemoryObjectSource
+    from vonk_control.models.fleet import AgentNode
+    from vonk_control.models.operations import ArtifactDistributionAssignment
 
     from .test_distribution import _assignment
 

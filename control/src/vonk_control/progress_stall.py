@@ -66,8 +66,8 @@ from sqlalchemy import event, inspect
 from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 
-from .fleet_profile_contract import FleetProfileApplicationProgress
-from .models import FleetProfileApplication
+from .fleet_profile_contract.applications import FleetProfileApplicationProgress
+from .models.fleet import FleetProfileApplication
 from .operations.blockers import (
     OperationBlocker,
     ProgressAlarmCode,

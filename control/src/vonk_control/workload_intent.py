@@ -28,7 +28,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from .models import AgentNode
+from .models.fleet import AgentNode
 
 # Every lost race is another request's committed intent, so a loop that keeps
 # losing means the Sparks are churning. The request ends as a typed wait

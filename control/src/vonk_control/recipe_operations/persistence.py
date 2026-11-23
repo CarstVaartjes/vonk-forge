@@ -35,10 +35,8 @@ from ..admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
-from ..agent_jobs import (
-    AgentJobService,
-    release_owned_reservations_in_session,
-)
+from ..agent_jobs.retirement import release_owned_reservations_in_session
+from ..agent_jobs.service import AgentJobService
 from ..bounded_json import require_mapping
 from ..compiled_execution_plan import (
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
@@ -46,9 +44,7 @@ from ..compiled_execution_plan import (
     validate_compiled_launch_payload,
 )
 from ..identity_insert import insert_identity
-from ..install_admission import (
-    InstallAdmissionBusy,
-)
+from ..install_admission.contracts import InstallAdmissionBusy
 from ..jobs import states as job_states
 from ..jobs.documents import controller_recipe_document
 from ..lifecycle.agent_operation import retry_scheduled
@@ -56,26 +52,11 @@ from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
 )
-from ..models import (
-    AgentNode,
-    AgentOperation,
-    Job,
-    RecipeInstallation,
-    RecipeRun,
-    ResourceReservation,
-)
+from ..models.execution import RecipeInstallation, RecipeRun, ResourceReservation
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from ..own_cleanup import CLEANUP_KINDS
-from ..recipe_lifecycle_contract import (
-    START_CHILD_KINDS,
-    validate_recipe_lifecycle_terminal,
-)
-from ..recipe_progress import (
-    _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
-)
-from ..recipe_progress import (
-    _project_recipe_operation_progress as _project_recipe_operation_progress,  # noqa: PLC0414 -- shared helper export
-)
-from ..recipe_progress import _recorded_parent
 from ..run_admission import (
     RunAdmissionBusy,
 )
@@ -86,7 +67,18 @@ from .constants import _MANIFEST_BOUND_KINDS, _WORKLOAD_INTENT_KINDS
 from .contracts import RecipeOperationContext
 from .errors import RecipeRequestInvalid
 from .interfaces import RecipeOperationView, new_recipe_job
+from .lifecycle_contract import (
+    START_CHILD_KINDS,
+    validate_recipe_lifecycle_terminal,
+)
 from .observation_helpers import _RECIPE_PARENT_READERS
+from .progress import (
+    _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
+)
+from .progress import (
+    _project_recipe_operation_progress as _project_recipe_operation_progress,  # noqa: PLC0414 -- shared helper export
+)
+from .progress import _recorded_parent
 from .rank_authority import _RECIPE_WIRE_PAYLOAD_MODELS
 from .results import _recorded_result
 

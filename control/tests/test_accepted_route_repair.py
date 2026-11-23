@@ -16,7 +16,7 @@ from vonk_control.gateway.route_runtime import (
     verify_active_route_bundle,
 )
 from vonk_control.presence import ManagementAddressPolicy
-from vonk_control.recipe_routes import AtomicRecipeRoutePublisher
+from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.shared import _RecipeCandidate, _RecipeEndpoint
 
 

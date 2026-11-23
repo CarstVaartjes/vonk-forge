@@ -17,11 +17,10 @@ from vonk_control.catalog.entities import (
 )
 from vonk_control.catalog.revision_contract import write_catalog_projection
 from vonk_control.compiled_execution_plan import VerifiedModelObject
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision
-from vonk_control.recipe_builds import (
-    derive_build_input_identity,
-)
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.recipe_builds.common import derive_build_input_identity
 from vonk_control.runtime.adapters import resolve_runtime_adapter
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
@@ -370,9 +369,7 @@ def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
     no download and no re-hash.
     """
 
-    from vonk_control.distribution import (
-        verified_model_receipts,
-    )
+    from vonk_control.distribution.sources import verified_model_receipts
     from vonk_control.execution_plan_service import (
         ControllerExecutionPlanService,
     )

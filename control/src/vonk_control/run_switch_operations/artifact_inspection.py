@@ -25,13 +25,11 @@ from vonk_agent_protocol.state_machines import PlacementInstallState
 from ..categorized_errors import BookkeepingUnknown
 from ..inventory.repository import INVENTORY_MAX_AGE, spark_model_objects
 from ..lifecycle.evidence import Residue
-from ..model_cache import ModelCacheService
 from ..model_cache.artifacts import ArtifactSetManifest
-from ..model_cache_contract import ModelCacheDownloadPreviewResponse
-from ..models import Job
-from ..run_switch_contract import (
-    RunSwitchReason,
-)
+from ..model_cache.contract import ModelCacheDownloadPreviewResponse
+from ..model_cache.service import ModelCacheService
+from ..models.jobs import Job
+from ..run_switch_contract.evidence import RunSwitchReason
 from ..stored.json_values import read_row_column
 from .interfaces import ArtifactInspection
 from .planning_helpers import (

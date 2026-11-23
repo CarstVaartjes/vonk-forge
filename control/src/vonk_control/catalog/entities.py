@@ -43,7 +43,7 @@ from vonk_forge_contracts.resolver import validate_recipe_models
 from ..admission_locking import ConstraintReplay, admitting
 from ..auth import CursorCodec
 from ..identity_insert import insert_identity
-from ..models import (
+from ..models.catalog import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,

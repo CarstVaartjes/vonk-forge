@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentClaim, AgentProgress, AgentResult
-from vonk_control.models import AgentOperation, AgentOperationAttempt
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
 Fenced = AgentClaim | AgentProgress | AgentResult | str
 
@@ -49,11 +49,13 @@ def park_for_operator(
     aggregated from it.
     """
 
-    from vonk_control.agent_jobs import (
-        AgentJobService,
-        _document,  # pyright: ignore[reportPrivateUsage]
+    from vonk_control.agent_jobs.evidence import (
         _failure_result,  # pyright: ignore[reportPrivateUsage]
     )
+    from vonk_control.agent_jobs.predicates import (
+        _document,  # pyright: ignore[reportPrivateUsage]
+    )
+    from vonk_control.agent_jobs.service import AgentJobService
     from vonk_control.recovery_policy import FailureKind
 
     assert isinstance(jobs, AgentJobService)

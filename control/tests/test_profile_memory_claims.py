@@ -10,18 +10,15 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     canonical_message,
 )
-from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
-from vonk_control.memory_reservations import memory_reservations
-from vonk_control.models import (
-    AgentNode,
-    FleetProfileApplication,
-    Job,
-    NodeInventorySnapshot,
-    RecipeRun,
-    ResourceReservation,
-    RunNode,
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
 )
-from vonk_control.resource_planning import UnknownRunMemoryResidual
+from vonk_control.memory_reservations import memory_reservations
+from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
+from vonk_control.models.fleet import AgentNode, FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.resource_planning.types import UnknownRunMemoryResidual
 from vonk_control.run_admission import RunAdmissionBusy
 
 from .test_profile_installed_execution import _drive_to_job
@@ -382,9 +379,9 @@ def test_replacement_stop_retains_current_root_after_withdrawal_response_loss(
 ):
     from vonk_agent_protocol import InvalidRequestReason
     from vonk_control.jobs.documents import RecipeStopParent
-    from vonk_control.recipe_operations import RecipeRequestInvalid
-    from vonk_control.run_switch_contract import RunSwitchOperationResult
-    from vonk_control.run_switch_operations import (
+    from vonk_control.recipe_operations.errors import RecipeRequestInvalid
+    from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+    from vonk_control.run_switch_operations.observation_helpers import (
         _phase_request_key,
         _stop_child_request_key,
     )

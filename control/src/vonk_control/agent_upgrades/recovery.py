@@ -20,14 +20,14 @@ from ..admission_locking import (
     label_transaction,
     lock_admission_rows,
 )
-from ..agent_jobs import (
-    schedule_agent_upgrade_retry,
-)
+from ..agent_jobs.retry import schedule_agent_upgrade_retry
 from ..jobs import states as job_states
-from ..lifecycle import CancelRequested, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.agent_upgrade import KIND, UNSUPPORTED_DISPATCH
-from ..models import AgentNode, AgentOperation, AgentOperationAttempt, Job, JobAttempt
+from ..lifecycle.types import CancelRequested, Outcome, Reported
+from ..models.fleet import AgentNode
+from ..models.jobs import Job, JobAttempt
+from ..models.operations import AgentOperation, AgentOperationAttempt
 
 if TYPE_CHECKING:
     from .service import AgentUpgradeService

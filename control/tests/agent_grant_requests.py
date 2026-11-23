@@ -22,7 +22,7 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeStartPayload,
     RecipeStopPayload,
 )
-from vonk_control.recipe_stop_payloads import (
+from vonk_control.recipe_operations.stop_payloads import (
     stop_payload_from_job_run,
     stop_payload_from_start,
 )

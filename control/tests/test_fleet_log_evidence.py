@@ -20,21 +20,16 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import Actor
-from vonk_control.fleet_projection import FleetSnapshot
-from vonk_control.models import (
-    AgentOperation,
-    AgentOperationAttempt,
-    Base,
-    CatalogDocumentRevision,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
-)
-from vonk_control.operator_projection_api import (
-    AgentFailureLogProvider,
-    FleetOperatorServices,
+from vonk_control.fleet_projection.common import FleetSnapshot
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operator_projection_api.logs import AgentFailureLogProvider
+from vonk_control.operator_projection_api.routes import (
     install_operator_projection_routes,
 )
+from vonk_control.operator_projection_api.services import FleetOperatorServices
 
 _NODE = "spk_" + "a" * 32
 _NOW = datetime(2026, 9, 17, 12, 56, tzinfo=UTC)

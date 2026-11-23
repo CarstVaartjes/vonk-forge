@@ -6,9 +6,9 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import InvalidRequestError, InvalidRequestReason
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.models import (
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.models.fleet import (
     AgentNode,
     AgentNodeContact,
     FleetProfileApplication,
@@ -196,7 +196,7 @@ def test_a_stale_replay_is_superseded_by_the_load_that_continues_it():
     stop the newer workload, so its review was stale, and comparing ordinals
     never saw the newer load: it backed off for hours while the newer load
     waited for it. The newest request steers: the old load is superseded."""
-    from vonk_control.fleet_profiles import FleetProfileReviewStale
+    from vonk_control.fleet_profiles.contracts import FleetProfileReviewStale
 
     sessions, service, _adapter, _first, _original, both_profile = _world()
     old = service.apply(both_profile.id, request_key=_uuid(18002), actor="admin")
@@ -292,7 +292,7 @@ def test_running_application_keeps_its_stored_recipe_after_catalog_head_changes(
     """A projection refresh must not replace the exact recipe already accepted."""
     from vonk_control.catalog.entities import CatalogEntityService
     from vonk_control.fleet_profiles.persistence import _stored_recipe
-    from vonk_control.models import CatalogDocumentRevision
+    from vonk_control.models.catalog import CatalogDocumentRevision
     from vonk_forge_contracts import RecipeDefinition
 
     sessions, service, _adapter, first, original, _ = _world()

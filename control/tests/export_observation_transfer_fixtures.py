@@ -12,9 +12,10 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import update
-from vonk_control.fleet_projection import FleetProjection
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.fleet_stream import FleetStream
-from vonk_control.models import AgentNode, AgentNodeContact, FleetStreamEvent
+from vonk_control.models.fleet import AgentNode, AgentNodeContact
+from vonk_control.models.telemetry import FleetStreamEvent
 from vonk_control.observation.transfer import (
     ObservationTransferResponse,
     observation_response,

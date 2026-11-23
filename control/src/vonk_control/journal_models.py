@@ -17,8 +17,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from .lifecycle.evidence import Residue
 from .model_primitives import Base, _lower_hex
-from .run_switch_identity_contract import RunSwitchCancellation
-from .run_switch_journal_contract import (
+from .run_switch_contract.identity import RunSwitchCancellation
+from .run_switch_contract.journal import (
     JournalRepairPurpose,
     RunSwitchJournalRepairEndEvidence,
     RunSwitchJournalRepairEvidence,

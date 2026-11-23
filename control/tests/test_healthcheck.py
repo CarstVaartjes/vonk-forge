@@ -24,7 +24,7 @@ class _Response:
 
 def test_healthcheck_probes_actual_readiness() -> None:
     from vonk_control import healthcheck
-    from vonk_control.operation_api import ReadyzResponse
+    from vonk_control.operation_api.contracts import ReadyzResponse
 
     events: list[object] = []
 
@@ -50,7 +50,7 @@ def test_healthcheck_rejects_non_ready_response(response: object) -> None:
 
     with pytest.raises(Exception) as _ending:
         healthcheck.main(open_url=lambda *_args, **_kwargs: _Response(response))
-    from vonk_control.operation_api import ReadyzResponse
+    from vonk_control.operation_api.contracts import ReadyzResponse
 
     healthcheck.main(
         open_url=lambda *_args, **_kwargs: _Response(

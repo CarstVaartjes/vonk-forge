@@ -10,17 +10,19 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from vonk_agent_protocol import canonical_message
-from vonk_control.api import create_app
-from vonk_control.artifact_job_api import ArtifactJobCreate
-from vonk_control.artifact_jobs import ArtifactJobListResponse
+from vonk_control.api.application import create_app
+from vonk_control.artifact_jobs.api import ArtifactJobCreate
+from vonk_control.artifact_jobs.contracts import ArtifactJobListResponse
 from vonk_control.artifact_jobs.job_contract import (
     ArtifactJobContractResponse,
     JobContractState,
 )
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.compiled_artifact_contract import compile_artifact_contract
-from vonk_control.fleet_projection import FleetProjection, RunPresence
-from vonk_control.models import CatalogDocumentRevision, RecipeRun
+from vonk_control.fleet_projection.common import RunPresence
+from vonk_control.fleet_projection.service import FleetProjection
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeRun
 from vonk_control.strict_json import serialize_json_value
 from vonk_forge_contracts import RecipeDefinition
 

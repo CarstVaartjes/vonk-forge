@@ -18,8 +18,10 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.models import AgentNode, Job, RecipeRun, RunNode
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
 from vonk_control.recipe_operations import job_run_stop
 
 from .lifecycle_simulation.invariants import ENDED

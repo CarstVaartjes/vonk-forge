@@ -22,15 +22,15 @@ from sqlalchemy import or_, select, update
 from vonk_agent_protocol import WaitReason, canonical_message
 
 from ..categorized_errors import BookkeepingUnknown
-from ..model_cache_contract import (
+from ..fleet_profiles.read_observation import remaining_storage_read_seconds
+from ..models.cache import ModelCacheSet
+from .artifacts import ArtifactSetManifest, _unique_artifacts
+from .constants import _LOGGER, _MAX_MANIFEST_BYTES, SCHEMA_VERSION
+from .contract import (
     ModelCacheObservedObject,
     ModelCacheSetState,
     ModelCacheStorageObservation,
 )
-from ..models import ModelCacheSet
-from ..profile_read_observation import remaining_storage_read_seconds
-from .artifacts import ArtifactSetManifest, _unique_artifacts
-from .constants import _LOGGER, _MAX_MANIFEST_BYTES, SCHEMA_VERSION
 from .errors import ModelCacheError
 from .source_helpers import _fsync_directory
 

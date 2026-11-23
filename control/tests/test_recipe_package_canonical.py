@@ -23,18 +23,11 @@ from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import (
-    AgentNode,
-    AgentNodeContact,
-    Base,
-    CatalogDocumentRevision,
-    RecipeSourceBundle,
-)
-from vonk_control.recipe_builds import (
-    RecipeBuildService,
-    _canonical_build,
-    _source_policy_document,
-)
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocumentRevision, RecipeSourceBundle
+from vonk_control.models.fleet import AgentNode, AgentNodeContact
+from vonk_control.recipe_builds.common import _canonical_build, _source_policy_document
+from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_packages.contracts import RecipePackageError
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_control.source_policy import inspect_build_source_policy

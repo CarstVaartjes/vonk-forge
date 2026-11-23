@@ -25,14 +25,10 @@ from ..lifecycle.run_switch import (
 from ..lifecycle.types import (
     State as _LifecycleState,
 )
-from ..models import (
-    AgentNode,
-    Job,
-)
-from ..recipe_operations import (
-    RecipeOperationConflict,
-)
-from ..run_switch_contract import (
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..recipe_operations.errors import RecipeOperationConflict
+from ..run_switch_contract.operations import (
     RunSwitchAwaitedInventory,
     RunSwitchOperationResult,
 )

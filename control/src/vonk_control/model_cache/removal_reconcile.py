@@ -12,9 +12,8 @@ from sqlalchemy import and_, false, or_, select, true
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import Disposition, LifecycleState, ModelCacheCode
 
-from .. import model_cache_states
 from ..agent_operation_facts import aware as _aware
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     check_removal_fence_nowait,
@@ -25,22 +24,23 @@ from ..artifact_lifecycle import (
     supersede_removal_nowait,
 )
 from ..categorized_errors import InvalidValue
-from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.evidence import Residue
+from ..lifecycle.types import Effect, Outcome, Reported
 from ..logging import log_event, redact_text
-from ..model_cache_contract import (
+from ..models.cache import ArtifactLifecycleGate, ModelCacheOperation, ModelCacheSet
+from ..models.jobs import Job
+from ..operations.contract import AvailabilityOperationFailure
+from . import states as model_cache_states
+from .artifacts import _is_digest
+from .catalog_helpers import _iso
+from .constants import _LOGGER, _TRANSFER_CLAIM_SECONDS, REMOVAL_BATCH_SECONDS
+from .contract import (
     ModelCacheDownloadPayload,
     ModelCacheOperationKind,
     ModelCacheRemovalPayload,
     ModelCacheRepairPayload,
     ModelCacheRetry,
 )
-from ..model_cache_progress import cache_phase, progress_document
-from ..models import ArtifactLifecycleGate, Job, ModelCacheOperation, ModelCacheSet
-from ..operations.contract import AvailabilityOperationFailure
-from .artifacts import _is_digest
-from .catalog_helpers import _iso
-from .constants import _LOGGER, _TRANSFER_CLAIM_SECONDS, REMOVAL_BATCH_SECONDS
 from .errors import ModelCacheStorageError, _ArtifactWriterBusy
 from .lineage import lineage_contents, model_sets
 from .persistence import (
@@ -52,6 +52,7 @@ from .persistence import (
     _store_operation_payload,
     _updated,
 )
+from .progress import cache_phase, progress_document
 from .removal_execution import _untouched
 
 if TYPE_CHECKING:

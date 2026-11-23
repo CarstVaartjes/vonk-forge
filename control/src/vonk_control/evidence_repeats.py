@@ -15,13 +15,9 @@ from vonk_agent_protocol.contracts import AgentFailureResult, AgentUpgradePayloa
 
 from . import agent_operation_states
 from .agent_contacts import lock_contact, store_contact_evidence
-from .models import (
-    REPEATED_EVIDENCE_SEQUENCE,
-    AgentNodeContact,
-    AgentOperation,
-    AgentOperationAttempt,
-    FleetProfileApplication,
-)
+from .models.evidence import REPEATED_EVIDENCE_SEQUENCE
+from .models.fleet import AgentNodeContact, FleetProfileApplication
+from .models.operations import AgentOperation, AgentOperationAttempt
 from .recovery_policy import RECOVERY
 from .repeated_evidence_contract import (
     RepeatedEvidence,

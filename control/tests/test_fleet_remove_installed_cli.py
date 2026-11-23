@@ -9,11 +9,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor
-from vonk_control.fleet_projection import FleetProjection
-from vonk_control.models import AgentCertificate, AgentNode, AgentNodeProfile
-from vonk_control.operator_projection_api import build_fleet_operator_services
+from vonk_control.fleet_projection.service import FleetProjection
+from vonk_control.models.fleet import AgentCertificate, AgentNode, AgentNodeProfile
+from vonk_control.operator_projection_api.wiring import build_fleet_operator_services
 
 from .runtime_identity_support import set_inventory_hostname
 from .test_agent_api import NODE_A, NODE_B, Jobs, make_agent_system

@@ -45,10 +45,10 @@ class _SchemaJobs:
 
 def _schema(*, include_browser_auth: bool) -> dict[str, object]:
     from sqlalchemy.orm import sessionmaker
-    from vonk_control.api import create_app
+    from vonk_control.api.application import create_app
     from vonk_control.auth import TokenCodec
     from vonk_control.browser_auth import BrowserAuthService
-    from vonk_control.operation_api import admin_openapi_schema
+    from vonk_control.operation_api.openapi import admin_openapi_schema
 
     signing_key = b"schema-only-signing-key-32-bytes!"
     app = create_app(
@@ -90,7 +90,7 @@ def typescript_vocabulary() -> str:
         FleetRemovalDisposition,
         FleetRemovalReason,
     )
-    from vonk_control.model_cache_contract import (
+    from vonk_control.model_cache.contract import (
         CacheOperationKind,
         ModelStorageObservationReason,
     )

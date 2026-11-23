@@ -16,7 +16,7 @@ from vonk_agent_protocol import (
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
 from ..content_identity import ImageContent, same_image
-from ..models import RecipeBuild
+from ..models.cache import RecipeBuild
 from ..operations.contract import AvailabilityRecoveryAction
 from ..runtime.adapters import RuntimeAdapter, resolve_runtime_adapter
 from ..runtime.spec_contract import RuntimeSpec

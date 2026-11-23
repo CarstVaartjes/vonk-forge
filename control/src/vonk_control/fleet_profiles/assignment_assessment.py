@@ -19,28 +19,28 @@ from vonk_forge_contracts import RecipeDefinition
 
 from ..cluster_mappings import mapping_option_choices
 from ..content_identity import catalog_reference_membership
-from ..fleet_profile_contract import FleetProfileAssignment, FleetProfileAssignmentState
+from ..fleet_profile_contract.definitions import FleetProfileAssignment
+from ..fleet_profile_contract.vocabulary import FleetProfileAssignmentState
 from ..installation_transitions import IN_FLIGHT
 from ..machine_states import rank_installed
-from ..models import (
+from ..models.cache import RecipeBuild
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import (
     STOPPABLE_RUN_STATES,
-    AgentNode,
-    CatalogDocumentRevision,
-    ClusterMapping,
-    ClusterMappingNode,
     InstallationNode,
-    RecipeBuild,
     RecipeInstallation,
     RecipeRun,
     RunNode,
 )
+from ..models.fleet import AgentNode
+from ..models.mapping import ClusterMapping, ClusterMappingNode
 from ..preparation_contract import RuntimeImageIdentity
 from ..profile_capacity import serving_run
-from ..recipe_execution_contract import (
+from ..recipe_operations.execution_contract import (
     installation_matches_runtime_image,
     installation_serves_authorised_ports,
 )
-from ..recipe_operations import _run_is_one_shot
+from ..recipe_operations.rank_authority import _run_is_one_shot
 from ..run_readiness import run_not_ready_for_profile
 from ..stored.states import ClusterMappingState, RecipeBuildState
 from .dependencies import _ACTIVE_INSTALL_STATES

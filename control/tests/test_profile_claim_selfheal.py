@@ -16,13 +16,10 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, ReservationState, RunSwitchCode
-from vonk_control.models import (
-    FleetProfileApplication,
-    Job,
-    NodeInventorySnapshot,
-    RecipeInstallation,
-    ResourceReservation,
-)
+from vonk_control.models.execution import RecipeInstallation, ResourceReservation
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.telemetry import NodeInventorySnapshot
 
 from .profile_due_fixtures import next_profile_due
 from .test_attempt_residues import _at_phase, _load, _loop, _switch

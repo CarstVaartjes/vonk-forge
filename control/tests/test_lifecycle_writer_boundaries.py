@@ -91,6 +91,16 @@ def test_bulk_update_constructor_setattr_and_helper_are_writes(body: str) -> Non
     assert _scanned(source)
 
 
+def test_a_model_imported_from_a_models_submodule_is_resolved() -> None:
+    source = (
+        "from .models.jobs import Job\n"
+        "def update(session):\n"
+        "    job = session.get(Job, 1)\n"
+        "    job.state = 'failed'\n"
+    )
+    assert _scanned(source)
+
+
 def test_a_state_dict_store_is_a_write_only_in_an_owner_module() -> None:
     source = 'def go(application):\n    application["state"] = "failed"\n'
     assert _scanned(source, path=OWNER)

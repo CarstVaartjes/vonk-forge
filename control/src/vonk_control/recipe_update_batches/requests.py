@@ -22,14 +22,20 @@ from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from ..admission_locking import ConstraintReplay, admitting
 from ..auth import MUTATION_ROLES
 from ..catalog.queries import active_head_revision
-from ..models import CatalogDocumentRevision, Job, User
-from ..recipe_image_availability import (
+from ..models.catalog import CatalogDocumentRevision
+from ..models.fleet import User
+from ..models.jobs import Job
+from ..recipe_image_availability.contracts import (
     RecipeImageAvailabilityInvalid,
     RecipeImageAvailabilityRefused,
     RecipeImageAvailabilityUnknown,
 )
-from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
-from ..recipe_update_contract import (
+from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
+from ..revision_images import revision_images
+from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
+from ..stored.states import CatalogRevisionState
+from ..strict_json import serialize_json_value
+from .contract import (
     UPDATE_KIND,
     RecipeUpdateChild,
     RecipeUpdateDocument,
@@ -38,12 +44,6 @@ from ..recipe_update_contract import (
     RecipeUpdateScope,
     read_update_document,
 )
-from ..revision_images import revision_images
-from ..runtime_image_preparation import (
-    RuntimeImagePreparationError,
-)
-from ..stored.states import CatalogRevisionState
-from ..strict_json import serialize_json_value
 
 if TYPE_CHECKING:
     from .service import RecipeUpdateBatches

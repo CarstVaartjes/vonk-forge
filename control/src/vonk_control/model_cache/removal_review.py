@@ -10,15 +10,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ArtifactLifecycleCode, ModelCacheCode
 
-from .. import model_cache_states
 from ..admission_locking import ConstraintReplay, admitting
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactKind,
     ArtifactLifecycleError,
     ArtifactReferenceUnsettled,
 )
-from ..artifact_reference_scan import model_set_objects, model_set_reference_findings
+from ..artifact_reference_scan.model_references import model_set_reference_findings
+from ..artifact_reference_scan.model_sets import model_set_objects
 from ..cache_removal_review import (
     CacheRemovalBlocker,
     CacheRemovalFinding,
@@ -29,17 +29,18 @@ from ..cache_removal_review import (
 from ..categorized_errors import InvalidValue
 from ..content_identity import recipes_bound_to
 from ..lifecycle.evidence import Residue
-from ..model_cache_contract import ModelCacheRemovalPayload, ModelCacheSetState
-from ..models import (
+from ..models.cache import (
     ArtifactLifecycleGate,
-    CatalogDocumentRevision,
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
 )
+from ..models.catalog import CatalogDocumentRevision
 from ..unused_storage_collection.evidence import _Evidence
+from . import states as model_cache_states
 from .artifacts import _unique_artifacts
 from .catalog_helpers import _recipe_model_content_digests
+from .contract import ModelCacheRemovalPayload, ModelCacheSetState
 from .errors import (
     ModelCacheRemovalOwnerInvalid,
     ModelCacheStorageInvalid,

@@ -11,28 +11,30 @@ import pytest
 from sqlalchemy import inspect, select
 from vonk_agent_protocol import LifecycleState, ProfileReasonCode
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import (
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileConflict,
     FleetProfileReviewStale,
-    FleetProfileService,
-    build_production_fleet_profile_service,
 )
-from vonk_control.models import (
-    AgentNode,
-    AgentNodeContact,
-    CatalogDocumentRevision,
-    FleetProfileApplication,
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
     InstallationNode,
-    NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
     RunNode,
+)
+from vonk_control.models.fleet import (
+    AgentNode,
+    AgentNodeContact,
+    FleetProfileApplication,
     User,
 )
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.preparation_contract import RolloutPreparation
-from vonk_control.run_switch_contract import RunSwitchAssessment
+from vonk_control.run_switch_contract.plans import RunSwitchAssessment
 from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
 
 from cluster_profiles.cli_render import render_payload
@@ -56,7 +58,7 @@ from .test_recipe_operations import started_recipe
 def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
     tmp_path, capsys
 ):
-    from vonk_control.run_switch_operations import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     from .test_recipe_operations import setup_services
     from .test_run_switch_operations import (
@@ -680,7 +682,7 @@ def test_review_binds_effects_but_not_readiness_counters_or_blockers():
 
 def _recheck_world(tmp_path, postgres_engine):
     """A real planner and profile service over PostgreSQL, with a movable clock."""
-    from vonk_control.run_switch_operations import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     from .test_recipe_operations import setup_services
     from .test_run_switch_operations import (
@@ -910,8 +912,10 @@ def test_deferred_target_builder_review_refreshes_inventory_before_admission(
 ) -> None:
     """Catch t0 builder freshness overriding t1 residual evidence on resume."""
     from vonk_agent_protocol.agent_words import ProfileOperationKind
-    from vonk_control.models import FleetProfile
-    from vonk_control.recipe_execution_contract import parse_stored_installation_plan
+    from vonk_control.models.fleet import FleetProfile
+    from vonk_control.recipe_operations.execution_contract import (
+        parse_stored_installation_plan,
+    )
 
     from .test_profile_build_memory import _accepted_build_profile
 

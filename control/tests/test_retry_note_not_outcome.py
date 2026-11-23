@@ -18,7 +18,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol import AgentOperation as WireOperation
-from vonk_control.models import AgentOperation
+from vonk_control.models.operations import AgentOperation
 from vonk_control.run_switch_operations.result_helpers import _child_progress_payload
 
 from .runtime_identity_support import claim_agent

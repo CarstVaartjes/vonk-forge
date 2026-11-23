@@ -30,8 +30,10 @@ from ..agent_operation_facts import (
 )
 from ..jobs.agent_contract import ClaimFacts
 from ..logging import redact_text
-from ..models import AgentNode, AgentOperationAttempt, Job
-from ..models import AgentOperation as StoredOperation
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from ..own_cleanup import CLEANUP_KINDS
 from ..stored.json_values import read_row_column
 from .contracts import (

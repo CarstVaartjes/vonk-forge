@@ -22,48 +22,49 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control.agent_contacts import record_contact
 from vonk_control.fleet_events import FleetEventRepository
-from vonk_control.fleet_projection import (
+from vonk_control.fleet_projection.common import (
     _AUTHORITY_REVISION,
     CapacityReservations,
     FleetNode,
-    FleetProjection,
     FleetSnapshot,
     NodeConnection,
     RecipePresence,
     TelemetryPoint,
     _install_partial_warnings,
 )
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.fleet_stream_contract import FleetChangeEvent
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentNodeContact,
-    AgentNodeProfile,
-    AgentOperation,
-    AgentOperationAttempt,
-    Base,
-    CatalogDocument,
-    CatalogDocumentRevision,
-    ClusterMapping,
-    ClusterMappingNode,
-    FleetEventCursor,
-    FleetStreamEvent,
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.models.execution import (
     InstallationNode,
-    Job,
-    NodeInventorySnapshot,
-    NodeTelemetryLatest,
-    NodeTelemetrySample,
-    RecipeBuild,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
     RunNode,
 )
-from vonk_control.recipe_execution_contract import installation_plan_document
+from vonk_control.models.fleet import (
+    AgentCertificate,
+    AgentNode,
+    AgentNodeContact,
+    AgentNodeProfile,
+)
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.models.telemetry import (
+    FleetEventCursor,
+    FleetStreamEvent,
+    NodeInventorySnapshot,
+    NodeTelemetryLatest,
+    NodeTelemetrySample,
+)
+from vonk_control.recipe_operations.execution_contract import installation_plan_document
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from tests.observation_transfer_peer import observation_document
@@ -3209,7 +3210,7 @@ def test_contact_committed_between_clock_read_and_postgres_snapshot_stays_online
 def test_system_memory_is_everything_in_use_outside_gpu_processes(
     changes: dict[str, int | None], expected: int | None
 ) -> None:
-    from vonk_control.fleet_projection import telemetry_point
+    from vonk_control.fleet_projection.common import telemetry_point
     from vonk_control.telemetry.samples import TelemetrySampleView
 
     vector = json.loads(

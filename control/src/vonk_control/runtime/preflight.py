@@ -47,7 +47,7 @@ def recipe_requirements(
     minimum_free_bytes: int,
 ) -> RuntimePreflightRequest:
     """Read the canonical topology; engine arguments are not an allowlist."""
-    from ..recipe_runtime_specs import recipe_topology
+    from ..recipe_operations.runtime_specs import recipe_topology
 
     fabric = recipe_topology(document)
     return RuntimePreflightRequest(
@@ -146,7 +146,7 @@ def latest_result(
 ) -> PreflightInventoryItem | None:
     """Read the canonical reusable item; attempt results remain operation history."""
     from ..inventory.items import inventory_items
-    from ..models import AgentNode
+    from ..models.fleet import AgentNode
 
     items = inventory_items(session.get(AgentNode, node_id))
     results = [

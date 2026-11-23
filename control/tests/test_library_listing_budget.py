@@ -38,19 +38,15 @@ from vonk_control.library.storage_observation import (
     STORAGE_OBSERVATION_DEADLINE_SECONDS,
     LibraryStorageObserver,
 )
-from vonk_control.library_projection import LibraryProjection
-from vonk_control.model_cache.resolution import resolve_recipe_set
-from vonk_control.model_cache_contract import (
+from vonk_control.library_projection.service import LibraryProjection
+from vonk_control.model_cache.contract import (
     CacheOperationKind,
     ModelCacheUsage,
     ModelStorageObservationReason,
 )
-from vonk_control.models import (
-    CatalogDocumentHead,
-    CatalogDocumentRevision,
-    ModelCacheSet,
-    RecipeBuild,
-)
+from vonk_control.model_cache.resolution import resolve_recipe_set
+from vonk_control.models.cache import ModelCacheSet, RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
 from vonk_control.settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
@@ -546,8 +542,8 @@ def test_queued_download_progress_is_projected_on_postgres(tmp_path, postgres_en
 
     from importlib import resources
 
-    from vonk_control.model_cache import ModelCacheService
-    from vonk_control.models import CatalogDocumentHead
+    from vonk_control.model_cache.service import ModelCacheService
+    from vonk_control.models.catalog import CatalogDocumentHead
     from vonk_forge_contracts import document_sha256
 
     from .test_recipe_operations import setup_services
@@ -1001,7 +997,7 @@ def test_completed_cache_change_is_visible_without_storage_refresh(
     """The DB batch owns list/filter/detail state even when byte observations disagree."""
     from vonk_agent_protocol import LifecycleState
     from vonk_control.library.contract import LibraryCacheState
-    from vonk_control.model_cache import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
     from .removal_settle import advance_until_ended, release_ended_gates
     from .test_model_cache import _artifact, _download
@@ -1077,7 +1073,7 @@ def test_damaged_verified_references_do_not_hide_healthy_cached_model(
 ):
     """One bad manifest must not turn unrelated cached rows into unknown state."""
     from vonk_control.library.contract import LibraryCacheState
-    from vonk_control.model_cache_contract import CacheManifest
+    from vonk_control.model_cache.contract import CacheManifest
     from vonk_control.stored.json_values import write_guard_mode
 
     projection, sessions, *_ = assessed_library

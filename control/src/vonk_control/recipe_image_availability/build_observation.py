@@ -17,15 +17,18 @@ from vonk_agent_protocol import (
 
 from ..jobs import states as job_states
 from ..lifecycle.evidence import Residue
-from ..models import AgentOperation, CatalogDocumentRevision, Job, RecipeBuild
-from ..recipe_execution_contract import (
+from ..models.cache import RecipeBuild
+from ..models.catalog import CatalogDocumentRevision
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
+from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_plan,
 )
 from .contracts import RecipeImageAvailabilityClaim
 
 if TYPE_CHECKING:
-    from ..recipe_operations import RecipeOperationService
+    from ..recipe_operations.service import RecipeOperationService
     from .service import RecipeImageAvailabilityService
 
 

@@ -23,26 +23,26 @@ from ..fleet_events import FleetEventDraft, FleetEventRepository
 from ..inventory.items import inventory_items
 from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS, newest_snapshot_ids
 from ..model_layout_notice import model_layout_notices
-from ..models import (
-    AgentCertificate,
-    AgentNode,
-    AgentNodeProfile,
-    CatalogDocument,
-    CatalogDocumentRevision,
-    ClusterMapping,
-    ClusterMappingNode,
-    FleetProfileApplication,
+from ..models.catalog import CatalogDocument, CatalogDocumentRevision
+from ..models.execution import (
     InstallationNode,
-    NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
     RunNode,
 )
+from ..models.fleet import (
+    AgentCertificate,
+    AgentNode,
+    AgentNodeProfile,
+    FleetProfileApplication,
+)
+from ..models.mapping import ClusterMapping, ClusterMappingNode
+from ..models.telemetry import NodeInventorySnapshot
 from ..nas_transfer_rate import slow_nas_transfers
 from ..observation.capture import begin_observation_capture
 from ..operations.blockers import PHASE_RETRY_CODE, read_blockers
-from ..recipe_update_notice import newest_active_revisions
+from ..recipe_update_batches.notice import newest_active_revisions
 from ..reservation_owners import SPARK_PRESENCE_WINDOW
 from ..run_states import ENDED_RUN_STATES
 from ..stored.states import CatalogRevisionState

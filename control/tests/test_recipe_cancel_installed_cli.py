@@ -13,16 +13,20 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
-from vonk_control.fleet_profiles import FleetProfileService
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.jobs.queue import JobService
-from vonk_control.models import Base, CatalogDocument, User
-from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
-from vonk_control.recipe_image_availability_view_contract import (
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocument
+from vonk_control.models.fleet import User
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
+)
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeImageAvailabilityView,
 )
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition
 
 from .test_fleet_profile_api import _headers

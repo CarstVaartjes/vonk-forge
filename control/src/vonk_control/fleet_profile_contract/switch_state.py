@@ -17,10 +17,8 @@ from vonk_agent_protocol.agent_words import (
     ProfileSwitchChildKind,
 )
 
-from ..run_switch_contract import (
-    RunSwitchOperationResult,
-    RunSwitchProfileStopScope,
-)
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.requests import RunSwitchProfileStopScope
 from ..strict_json import StrictModel
 from .definitions import FleetProfileAssignment
 from .effects import FleetProfileChildProgress

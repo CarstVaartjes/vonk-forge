@@ -16,6 +16,7 @@ from vonk_agent_protocol import (
 )
 
 from ..content_identity import ImageContent, differing_image_fields, same_image
+from ..fleet_profiles.read_observation import observe_storage
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..oci_image_store import (
     DAMAGED_MANIFEST_CODES,
@@ -26,7 +27,6 @@ from ..oci_image_store import (
     StoreUnknown,
 )
 from ..operations.contract import AvailabilityRecoveryAction
-from ..profile_read_observation import observe_storage
 from .contracts import (
     _IMAGE_DIGEST,
     _LOGGER,

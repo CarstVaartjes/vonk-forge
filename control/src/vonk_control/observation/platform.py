@@ -16,11 +16,9 @@ from ..build_identity import RuntimeBuildIdentity, packaged_runtime_identity
 from ..capabilities import CapabilityRegistry
 from ..capability_contract import CapabilityStatus
 from ..coordinator_contract import CoordinatorFailureView
-from ..models import (
-    ControlProcessHeartbeat,
-    CoordinatorFailure,
-    FleetProfileApplication,
-)
+from ..models.coordinator import CoordinatorFailure
+from ..models.fleet import FleetProfileApplication
+from ..models.jobs import ControlProcessHeartbeat
 from ..persisted_waits import read_wait
 from ..progress_stall import WAITING_STATES, is_stalled, read_stall
 from ..strict_json import StrictModel

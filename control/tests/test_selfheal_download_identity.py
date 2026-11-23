@@ -3,7 +3,7 @@
 from uuid import uuid4
 
 from vonk_agent_protocol import LifecycleState
-from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache.service import ModelCacheService
 
 from .non_blocking import assert_ended_without_blocking
 from .test_model_cache import _artifact
@@ -69,7 +69,7 @@ def test_cancelled_selector_replays_only_original_key_after_restart(
 
 
 def _assert_no_claim(sessions, operation_id):
-    from vonk_control.models import ModelCacheOperation
+    from vonk_control.models.cache import ModelCacheOperation
 
     with sessions() as session:
         operation = session.get(ModelCacheOperation, operation_id)

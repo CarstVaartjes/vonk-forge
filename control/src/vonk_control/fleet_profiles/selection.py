@@ -24,9 +24,9 @@ from ..admission_locking import (
     node_admission_key,
 )
 from ..auth import MUTATION_ROLES, Actor
-from ..fleet_profile_contract import FleetProfileApplicationProgress
+from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
 from ..lifecycle.evidence import Damaged, Residue, read_or_rebuild
-from ..models import FleetProfileApplication, FleetProfileSelection, User
+from ..models.fleet import FleetProfileApplication, FleetProfileSelection, User
 from ..persisted_waits import read_wait
 from ..profile_capacity import release_unassigned_profile_claims
 from ..settings import DATABASE_WAIT_BUDGETS

@@ -20,8 +20,11 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, WaitReason
-from vonk_control.lifecycle import (
-    STOP_BUDGET,
+from vonk_control.lifecycle.core import STOP_BUDGET, transition
+from vonk_control.lifecycle.model_cache import (
+    RECOVERY_BUDGET,
+)
+from vonk_control.lifecycle.types import (
     Effect,
     LeaseLapsed,
     Observed,
@@ -29,13 +32,9 @@ from vonk_control.lifecycle import (
     Reported,
     State,
     Tick,
-    transition,
 )
-from vonk_control.lifecycle.model_cache import (
-    RECOVERY_BUDGET,
-)
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import ModelCacheOperation, ModelCacheSet
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
 
 from .non_blocking import assert_ended_without_blocking
 from .test_model_cache import (
@@ -500,9 +499,7 @@ def test_a_full_disk_queues_the_download_and_it_runs_when_space_returns(
 
     service, sessions = cache
     usage = namedtuple("usage", "total used free")
-    monkeypatch.setattr(
-        "vonk_control.model_cache.shutil.disk_usage", lambda _: usage(100, 100, 0)
-    )
+    monkeypatch.setattr("shutil.disk_usage", lambda _: usage(100, 100, 0))
     operation, artifact = _queue(
         service, tmp_path, "00000000-0000-4000-8000-00000000a060", b"needs space"
     )
@@ -516,7 +513,7 @@ def test_a_full_disk_queues_the_download_and_it_runs_when_space_returns(
     assert _row(sessions, operation.id).state == "queued"
     assert not service._object_path(str(artifact["sha256"])).exists()
     monkeypatch.setattr(
-        "vonk_control.model_cache.shutil.disk_usage",
+        "shutil.disk_usage",
         lambda _: usage(10**12, 0, 10**12),
     )
     assert service.run_pending() == 1
@@ -534,7 +531,7 @@ def test_the_cache_writes_backoff_never_partial(cache, tmp_path):
     _edit(sessions, operation.id, state="running")
     service._lifecycle.reopen(_row(sessions, operation.id), datetime.now(UTC))
     assert LifecycleState.BACKOFF.value == "backoff"
-    from vonk_control import model_cache_states
+    from vonk_control.model_cache import states as model_cache_states
 
     assert model_cache_states.BACKOFF == "backoff"
 
@@ -559,7 +556,7 @@ def _settle_background(service: ModelCacheService) -> None:
 def test_a_background_transfer_with_an_unknown_outcome_is_kept_and_retried(
     threaded_cache, tmp_path
 ):
-    from vonk_control.model_cache import ModelCacheStorageUnknown
+    from vonk_control.model_cache.errors import ModelCacheStorageUnknown
 
     service, _sessions = threaded_cache
     now = _clock_at(service)

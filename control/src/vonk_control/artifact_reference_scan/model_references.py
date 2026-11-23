@@ -12,23 +12,18 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .. import model_cache_states
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactReferenceUnverified,
 )
 from ..content_identity import recipe_model_digests, recipes_bound_to
 from ..machine_states import DISTRIBUTION_HELD, RUN_LIVE
-from ..model_cache_contract import ModelCacheSetState
-from ..models import (
-    ArtifactDistributionAssignment,
-    FleetProfile,
-    FleetProfileApplication,
-    Job,
-    ModelCacheOperation,
-    ModelCacheSet,
-    RecipeInstallation,
-    RecipeRun,
-)
+from ..model_cache import states as model_cache_states
+from ..model_cache.contract import ModelCacheSetState
+from ..models.cache import ModelCacheOperation, ModelCacheSet
+from ..models.execution import RecipeInstallation, RecipeRun
+from ..models.fleet import FleetProfile, FleetProfileApplication
+from ..models.jobs import Job
+from ..models.operations import ArtifactDistributionAssignment
 from ..reference_facts import profiles_naming
 from .intents import (
     _profile_plan,

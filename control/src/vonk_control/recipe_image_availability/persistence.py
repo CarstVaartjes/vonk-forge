@@ -24,29 +24,11 @@ from ..catalog.queries import active_head_revision
 from ..jobs import states as job_states
 from ..jobs.documents import AvailabilityJobPayload
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..model_cache import (
-    ModelCacheRemovalScope,
-)
-from ..models import (
-    CatalogDocumentRevision,
-    Job,
-)
-from ..recipe_availability_intent import (
+from ..model_cache.views import ModelCacheRemovalScope
+from ..models.catalog import CatalogDocumentRevision
+from ..models.jobs import Job
+from ..recipe_operations.availability_intent import (
     RecipeSelectorIntent,
-)
-from ..recipe_image_availability_reader_contract import (
-    RecoveredAvailabilityPayload,
-    StoredAvailabilityIdentity,
-)
-from ..recipe_image_availability_view_contract import (
-    RecipeCacheRemovalStatus,
-    RecipeImageAvailabilityView,
-)
-from ..recipe_image_removal_contract import (
-    RecipeCacheRemovalIntent,
-    RecipeCacheRemovalOwner,
-    RecipeCacheRemovalPlan,
-    RecipeCacheRemovalResult,
 )
 from ..revision_images import revision_images
 from ..stored.json_values import Residue, read_row_column
@@ -65,6 +47,20 @@ from .contracts import (
     _iso,
     _read,
     _RecipeRemovalSelection,
+)
+from .reader_contract import (
+    RecoveredAvailabilityPayload,
+    StoredAvailabilityIdentity,
+)
+from .removal_contract import (
+    RecipeCacheRemovalIntent,
+    RecipeCacheRemovalOwner,
+    RecipeCacheRemovalPlan,
+    RecipeCacheRemovalResult,
+)
+from .view_contract import (
+    RecipeCacheRemovalStatus,
+    RecipeImageAvailabilityView,
 )
 
 if TYPE_CHECKING:

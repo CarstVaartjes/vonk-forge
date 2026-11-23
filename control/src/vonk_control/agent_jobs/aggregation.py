@@ -11,7 +11,7 @@ from vonk_agent_protocol import AgentOperation, InvalidRequestReason, LifecycleS
 from vonk_agent_protocol.agent_words import FailureStage
 
 from .. import agent_operation_states
-from ..agent_upgrade_status import operator_agent_upgrade_reason
+from ..agent_upgrades.status import operator_agent_upgrade_reason
 from ..categorized_errors import MissingRecord
 from ..inventory.items import runtime_value
 from ..jobs import states as job_states
@@ -23,8 +23,10 @@ from ..lifecycle.agent_operation import (
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.job_ranks import job_run_verdict
 from ..logging import redact_text
-from ..models import AgentNode, AgentOperationAttempt, Job
-from ..models import AgentOperation as StoredOperation
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from ..offline_stops import is_deferred_stop
 from .contracts import _ABANDONABLE_OPERATIONS
 from .evidence import _is_refusal_reason

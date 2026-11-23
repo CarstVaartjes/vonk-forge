@@ -14,16 +14,17 @@ from vonk_agent_protocol.package_source import AgentPackageSource
 
 from ..admission_locking import ConstraintReplay, admitting
 from ..agent_package_source import load_package_source
-from ..agent_upgrade_contract import (
+from ..identity_insert import insert_identity
+from ..inventory.items import runtime_value
+from ..lifecycle.agent_upgrade import AgentUpgradeAdapter
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from .contract import (
     AgentUpgradePackage,
     AgentUpgradeRequestIntent,
     AgentUpgradeRolloutPayload,
     AgentUpgradeRolloutResult,
 )
-from ..identity_insert import insert_identity
-from ..inventory.items import runtime_value
-from ..lifecycle.agent_upgrade import AgentUpgradeAdapter
-from ..models import AgentNode, Job
 
 if TYPE_CHECKING:
     from .service import AgentUpgradeService

@@ -10,7 +10,7 @@ import pytest
 from vonk_agent_protocol import DistributionAssignment, DistributionObject
 from vonk_control.distribution.types import plan_objects
 from vonk_control.distribution_executor.identity import DistributionIdentity
-from vonk_control.model_cache import ArtifactSetManifest, ArtifactSpec
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
 
 TOKENIZER = b"{}" * 50
 WEIGHTS = b"w" * 300

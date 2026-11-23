@@ -3,12 +3,12 @@ from importlib.resources import files
 
 from vonk_agent_protocol import canonical_message
 from vonk_control.bounded_json import text
-from vonk_control.resource_planning import (
+from vonk_control.resource_planning.demand import (
     _resource_evidence,
     _selected_model_bytes,
-    resolve_effective_settings,
 )
-from vonk_control.run_switch_operations import (
+from vonk_control.resource_planning.settings import resolve_effective_settings
+from vonk_control.run_switch_operations.planning_helpers import (
     _resource_evidence_digest,
     _settings_view,
 )

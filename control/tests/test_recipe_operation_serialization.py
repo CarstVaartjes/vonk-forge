@@ -14,9 +14,12 @@ from vonk_control.jobs.documents import (
     ServiceRunStopReview,
     controller_recipe_document,
 )
-from vonk_control.models import AgentOperation, Job
-from vonk_control.recipe_lifecycle_contract import parse_recipe_lifecycle_result
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
 from vonk_control.recipe_operations.contracts import RecipeOperationContext
+from vonk_control.recipe_operations.lifecycle_contract import (
+    parse_recipe_lifecycle_result,
+)
 from vonk_control.recipe_operations.observation_helpers import _RECIPE_PARENT_READERS
 from vonk_control.stored.json_values import bindings
 from vonk_control.strict_json import read_stored_model, serialize_json_value

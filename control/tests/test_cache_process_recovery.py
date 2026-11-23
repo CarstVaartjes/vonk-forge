@@ -10,12 +10,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import sessionmaker
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.model_cache_contract import (
+from vonk_control.model_cache.contract import (
     ModelCacheDownloadPayload,
     parse_model_cache_payload,
 )
-from vonk_control.models import Base, ModelCacheOperation
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation
 
 from .test_model_cache import _artifact
 from .test_model_cache_availability_regressions import _drain, _start
@@ -203,7 +204,7 @@ from io import BytesIO
 from email.message import Message
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache.service import ModelCacheService
 configuration = json.loads(Path(sys.argv[1]).read_text())
 engine = create_engine(configuration["database"])
 sessions = sessionmaker(engine)
@@ -222,7 +223,7 @@ if sys.argv[2] == "die":
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from vonk_control.auth import Actor
-from vonk_control.model_cache_api import install_model_operator_routes
+from vonk_control.model_cache.api import install_model_operator_routes
 from cluster_profiles.cli import main
 from cluster_profiles.control_client import ControlClient
 opened = service._open_source

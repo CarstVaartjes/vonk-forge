@@ -16,18 +16,20 @@ from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 
 from ..admission_locking import ConstraintReplay, admitting
 from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract import (
+from ..fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
-    FleetProfileApplicationView,
     FleetProfileIntendedConfiguration,
-    FleetProfileOperationKind,
-    FleetProfilePreview,
-    FleetProfileScope,
 )
+from ..fleet_profile_contract.definitions import FleetProfileScope
+from ..fleet_profile_contract.review import (
+    FleetProfileApplicationView,
+    FleetProfilePreview,
+)
+from ..fleet_profile_contract.vocabulary import FleetProfileOperationKind
 from ..lifecycle.evidence import Residue
 from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..lifecycle.types import State as _LifecycleState
-from ..models import FleetProfile, FleetProfileApplication
+from ..models.fleet import FleetProfile, FleetProfileApplication
 from ..operations.blockers import OperationBlocker, make_blocker
 from ..persisted_waits import schedule_wait
 from ..settings import PROFILE_STALL_WINDOW_SECONDS, STORAGE_ADMISSION_RETRY_SECONDS

@@ -12,22 +12,21 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from vonk_agent_protocol import RecipeReconcilePayload, canonical_message
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.install_admission import installation_plan_digest_from_stored_document
+from vonk_control.install_admission.identity import (
+    installation_plan_digest_from_stored_document,
+)
 from vonk_control.installation_reconciliation_api import (
     INSTALLATION_RECONCILIATION_OPERATION_IDS,
     install_installation_reconciliation_routes,
 )
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    Job,
-    RecipeInstallation,
-)
-from vonk_control.operation_api import durable_operation_services
-from vonk_control.run_switch_operations import RunSwitchOperationConflict
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operation_api.durable import durable_operation_services
+from vonk_control.run_switch_operations.errors import RunSwitchOperationConflict
 
 from .test_recipe_operations import NOW, installed_recipe, setup_services
 from .test_run_switch_operations import RecordingArtifactExecutor, _service

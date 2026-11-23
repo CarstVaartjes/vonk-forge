@@ -10,9 +10,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from ..models import (
-    CatalogDocumentRevision,
-)
+from ..models.catalog import CatalogDocumentRevision
 from ..stored.states import CatalogRevisionState
 from .contracts import (
     _REFRESHABLE_PREFLIGHT_BLOCKERS,

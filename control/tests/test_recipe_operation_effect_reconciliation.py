@@ -17,16 +17,16 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
-from vonk_control.install_admission import InstallEvidenceChanged
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    Job,
+from vonk_control.install_admission.contracts import InstallEvidenceChanged
+from vonk_control.models.execution import (
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
     RunNode,
 )
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
 
 from .node_contacts import contact_row
 from .non_blocking import assert_ended_without_blocking
@@ -298,7 +298,7 @@ def test_retirement_owner_loss_retains_capacity_until_exact_cleanup_receipt(
     tmp_path: Path,
 ) -> None:
     """Catches owner deletion being treated as a host Stop and free memory."""
-    from vonk_control.models import AgentOperationAttempt
+    from vonk_control.models.operations import AgentOperationAttempt
 
     sessions, service, _queue, mapping, build, nodes = setup_services(tmp_path)
     installation = installed_recipe(

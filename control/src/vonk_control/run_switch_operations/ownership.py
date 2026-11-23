@@ -17,15 +17,11 @@ from vonk_agent_protocol.agent_words import ProfileChildJobKind
 
 from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
 from ..jobs import states as job_states
-from ..models import (
-    AgentNode,
-    Job,
-)
-from ..recipe_builds import RecipeBuildAdmissionBusy
-from ..run_switch_contract import (
-    RunSwitchOperationResult,
-    RunSwitchPlan,
-)
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..recipe_builds.common import RecipeBuildAdmissionBusy
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.plans import RunSwitchPlan
 from ..stored.json_values import read_row_column
 from .errors import RunSwitchRetryLater, _RunSwitchBuildParentChanged
 from .observation_helpers import _phase_request_key

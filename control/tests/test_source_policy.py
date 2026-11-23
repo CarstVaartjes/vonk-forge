@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 
 import pytest
-from vonk_control.recipe_builds import inspect_package_source_policy
+from vonk_control.recipe_builds.common import inspect_package_source_policy
 from vonk_control.source_bundles import generate_source_bundle, parse_source_bundle
 from vonk_control.source_policy import SourcePolicyError, enforce_build_source_policy
 

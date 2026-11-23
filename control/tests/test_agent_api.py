@@ -67,42 +67,37 @@ from vonk_agent_protocol.inventory import (
 )
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 from vonk_control import agent_operation_states as aos
-from vonk_control.agent_api import (
+from vonk_control.agent_api.common import (
+    _ENROLLMENT_TOKEN,
     AgentApiServices,
     EnrollmentRateLimiter,
-    _bounded_enrollment_body,
-    _scan_enrollment_grants,
 )
-from vonk_control.agent_api.common import _ENROLLMENT_TOKEN
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.api import create_app
+from vonk_control.agent_api.enrollment import _scan_enrollment_grants
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
-from vonk_control.enrollment import EnrollmentService
+from vonk_control.enrollment.body import _bounded_enrollment_body
 from vonk_control.enrollment.bootstrap import EnrollmentBootstrapConfig
 from vonk_control.enrollment.contract import EnrollmentGrant
+from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )
 from vonk_control.inventory.items import runtime_value
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    Base,
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentRevision,
-    InstallationNode,
-    Job,
-    NodeInventorySnapshot,
-    NodeTelemetrySample,
-    RecipeBuild,
-    RecipeRun,
     RecipeSourceBundle,
-    RunNode,
 )
+from vonk_control.models.execution import InstallationNode, RecipeRun, RunNode
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.models.telemetry import NodeInventorySnapshot, NodeTelemetrySample
 from vonk_control.pki import IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
@@ -1408,7 +1403,7 @@ def test_post_stop_inventory_makes_the_waiting_switch_due_on_arrival(
     is not newer than the 30 s post-stop floor wakes nothing, and a failing
     wake never costs the Spark its accepted report."""
     from vonk_control.agent_api import observations
-    from vonk_control.run_switch_contract import (
+    from vonk_control.run_switch_contract.operations import (
         RunSwitchAwaitedInventory,
         RunSwitchOperationResult,
     )
@@ -1520,7 +1515,7 @@ def test_an_internal_fault_waits_and_the_same_bytes_are_accepted_once_it_clears(
 def test_claim_security_refusal_stays_403_and_unknown_outcome_keeps_its_wait(
     agent_system, monkeypatch
 ) -> None:
-    from vonk_control.agent_jobs import AgentContactIdentityMismatch
+    from vonk_control.agent_jobs.contracts import AgentContactIdentityMismatch
     from vonk_control.categorized_errors import BookkeepingUnknown
 
     client, services, _, _clock = agent_system
@@ -1551,7 +1546,7 @@ def test_incomplete_observation_warns_with_counts_and_recovers_in_fleet_health(
     import logging
 
     from vonk_agent_protocol import ProjectionCode
-    from vonk_control.fleet_projection import FleetProjection
+    from vonk_control.fleet_projection.service import FleetProjection
 
     client, services, _, clock = agent_system
     payload = canonical_message(
@@ -1948,7 +1943,7 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
 def test_recipe_image_upload_lock_preserves_interrupted_bytes(tmp_path) -> None:
     import os
 
-    from vonk_control.agent_api import _prepare_recipe_image_upload
+    from vonk_control.agent_api.common import _prepare_recipe_image_upload
 
     descriptor, partial = _prepare_recipe_image_upload(tmp_path, "a" * 64)
     try:
@@ -2100,8 +2095,8 @@ def enrollment_grant(services: AgentApiServices) -> str:
 
 
 def assert_grant_available(services: AgentApiServices, token: str) -> None:
-    from vonk_control.enrollment import _decode_token, _digest
-    from vonk_control.models import AgentEnrollmentGrant
+    from vonk_control.enrollment.validation import _decode_token, _digest
+    from vonk_control.models.fleet import AgentEnrollmentGrant
 
     assert services.enrollment is not None
     with services.enrollment._sessions() as session:
@@ -2114,8 +2109,8 @@ def assert_grant_available(services: AgentApiServices, token: str) -> None:
 
 
 def assert_grant_unconsumed(services: AgentApiServices, token: str) -> None:
-    from vonk_control.enrollment import _decode_token, _digest
-    from vonk_control.models import AgentEnrollmentGrant
+    from vonk_control.enrollment.validation import _decode_token, _digest
+    from vonk_control.models.fleet import AgentEnrollmentGrant
 
     with services.sessions() as session:
         grant = session.scalar(
@@ -4815,7 +4810,9 @@ def test_cli_enrollment_file_and_recovery_use_the_actual_authority(
     from email.message import Message as EmailMessage
     from urllib.error import URLError
 
-    from vonk_control.operator_projection_api import build_fleet_operator_services
+    from vonk_control.operator_projection_api.wiring import (
+        build_fleet_operator_services,
+    )
 
     from cluster_profiles import cli
     from cluster_profiles.control_client import ControlClient
@@ -5011,7 +5008,7 @@ def test_fleet_detail_reports_the_claimed_agent_build_and_updates_it(
 ):
     """An upgrade result is not proof of the binary that most recently claimed."""
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
-    from vonk_control.fleet_projection import FleetProjection
+    from vonk_control.fleet_projection.service import FleetProjection
 
     from cluster_profiles.cli_render import render_payload
 
@@ -5058,7 +5055,7 @@ def test_gpu_clock_failure_evidence_survives_http_storage_and_fleet_detail(
         GpuClockUnavailableReason,
     )
     from vonk_agent_protocol.telemetry import TelemetryRequest, TelemetrySample
-    from vonk_control.fleet_projection import FleetProjection
+    from vonk_control.fleet_projection.service import FleetProjection
     from vonk_control.telemetry.samples import TelemetryRepository
 
     from cluster_profiles.cli_render import render_payload
@@ -5143,7 +5140,7 @@ def test_gpu_collection_reason_reaches_fleet_and_fresh_report_recovers(agent_sys
         TelemetryRequest,
         TelemetrySample,
     )
-    from vonk_control.fleet_projection import telemetry_point
+    from vonk_control.fleet_projection.common import telemetry_point
     from vonk_control.telemetry.samples import TelemetryRepository
 
     client, services, _, clock = agent_system
@@ -5629,7 +5626,7 @@ def test_display_memory_agent_vectors_reobserve_through_http_store_and_cli(
 ):
     """Catches lost JSON enum evidence, sticky advice, or inventing unknown bytes."""
     from vonk_agent_protocol import ProjectionCode
-    from vonk_control.fleet_projection import FleetProjection
+    from vonk_control.fleet_projection.service import FleetProjection
 
     from cluster_profiles.cli_render import render_payload
 

@@ -5,18 +5,16 @@ from uuid import uuid4
 
 import pytest
 from vonk_agent_protocol import canonical_message
-from vonk_control.distribution_executor import (
-    DurableDistributionPhaseExecutor,
-    _phase_receipt,
-)
-from vonk_control.run_switch_contract import (
-    RunSwitchOperationResult,
-    RunSwitchPhase,
-    RunSwitchPlan,
+from vonk_control.distribution_executor.durable import DurableDistributionPhaseExecutor
+from vonk_control.distribution_executor.receipts import _phase_receipt
+from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import (
     RunSwitchRuntimeImageResult,
     RunSwitchTargetTransferEvidenceResult,
 )
-from vonk_control.runtime_image_preparation import RuntimeImageReceipt
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 
 NODE = "spk_" + "1" * 32
 IMAGE = "sha256:" + "a" * 64

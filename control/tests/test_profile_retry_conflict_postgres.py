@@ -8,16 +8,13 @@ from uuid import uuid4
 import pytest
 from vonk_agent_protocol import LifecycleState, ProfileReasonCode, SupersedeCode
 from vonk_control.evidence_repeats import owner_evidence
-from vonk_control.fleet_profile_contract import (
-    FleetProfileApplicationView,
+from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
 )
-from vonk_control.models import (
-    FleetProfileApplication,
-    FleetProfileSelection,
-    Job,
-)
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.models.fleet import FleetProfileApplication, FleetProfileSelection
+from vonk_control.models.jobs import Job
 
 from .lifecycle_simulation.simulation import ROUND_SECONDS, Simulation
 from .lifecycle_simulation.world import SOLO, SOLO_B, build_world

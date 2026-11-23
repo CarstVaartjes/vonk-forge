@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import TelemetryRequest
-from vonk_control.models import NodeEngineSample, NodeTelemetrySample
+from vonk_control.models.telemetry import NodeEngineSample, NodeTelemetrySample
 
 from tests.wire_probes import prebuilt_probe
 

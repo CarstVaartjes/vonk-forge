@@ -44,8 +44,10 @@ from vonk_agent_protocol.optional_evidence import EvidenceDrop
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 
 from .. import agent_operation_states
-from ..fleet_profile_contract import FleetProfileApplicationCancellationView
-from ..model_cache_contract import ModelCacheCancellation
+from ..fleet_profile_contract.applications import (
+    FleetProfileApplicationCancellationView,
+)
+from ..model_cache.contract import ModelCacheCancellation
 from ..strict_json import StrictModel, read_stored_model
 from ..summary_cut import summary_cut
 from ..wait_contract import QueueWait

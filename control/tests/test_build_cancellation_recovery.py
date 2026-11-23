@@ -7,23 +7,19 @@ import uuid
 
 import pytest
 from sqlalchemy import select
-from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.models import (
-    AgentOperation,
-    Job,
-    RecipeBuild,
-    ResourceReservation,
-)
-from vonk_control.recipe_builds import RecipeBuildService
-from vonk_control.recipe_execution_contract import parse_stored_build_plan
-from vonk_control.recipe_image_availability import (
+from vonk_control.install_admission.service import InstallAdmissionService
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_builds.service import RecipeBuildService
+from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
-from vonk_control.recipe_operations import (
-    RecipeOperationService,
-)
+from vonk_control.recipe_operations.execution_contract import parse_stored_build_plan
+from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition
 
 from .recipe_removal_review_support import remove_after_review

@@ -11,12 +11,10 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     canonical_message,
 )
-from vonk_control.fleet_profile_contract import FleetProfilePreview
-from vonk_control.models import (
-    FleetProfileApplication,
-    RecipeBuild,
-    ResourceReservation,
-)
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.profile_capacity import (
     accepted_profile_runtime_image,
     inherited_profile_memory,
@@ -334,7 +332,9 @@ def test_older_or_historical_retry_sibling_cannot_gate_current_repair(
     tmp_path, sibling_state
 ):
     """Catches same-profile active history and ended retry lineage vetoing repair."""
-    from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
+    from vonk_control.fleet_profile_contract.applications import (
+        FleetProfileApplicationProgress,
+    )
 
     from .test_fleet_profile_recovery_current import _failed_profile
 

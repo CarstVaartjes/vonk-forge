@@ -16,17 +16,15 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import DistributionObject
-from vonk_control.distribution import (
-    DistributionError,
-    DistributionService,
-    MemoryObjectSource,
-)
-from vonk_control.distribution_executor import (
-    DurableDistributionPhaseExecutor,
-    RuntimeImagePull,
-)
-from vonk_control.models import AgentNode, ArtifactDistributionAssignment, Job
-from vonk_control.run_switch_contract import RunSwitchOperationResult
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.sources import MemoryObjectSource
+from vonk_control.distribution.types import DistributionError
+from vonk_control.distribution_executor.durable import DurableDistributionPhaseExecutor
+from vonk_control.distribution_executor.receipts import RuntimeImagePull
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import ArtifactDistributionAssignment
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 
 from .test_agent_api import NODE_A, NODE_B, agent_system  # noqa: F401
 from .test_distribution_executor import _phase, _plan

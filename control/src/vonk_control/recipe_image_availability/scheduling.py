@@ -17,8 +17,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from .. import model_cache_states
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     has_pending_removal,
 )
@@ -30,10 +29,9 @@ from ..jobs.documents import (
     AvailabilityUnknownEnd,
 )
 from ..lifecycle.image_availability import PREPARATION_STALL_WINDOW
-from ..models import (
-    CatalogDocumentRevision,
-    Job,
-)
+from ..model_cache import states as model_cache_states
+from ..models.catalog import CatalogDocumentRevision
+from ..models.jobs import Job
 from ..operations.blockers import make_blocker
 from ..operations.contract import (
     AvailabilityOperationFailure,

@@ -15,20 +15,21 @@ from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
 from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
-from ..artifact_reference_scan import model_set_reference_reasons
+from ..artifact_reference_scan.model_references import model_set_reference_reasons
 from ..catalog.queries import WITHOUT_DOCUMENT, active_head_revision
 from ..failure_classification import wait_reason
 from ..logging import log_event
-from ..model_cache_contract import (
+from ..models.cache import ModelCacheOperation, ModelCacheSet
+from ..models.catalog import CatalogDocumentRevision
+from .artifacts import ArtifactSetManifest
+from .catalog_helpers import _revision_identity
+from .constants import _LOGGER
+from .contract import (
     CacheOperationKind,
     ModelCacheSetState,
     ModelCacheUsage,
     RetainedModelRevision,
 )
-from ..models import CatalogDocumentRevision, ModelCacheOperation, ModelCacheSet
-from .artifacts import ArtifactSetManifest
-from .catalog_helpers import _revision_identity
-from .constants import _LOGGER
 from .errors import ModelCacheConflictUnknown, ModelCacheError
 from .lineage import set_bindings
 from .persistence import _manifest_of

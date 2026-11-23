@@ -26,14 +26,9 @@ from .. import agent_operation_states
 from ..compose_bundle import ComposeBundle
 from ..jobs import states as job_states
 from ..jobs.queue import without_agent_operation
-from ..models import (
-    AgentCertificate,
-    AgentNode,
-    AgentNodeContact,
-    AgentOperation,
-    AgentOperationAttempt,
-    Job,
-)
+from ..models.fleet import AgentCertificate, AgentNode, AgentNodeContact
+from ..models.jobs import Job
+from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..operations.progress import project_progress
 from ..strict_json import read_stored_model
 from ..terminal_history_collection import history_rows_past_grace
@@ -46,7 +41,7 @@ from .readings import (
 )
 
 if TYPE_CHECKING:
-    from ..fleet_projection import FleetSnapshot
+    from ..fleet_projection.common import FleetSnapshot
     from ..telemetry.samples import LiveEngineReading
 
 _NODE = re.compile(r"spk_[0-9a-f]{32}")
@@ -321,7 +316,7 @@ class MetricsRegistry:
     def _fleet_values(snapshot: FleetSnapshot):
         """Project the typed FleetSnapshot without inventing node health."""
 
-        from ..fleet_projection import FleetSnapshot
+        from ..fleet_projection.common import FleetSnapshot
 
         if not isinstance(snapshot, FleetSnapshot):
             raise TypeError("fleet metrics require a typed FleetSnapshot")

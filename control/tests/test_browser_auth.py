@@ -18,7 +18,8 @@ from vonk_control.browser_auth import (
     LoginRateLimiter,
     bootstrap_administrator,
 )
-from vonk_control.models import Base, LoginSession, User
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import LoginSession, User
 from vonk_control.passwords import hash_password, verify_password
 
 ADMIN_PASSWORD = "correct horse battery staple"

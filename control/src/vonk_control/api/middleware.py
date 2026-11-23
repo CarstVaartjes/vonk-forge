@@ -23,13 +23,13 @@ from vonk_agent_protocol.error_response import (
 
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
-from ..agent_api import (
+from ..agent_api.common import (
     MAX_RECIPE_IMAGE_BYTES,
     AgentApiServices,
     activation_agent_identity,
     active_agent_identity,
 )
-from ..artifact_job_api import (
+from ..artifact_jobs.api import (
     MAX_ARTIFACT_INPUT_UPLOAD_BYTES,
     MAX_ARTIFACT_OUTPUT_UPLOAD_BYTES,
 )

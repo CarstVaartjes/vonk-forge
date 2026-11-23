@@ -22,9 +22,9 @@ from vonk_agent_protocol import (
     SecurityRefusalReason,
     WaitReason,
 )
-from vonk_control.fleet_projection import FleetProjection
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.host_helper_authority import HostHelperAuthorityError
-from vonk_control.models import AgentNode, AgentNodeContact
+from vonk_control.models.fleet import AgentNode, AgentNodeContact
 from vonk_control.recovery_policy import RECOVERY
 from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 

@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session, SessionTransaction
 from vonk_agent_protocol import RunState
 
 from ..admission_locking import set_admission_timeout
-from ..models import RecipeRun
+from ..models.execution import RecipeRun
 from .run_transitions import end_unfinished_run
 
 if TYPE_CHECKING:

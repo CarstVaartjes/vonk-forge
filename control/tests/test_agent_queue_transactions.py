@@ -9,16 +9,13 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_control import agent_operation_states as aos
-from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
+from vonk_control.agent_jobs.contracts import StaleAgentAttempt
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.jobs.queue import JobService
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    Base,
-    Job,
-)
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
 from .agent_fences import fenced_operation
 from .recipe_stop_fixtures import recipe_stop_payload

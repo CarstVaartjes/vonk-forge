@@ -19,7 +19,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from ..artifact_lifecycle import ArtifactLifecycleError
+from ..artifact_jobs.lifecycle import ArtifactLifecycleError
 from ..failure_classification import is_security_failure
 from ..runtime_init import RuntimeSecretError
 from .constants import (

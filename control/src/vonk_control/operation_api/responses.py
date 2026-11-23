@@ -18,8 +18,10 @@ from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from .. import agent_operation_states
 from ..auth import CursorCodec, CursorError
 from ..bounded_json import BoundedJSONError, require_sequence
-from ..fleet_profile_contract import FleetProfileApplicationCancellationView
-from ..models import AgentOperation, AgentOperationAttempt
+from ..fleet_profile_contract.applications import (
+    FleetProfileApplicationCancellationView,
+)
+from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..operations.contract import (
     OperationFailure,
     OperationFailureEvidence,

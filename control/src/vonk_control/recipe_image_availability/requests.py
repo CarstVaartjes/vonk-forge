@@ -25,7 +25,7 @@ from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_forge_contracts import RecipeDefinition
 
 from ..admission_locking import ConstraintReplay, admitting
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     has_pending_removal,
     lock_reference_gates,
@@ -37,22 +37,16 @@ from ..jobs.documents import (
     AvailabilityRuntime,
 )
 from ..lifecycle.evidence import Residue
-from ..models import (
-    CatalogDocument,
-    CatalogDocumentRevision,
-    Job,
-)
+from ..models.catalog import CatalogDocument, CatalogDocumentRevision
+from ..models.jobs import Job
 from ..operations.blockers import IdentityConflict, OperationBlocker, make_blocker
-from ..recipe_availability_intent import (
-    RecipeRevisionIntent,
-    RecipeSelectorIntent,
-)
 from ..recipe_builds.cancellation import (
     BuildConsumerError,
     lock_availability_build_dependency,
 )
-from ..recipe_image_availability_view_contract import (
-    RecipeImageAvailabilityView,
+from ..recipe_operations.availability_intent import (
+    RecipeRevisionIntent,
+    RecipeSelectorIntent,
 )
 from ..revision_images import revision_archives
 from ..stored.json_values import read_row_column
@@ -74,12 +68,15 @@ from .contracts import (
     _read,
     _retry_after,
 )
+from .view_contract import (
+    RecipeImageAvailabilityView,
+)
 
 REQUEST_OBSERVATION_BUDGET_SECONDS = 0.25
 
 
 if TYPE_CHECKING:
-    from ..recipe_update_batches import RecipeUpdateClaim
+    from ..recipe_update_batches.helpers import RecipeUpdateClaim
     from .service import RecipeImageAvailabilityService
 
 

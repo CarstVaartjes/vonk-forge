@@ -12,7 +12,8 @@ from pathlib import Path
 
 from sqlalchemy import create_engine
 from vonk_agent_protocol import InstallationState, LifecycleState, RunState
-from vonk_control.models import ArtifactJob, Base, RecipeInstallation
+from vonk_control.model_primitives import Base
+from vonk_control.models.execution import ArtifactJob, RecipeInstallation
 from vonk_control.untracked_installations import untracked_installations, untracked_runs
 
 from .test_artifact_jobs import running_artifact_service, submitted_artifact_job

@@ -13,23 +13,23 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.jobs.queue import JobService
-from vonk_control.models import (
-    Base,
-    CatalogDocumentHead,
-    Job,
-)
-from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
-from vonk_control.recipe_image_availability_view_contract import (
-    RecipeCacheRemovalStatus,
-)
-from vonk_control.recipe_image_removal_contract import (
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocumentHead
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability.removal_contract import (
     RecipeCacheRemovalOwner,
     RecipeCacheRemovalResult,
 )
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
+)
+from vonk_control.recipe_image_availability.view_contract import (
+    RecipeCacheRemovalStatus,
+)
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import document_sha256
 
 from .runtime_image_fixtures import place_test_image

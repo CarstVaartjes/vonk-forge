@@ -24,11 +24,11 @@ from vonk_agent_protocol.error_response import (
 from vonk_agent_protocol.failure_evidence import LOG_TAIL_BYTES, FailureDiagnostics
 from vonk_control.catalog.sync import _empty_result
 from vonk_control.catalog.sync_contract import ManagedCatalogSyncResult
-from vonk_control.fleet_profile_contract import (
+from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileDefinitionView,
     FleetProfileInput,
 )
-from vonk_control.operation_api import JobDetailResponse
+from vonk_control.operation_api.contracts import JobDetailResponse
 from vonk_forge_contracts.recipe import RecipeRuntimeEnvironment, RecipeSetting
 
 NODE = "spk_" + "1" * 32

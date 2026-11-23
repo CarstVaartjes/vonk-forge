@@ -42,7 +42,10 @@ _OWNED_CHECKS = {
 def _validate_rows(
     connection: Connection, table_name: str, columns: tuple[str, ...]
 ) -> None:
-    from .models import Base
+    from . import (
+        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+    )
+    from .model_primitives import Base
 
     table = Base.metadata.tables[table_name]
     predicates = []
@@ -75,7 +78,10 @@ def _postgres_owned_checks_current(
     """Compare only owning CHECKs using the server's exact native rendering."""
     from sqlalchemy.schema import CreateTable, DropTable
 
-    from .models import Base
+    from . import (
+        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+    )
+    from .model_primitives import Base
 
     declared = Base.metadata.tables[table_name]
     temporary = Table(
@@ -117,7 +123,10 @@ def _postgres_owned_checks_current(
 
 
 def _pending_adoption(connection: Connection) -> dict[str, tuple[str, ...]]:
-    from .models import Base
+    from . import (
+        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+    )
+    from .model_primitives import Base
 
     inspector = inspect(connection)
     tables = set(inspector.get_table_names())
@@ -307,7 +316,10 @@ def adopt_exact_integer_columns(connection: Connection) -> None:
     The caller owns the transaction. SQLite callers with foreign-key
     enforcement must use reconcile_exact_integer_schema before service use.
     """
-    from .models import Base
+    from . import (
+        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+    )
+    from .model_primitives import Base
 
     pending = _pending_adoption(connection)
     if not pending:

@@ -33,6 +33,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
+from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_agent_protocol.job_limits import (
     MAX_INPUT_FILE_BYTES,
@@ -45,12 +46,6 @@ from vonk_agent_protocol.job_limits import (
 )
 from vonk_forge_contracts import RecipeDefinition, RecipeDisplay, read_recipe
 
-from ..artifact_blob_store import ArtifactBlobStoreError, BlobReconciliation
-from ..artifact_job_evidence import (
-    ArtifactJobResultEvidence,
-    OutputContractBreach,
-    OutputContractRule,
-)
 from ..compiled_artifact_contract import (
     ArtifactSlotContract,
     CompiledArtifactContract,
@@ -67,11 +62,18 @@ from ..lifecycle.evidence import (
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..models import ArtifactJob, CatalogDocument, CatalogDocumentRevision, Job, RunNode
-from ..run_switch_contract import MemoryKind
+from ..models.catalog import CatalogDocument, CatalogDocumentRevision
+from ..models.execution import ArtifactJob, RunNode
+from ..models.jobs import Job
 from ..stored.json_values import read_row_column
 from ..stored.states import CatalogRevisionState
 from ..strict_json import StrictJSONModel, read_stored_model
+from .blob_store import ArtifactBlobStoreError, BlobReconciliation
+from .evidence import (
+    ArtifactJobResultEvidence,
+    OutputContractBreach,
+    OutputContractRule,
+)
 
 _UUID_ID_ADAPTER = TypeAdapter(UuidId)
 

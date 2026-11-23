@@ -12,7 +12,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 from vonk_agent_protocol.gpu_clock import GpuClockRange
-from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 @pytest.mark.parametrize(

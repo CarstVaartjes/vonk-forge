@@ -8,7 +8,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
-from vonk_control.models import (
+from vonk_control.models.cache import (
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,

@@ -16,8 +16,10 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireOperation
 from vonk_agent_protocol import RecipeJobRunRequest
 
-from .. import artifact_job_states as ajs
-from ..models import AgentOperation, ArtifactJob, Job
+from ..artifact_jobs import states as ajs
+from ..models.execution import ArtifactJob
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from ..stored.json_values import read_row_column
 from .agent_operation import is_artifact_owned
 

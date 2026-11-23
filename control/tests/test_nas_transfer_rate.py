@@ -11,13 +11,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import InventoryRequest, NetworkInterface
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    Base,
-    Job,
-)
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.nas_transfer_rate import (
     NasTransferNotice,
     nas_transfer_detail,
@@ -269,7 +266,7 @@ def test_link_evidence_fits_the_warning_bound_without_cutting_it_off() -> None:
     # bound and breaks the fleet view, or truncates away the link diagnosis.
     from vonk_agent_protocol import ProjectionCode
     from vonk_agent_protocol.agent_words import ProfileReasonSeverity
-    from vonk_control.fleet_projection import ProjectionReason
+    from vonk_control.fleet_projection.common import ProjectionReason
 
     notice = NasTransferNotice(
         "Copies from the NAS at 3.6 MB/s vs 64.1 MB/s on "

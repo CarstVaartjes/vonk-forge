@@ -10,13 +10,9 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from ..models import (
-    RecipeBuild,
-)
-from ..run_switch_contract import (
-    FreshnessEvidence,
-    RunSwitchContainerBuildResult,
-)
+from ..models.cache import RecipeBuild
+from ..run_switch_contract.evidence import FreshnessEvidence
+from ..run_switch_contract.phase_results import RunSwitchContainerBuildResult
 from ..stored.states import RecipeBuildState
 from .constants import _CONTAINER_BUILD_STATE_ADAPTER
 from .errors import RunSwitchRetryLater

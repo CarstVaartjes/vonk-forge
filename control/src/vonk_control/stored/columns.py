@@ -48,11 +48,11 @@ from vonk_forge_contracts import (
     RecipeDisplay,
 )
 
-from ..agent_upgrade_contract import (
+from ..agent_upgrades.contract import (
     AgentUpgradeRolloutPayload,
     AgentUpgradeRolloutResult,
 )
-from ..artifact_job_evidence import ArtifactJobResultEvidence
+from ..artifact_jobs.evidence import ArtifactJobResultEvidence
 from ..ca_issuance_contract import CertificateIssuanceBinding
 from ..catalog.revision_contract import (
     ModelRevisionProjection,
@@ -75,14 +75,13 @@ from ..fleet_event_contract import (
     RecipeRunPayload,
     RunNodePayload,
 )
-from ..fleet_profile_contract import (
+from ..fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
-    FleetProfileAssignmentInput,
-    FleetProfilePreview,
-    LabelName,
-    LabelValue,
 )
+from ..fleet_profile_contract.definitions import FleetProfileAssignmentInput
+from ..fleet_profile_contract.review import FleetProfilePreview
+from ..fleet_profile_contract.vocabulary import LabelName, LabelValue
 from ..jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityJobResult,
@@ -102,7 +101,7 @@ from ..jobs.documents import (
     RunSwitchJobPayload,
 )
 from ..mapping_parameters import MappingParameters
-from ..model_cache_contract import (
+from ..model_cache.contract import (
     CacheManifest,
     ModelCacheDownloadPayload,
     ModelCacheOperationProgress,
@@ -111,17 +110,17 @@ from ..model_cache_contract import (
 )
 from ..operator_receipt_contract import ReceiptOwner
 from ..profile_stop_authority import ProfileJobRunStopJob
-from ..recipe_execution_contract import (
+from ..recipe_image_availability.removal_contract import (
+    RecipeCacheRemovalOwner,
+    RecipeCacheRemovalResult,
+)
+from ..recipe_operations.execution_contract import (
     StoredBuildPolicyReport,
     StoredInstallationPlan,
     StoredRunEndpoint,
     StoredRunPlan,
 )
-from ..recipe_image_removal_contract import (
-    RecipeCacheRemovalOwner,
-    RecipeCacheRemovalResult,
-)
-from ..recipe_lifecycle_contract import (
+from ..recipe_operations.lifecycle_contract import (
     JOB_ACTIVATION,
     RecipeOperationActivatedResult,
     RecipeOperationCancellationResult,
@@ -129,17 +128,15 @@ from ..recipe_lifecycle_contract import (
     RecipeOperationResult,
     RecipeOperationStoppedResult,
 )
-from ..recipe_update_contract import RecipeUpdateDocument, RecipeUpdateFailure
-from ..run_switch_contract import (
-    RunSwitchDistributionChildResult,
-    RunSwitchOperationResult,
-)
-from ..run_switch_journal_contract import (
+from ..recipe_update_batches.contract import RecipeUpdateDocument, RecipeUpdateFailure
+from ..run_switch_contract.journal import (
     JournalRepairPurpose,
     RunSwitchJournalRepairEndEvidence,
     RunSwitchJournalRepairEvidence,
     RunSwitchJournalRepairPendingState,
 )
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.phase_results import RunSwitchDistributionChildResult
 from .documents import RouteClaimMarker
 from .json_values import bind
 
@@ -329,7 +326,7 @@ bind(
 bind("agent_operation_attempts", "progress", OperationProgress, nullable=True)
 bind("agent_operation_attempts", "result", AgentResultPayload, nullable=True)
 
-from ..run_switch_identity_contract import RunSwitchCancellation
+from ..run_switch_contract.identity import RunSwitchCancellation
 
 bind(
     "run_switch_journal_repairs",

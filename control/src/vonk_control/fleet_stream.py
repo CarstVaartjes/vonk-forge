@@ -22,7 +22,7 @@ from .fleet_events import (
     FleetReplayBatch,
     _FleetStoredEventGap,
 )
-from .fleet_projection import telemetry_point
+from .fleet_projection.common import telemetry_point
 from .fleet_stream_contract import (
     FleetChangeAdapter,
     FleetChangeEvent,

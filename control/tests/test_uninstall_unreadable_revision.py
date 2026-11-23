@@ -14,13 +14,10 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select, update
-from vonk_control.models import (
-    CatalogDocumentRevision,
-    Job,
-    RecipeInstallation,
-    ResourceReservation,
-)
-from vonk_control.run_switch_contract import RunSwitchCleanupApplyRequest
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation, ResourceReservation
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_contract.requests import RunSwitchCleanupApplyRequest
 from vonk_forge_contracts import RecipeDefinition
 
 from .test_recipe_operations import installed_recipe, setup_services

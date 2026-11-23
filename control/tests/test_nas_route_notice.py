@@ -1,7 +1,7 @@
 """The NAS-route warning codes are one typed set shared by every client."""
 
 from vonk_agent_protocol.inventory import NetworkInterface
-from vonk_control.fleet_projection import ProjectionReason
+from vonk_control.fleet_projection.common import ProjectionReason
 from vonk_control.nas_route_notice import nas_route_notice
 
 

@@ -13,18 +13,24 @@ from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import ProfileReasonCode
 from vonk_agent_protocol.agent_words import ProfileInstallationPolicy
 from vonk_control.auth import Actor
-from vonk_control.fleet_profile_contract import (
+from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileDefinitionView,
     FleetProfileList,
-    FleetProfilePreview,
     FleetProfileView,
     UnavailableFleetProfileView,
 )
-from vonk_control.models import Base, FleetProfile, Job
-from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
-from vonk_control.recipe_image_availability_api import install_recipe_operator_routes
-from vonk_control.recipe_image_removal_contract import RecipeRemovalUnavailableView
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import FleetProfile
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability.api import install_recipe_operator_routes
+from vonk_control.recipe_image_availability.removal_contract import (
+    RecipeRemovalUnavailableView,
+)
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
+)
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from cluster_profiles.cli_render import render_payload
 

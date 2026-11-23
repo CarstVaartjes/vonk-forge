@@ -5,13 +5,14 @@ from uuid import uuid4
 
 import pytest
 from vonk_agent_protocol import LifecycleState, ProfileReasonCode
-from vonk_control.fleet_profile_contract import (
-    FleetProfileApplicationView,
+from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
 )
-from vonk_control.fleet_profiles import _persisted_profile_progress
-from vonk_control.models import FleetProfileApplication, FleetProfileSelection, Job
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_profiles.persistence import _persisted_profile_progress
+from vonk_control.models.fleet import FleetProfileApplication, FleetProfileSelection
+from vonk_control.models.jobs import Job
 
 from .lifecycle_simulation.world import SOLO, build_world
 from .test_fleet_profile_api import _client, _headers

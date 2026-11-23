@@ -18,26 +18,27 @@ from vonk_agent_protocol.agent_words import (
 )
 
 from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract import (
-    FleetProfileAssignment,
-    FleetProfilePreview,
-    FleetProfileSwitchQueueItem,
-    profile_switch_child_request_key,
-)
+from ..fleet_profile_contract.definitions import FleetProfileAssignment
+from ..fleet_profile_contract.review import FleetProfilePreview
+from ..fleet_profile_contract.switch_state import FleetProfileSwitchQueueItem
+from ..fleet_profile_contract.vocabulary import profile_switch_child_request_key
 from ..jobs.documents import RunSwitchJobPayload
 from ..lifecycle.evidence import (
     BookkeepingReason,
     Residue,
     retire_as_unknown,
 )
-from ..models import FleetProfileApplication, Job
+from ..models.fleet import FleetProfileApplication
+from ..models.jobs import Job
 from ..operations.blockers import OperationBlocker, make_blocker
-from ..run_switch_contract import (
-    RunSwitchCleanupApplyRequest,
-    RunSwitchCleanupPreviewRequest,
+from ..run_switch_contract.operations import (
     RunSwitchOperation,
     RunSwitchOperationResult,
-    RunSwitchPlan,
+)
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_contract.requests import (
+    RunSwitchCleanupApplyRequest,
+    RunSwitchCleanupPreviewRequest,
     RunSwitchStopApplyRequest,
     RunSwitchStopPreviewRequest,
 )

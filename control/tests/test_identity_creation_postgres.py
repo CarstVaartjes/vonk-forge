@@ -23,23 +23,21 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.admission_locking import AdmissionLockKey, node_admission_key
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.service import CatalogService
-from vonk_control.distribution import (
-    DistributionIntegrityError,
-    DistributionService,
-    MemoryObjectSource,
-)
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.sources import MemoryObjectSource
+from vonk_control.distribution.types import DistributionIntegrityError
 from vonk_control.identity_insert import insert_identity
-from vonk_control.models import (
-    AgentNode,
-    ArtifactDistributionAssignment,
-    Base,
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
-    Job,
-    RecipeRun,
     RecipeSourceBundle,
 )
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import ArtifactDistributionAssignment
 from vonk_control.recipe_operations.interfaces import new_recipe_job
 from vonk_control.source_bundles import (
     DatabaseSourceBundleStore,

@@ -28,37 +28,45 @@ from vonk_agent_protocol import (
     ModelCacheCode,
     RunState,
 )
-from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
-from vonk_control.catalog.revision_collection import operation_tokens
-from vonk_control.fleet_profile_contract import (
+from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleGate
+from vonk_control.catalog.revision_collection import GRACE, operation_tokens
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileEffectProgress,
-    FleetProfilePreview,
 )
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    ArtifactDistributionAssignment,
-    Base,
-    CatalogDocumentRevision,
-    CatalogRecipeModelReference,
-    FleetProfile,
-    FleetProfileApplication,
-    FleetProfileSelection,
-    InstallationNode,
-    Job,
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import (
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
-    NodeInventorySnapshot,
+)
+from vonk_control.models.catalog import (
+    CatalogDocumentRevision,
+    CatalogRecipeModelReference,
+)
+from vonk_control.models.execution import (
+    InstallationNode,
     RecipeInstallation,
     RecipeRun,
     RunNode,
 )
-from vonk_control.recipe_operations import RecipeOperationConflict
-from vonk_control.recipe_update_notice import recipe_update_notice
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.models.fleet import (
+    AgentNode,
+    FleetProfile,
+    FleetProfileApplication,
+    FleetProfileSelection,
+)
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import (
+    AgentOperation,
+    ArtifactDistributionAssignment,
+)
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.recipe_operations.errors import RecipeOperationConflict
+from vonk_control.recipe_update_batches.notice import recipe_update_notice
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.storage_demands import (
     NAS_MODELS,
     STORAGE_EVICTING,
@@ -66,14 +74,10 @@ from vonk_control.storage_demands import (
     StorageDemands,
     spark_scope,
 )
-from vonk_control.unused_storage_collection import (
-    ACTOR,
-    GRACE,
-    UnusedStorageCollector,
-    spark_eviction_capacity,
-)
 from vonk_control.unused_storage_collection import pressure as unused_storage_pressure
+from vonk_control.unused_storage_collection.common import ACTOR, spark_eviction_capacity
 from vonk_control.unused_storage_collection.evidence import _Evidence
+from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 from vonk_forge_contracts.model import ModelReference
 
 from .removal_settle import advance_until_ended, release_ended_gates
@@ -730,7 +734,7 @@ def test_pointed_installations_are_planned_least_recently_used_first(
         (oldest,),
         (newer,),
     ]
-    from vonk_control.unused_storage_collection import _eviction_order
+    from vonk_control.unused_storage_collection.common import _eviction_order
 
     assert [item.members[0] for item in _eviction_order(capacity.items)] == [
         oldest,
@@ -1360,7 +1364,9 @@ def test_selected_application_releases_historical_installation_hold(
     ended: LifecycleState | None,
 ) -> None:
     """A selected snapshot must not retain obsolete effects after its owner ends."""
-    from vonk_control.fleet_profile_contract import FleetProfileInstallationEffect
+    from vonk_control.fleet_profile_contract.effects import (
+        FleetProfileInstallationEffect,
+    )
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)
@@ -1510,7 +1516,7 @@ def test_unknown_removal_is_deferred_and_retried_without_blocking_other_items(
 ):
     """Catches treating temporary ownership uncertainty as a refusal or hot loop."""
     from vonk_agent_protocol import WaitReason
-    from vonk_control.recipe_operations import RecipeRetryLater
+    from vonk_control.recipe_operations.errors import RecipeRetryLater
 
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")
@@ -3024,7 +3030,7 @@ def test_a_waiting_load_is_told_evicting_only_while_the_removal_can_happen(
     removal (outcome unknown, retried next pass) is still under way; a refused
     one is not, until a later pass removes it after all."""
     from vonk_agent_protocol import WaitReason
-    from vonk_control.recipe_operations import RecipeRetryLater
+    from vonk_control.recipe_operations.errors import RecipeRetryLater
 
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")
@@ -3410,7 +3416,10 @@ def test_receipt_unlink_is_outside_sql_with_committed_fence_and_fresh_admission(
     postgres_engine: Engine, tmp_path: Path, monkeypatch, fault: str
 ) -> None:
     """Catches filesystem effects under SQL locks and gates leaked on failure."""
-    from vonk_control.artifact_lifecycle import ArtifactIdentity, require_reference_open
+    from vonk_control.artifact_jobs.lifecycle import (
+        ArtifactIdentity,
+        require_reference_open,
+    )
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)
@@ -3637,8 +3646,10 @@ def test_installation_content_references_hold_but_provenance_does_not(
     """Catches keeping only UUIDs, or treating recipe/build provenance as use."""
     from dataclasses import replace
 
-    from vonk_control.recipe_execution_contract import parse_stored_installation_plan
-    from vonk_control.unused_storage_collection import _installation_kept
+    from vonk_control.recipe_operations.execution_contract import (
+        parse_stored_installation_plan,
+    )
+    from vonk_control.unused_storage_collection.references import _installation_kept
 
     sessions, _, installation_id, _ = _real_lifecycle(tmp_path, engine=postgres_engine)
     with sessions() as session:
@@ -3706,7 +3717,9 @@ def test_shared_file_does_not_pin_an_unrelated_installation(
     from vonk_agent_protocol.recipe_operations import RecipeInstallPayload
     from vonk_control.jobs.documents import InstallPhaseOperation, RecipeInstallParent
     from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
-    from vonk_control.recipe_execution_contract import parse_stored_installation_plan
+    from vonk_control.recipe_operations.execution_contract import (
+        parse_stored_installation_plan,
+    )
 
     sessions, _, installation_id, nodes = _real_lifecycle(
         tmp_path, engine=postgres_engine
@@ -3799,7 +3812,7 @@ def test_shared_file_does_not_pin_an_unrelated_installation(
             )
         )
     with sessions() as session:
-        from vonk_control.unused_storage_collection import _installation_kept
+        from vonk_control.unused_storage_collection.references import _installation_kept
 
         evidence = _Evidence.read(session, _REAL_CLOCK)
         assert compiled.artifacts[0].sha256 in evidence.operations

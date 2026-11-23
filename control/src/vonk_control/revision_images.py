@@ -32,7 +32,8 @@ from .catalog.revision_contract import (
 )
 from .content_identity import build_source_bundles
 from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from .models import CatalogDocumentRevision, RecipeBuild
+from .models.cache import RecipeBuild
+from .models.catalog import CatalogDocumentRevision
 from .stored.states import RecipeBuildState
 
 

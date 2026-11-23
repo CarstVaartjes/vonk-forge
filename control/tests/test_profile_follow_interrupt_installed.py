@@ -17,15 +17,17 @@ from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_contacts import record_contact
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import (
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import (
     AgentCertificate,
     AgentNode,
-    CatalogDocumentRevision,
     FleetProfileApplication,
 )
 

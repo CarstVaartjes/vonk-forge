@@ -8,24 +8,26 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from vonk_control.agent_api import AgentApiServices, EnrollmentGrantResponse
-from vonk_control.agent_upgrade_contract import (
+from vonk_control.agent_api.common import AgentApiServices, EnrollmentGrantResponse
+from vonk_control.agent_upgrades.contract import (
     AgentUpgradePackage,
     AgentUpgradeRequestIntent,
 )
-from vonk_control.agent_upgrades import AgentUpgradeConflict
+from vonk_control.agent_upgrades.errors import AgentUpgradeConflict
 from vonk_control.auth import MUTATION_ROLES, Actor, CursorError
-from vonk_control.enrollment import EnrollmentDenied, RemoteRevocationUncertain
 from vonk_control.enrollment.contract import EnrollmentRevocationStatus
+from vonk_control.enrollment.types import EnrollmentDenied, RemoteRevocationUncertain
 from vonk_control.library.api import _error as library_error
-from vonk_control.operator_projection_api import (
-    FleetActionResponse,
-    FleetOperatorServices,
-    _AgentEnrollmentAdapter,
-    _operator_error,
-    build_fleet_operator_services,
+from vonk_control.operator_projection_api.contracts import FleetActionResponse
+from vonk_control.operator_projection_api.errors import _operator_error
+from vonk_control.operator_projection_api.routes import (
     install_operator_projection_routes,
 )
+from vonk_control.operator_projection_api.services import (
+    FleetOperatorServices,
+    _AgentEnrollmentAdapter,
+)
+from vonk_control.operator_projection_api.wiring import build_fleet_operator_services
 from vonk_control.request_fault import RequestFault
 
 from .test_agent_upgrades import PACKAGE_MODEL
@@ -192,7 +194,7 @@ def test_fleet_locks_is_administrator_only_and_empty_on_sqlite() -> None:
 
 
 def test_fleet_node_detail_preserves_typed_live_observations() -> None:
-    from vonk_control.fleet_projection import FleetNode, FleetSnapshot
+    from vonk_control.fleet_projection.common import FleetNode, FleetSnapshot
 
     from .test_metrics import NODE, _fleet_snapshot
 
@@ -216,8 +218,8 @@ def test_fleet_node_detail_preserves_typed_live_observations() -> None:
 
 
 def test_node_selection_returns_exact_ids_before_names_and_all_ambiguity_candidates():
-    from vonk_control.library_projection import LibrarySelectorAmbiguous
-    from vonk_control.operator_projection_api import _node
+    from vonk_control.library_projection.common import LibrarySelectorAmbiguous
+    from vonk_control.operator_projection_api.errors import _node
 
     from .test_metrics import _fleet_snapshot
 

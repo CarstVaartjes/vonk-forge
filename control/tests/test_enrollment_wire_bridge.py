@@ -175,7 +175,7 @@ def test_rust_enrollment_request_and_controller_issued_response(
 def test_controller_renewal_uses_the_same_issued_response(
     agent_system, enrollment_wire_probe: Path
 ) -> None:
-    from vonk_control.models import AgentCertificate
+    from vonk_control.models.fleet import AgentCertificate
 
     client, services, _, _ = agent_system
     with services.enrollment._sessions.begin() as session:

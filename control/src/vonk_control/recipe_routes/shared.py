@@ -32,11 +32,8 @@ from ..failure_classification import disposition
 from ..gateway.litellm import LiteLlmGeneration, LiteLlmPolicy, RouteState
 from ..gateway.route_bundle_contract import RouteEndpointDocument
 from ..gateway.route_runtime import ActivationMarker
-from ..models import (
-    Job,
-    RoutePublication,
-    RoutePublicationOwner,
-)
+from ..models.jobs import Job
+from ..models.routes import RoutePublication, RoutePublicationOwner
 
 _NODE_ID = TypeAdapter(NodeId)
 _UPSTREAM_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,119}\Z")

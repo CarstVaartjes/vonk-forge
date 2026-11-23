@@ -14,8 +14,9 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_control import agent_operation_states as aos
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.models import AgentOperation, AgentOperationAttempt, Job
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .runtime_identity_support import claim_agent

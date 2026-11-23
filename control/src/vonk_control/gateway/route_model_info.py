@@ -47,13 +47,10 @@ from ..catalog.revision_contract import (
     read_catalog_document,
     read_recipe_projection,
 )
-from ..models import (
-    CatalogDocumentRevision,
-    ClusterMapping,
-    RecipeInstallation,
-    RecipeRun,
-)
-from ..recipe_runtime_specs import (
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import RecipeInstallation, RecipeRun
+from ..models.mapping import ClusterMapping
+from ..recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     _compiled_arguments,
     split_option_choices,

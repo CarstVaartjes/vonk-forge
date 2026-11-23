@@ -33,17 +33,15 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from vonk_control.agent_operation_facts import aware as _aware
-from vonk_control.models import (
-    AgentOperation,
-    AgentOperationAttempt,
+from vonk_control.models.cache import (
     ArtifactLifecycleGate,
-    FleetProfileApplication,
-    Job,
     ModelCacheOperation,
     ModelCacheSet,
-    RecipeRun,
-    RunNode,
 )
+from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
 from .invariants import (
     CLAIM_GRACE,

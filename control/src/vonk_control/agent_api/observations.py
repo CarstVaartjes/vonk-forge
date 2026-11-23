@@ -31,7 +31,7 @@ from vonk_agent_protocol.http_failure import TransientReason
 from vonk_agent_protocol.telemetry import TelemetryRequest
 
 from ..agent_acceptance import InventoryAcceptance, ObservationAcceptance
-from ..agent_jobs import StaleAgentAttempt
+from ..agent_jobs.contracts import StaleAgentAttempt
 from ..auth import AgentIdentity
 from ..download_contract import download_responses
 from ..http_errors import temporary_http_answer
@@ -43,19 +43,17 @@ from ..inventory.repository import (
 )
 from ..library.contract import UuidId
 from ..logging import log_event
-from ..models import (
-    STOPPABLE_NOT_RUNNING_RUN_STATES,
-    ClusterMapping,
-    RecipeBuild,
-    RecipeRun,
-    RunNode,
-)
+from ..models.cache import RecipeBuild
+from ..models.execution import STOPPABLE_NOT_RUNNING_RUN_STATES, RecipeRun, RunNode
+from ..models.mapping import ClusterMapping
 from ..operator_acceptance import ReceiptPolicy, operator_acceptance
 from ..optimistic import Stale, transition
 from ..owner_liveness import builds_in_flight, run_has_live_operation
 from ..persisted_waits import schedule_wait
 from ..presence import PresenceError
-from ..recipe_operations import prepare_exact_recipe_run_observation_nodes
+from ..recipe_operations.observation_helpers import (
+    prepare_exact_recipe_run_observation_nodes,
+)
 from ..run_switch_operations.evidence_waits import wake_evidence_waits
 from ..source_bundles import SourceBundleError
 from ..spark_store_retention import store_retention_request

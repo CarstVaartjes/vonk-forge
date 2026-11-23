@@ -31,9 +31,7 @@ from ..admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
-from ..agent_jobs import (
-    _JsonFlagIsTrue,
-)
+from ..agent_jobs.predicates import _JsonFlagIsTrue
 from ..jobs import states as job_states
 from ..jobs.documents import RecipeBuildParent, controller_recipe_document
 from ..lifecycle.evidence import (
@@ -41,32 +39,27 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..lifecycle.image_availability import PrebuiltImageAdapter
-from ..models import (
-    AgentNode,
-    CatalogDocumentRevision,
-    Job,
-    RecipeBuild,
-)
+from ..models.cache import RecipeBuild
+from ..models.catalog import CatalogDocumentRevision
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
 from ..owner_liveness import OwnerKind, issued_for, live_build_job
 from ..prebuilt_images import policy_prebuilt_reference
-from ..recipe_builds import (
-    RecipeBuildAdmissionBusy,
-    RecipeBuildPlan,
-)
 from ..recipe_builds.cancellation import (
     RecipeBuildIntent,
     build_cancellation,
     read_build_intent,
 )
-from ..recipe_lifecycle_contract import (
-    RecipeOperationCancellationResult,
-)
+from ..recipe_builds.common import RecipeBuildAdmissionBusy, RecipeBuildPlan
 from ..source_policy import SourcePolicyReport
 from ..stored.json_values import read_row_column
 from ..stored.states import RecipeBuildState
 from ..strict_json import serialize_json_value
 from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .interfaces import RecipeOperationView, new_recipe_job
+from .lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
 from .results import _recorded_result, _recorded_result_document
 
 if TYPE_CHECKING:

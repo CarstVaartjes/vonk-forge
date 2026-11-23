@@ -45,7 +45,7 @@ from ..bounded_json import require_mapping
 from ..strict_json import StrictJSONModel, serialize_json_value, stored_document_detail
 
 if TYPE_CHECKING:
-    from ..models import CatalogDocumentRevision
+    from ..models.catalog import CatalogDocumentRevision
 
 
 # A published document as JSON, before any contract has read it: the exact bytes

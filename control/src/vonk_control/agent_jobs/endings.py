@@ -8,10 +8,11 @@ from typing import TYPE_CHECKING
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import LifecycleState, WaitReason
 
-from ..lifecycle import CancelRequested
 from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..models import AgentOperation as StoredOperation
-from ..models import AgentOperationAttempt, Job
+from ..lifecycle.types import CancelRequested
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from .retirement import release_owned_reservations_in_session
 
 if TYPE_CHECKING:

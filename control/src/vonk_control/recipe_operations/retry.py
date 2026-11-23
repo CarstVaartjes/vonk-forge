@@ -26,31 +26,25 @@ from ..lifecycle.evidence import (
     Residue,
     read_or_rebuild,
 )
-from ..models import (
-    AgentOperation,
-    InstallationNode,
-    Job,
-    RecipeBuild,
-    RecipeInstallation,
-    ResourceReservation,
-)
-from ..recipe_builds import (
-    RecipeBuildPlan,
-)
+from ..models.cache import RecipeBuild
+from ..models.execution import InstallationNode, RecipeInstallation, ResourceReservation
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from ..recipe_builds.cancellation import RecipeBuildIntent, build_cancellation
-from ..recipe_execution_contract import (
-    build_plan_document,
-    parse_stored_build_plan,
-)
-from ..recipe_progress import (
-    _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
-)
+from ..recipe_builds.common import RecipeBuildPlan
 from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value
 from .errors import RecipeRequestInvalid, RecipeRetryLater
+from .execution_contract import (
+    build_plan_document,
+    parse_stored_build_plan,
+)
 from .intent import _bound_workload_intent
 from .interfaces import RecipeOperationView
 from .observation_helpers import _active_recipe_revision
+from .progress import (
+    _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
+)
 
 if TYPE_CHECKING:
     from .service import RecipeOperationService

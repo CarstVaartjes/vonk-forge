@@ -68,20 +68,18 @@ from vonk_agent_protocol import (
 from ..agent_operation_facts import aware
 from ..jobs import states as job_states
 from ..lifecycle_preflight import end_unclaimed_probes
-from ..models import AgentOperation as StoredOperation
-from ..models import Job
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
 from ..operations.blockers import OperationBlocker, make_blocker
 from ..persisted_waits import lifecycle_wait, schedule_wait, typed_wait_reason, wait_due
-from ..run_switch_contract import (
-    RunSwitchMemberReceipt,
-    RunSwitchMemberState,
-    RunSwitchOperationResult,
-)
-from ..run_switch_observation_contract import (
+from ..run_switch_contract.observation import (
     RunSwitchStoredChildIdentity,
     RunSwitchStoredIdentity,
     RunSwitchStoredLifecycle,
 )
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.progress import RunSwitchMemberReceipt
+from ..run_switch_contract.vocabulary import RunSwitchMemberState
 from .adapter import Dispatch
 from .agent_operation import AgentOperationAdapter
 from .composite import aggregate
@@ -177,8 +175,8 @@ def end_unclaimed_children(
     """
     # agent_jobs builds on the lifecycle core; import its writers at use.
     from .. import agent_operation_states
-    from ..agent_jobs import abandon_idempotent_job_in_session
     from ..agent_jobs.contracts import _ABANDONABLE_OPERATIONS
+    from ..agent_jobs.retry import abandon_idempotent_job_in_session
     from ..run_switch_operations.awaited_children import child_job_ids
 
     children = child_job_ids(progress)

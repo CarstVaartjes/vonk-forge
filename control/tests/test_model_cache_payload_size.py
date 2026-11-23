@@ -14,8 +14,9 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, RecipeImageCode
 from vonk_control.admission_locking import ConstraintDefect, admitting
 from vonk_control.lifecycle.model_cache import ModelCacheAdapter
-from vonk_control.models import Base, ModelCacheOperation
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .test_model_cache import _artifact, cache  # noqa: F401
 from .test_recipe_image_availability import (

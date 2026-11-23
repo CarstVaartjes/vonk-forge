@@ -14,37 +14,35 @@ from vonk_agent_protocol import LifecycleState, RuntimeImageCode, canonical_mess
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.bounded_json import require_mapping, require_sequence
-from vonk_control.fleet_profile_contract import (
-    FleetProfileInput,
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchAdapterState,
 )
-from vonk_control.fleet_profiles import (
-    RunSwitchFleetProfileAdapter,
-    build_production_fleet_profile_service,
-)
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
 from vonk_control.jobs.documents import RunSwitchJobPayload
 from vonk_control.lifecycle.evidence import Residue
-from vonk_control.models import (
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision, RecipeSourceBundle
+from vonk_control.models.fleet import (
     AgentNode,
     AgentNodeContact,
-    CatalogDocumentRevision,
     FleetProfileApplication,
     FleetProfileSelection,
-    Job,
-    NodeInventorySnapshot,
-    RecipeBuild,
-    RecipeSourceBundle,
     User,
 )
+from vonk_control.models.jobs import Job
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.persisted_waits import schedule_wait
-from vonk_control.recipe_builds import RecipeBuildPlan
-from vonk_control.recipe_operations import RecipeOperationService
-from vonk_control.run_switch_contract import RunSwitchApplyRequest
-from vonk_control.run_switch_operations import PhaseExecution, RunSwitchOperationService
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
+from vonk_control.recipe_builds.common import RecipeBuildPlan
+from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
+from vonk_control.run_switch_operations.interfaces import PhaseExecution
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImagePreparationError,
 )
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.stored.json_values import read_row_column
 
 from .runtime_identity_support import (

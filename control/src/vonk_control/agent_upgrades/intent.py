@@ -11,11 +11,8 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.package_source import AgentPackageSource
 
-from ..agent_upgrade_contract import (
-    AgentUpgradePackage,
-    AgentUpgradeRequestIntent,
-)
 from ..strict_json import read_stored_model
+from .contract import AgentUpgradePackage, AgentUpgradeRequestIntent
 from .errors import AgentUpgradeInvalid
 
 

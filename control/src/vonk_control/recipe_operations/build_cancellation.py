@@ -24,7 +24,6 @@ from ..admission_locking import (
 )
 from ..jobs import states as job_states
 from ..jobs.documents import controller_recipe_document
-from ..lifecycle import Outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.core import RECOVERY
 from ..lifecycle.evidence import (
@@ -32,12 +31,11 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..models import (
-    AgentNode,
-    AgentOperation,
-    Job,
-    RecipeBuild,
-)
+from ..lifecycle.types import Outcome
+from ..models.cache import RecipeBuild
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from ..owner_liveness import OwnerKind, issued_for
 from ..prebuilt_images import prebuilt_reference
 from ..recipe_builds.cancellation import (
@@ -47,16 +45,16 @@ from ..recipe_builds.cancellation import (
     read_build_intent,
     request_build_cancellation,
 )
-from ..recipe_progress import (
-    _parent_force_rebuild as _parent_force_rebuild,  # noqa: PLC0414 -- shared helper export
-)
-from ..recipe_progress import (
-    _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
-)
 from ..stored.states import RecipeBuildState
 from ..strict_json import serialize_json_value
 from .errors import RecipeBuildOwnershipBusy, RecipeRequestInvalid
 from .observation_helpers import _aware
+from .progress import (
+    _parent_force_rebuild as _parent_force_rebuild,  # noqa: PLC0414 -- shared helper export
+)
+from .progress import (
+    _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
+)
 
 if TYPE_CHECKING:
     from .service import RecipeOperationService

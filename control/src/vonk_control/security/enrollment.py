@@ -27,7 +27,7 @@ from ..enrollment.types import (
     ExpiredRenewalGraceExhausted,
 )
 from ..enrollment.validation import _stored_utc, _utc
-from ..models import AgentCertificate, AgentEnrollmentGrant, AgentNode
+from ..models.fleet import AgentCertificate, AgentEnrollmentGrant, AgentNode
 from ..pki import IssuedCertificate
 from ..step_ca import StepCAError, StepCAUnavailable
 

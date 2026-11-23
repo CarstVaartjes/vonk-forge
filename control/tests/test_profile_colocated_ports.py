@@ -9,14 +9,12 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from sqlalchemy import select, update
-from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.models import (
-    CatalogDocumentRevision,
-    FleetProfileApplication,
-    ResourceReservation,
-)
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .test_profile_installed_execution import _drive_to_job, _profile_service
 from .test_profile_port_claims import _ready_profile

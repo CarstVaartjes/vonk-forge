@@ -16,8 +16,9 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from ..admission_locking import acquire_admission_keys, node_admission_key
 from ..categorized_errors import InvalidValue, MissingRecord
 from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..models import AgentNode, Job
-from ..models import AgentOperation as StoredOperation
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
 from ..own_cleanup import CLEANUP_KINDS
 from .contracts import (
     _CONTROL_OPERATIONS,

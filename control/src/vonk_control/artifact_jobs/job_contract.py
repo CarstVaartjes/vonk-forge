@@ -24,7 +24,7 @@ from vonk_forge_contracts import EndpointAlias
 from ..compiled_artifact_contract import CompiledArtifactContract
 from ..library.contract import UuidId
 from ..lifecycle.evidence import Damaged
-from ..models import RecipeInstallation, RecipeRun
+from ..models.execution import RecipeInstallation, RecipeRun
 from .contracts import (
     ArtifactJobContractModel,
     ArtifactJobError,

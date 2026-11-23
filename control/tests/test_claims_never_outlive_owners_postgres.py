@@ -34,9 +34,9 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_control import journal_models
-from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS
-from vonk_control.artifact_lifecycle import (
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactReferenceUnsettled,
     require_reference_open,
@@ -48,26 +48,28 @@ from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )
-from vonk_control.distribution import DistributionService, MemoryObjectSource
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.distribution_assignment import NodeDistributionAssignment
-from vonk_control.enrollment import EnrollmentService
-from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import (
+from vonk_control.enrollment.service import EnrollmentService
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import (
+    ArtifactLifecycleGate,
+    ModelCacheOperation,
+    RecipeLibrarySyncRun,
+)
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import (
     AgentCertificate,
     AgentCertificateRotation,
     AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    ArtifactLifecycleGate,
-    Base,
-    CatalogDocumentRevision,
     FleetProfileApplication,
-    Job,
-    ModelCacheOperation,
-    RecipeLibrarySyncRun,
-    ResourceReservation,
 )
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
 from vonk_control.pki import IssuedCertificate
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS

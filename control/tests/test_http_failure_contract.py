@@ -11,7 +11,8 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.testclient import TestClient
 from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
 from vonk_control.agent_api import common
-from vonk_control.api import create_app, middleware
+from vonk_control.api import middleware
+from vonk_control.api.application import create_app
 from vonk_control.auth import AgentIdentity, TokenCodec
 from vonk_control.http_errors import temporary_http_answer
 

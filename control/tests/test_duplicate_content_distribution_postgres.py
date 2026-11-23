@@ -16,15 +16,14 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import DistributionObject
-from vonk_control.distribution import (
-    CompositeObjectSource,
-    DistributionService,
-    DistributionUnknown,
-    ModelCacheObjectSource,
-)
+from vonk_control.distribution.model_cache import ModelCacheObjectSource
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.sources import CompositeObjectSource
+from vonk_control.distribution.types import DistributionUnknown
 from vonk_control.distribution_executor.identity import DistributionIdentity
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import AgentNode, Base
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentNode
 
 from .test_nas_cache_acceptance import (
     NODE_A,
@@ -191,7 +190,7 @@ def test_a_grant_registers_after_the_nas_evicted_its_set(
 ) -> None:
     """A Spark holding the files gets the image: its grant needs no NAS set."""
     from sqlalchemy import delete
-    from vonk_control.models import ModelCacheSet, ModelCacheSetArtifact
+    from vonk_control.models.cache import ModelCacheSet, ModelCacheSetArtifact
 
     set_digest, model_source, distribution, identity, image = _world(
         postgres_engine, tmp_path

@@ -16,7 +16,7 @@ from vonk_agent_protocol import (
 )
 
 from ..admission_locking import ConstraintReplay, admitting
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     RemovalOwnerKind,
@@ -28,28 +28,11 @@ from ..cache_removal_review import (
 )
 from ..jobs import states as job_states
 from ..jobs.documents import AvailabilityJobPayload
-from ..model_cache import (
-    ModelCacheConflict,
-)
-from ..models import (
-    ArtifactLifecycleGate,
-    CatalogDocumentRevision,
-    Job,
-    ModelCacheOperation,
-)
-from ..recipe_image_availability_view_contract import (
-    RecipeCacheRemovalStatus,
-)
-from ..recipe_image_removal_contract import (
-    RecipeCacheRemovalCheckpoint,
-    RecipeCacheRemovalIntent,
-    RecipeCacheRemovalModelChild,
-    RecipeCacheRemovalOwner,
-    RecipeCacheRemovalPlan,
-)
-from ..runtime_image_preparation import (
-    RuntimeImagePreparationError,
-)
+from ..model_cache.errors import ModelCacheConflict
+from ..models.cache import ArtifactLifecycleGate, ModelCacheOperation
+from ..models.catalog import CatalogDocumentRevision
+from ..models.jobs import Job
+from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
 from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value
 from .contracts import (
@@ -59,6 +42,16 @@ from .contracts import (
     ModelCacheRemovalCoordinator,
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityInvalid,
+)
+from .removal_contract import (
+    RecipeCacheRemovalCheckpoint,
+    RecipeCacheRemovalIntent,
+    RecipeCacheRemovalModelChild,
+    RecipeCacheRemovalOwner,
+    RecipeCacheRemovalPlan,
+)
+from .view_contract import (
+    RecipeCacheRemovalStatus,
 )
 
 REMOVAL_PASS_BUDGET_SECONDS = 0.25

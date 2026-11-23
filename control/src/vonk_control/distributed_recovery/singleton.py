@@ -23,22 +23,17 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..jobs.documents import RecipeStartParent, RecipeStopParent
 from ..lifecycle.evidence import Residue
-from ..models import (
-    AgentNode,
-    AgentNodeContact,
-    AgentOperation,
-    ClusterMapping,
-    Job,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
-)
-from ..recipe_execution_contract import (
+from ..models.execution import RecipeInstallation, RecipeRun, RunNode
+from ..models.fleet import AgentNode, AgentNodeContact
+from ..models.jobs import Job
+from ..models.mapping import ClusterMapping
+from ..models.operations import AgentOperation
+from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
     parse_stored_run_plan,
 )
-from ..recipe_start_payloads import (
+from ..recipe_operations.start_payloads import (
     RecipeStartPayloadError,
     RecipeStartPlacement,
     build_recipe_start_payload,

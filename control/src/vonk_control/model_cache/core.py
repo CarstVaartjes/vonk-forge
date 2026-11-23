@@ -14,23 +14,22 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, object_session
 from vonk_agent_protocol import ModelCacheCode
 
-from .. import model_cache_states
-from ..lifecycle import Lifecycle, State
 from ..lifecycle.evidence import BookkeepingReason, Damaged, Residue, read_or_rebuild
+from ..lifecycle.types import Lifecycle, State
 from ..logging import log_event
-from ..model_cache_contract import (
+from ..models.cache import ModelCacheOperation, ModelCacheSet
+from ..operations.contract import AvailabilityOperationFailure
+from ..stored.json_values import read_row_column
+from . import states as model_cache_states
+from .artifacts import ArtifactSetManifest, _unique_artifacts
+from .constants import _LOGGER
+from .contract import (
     CacheManifest,
     ModelCacheDownloadPayload,
     ModelCacheOperationPayload,
     ModelCacheRemovalPayload,
     ModelCacheSetState,
 )
-from ..model_cache_progress import cache_phase, progress_document
-from ..models import ModelCacheOperation, ModelCacheSet
-from ..operations.contract import AvailabilityOperationFailure
-from ..stored.json_values import read_row_column
-from .artifacts import ArtifactSetManifest, _unique_artifacts
-from .constants import _LOGGER
 from .errors import ModelCacheError
 from .persistence import (
     _manifest_of,
@@ -38,6 +37,7 @@ from .persistence import (
     _operation_progress,
     _store_operation_payload,
 )
+from .progress import cache_phase, progress_document
 from .provider_waits import payload_kinds, provider_wait_end
 
 if TYPE_CHECKING:

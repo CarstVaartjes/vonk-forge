@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from vonk_control.recipe_builds import BUILD_ARTIFACT_FORMAT
+from vonk_control.recipe_builds.common import BUILD_ARTIFACT_FORMAT
 
 
 def valid_policy_report(passed: bool = True) -> dict[str, object]:

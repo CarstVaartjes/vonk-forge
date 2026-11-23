@@ -13,20 +13,20 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from starlette.responses import Response
-from vonk_control.artifact_job_api import ArtifactJobCreate, install_artifact_job_routes
-from vonk_control.artifact_job_evidence import (
+from vonk_control.artifact_jobs.api import (
+    ArtifactJobCreate,
+    install_artifact_job_routes,
+)
+from vonk_control.artifact_jobs.contracts import ArtifactJobResponse, ArtifactJobView
+from vonk_control.artifact_jobs.evidence import (
     ArtifactJobResultEvidence,
     dump_result_evidence,
     read_result_evidence,
 )
-from vonk_control.artifact_jobs import (
-    ArtifactJobResponse,
-    ArtifactJobService,
-    ArtifactJobView,
-    CompiledArtifactContract,
-)
+from vonk_control.artifact_jobs.service import ArtifactJobService
 from vonk_control.auth import Actor
-from vonk_control.models import ArtifactJobBlob, ArtifactJobFile
+from vonk_control.compiled_artifact_contract import CompiledArtifactContract
+from vonk_control.models.execution import ArtifactJobBlob, ArtifactJobFile
 from vonk_control.strict_json import ControllerAPIRoute
 
 from cluster_profiles.generated_control.models.artifact_job_response import (
@@ -480,7 +480,7 @@ def test_result_evidence_preserves_current_values_without_field_presence() -> No
 
 def test_capacity_unknown_releases_upload_and_fresh_draft_is_admitted(tmp_path):
     """Catches translating storage shortage into a conflict at the HTTP boundary."""
-    from vonk_control.artifact_blob_store import ArtifactBlobStore
+    from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
 
     from .test_artifact_jobs import (
         artifact_create_request,
@@ -543,8 +543,8 @@ def test_library_upload_reobserves_capacity_after_releasing_holds(
     tmp_path, monkeypatch
 ):
     """Catches an ended library upload with no automatic bounded observation."""
-    from vonk_control.artifact_blob_store import ArtifactBlobStore
     from vonk_control.artifact_jobs import inputs
+    from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
     from vonk_control.bounded_retry import bounded_attempts
 
     from .test_artifact_jobs import (

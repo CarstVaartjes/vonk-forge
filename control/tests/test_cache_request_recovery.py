@@ -24,20 +24,22 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import LifecycleState
-from vonk_control.artifact_lifecycle import ArtifactIdentity, lock_reference_gates
+from vonk_control.artifact_jobs.lifecycle import ArtifactIdentity, lock_reference_gates
 from vonk_control.auth import Actor
-from vonk_control.model_cache import (
-    CacheOperationView,
-    ModelCacheConflict,
-    ModelCacheService,
-)
-from vonk_control.models import Base, Job, ModelCacheOperation
-from vonk_control.recipe_image_availability import (
+from vonk_control.model_cache.errors import ModelCacheConflict
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_cache.views import CacheOperationView
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability.api import install_recipe_operator_routes
+from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityError,
+)
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeImageAvailabilityView,
 )
-from vonk_control.recipe_image_availability_api import install_recipe_operator_routes
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from cluster_profiles.cli import main
 from cluster_profiles.control_client import ControlClient

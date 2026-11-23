@@ -21,12 +21,12 @@ from vonk_agent_protocol import (
 
 from ..bounded_retry import bounded_attempts
 from ..categorized_faults import OperationInterrupted
-from ..model_cache_contract import ModelCacheRepairPayload
-from ..models import ModelCacheOperation
+from ..models.cache import ModelCacheOperation
 from ..worker.memory_contract import WorkerMemoryComponent
 from . import constants
 from .artifacts import ArtifactSpec
 from .constants import _CHUNK_BYTES, _TRANSFER_CLAIM_SECONDS
+from .contract import ModelCacheRepairPayload
 from .errors import ModelCacheStorageUnknown
 from .persistence import _operation_cancellation
 

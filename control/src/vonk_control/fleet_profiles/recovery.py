@@ -22,20 +22,19 @@ from vonk_agent_protocol.agent_words import (
     ProfileProjectionKind,
 )
 
-from .. import fleet_profile_states
 from ..evidence_repeats import load_subject, note_repeat
-from ..fleet_profile_contract import (
+from ..fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileChildOperation,
-    FleetProfileOperationState,
-    FleetProfilePlanStep,
 )
+from ..fleet_profile_contract.assessment import FleetProfilePlanStep
+from ..fleet_profile_contract.vocabulary import FleetProfileOperationState
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.fleet_profile import FleetProfileAdapter
-from ..models import AgentNode, FleetProfileApplication, FleetProfileSelection
+from ..models.fleet import AgentNode, FleetProfileApplication, FleetProfileSelection
 from ..operations.blockers import OperationBlocker, make_blocker
 from ..persisted_waits import wait_due
-from ..profile_error_summary import _normalized_failure_text
+from . import states as fleet_profile_states
 from .assessment_support import (
     _progress_with_blockers,
 )
@@ -49,6 +48,7 @@ from .dependencies import (
     ENDING_BLOCKER_CODES,
     PROFILE_REPEATED_FAILURE_CODE,
 )
+from .error_summary import _normalized_failure_text
 from .persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,

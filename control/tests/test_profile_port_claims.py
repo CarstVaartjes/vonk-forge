@@ -11,23 +11,21 @@ from vonk_agent_protocol import (
     RunState,
     canonical_message,
 )
-from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
-from vonk_control.fleet_projection import FleetProjection
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.inventory.repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import (
-    AgentNode,
-    ClusterMapping,
-    FleetProfileApplication,
-    Job,
-    NodeInventorySnapshot,
-    RecipeBuild,
-    RecipeRun,
-    ResourceReservation,
-)
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import RecipeRun, ResourceReservation
+from vonk_control.models.fleet import AgentNode, FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS
 
 from .test_profile_capacity_admission import _capacity_profile

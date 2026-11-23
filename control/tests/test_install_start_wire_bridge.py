@@ -15,9 +15,11 @@ from vonk_agent_protocol import (
     RecipeStartResult,
 )
 from vonk_control.agent_outcome import stored_report
-from vonk_control.distribution import DistributionService, MemoryObjectSource
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.distribution_assignment import NodeDistributionAssignment
-from vonk_control.models import AgentOperation, InstallationNode, RunNode
+from vonk_control.models.execution import InstallationNode, RunNode
+from vonk_control.models.operations import AgentOperation
 
 from tests.wire_probes import prebuilt_probe
 

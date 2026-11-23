@@ -54,7 +54,7 @@ ENTRY_POINTS: dict[str, frozenset[str]] = {
             "outcome_body",
         }
     ),
-    "vonk_control.api": frozenset({"production_app"}),
+    "vonk_control.api.production": frozenset({"production_app"}),
     "vonk_control.auth": frozenset({"TokenCodec"}),
     "vonk_control.catalog.service": frozenset({"CatalogService"}),
     "vonk_control.catalog.sync": frozenset(
@@ -63,7 +63,7 @@ ENTRY_POINTS: dict[str, frozenset[str]] = {
     "vonk_control.catalog.sync_contract": frozenset(
         {"CatalogSyncTrigger", "ManagedCatalogSyncRequest", "reviewed_catalog_content"}
     ),
-    "vonk_control.db": frozenset({"build_engine", "session_factory"}),
+    "vonk_control.db.connections": frozenset({"build_engine", "session_factory"}),
     # The release reader's own index parser and package decoder.
     "vonk_control.recipe_packages.client": frozenset(
         {"RecipePackageClient", "load_recipe_package"}

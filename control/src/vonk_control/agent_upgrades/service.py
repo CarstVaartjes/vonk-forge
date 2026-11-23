@@ -11,9 +11,7 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
 )
 
-from ..agent_jobs import (
-    AgentJobService,
-)
+from ..agent_jobs.service import AgentJobService
 from ..categorized_errors import (
     InvalidValue,
 )

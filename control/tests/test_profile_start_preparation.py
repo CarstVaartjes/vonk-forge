@@ -10,14 +10,12 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import WaitReason
-from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import build_production_fleet_profile_service
-from vonk_control.models import CatalogDocumentRevision
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.operations.blockers import make_blocker
-from vonk_control.run_switch_operations import (
-    ArtifactInspection,
-    RunSwitchOperationService,
-)
+from vonk_control.run_switch_operations.interfaces import ArtifactInspection
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .test_recipe_operations import installed_recipe, setup_services
 from .test_run_switch_operations import (

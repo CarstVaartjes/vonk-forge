@@ -34,7 +34,7 @@ from vonk_agent_protocol.inventory import NetworkInterface
 
 from .agent_operation_states import ORDER
 from .catalog.revision_collection import GRACE
-from .models import AgentOperation, AgentOperationAttempt
+from .models.operations import AgentOperation, AgentOperationAttempt
 from .operations.progress import stored_progress
 
 _LOGGER = logging.getLogger(__name__)

@@ -22,7 +22,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..admission_locking import ConstraintReplay, admitting
-from ..agent_jobs import AgentJobService
+from ..agent_jobs.service import AgentJobService
 from ..bounded_json import require_integer, require_mapping
 from ..failure_classification import error_code, is_security_failure
 from ..jobs import states as job_states
@@ -38,18 +38,14 @@ from ..lifecycle.evidence import Residue
 from ..lifecycle.types import (
     State as _LifecycleState,
 )
-from ..models import (
-    AgentNode,
-    Job,
-)
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
 from ..recipe_builds.cancellation import (
     BuildConsumerError,
     lock_run_switch_build_dependency,
 )
-from ..run_switch_contract import (
-    RunSwitchOperation,
-    RunSwitchPlan,
-)
+from ..run_switch_contract.operations import RunSwitchOperation
+from ..run_switch_contract.plans import RunSwitchPlan
 from ..stored.json_values import read_row_column
 from ..strict_json import (
     serialize_json_value,

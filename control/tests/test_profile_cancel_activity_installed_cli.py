@@ -11,9 +11,10 @@ from uuid import uuid4
 
 from sqlalchemy import select
 from vonk_control.auth import TokenCodec
-from vonk_control.fleet_profiles import build_production_fleet_profile_service
-from vonk_control.models import Job, ResourceReservation
-from vonk_control.operation_api import durable_operation_services
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.jobs import Job
+from vonk_control.operation_api.durable import durable_operation_services
 
 from .test_fleet_profile_api import _client, _headers
 from .test_fleet_profile_cancel import _application

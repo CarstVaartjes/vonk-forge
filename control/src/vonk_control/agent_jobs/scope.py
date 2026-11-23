@@ -8,8 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..admission_locking import AdmissionRowLock, lock_admission_rows
-from ..models import AgentNode, Job
-from ..models import AgentOperation as StoredOperation
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
 from .stored import column_value
 
 if TYPE_CHECKING:

@@ -43,20 +43,18 @@ from vonk_control.exact_integer_storage import (
     DecimalIntegerOrderKey,
     ExactNonnegativeInteger,
 )
-from vonk_control.model_cache import ArtifactSetManifest, ModelCacheService
-from vonk_control.model_cache_contract import (
+from vonk_control.model_cache.artifacts import ArtifactSetManifest
+from vonk_control.model_cache.contract import (
     CacheEntryResponse,
     ModelCacheDownloadPayload,
     ModelCacheOperationProgress,
 )
-from vonk_control.models import (
-    Base,
-    CatalogDocumentRevision,
-    ModelCacheOperation,
-    ModelCacheSet,
-)
-from vonk_control.recipe_action_plans import StopPlan, UninstallPlan
-from vonk_control.unused_storage_collection import UnusedStorageCollector
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.recipe_operations.impact_plans import StopPlan, UninstallPlan
+from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 from vonk_forge_contracts import ModelDefinition
 
 from .display_fixtures import create_draft

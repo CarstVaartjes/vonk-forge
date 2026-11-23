@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 from vonk_agent_protocol import SecurityRefusalReason
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
+from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImagePreparationRefused,
 )
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .test_runtime_image_preparation import (
     ARCHIVE_DIGEST,
@@ -91,8 +91,12 @@ def test_unknown_receipt_attempt_ends_without_blocking_fresh_preparation(
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from vonk_agent_protocol import LifecycleState
-    from vonk_control.models import Base, Job, RecipeBuild
-    from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
+    from vonk_control.model_primitives import Base
+    from vonk_control.models.cache import RecipeBuild
+    from vonk_control.models.jobs import Job
+    from vonk_control.recipe_image_availability.availability_contract import (
+        AvailabilityBuildReceipt,
+    )
 
     from .test_recipe_image_availability import (
         ARCHIVE_SHA,
@@ -228,9 +232,12 @@ def test_observation_budget_is_owned_by_request_across_restart_for_all_unknowns(
         RuntimeImageCode,
         WaitReason,
     )
-    from vonk_control.models import Base, Job
-    from vonk_control.recipe_image_availability import BuildUnsettled
-    from vonk_control.runtime_image_preparation import RuntimeImagePreparationUnknown
+    from vonk_control.model_primitives import Base
+    from vonk_control.models.jobs import Job
+    from vonk_control.recipe_image_availability.contracts import BuildUnsettled
+    from vonk_control.runtime_image_preparation.contracts import (
+        RuntimeImagePreparationUnknown,
+    )
 
     from .test_recipe_image_availability import (
         _add_revision,
@@ -323,7 +330,7 @@ def test_observation_budget_is_owned_by_request_across_restart_for_all_unknowns(
 def _hold_availability_row(database_url: str, operation_id: str, pipe) -> None:
     from sqlalchemy import create_engine, select
     from sqlalchemy.orm import sessionmaker
-    from vonk_control.models import Job
+    from vonk_control.models.jobs import Job
 
     engine = create_engine(database_url)
     try:
@@ -352,8 +359,9 @@ def test_postgres_concurrent_owner_newer_intent_fences_stale_claim_and_restarts(
     from sqlalchemy.orm import sessionmaker
     from vonk_agent_protocol import LifecycleState, RecipeImageCode, WaitReason
     from vonk_control.jobs.documents import AvailabilityJobResult
-    from vonk_control.models import Base, Job
-    from vonk_control.recipe_image_availability import BuildUnsettled
+    from vonk_control.model_primitives import Base
+    from vonk_control.models.jobs import Job
+    from vonk_control.recipe_image_availability.contracts import BuildUnsettled
 
     from .test_recipe_image_availability import (
         _add_recipe_successors,

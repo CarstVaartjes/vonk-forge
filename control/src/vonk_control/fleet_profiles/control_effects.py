@@ -20,29 +20,28 @@ from vonk_agent_protocol.agent_words import (
     ProfileReasonSeverity,
 )
 
-from .. import fleet_profile_states
-from ..fleet_profile_contract import (
-    FleetProfileAssignment,
+from ..fleet_profile_contract.assessment import FleetProfileReason
+from ..fleet_profile_contract.definitions import FleetProfileAssignment
+from ..fleet_profile_contract.effects import (
     FleetProfileEffects,
     FleetProfileInstallationEffect,
-    FleetProfileReason,
     FleetProfileRunEffect,
 )
 from ..jobs import states as job_states
 from ..lifecycle.evidence import Residue
-from ..models import (
-    STOPPABLE_RUN_STATES,
-    AgentNode,
-    ClusterMappingNode,
-    FleetProfileApplication,
-    Job,
-    RecipeInstallation,
-    RecipeRun,
-)
+from ..models.execution import STOPPABLE_RUN_STATES, RecipeInstallation, RecipeRun
+from ..models.fleet import AgentNode, FleetProfileApplication
+from ..models.jobs import Job
+from ..models.mapping import ClusterMappingNode
 from ..preparation_contract import RuntimeImageIdentity
 from ..run_route_name import carries_alias
-from ..run_switch_contract import RunSwitchProfileStopScope, SparkGroup, SparkGroupNode
+from ..run_switch_contract.requests import (
+    RunSwitchProfileStopScope,
+    SparkGroup,
+    SparkGroupNode,
+)
 from ..strict_json import warn_unreadable_once
+from . import states as fleet_profile_states
 from .contracts import (
     _ProfileControlEffects,
 )

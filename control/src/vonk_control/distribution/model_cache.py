@@ -17,7 +17,7 @@ from ..compiled_execution_plan import DistributionObjectReceipt, VerifiedModelOb
 from ..model_cache.errors import ModelCacheNotFound
 
 if TYPE_CHECKING:
-    from ..model_cache import ModelCacheService
+    from ..model_cache.service import ModelCacheService
 
 
 from .types import (

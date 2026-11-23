@@ -14,12 +14,12 @@ from uuid import uuid4
 from sqlalchemy import select
 from vonk_agent_protocol import ProfileReasonCode
 from vonk_control.admission_locking import PATIENT_AFTER_RETRIES, label_transaction
-from vonk_control.fleet_profile_contract import (
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
-    FleetProfileApplicationView,
 )
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
 from vonk_control.fleet_profiles.persistence import _persisted_profile_progress
-from vonk_control.models import AgentNode, FleetProfileApplication
+from vonk_control.models.fleet import AgentNode, FleetProfileApplication
 
 from .test_profile_capacity_admission import _capacity_profile
 

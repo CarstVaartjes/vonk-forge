@@ -12,9 +12,9 @@ from vonk_agent_protocol import (
 
 from ..categorized_errors import MissingRecord
 from ..jobs import states as job_states
-from ..models import Job
+from ..models.jobs import Job
 from ..persisted_waits import read_wait, wait_due
-from ..recipe_update_contract import (
+from .contract import (
     UPDATE_KIND,
     RecipeUpdateDocument,
     RecipeUpdateResponse,

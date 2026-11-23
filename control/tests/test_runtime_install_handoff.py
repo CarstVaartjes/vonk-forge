@@ -7,12 +7,12 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentOperation as OperationKind
 from vonk_agent_protocol import LifecycleState, canonical_message
-from vonk_control.models import AgentNode, AgentOperation, Job
-from vonk_control.run_switch_contract import (
-    RunSwitchOperationResult,
-    RunSwitchRuntimeInstallResult,
-)
-from vonk_control.run_switch_operations import _persisted_result
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import RunSwitchRuntimeInstallResult
+from vonk_control.run_switch_operations.result_helpers import _persisted_result
 
 from .runtime_identity_support import set_inventory_fingerprint
 from .test_lifecycle_preflight import _clear, _finish

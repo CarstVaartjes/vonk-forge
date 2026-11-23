@@ -59,7 +59,7 @@ def test_non_model_expiry_survives_restart_and_retries_failed_unlink(
     assert lifecycle.removed == [idle]
     assert receipt.exists() and model.exists()
     with world.sessions() as session:
-        from vonk_control.models import RecipeInstallation
+        from vonk_control.models.execution import RecipeInstallation
 
         row = session.get(RecipeInstallation, live)
         assert row is not None and row.state == InstallationState.INSTALLED
@@ -87,12 +87,10 @@ def test_age_uninstall_binds_model_retention_in_real_queue(
     """Catches preview retaining models while acceptance still asks the agent to erase them."""
     from sqlalchemy import select
     from vonk_agent_protocol import AgentOperation as Operation
-    from vonk_control.models import (
-        AgentOperation,
-        NodeInventorySnapshot,
-        RecipeInstallation,
-    )
-    from vonk_control.unused_storage_collection import UnusedStorageCollector
+    from vonk_control.models.execution import RecipeInstallation
+    from vonk_control.models.operations import AgentOperation
+    from vonk_control.models.telemetry import NodeInventorySnapshot
+    from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
     from .test_unused_storage_collection import (
         _REAL_CLOCK,

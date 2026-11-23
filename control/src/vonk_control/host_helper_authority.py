@@ -52,7 +52,7 @@ from vonk_agent_protocol.recipe_operations import (
 from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdentityState
 
 from . import agent_operation_states
-from .agent_jobs import _WORKLOAD_INTENT_OPERATIONS
+from .agent_jobs.contracts import _WORKLOAD_INTENT_OPERATIONS
 from .host_runtime_plan_authority import (
     RuntimePlanAuthorityError,
     RuntimePlanBinding,
@@ -62,13 +62,10 @@ from .host_runtime_plan_authority import (
 )
 from .jobs import states as job_states
 from .logging import log_event
-from .models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperationAttempt,
-    Job,
-)
-from .models import AgentOperation as StoredAgentOperation
+from .models.fleet import AgentCertificate, AgentNode
+from .models.jobs import Job
+from .models.operations import AgentOperation as StoredAgentOperation
+from .models.operations import AgentOperationAttempt
 from .offline_stops import is_deferred_stop
 from .own_cleanup import CLEANUP_ACTIONS
 from .owner_liveness import run_has_live_operation

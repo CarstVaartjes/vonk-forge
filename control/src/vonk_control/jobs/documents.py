@@ -52,27 +52,35 @@ from ..profile_stop_authority import (
     OfflineStopIntent,
     ProfileStopOwnerBinding,
 )
-from ..recipe_availability_intent import RecipeAvailabilityIntent, RecipeBuildDependency
 from ..recipe_builds.cancellation import RecipeBuildIntent
-from ..recipe_image_availability_contract import (
+from ..recipe_image_availability.availability_contract import (
     RecipeImageAvailabilityArtifact,
     RecipeImageAvailabilityState,
 )
-from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
-from ..run_switch_contract import (
-    RunSwitchAction,
+from ..recipe_operations.availability_intent import (
+    RecipeAvailabilityIntent,
+    RecipeBuildDependency,
+)
+from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_contract.progress import RunSwitchMemberReceipt
+from ..run_switch_contract.requests import (
     RunSwitchApplyRequest,
     RunSwitchCleanupApplyRequest,
-    RunSwitchMemberReceipt,
-    RunSwitchOperationKind,
-    RunSwitchOperationResult,
-    RunSwitchPhaseKind,
-    RunSwitchPlan,
     RunSwitchProfileStopScope,
     RunSwitchReconciliationAuthority,
     RunSwitchStopApplyRequest,
 )
-from ..runtime_image_preparation import RuntimeImageReceipt, RuntimeImageReferenceIntent
+from ..run_switch_contract.vocabulary import (
+    RunSwitchAction,
+    RunSwitchOperationKind,
+    RunSwitchPhaseKind,
+)
+from ..runtime_image_preparation.contracts import (
+    RuntimeImageReceipt,
+    RuntimeImageReferenceIntent,
+)
 from ..stored.json_values import ExternalPassthrough
 from ..strict_json import StrictJSONModel
 

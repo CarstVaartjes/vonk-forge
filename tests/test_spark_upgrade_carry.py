@@ -188,7 +188,9 @@ INSTALLATION_ID = "55555555-5555-4555-8555-555555555555"
 def _serving_receipt(run_id: str):
     from vonk_agent_protocol.agent_words import ProfileReportedPhase
     from vonk_agent_protocol.state_machines import RouteState, RunState
-    from vonk_control.run_switch_contract import RunSwitchFinalVerifyResult
+    from vonk_control.run_switch_contract.phase_results import (
+        RunSwitchFinalVerifyResult,
+    )
 
     return RunSwitchFinalVerifyResult.model_validate_json(
         json.dumps(

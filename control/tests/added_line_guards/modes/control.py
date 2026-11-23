@@ -34,6 +34,7 @@ from ..scans import (
     JOB_LIMITS_OWNER,
     LIVE_RESERVATION_COPY,
     LIVE_RESERVATION_KIND,
+    MOVED_FLAT_MODEL_CACHE_MODULES,
     MOVEMENT_VERDICTS,
     NAS_COVERAGE_READER,
     NEWEST_SNAPSHOT_KIND,
@@ -593,7 +594,10 @@ def check_model_sets_4(ctx: CheckContext) -> None:
         and not is_test
         and "model-sets" in modes
         and path.startswith("control/src/vonk_control/")
-        and not path.startswith("control/src/vonk_control/model_cache/")
+        and not (
+            path.startswith("control/src/vonk_control/model_cache/")
+            and path not in MOVED_FLAT_MODEL_CACHE_MODULES
+        )
         and path != NAS_COVERAGE_READER
     ):
         # NAS coverage is read only where NAS bytes are read: the distribution

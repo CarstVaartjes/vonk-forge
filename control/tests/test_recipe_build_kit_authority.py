@@ -5,9 +5,11 @@ import io
 import pytest
 from sqlalchemy import select, update
 from vonk_agent_protocol import LifecycleState, PrebuiltImageCode
-from vonk_control.models import AgentNode, CatalogDocumentRevision, RecipeBuild
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import AgentNode
 from vonk_control.prebuilt_images import executable_build_key
-from vonk_control.recipe_builds import RecipeBuildService
+from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.source_bundles import generate_source_bundle
 
 from tests.signed_recipe_release import signed_recipe_releases
@@ -141,7 +143,9 @@ def test_accepted_source_is_not_readmitted_by_declarative_policy(tmp_path):
 def test_failed_controller_pull_ends_and_fresh_request_publishes_exact_image(tmp_path):
     """A spent pull never dispatches a Spark build or poisons the pinned image."""
     from vonk_agent_protocol import ImageStoreCode
-    from vonk_control.models import AgentOperation, Job, ResourceReservation
+    from vonk_control.models.execution import ResourceReservation
+    from vonk_control.models.jobs import Job
+    from vonk_control.models.operations import AgentOperation
     from vonk_control.oci_image_store import StoreUnknown
     from vonk_control.prebuilt_images import PrebuiltImageImporter
 
@@ -216,7 +220,9 @@ def test_failed_controller_pull_ends_and_fresh_request_publishes_exact_image(tmp
 
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_damaged_plan_repairs_without_discarding_last_verified_image(tmp_path):
-    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+    from vonk_control.runtime_image_preparation.storage import (
+        FilesystemRuntimeImageStorage,
+    )
 
     from .runtime_image_fixtures import place_test_image
 

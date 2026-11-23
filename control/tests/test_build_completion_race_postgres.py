@@ -5,14 +5,12 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentOperation, LifecycleState
-from vonk_control.models import (
-    AgentNode,
-    CatalogDocumentRevision,
-    NodeInventorySnapshot,
-    RecipeBuild,
-)
-from vonk_control.recipe_builds import RecipeBuildPlan
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.recipe_builds.common import RecipeBuildPlan
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .runtime_identity_support import set_inventory_identity
 from .test_recipe_operations import setup_services

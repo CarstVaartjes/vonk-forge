@@ -29,13 +29,10 @@ from ..categorized_errors import InvalidValue
 from ..inventory.items import record_runtime
 from ..jobs import states as job_states
 from ..logging import redact_text
-from ..models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperationAttempt,
-    Job,
-)
-from ..models import AgentOperation as StoredOperation
+from ..models.fleet import AgentCertificate, AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from ..offline_stops import is_deferred_stop
 from ..own_cleanup import CLEANUP_KINDS
 from .contracts import (

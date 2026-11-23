@@ -310,7 +310,7 @@ def test_fleet_snapshot_validates_the_decoded_response_as_json() -> None:
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.control = Control()
 
-    from vonk_control.fleet_projection import FleetSnapshot
+    from vonk_control.fleet_projection.common import FleetSnapshot
 
     expected = FleetSnapshot.model_validate_json(json.dumps(expected_payload))
     assert run._fleet_snapshot() == expected.model_dump(mode="json")
@@ -328,7 +328,8 @@ def test_agent_identity_wait_requires_current_identity_and_builder_capability(
     from sqlalchemy import create_engine, insert, text
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
     from vonk_agent_protocol.state_machines import NodeIdentityState
-    from vonk_control.models import AgentCertificate, AgentNode, Base
+    from vonk_control.model_primitives import Base
+    from vonk_control.models.fleet import AgentCertificate, AgentNode
 
     lifecycle = _module()
     node_id = "spk_" + "1" * 32
@@ -531,7 +532,7 @@ def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> N
     from vonk_control.auth import TokenCodec
     from vonk_control.catalog.service import CatalogService
     from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
-    from vonk_control.models import Base
+    from vonk_control.model_primitives import Base
     from vonk_control.source_bundles import SourceBundleStore
 
     specification = importlib.util.spec_from_file_location(
@@ -622,7 +623,7 @@ def test_canary_catalog_path_calls_the_installed_service_contract(tmp_path):
     from vonk_control.auth import TokenCodec
     from vonk_control.catalog.service import CatalogService
     from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
-    from vonk_control.models import Base
+    from vonk_control.model_primitives import Base
 
     specification = importlib.util.spec_from_file_location(
         "canary_import_contract",
@@ -1655,11 +1656,11 @@ def test_recipe_download_consumes_typed_terminal_receipt() -> None:
     )
     lifecycle = _module()
     from vonk_agent_protocol import OperationProgress
-    from vonk_control.recipe_availability_intent import RecipeSelectorIntent
-    from vonk_control.recipe_image_availability_api import (
+    from vonk_control.recipe_image_availability.api import (
         RecipeImageAvailabilityResponse,
         RecipeImageAvailabilityResult,
     )
+    from vonk_control.recipe_operations.availability_intent import RecipeSelectorIntent
 
     recipe_digest = "a" * 64
     model_digest = "b" * 64
@@ -1731,11 +1732,11 @@ def test_recipe_download_timeout_preserves_durable_progress(monkeypatch, state) 
         AvailabilityOperationFailure,
         AvailabilityRecoveryAction,
     )
-    from vonk_control.recipe_availability_intent import RecipeSelectorIntent
-    from vonk_control.recipe_image_availability_api import (
+    from vonk_control.recipe_image_availability.api import (
         RecipeImageAvailabilityAction,
         RecipeImageAvailabilityResponse,
     )
+    from vonk_control.recipe_operations.availability_intent import RecipeSelectorIntent
 
     recipe_digest = "a" * 64
     pending = RecipeImageAvailabilityResponse(
@@ -2013,7 +2014,7 @@ def test_lost_start_probe_binds_produced_placement_to_owned_interface(
     foreign_host: bool,
 ) -> None:
     from vonk_agent_protocol import CompiledExecutionPlan, RecipeStartPayload
-    from vonk_control.recipe_start_payloads import (
+    from vonk_control.recipe_operations.start_payloads import (
         RecipeStartPlacement,
         build_recipe_start_payload,
     )
@@ -2153,7 +2154,7 @@ def test_artifact_job_recipe_is_imported_by_the_controller_catalog(
     from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
     from vonk_control.compiled_artifact_contract import compile_artifact_contract
     from vonk_control.harnesses.canonical import validate_runtime_policy
-    from vonk_control.models import Base
+    from vonk_control.model_primitives import Base
     from vonk_control.source_bundles import SourceBundleStore
     from vonk_forge_contracts import RecipeDefinition
 
@@ -2362,7 +2363,9 @@ def test_preview_diagnostic_names_assignment_level_admission_blockers() -> None:
     pytest.importorskip(
         "fastapi", reason="Controller contract tests run in the control suite"
     )
-    from vonk_control.fleet_profile_contract import FleetProfileAdmissionDecision
+    from vonk_control.fleet_profile_contract.assessment import (
+        FleetProfileAdmissionDecision,
+    )
 
     lifecycle = _module()
 

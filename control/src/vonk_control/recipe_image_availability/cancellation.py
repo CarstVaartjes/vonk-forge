@@ -17,29 +17,20 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from .. import model_cache_states
 from ..categorized_errors import InvalidValue, MissingRecord
 from ..jobs import states as job_states
 from ..jobs.documents import AvailabilityJobPayload, RecipeBuildParent
-from ..models import (
-    Job,
-    ModelCacheOperation,
-    RecipeBuild,
-)
+from ..model_cache import states as model_cache_states
+from ..models.cache import ModelCacheOperation, RecipeBuild
+from ..models.jobs import Job
 from ..recipe_builds.cancellation import (
     BuildConsumerError,
     current_build_consumers,
     lock_build_dependency,
     request_build_cancellation,
 )
-from ..recipe_image_availability_reader_contract import (
-    StoredAvailabilityIdentity,
-)
-from ..recipe_image_availability_view_contract import (
-    RecipeImageAvailabilityView,
-)
-from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
-from ..recipe_update_contract import UPDATE_KIND, RecipeUpdateResponse
+from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
+from ..recipe_update_batches.contract import UPDATE_KIND, RecipeUpdateResponse
 from ..stored.json_values import Residue, read_row_column
 from ..strict_json import serialize_json_value
 from .contracts import (
@@ -49,6 +40,12 @@ from .contracts import (
     RecipeImageAvailabilityUnknown,
     _canonical_cancellation_id,
     _read,
+)
+from .reader_contract import (
+    StoredAvailabilityIdentity,
+)
+from .view_contract import (
+    RecipeImageAvailabilityView,
 )
 
 if TYPE_CHECKING:

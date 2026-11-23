@@ -13,9 +13,9 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..inventory.repository import INVENTORY_MAX_AGE
 from ..logging import log_event
-from ..models import InstallationNode, RecipeInstallation
+from ..models.execution import InstallationNode, RecipeInstallation
 from ..oci_image_store import IMAGE_CACHE_DIRECTORY
-from ..runtime_image_preparation import FilesystemRuntimeImageStorage
+from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from ..settings import (
     STORAGE_EVICTION_RESERVE_FLOOR_BYTES,
     STORAGE_EVICTION_RESERVE_FRACTION,

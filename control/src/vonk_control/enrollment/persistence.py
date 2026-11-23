@@ -24,7 +24,7 @@ from vonk_agent_protocol.state_machines import (
 
 from ..agent_contacts import ensure_contact
 from ..ca_issuance_contract import CertificateIssuanceBinding
-from ..models import (
+from ..models.fleet import (
     AgentCertificate,
     AgentCertificateRotation,
     AgentEnrollment,

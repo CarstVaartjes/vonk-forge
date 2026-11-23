@@ -27,11 +27,13 @@ from ..admission_locking import (
 from ..agent_operation_facts import aware as _aware
 from ..categorized_errors import InvalidValue
 from ..jobs import states as job_states
-from ..lifecycle import CancelRequested
 from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..models import AgentOperation as StoredOperation
-from ..models import AgentOperationAttempt, Job, RecipeRun
+from ..lifecycle.types import CancelRequested
+from ..models.execution import RecipeRun
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from ..offline_stops import pending_run_stop_nodes
 from ..own_cleanup import CLEANUP_KINDS
 from ..recovery_policy import FailureKind

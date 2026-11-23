@@ -3,8 +3,15 @@ from dataclasses import replace
 
 from vonk_agent_protocol import ResourceBlockerCode, ResourcePlanningCode
 from vonk_control.owner_liveness import OwnerKind, OwnerRef
-from vonk_control.resource_planning import (
-    PLATFORM_MEMORY_FLOOR_BYTES,
+from vonk_control.resource_planning.capacity import plan_capacity
+from vonk_control.resource_planning.demand import resource_demand
+from vonk_control.resource_planning.memory import memory_capacity_snapshot
+from vonk_control.resource_planning.preflight import plan_resource_preflight
+from vonk_control.resource_planning.settings import (
+    classify_preparation_effects,
+    resolve_effective_settings,
+)
+from vonk_control.resource_planning.types import (
     CapacitySnapshot,
     EffectiveResourceSettings,
     MemoryClaimHolder,
@@ -13,13 +20,8 @@ from vonk_control.resource_planning import (
     PlannedStopRelease,
     ResourceEvidence,
     UnknownRunMemoryResidual,
-    classify_preparation_effects,
-    memory_capacity_snapshot,
-    plan_capacity,
-    plan_resource_preflight,
-    resolve_effective_settings,
-    resource_demand,
 )
+from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
 
 def _recipe_settings(
@@ -641,7 +643,7 @@ def test_production_services_use_exactly_the_platform_memory_floor() -> None:
     import ast
     from pathlib import Path
 
-    from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
+    from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
     source = Path(__file__).resolve().parents[1] / "src" / "vonk_control"
     services = {"RunAdmissionService", "RunSwitchOperationService"}
@@ -671,7 +673,7 @@ def test_production_services_use_exactly_the_platform_memory_floor() -> None:
     import inspect
 
     from vonk_control.run_admission import RunAdmissionService
-    from vonk_control.run_switch_operations import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     for service in (RunAdmissionService, RunSwitchOperationService):
         default = inspect.signature(service).parameters["memory_floor_bytes"].default
@@ -682,7 +684,7 @@ def test_stored_canonical_models_supply_exact_selected_weight_bytes() -> None:
     """Catches counting unused files, or sizing a Model the recipe does not pin."""
     from importlib import resources
 
-    from vonk_control.resource_planning import memory_requirement
+    from vonk_control.resource_planning.memory import memory_requirement
     from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
     recipe = RecipeDefinition.model_validate_json(
@@ -726,7 +728,7 @@ def test_stored_canonical_models_supply_exact_selected_weight_bytes() -> None:
 
 def test_typed_effective_selection_roundtrip_keeps_bound_identity_and_knobs() -> None:
     """Catches object duck-reading losing the already reviewed settings digest."""
-    from vonk_control.run_switch_contract import EffectiveSettingsSelection
+    from vonk_control.run_switch_contract.evidence import EffectiveSettingsSelection
 
     resolved = resolve_effective_settings(_recipe_document(_recipe_settings())).settings
     assert resolved is not None

@@ -15,17 +15,17 @@ from vonk_agent_protocol import (
 from ..categorized_errors import InvalidValue, MissingRecord
 from ..jobs import states as job_states
 from ..logging import redact_text
-from ..models import Job
+from ..models.jobs import Job
 from ..persisted_waits import schedule_wait
-from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
-from ..recipe_update_contract import (
+from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
+from ..strict_json import serialize_json_value
+from .contract import (
     UPDATE_KIND,
     RecipeUpdateFailure,
     RecipeUpdateResponse,
     UpdateState,
     read_update_document,
 )
-from ..strict_json import serialize_json_value
 
 if TYPE_CHECKING:
     from .service import RecipeUpdateBatches
@@ -65,8 +65,8 @@ class CancellationMixin:
         """Reconcile accepted child operations without claiming the batch slot."""
         service = cast("RecipeUpdateBatches", self)
 
-        from ..recipe_image_availability import (
-            RecipeImageAvailabilityError,
+        from ..recipe_image_availability.contracts import RecipeImageAvailabilityError
+        from ..recipe_image_availability.view_contract import (
             RecipeImageAvailabilityView,
         )
 

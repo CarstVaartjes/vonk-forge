@@ -19,21 +19,18 @@ from vonk_agent_protocol import (
 
 from ..admission_locking import ConstraintDefect
 from ..jobs.documents import AvailabilityModelChild
-from ..model_cache_contract import (
+from ..model_cache.contract import (
     CacheManifest,
     ModelCacheOperationProgress,
 )
-from ..model_cache_progress import project_cache_progress
+from ..model_cache.progress import project_cache_progress
 from ..operations.blockers import OperationBlocker
 from ..operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
-from ..recipe_image_availability_contract import (
+from .availability_contract import (
     RecipeImageAvailabilityArtifact,
-)
-from ..recipe_image_availability_reader_contract import (
-    AvailabilityDownloadPreview,
 )
 from .contracts import (
     ModelCacheOperationHandle,
@@ -44,6 +41,9 @@ from .contracts import (
     _ModelQueueFailed,
     _progress,
     _read,
+)
+from .reader_contract import (
+    AvailabilityDownloadPreview,
 )
 
 if TYPE_CHECKING:

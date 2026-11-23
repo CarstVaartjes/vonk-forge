@@ -9,7 +9,7 @@ from vonk_agent_protocol.state_machines import (
 )
 
 from ..ca_issuance_contract import CertificateIssuanceBinding
-from ..models import AgentCertificate, AgentIssuedCertificateRevocation
+from ..models.fleet import AgentCertificate, AgentIssuedCertificateRevocation
 
 
 def retain_ended_effect(

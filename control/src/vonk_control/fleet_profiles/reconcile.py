@@ -23,20 +23,19 @@ from vonk_agent_protocol.agent_words import (
     ProfileReasonSeverity,
 )
 
-from .. import fleet_profile_states
 from ..failure_classification import error_code, is_definite, is_security_failure
-from ..fleet_profile_contract import (
+from ..fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
     FleetProfileChildOperation,
-    FleetProfileStepResult,
 )
+from ..fleet_profile_contract.switch_state import FleetProfileStepResult
 from ..jobs import states as job_states
 from ..lifecycle.evidence import Residue
 from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..lifecycle.types import Effect as _LifecycleEffect
 from ..lifecycle.types import State as _LifecycleState
-from ..models import FleetProfileApplication
+from ..models.fleet import FleetProfileApplication
 from ..operations.blockers import (
     PHASE_RETRY_CODE,
     BlockingOperation,
@@ -45,11 +44,11 @@ from ..operations.blockers import (
     make_blocker,
 )
 from ..persisted_waits import schedule_wait
-from ..profile_error_summary import _normalized_failure_text
-from ..recipe_operations import RecipeOperationConflict
+from ..recipe_operations.errors import RecipeOperationConflict
 from ..reservation_owners import release_dead_owner_reservations
-from ..run_switch_contract import RunSwitchStopResult
+from ..run_switch_contract.phase_results import RunSwitchStopResult
 from ..strict_json import read_stored_model
+from . import states as fleet_profile_states
 from .contracts import (
     FleetProfileChildPlanBlocked,
     FleetProfileConflict,
@@ -61,6 +60,7 @@ from .dependencies import (
     _CHILD_FAILED_STATES,
     _CHILD_PENDING_STATES,
 )
+from .error_summary import _normalized_failure_text
 from .persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,

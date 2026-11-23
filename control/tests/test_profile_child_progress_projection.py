@@ -12,56 +12,48 @@ from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, OperationProgress, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_contacts import record_contact
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.execution_plan_service import (
     ControllerExecutionPlanService,
     _build_package,
 )
-from vonk_control.fleet_profile_contract import (
-    FleetProfileApplicationView,
-    FleetProfileInput,
-)
-from vonk_control.fleet_profiles import (
-    _persisted_profile_progress,
-    build_production_fleet_profile_service,
-)
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.fleet_profiles.persistence import _persisted_profile_progress
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
 from vonk_control.jobs.documents import RecipeStartParent
 from vonk_control.lifecycle.evidence import Residue
-from vonk_control.models import (
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import (
     AgentCertificate,
     AgentNode,
     AgentNodeContact,
-    AgentOperation,
-    AgentOperationAttempt,
-    CatalogDocumentRevision,
     FleetProfileApplication,
-    Job,
-    RecipeBuild,
 )
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.operations.progress import aggregate_progress, member_progress
-from vonk_control.recipe_operations import RecipeOperationService, _stored_phases
-from vonk_control.recipe_runtime_specs import (
+from vonk_control.recipe_operations.progress import _stored_phases
+from vonk_control.recipe_operations.runtime_specs import (
     compile_runtime_spec,
     resolve_recipe_entities,
     split_option_choices,
 )
-from vonk_control.run_switch_contract import (
-    RunSwitchOperationResult,
-    RunSwitchPhase,
-    RunSwitchPlan,
-)
-from vonk_control.run_switch_observation_contract import RunSwitchObservedEvidence
-from vonk_control.run_switch_operations import (
-    PhaseExecution,
-    RunSwitchOperationService,
-    _merge_progress_evidence,
-    _stored_job_plan,
-    _stored_result,
-)
+from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+from vonk_control.run_switch_contract.observation import RunSwitchObservedEvidence
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.progress_view import _merge_progress_evidence
+from vonk_control.run_switch_operations.interfaces import PhaseExecution
+from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
+from vonk_control.run_switch_operations.results import _stored_result
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.stored.json_values import write_guard_mode
 
 from cluster_profiles.control_client import validate_control_document

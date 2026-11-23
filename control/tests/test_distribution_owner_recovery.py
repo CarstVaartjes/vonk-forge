@@ -9,9 +9,10 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.agent_words import ProfileChildPhase
-from vonk_control.models import Job, NodeInventorySnapshot
-from vonk_control.run_switch_contract import RunSwitchApplyRequest
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.models.jobs import Job
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .non_blocking import NON_BLOCKING_ENDS
 from .test_run_switch_operations import (

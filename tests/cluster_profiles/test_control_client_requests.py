@@ -19,7 +19,7 @@ from typing import Self, cast
 
 import httpx2
 import pytest
-from vonk_control.fleet_projection import FleetSnapshot as OwnedFleetSnapshot
+from vonk_control.fleet_projection.common import FleetSnapshot as OwnedFleetSnapshot
 from vonk_control.observation.transfer import (
     OBSERVATION_MEDIA_TYPE,
     ObservationTransferChunk,
@@ -1430,11 +1430,11 @@ def test_preview_recovery_uses_canonical_transport_before_any_load(
     tmp_path, binding, fault_count
 ):
     from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_control.fleet_profile_contract import (
+    from vonk_control.fleet_profile_contract.applications import (
         FleetProfileApplicationProgress,
         FleetProfileApplicationResult,
-        FleetProfileApplicationView,
     )
+    from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
     from vonk_control.strict_json import serialize_json_value
 
     from cluster_profiles.controller_cli.profile_load import (

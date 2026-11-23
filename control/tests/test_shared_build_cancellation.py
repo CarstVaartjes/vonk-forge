@@ -8,13 +8,17 @@ import pytest
 import vonk_control.recipe_image_availability.requests as availability_requests
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState
-from vonk_control.models import CatalogDocumentRevision, Job, RecipeBuild
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.jobs import Job
 from vonk_control.recipe_builds.cancellation import current_build_consumers
-from vonk_control.recipe_image_availability import RecipeImageAvailabilityUnknown
-from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.recipe_image_availability.contracts import (
+    RecipeImageAvailabilityUnknown,
+)
 from vonk_control.recipe_operations import build_cancellation as operations_module
-from vonk_control.run_switch_contract import RunSwitchApplyRequest
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .test_build_cancellation_recovery import _active_claims, _issue, _settle_cleanup
 from .test_build_consumer_ownership import _availability

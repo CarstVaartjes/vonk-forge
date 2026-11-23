@@ -13,11 +13,12 @@ from sqlalchemy import event
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LifecycleState, ModelCacheCode
-from vonk_control.model_cache import ModelCacheService, partials_collection
+from vonk_control.model_cache import partials_collection
 from vonk_control.model_cache.errors import _ArtifactWriterBusy
 from vonk_control.model_cache.partials_collection import ModelPartialsCollector
+from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_cache.split_transfer import REPAIR_PARTIALS_PREFIX
-from vonk_control.models import ModelCacheOperation
+from vonk_control.models.cache import ModelCacheOperation
 
 from .removal_settle import advance_until_ended
 from .test_model_cache import _artifact, _download, _remove_model, cache

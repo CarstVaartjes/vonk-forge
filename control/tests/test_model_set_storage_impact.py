@@ -2,14 +2,14 @@
 
 import uuid
 
-from vonk_control.model_cache import ArtifactSetManifest, ArtifactSpec
-from vonk_control.models import Job
-from vonk_control.run_switch_contract import (
-    ArtifactStorageImpact,
-    RunSwitchApplyRequest,
-    RunSwitchCachedTransferResult,
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_contract.evidence import ArtifactStorageImpact
+from vonk_control.run_switch_contract.phase_results import RunSwitchCachedTransferResult
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
+from vonk_control.run_switch_operations.artifact_inspection import (
+    DatabaseRunSwitchArtifactInspector,
 )
-from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
 from vonk_control.run_switch_operations.interfaces import ArtifactInspection
 from vonk_control.run_switch_operations.phase_planning import PhasePlanningMixin
 from vonk_control.run_switch_operations.planning_helpers import _run_switch_payload
@@ -137,8 +137,11 @@ def test_a_many_file_model_plans_persists_and_reads_back_through_the_real_path(
 
 def test_a_set_of_more_than_a_thousand_files_is_a_valid_manifest() -> None:
     """The manifest byte limit bounds a set; a file count never did the right thing."""
-    from vonk_control.model_cache import ArtifactSetManifest, ArtifactSpec
-    from vonk_control.model_cache.artifacts import _validate_manifest
+    from vonk_control.model_cache.artifacts import (
+        ArtifactSetManifest,
+        ArtifactSpec,
+        _validate_manifest,
+    )
 
     model = "e" * 64
     manifest = ArtifactSetManifest(

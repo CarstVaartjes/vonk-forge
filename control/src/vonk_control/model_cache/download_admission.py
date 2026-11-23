@@ -17,22 +17,14 @@ from vonk_agent_protocol import (
 )
 
 from ..admission_locking import ConstraintReplay, admitting, is_admission_contention
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactReferenceUnsettled,
     has_pending_removal,
 )
 from ..bounded_json import require_sequence
-from ..model_cache_contract import (
-    CacheOperationKind,
-    ModelCacheDownloadPayload,
-    ModelCacheRetry,
-    ModelCacheTransfer,
-    ModelCacheTransferArtifact,
-)
-from ..model_cache_progress import progress_document
-from ..models import ModelCacheOperation
-from ..profile_read_observation import observe_storage, observing_profile
+from ..fleet_profiles.read_observation import observe_storage, observing_profile
+from ..models.cache import ModelCacheOperation
 from ..settings import DATABASE_WAIT_BUDGETS
 from ..strict_json import serialize_json_value
 from .artifacts import (
@@ -43,11 +35,19 @@ from .artifacts import (
     _unique_artifacts,
 )
 from .constants import SCHEMA_VERSION, SOURCE_POLICY
+from .contract import (
+    CacheOperationKind,
+    ModelCacheDownloadPayload,
+    ModelCacheRetry,
+    ModelCacheTransfer,
+    ModelCacheTransferArtifact,
+)
 from .errors import (
     ModelCacheConflictInvalid,
     ModelCacheConflictUnknown,
 )
 from .persistence import _cache_failure, _write_operation_payload
+from .progress import progress_document
 from .source_helpers import _model_selector, _request_key
 from .transfer_admission import admit_transfer
 from .views import CacheOperationView

@@ -12,20 +12,23 @@ import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
-from vonk_control.artifact_reference_scan import model_set_objects
+from vonk_control.artifact_reference_scan.model_sets import model_set_objects
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.compiled_execution_plan import (
     VerifiedRuntimeImage,
     compile_verified_execution_plan,
 )
-from vonk_control.distribution import verified_model_receipts
+from vonk_control.distribution.sources import verified_model_receipts
 from vonk_control.execution_plan_service import _bind_runtime_artifacts
-from vonk_control.model_cache import ArtifactSetManifest, ModelCacheService
-from vonk_control.model_cache_contract import ModelCacheDownloadPayload
-from vonk_control.models import Base, Job, ModelCacheOperation
-from vonk_control.recipe_runtime_specs import compile_runtime_spec
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.model_cache.artifacts import ArtifactSetManifest
+from vonk_control.model_cache.contract import ModelCacheDownloadPayload
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_operations.runtime_specs import compile_runtime_spec
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .display_fixtures import reword

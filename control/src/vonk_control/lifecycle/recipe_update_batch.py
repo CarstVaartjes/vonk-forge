@@ -41,9 +41,9 @@ from vonk_agent_protocol import (
 
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..jobs import states as job_states
-from ..models import Job
+from ..models.jobs import Job
 from ..persisted_waits import initialize_wait, lifecycle_wait, wait_due
-from ..recipe_update_contract import RecipeUpdateChild, RecipeUpdateDocument
+from ..recipe_update_batches.contract import RecipeUpdateChild, RecipeUpdateDocument
 from .adapter import Dispatch
 from .composite import aggregate
 from .core import STOP_BUDGET, transition

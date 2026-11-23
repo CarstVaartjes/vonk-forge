@@ -12,24 +12,23 @@ from typing import cast
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState
-from vonk_control.fleet_profile_contract import FleetProfileInput, FleetProfilePreview
-from vonk_control.fleet_profiles import (
-    FleetProfileService,
-    RunSwitchFleetProfileAdapter,
-    build_production_fleet_profile_service,
-)
-from vonk_control.models import (
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.models.fleet import (
     AgentNode,
     AgentNodeContact,
-    CatalogDocumentRevision,
     FleetProfileApplication,
-    Job,
-    RecipeBuild,
-    RecipeInstallation,
 )
-from vonk_control.recipe_operations import record_build_evidence
-from vonk_control.run_switch_contract import RunSwitchPlan
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_operations.observation_helpers import record_build_evidence
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .runtime_image_fixtures import (
     place_test_image,

@@ -11,14 +11,15 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import Disposition, LifecycleState, ModelCacheCode
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.failure_classification import disposition
-from vonk_control.library_projection import LibraryProjection
-from vonk_control.model_cache import ModelCacheService
+from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.model_cache.errors import ModelCacheError
-from vonk_control.models import Base, CatalogDocumentRevision
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocumentRevision
 
 from .display_fixtures import create_draft
 from .test_model_cache import _artifact, _canonical_model, _download

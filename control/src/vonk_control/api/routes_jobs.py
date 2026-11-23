@@ -22,7 +22,7 @@ from vonk_agent_protocol import (
 
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
-from ..agent_jobs import OperatorRetirementRefused
+from ..agent_jobs.contracts import OperatorRetirementRefused
 from ..api_availability import AVAILABILITY_ERRORS
 from ..auth import (
     Actor,
@@ -32,17 +32,18 @@ from ..auth import (
 from ..cursor_contract import MAX_CURSOR_LENGTH
 from ..failure_evidence import FailureEvidenceService
 from ..jobs.operator_receipts import JobOperatorReceipt, read_job_operator_receipt
-from ..model_cache_contract import UUID_PATTERN
-from ..operation_api import (
+from ..model_cache.contract import UUID_PATTERN
+from ..operation_api.contracts import (
     JobDetailResponse,
     JobResumeRequest,
     JobResumeResponse,
     OperationApiServices,
     OperationDetailResponse,
     OperationsResponse,
-    _global_get_operation,
-    _global_list_operations,
     bounded_error_responses,
+)
+from ..operation_api.providers import _global_get_operation, _global_list_operations
+from ..operation_api.responses import (
     bounded_operation_detail,
     bounded_operations_response,
     decode_offset,

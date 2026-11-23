@@ -19,7 +19,7 @@ SUPPORT = ROOT / "control/tests/pass_budget_clocks.py"
 # These loops return one all-or-nothing decision or wait for one effect. They
 # do not yield a partial collection pass; their tests own retry/stall clocks.
 WAIT_DEADLINE_MODULES = {
-    "vonk_control.artifact_blob_store",
+    "vonk_control.artifact_jobs.blob_store",
     "vonk_control.gateway.route_runtime",
     "vonk_control.recipe_image_availability.requests",
     "vonk_control.exact_integer_adoption",

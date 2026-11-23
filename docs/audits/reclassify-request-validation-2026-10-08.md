@@ -84,7 +84,7 @@ track does not access production or run local integration suites.
 
 Current source anchors (paths are under `control/src/vonk_control`):
 `catalog_entities.py:407`, `catalog_service.py:454`,
-`compiled_execution_plan.py:440,467`, `recipe_runtime_specs.py:161`,
+`compiled_execution_plan.py:440,467`, `recipe_operations/runtime_specs.py:161`,
 `harnesses/canonical.py:149`, `harnesses/common.py:64`,
 `source_bundles.py:397,431`, `contract_graph.py:158`,
 `operation_api.py:2345`, `catalog_sync.py:735`, `recipe_builds.py:575`,

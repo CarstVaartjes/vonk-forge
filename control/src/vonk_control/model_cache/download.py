@@ -22,16 +22,15 @@ from vonk_agent_protocol import (
     OperatorActionName,
 )
 
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     reference_gate_is_open_nowait,
 )
-from ..artifact_reference_scan import require_model_sets_open
+from ..artifact_reference_scan.model_sets import require_model_sets_open
 from ..categorized_faults import OperationInterrupted
-from ..lifecycle import State
-from ..model_cache_ranges import cleanup_ranges, download_ranges, range_partial_bytes
-from ..models import ModelCacheOperation, ModelCacheSet
+from ..lifecycle.types import State
+from ..models.cache import ModelCacheOperation, ModelCacheSet
 from ..operations.contract import AvailabilityRecoveryAction
 from .artifacts import ArtifactSpec
 from .constants import _CHUNK_BYTES, _PARALLEL_RANGE_WORKERS
@@ -48,6 +47,7 @@ from .errors import (
 )
 from .provider_waits import hinted_until
 from .providers import provider_for
+from .ranges import cleanup_ranges, download_ranges, range_partial_bytes
 
 if TYPE_CHECKING:
     from .service import ModelCacheService

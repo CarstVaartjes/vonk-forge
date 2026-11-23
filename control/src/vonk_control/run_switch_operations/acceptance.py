@@ -23,13 +23,11 @@ from ..jobs.documents import (
     RunSwitchRunIntent,
     RunSwitchStopIntent,
 )
-from ..models import (
-    Job,
-)
-from ..run_switch_contract import (
+from ..models.jobs import Job
+from ..run_switch_contract.operations import RunSwitchOperation
+from ..run_switch_contract.requests import (
     RunSwitchApplyRequest,
     RunSwitchCleanupApplyRequest,
-    RunSwitchOperation,
     RunSwitchProfileStopScope,
     RunSwitchStopApplyRequest,
 )

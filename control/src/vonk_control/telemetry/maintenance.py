@@ -26,20 +26,20 @@ from ..fleet_event_contract import NodeTelemetryPayload
 from ..fleet_events import FleetEventDraft, FleetEventRepository
 from ..inventory.items_contract import InventorySnapshotKind
 from ..inventory.repository import newest_snapshot_ids
-from ..models import (
+from ..models.fleet import (
     AgentCertificate,
+    AgentIssuedCertificateRevocation,
     AgentNode,
+    LocalCertificateIssuance,
+    LocalCertificateRevocation,
+)
+from ..models.telemetry import (
     FleetStreamEvent,
     NodeInventoryResourceSnapshot,
     NodeInventorySnapshot,
     NodeSnapshot,
     NodeTelemetryLatest,
     NodeTelemetrySample,
-)
-from ..models.fleet import (
-    AgentIssuedCertificateRevocation,
-    LocalCertificateIssuance,
-    LocalCertificateRevocation,
 )
 from ..step_ca import CERTIFICATE_LIFETIME
 

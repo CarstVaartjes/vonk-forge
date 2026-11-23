@@ -10,9 +10,9 @@ from pytest import MonkeyPatch
 from sqlalchemy.engine import Connection, Engine
 from vonk_agent_protocol.inventory import InventoryRequest
 from vonk_agent_protocol.state_machines import NodeIdentityState
-from vonk_control.db import initialize_database
 from vonk_control.db import startup as startup_owner
-from vonk_control.models import NodeInventorySnapshot
+from vonk_control.db.startup import initialize_database
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.stored.json_values import ContractJSON
 
 
@@ -89,7 +89,8 @@ def test_contact_move_rolls_back_on_interruption_and_restarts(
     from sqlalchemy import event, insert, inspect, text
     from sqlalchemy.orm import sessionmaker
     from vonk_control.db import node_facts
-    from vonk_control.models import AgentNode, AgentNodeContact, Base
+    from vonk_control.model_primitives import Base
+    from vonk_control.models.fleet import AgentNode, AgentNodeContact
 
     legacy, empty = "spk_" + "a" * 32, "spk_" + "b" * 32
     moved = set(AgentNodeContact.__table__.columns.keys()) - {"node_id"}
@@ -215,10 +216,9 @@ def test_runtime_items_migration_is_atomic_and_does_not_invent_capacity(
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
     from vonk_control.db import node_facts
     from vonk_control.inventory.items import inventory_items
-    from vonk_control.models import (
-        AgentNode,
-        AgentNodeProfile,
-        Base,
+    from vonk_control.model_primitives import Base
+    from vonk_control.models.fleet import AgentNode, AgentNodeProfile
+    from vonk_control.models.telemetry import (
         NodeInventoryItemsSnapshot,
         NodeInventorySnapshot,
     )
@@ -324,7 +324,8 @@ def test_partial_runtime_evidence_waits_for_claim_then_retires_columns(
     from sqlalchemy.orm import sessionmaker
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
     from vonk_control.inventory.items import inventory_items, record_runtime
-    from vonk_control.models import AgentNode, Base
+    from vonk_control.model_primitives import Base
+    from vonk_control.models.fleet import AgentNode
 
     Base.metadata.create_all(postgres_engine)
     with postgres_engine.begin() as connection:
@@ -392,7 +393,8 @@ def test_authenticated_claim_rebuilds_damaged_inventory_without_blessing_old_fac
     from sqlalchemy import update
     from vonk_agent_protocol import UnknownOutcomeError
     from vonk_control.inventory.items import inventory_items
-    from vonk_control.models import AgentNode, NodeInventoryItemsSnapshot
+    from vonk_control.models.fleet import AgentNode
+    from vonk_control.models.telemetry import NodeInventoryItemsSnapshot
 
     from .test_agent_api import NODE_A, agent_headers, make_agent_system
 

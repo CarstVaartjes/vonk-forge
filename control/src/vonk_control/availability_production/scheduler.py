@@ -12,14 +12,10 @@ from vonk_agent_protocol import (
 )
 
 from ..categorized_errors import InvalidValue
-from ..models import (
-    Job,
-)
-from ..recipe_image_availability import (
-    RecipeImageAvailabilityService,
-)
+from ..models.jobs import Job
 from ..recipe_image_availability.contracts import OPERATION_KIND, REMOVE_OPERATION_KIND
-from ..recipe_update_contract import UPDATE_KIND
+from ..recipe_image_availability.service import RecipeImageAvailabilityService
+from ..recipe_update_batches.contract import UPDATE_KIND
 from ..worker.memory_contract import WorkerMemoryComponent
 
 

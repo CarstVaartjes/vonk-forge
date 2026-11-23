@@ -14,7 +14,6 @@ from vonk_agent_protocol.gpu_clock import GpuClockRange
 from vonk_forge_contracts import EndpointAlias
 
 from ..preparation_contract import RolloutPreparation
-from ..run_switch_identity_contract import UuidId
 from ..strict_json import StrictModel
 from .evidence import (
     ArtifactStorageImpact,
@@ -29,6 +28,7 @@ from .evidence import (
     SparkFit,
     StopImpact,
 )
+from .identity import UuidId
 from .requests import (
     InvocationMetadata,
     RunSwitchProfileStopScope,

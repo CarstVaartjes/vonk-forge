@@ -26,34 +26,26 @@ from ..cluster_mappings import (
 )
 from ..content_identity import same_image
 from ..machine_states import rank_installed
-from ..models import (
-    CatalogDocumentRevision,
-    ClusterMapping,
-    ClusterMappingNode,
-    InstallationNode,
-    RecipeBuild,
-    RecipeInstallation,
-)
+from ..models.cache import RecipeBuild
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import InstallationNode, RecipeInstallation
+from ..models.mapping import ClusterMapping, ClusterMappingNode
 from ..preparation_contract import (
     RuntimeImageIdentity,
 )
-from ..recipe_execution_contract import (
+from ..recipe_operations.execution_contract import (
     StoredInstallationPlan,
     installation_serves_authorised_ports,
 )
-from ..recipe_runtime_specs import (
+from ..recipe_operations.runtime_specs import (
     OPTION_CHOICES_KEY,
     RUNTIME_INTERFACE,
     RecipeRuntimeSpecError,
     resolve_recipe_entities,
 )
 from ..revision_images import revision_source_bundle
-from ..run_switch_contract import (
-    MappingSelection,
-    RunSwitchReason,
-    SparkGroup,
-    SparkGroupNode,
-)
+from ..run_switch_contract.evidence import MappingSelection, RunSwitchReason
+from ..run_switch_contract.requests import SparkGroup, SparkGroupNode
 from ..stored.states import ClusterMappingState, RecipeBuildState
 from .planning_helpers import _as_reason
 

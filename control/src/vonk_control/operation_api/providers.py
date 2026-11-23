@@ -19,7 +19,8 @@ from vonk_agent_protocol import (
 )
 
 from ..auth import CursorCodec, CursorError, cursor_key
-from ..models import AgentOperation, Job
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from ..operations.blockers import read_blockers
 from ..operations.item_contract import (
     OperationItem,

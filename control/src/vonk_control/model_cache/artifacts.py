@@ -13,13 +13,6 @@ from vonk_agent_protocol import ModelCacheCode, canonical_message
 from vonk_forge_contracts.model import ModelReference
 
 from ..bounded_json import require_integer, require_mapping
-from ..model_cache_contract import (
-    CacheIdentity,
-    CacheIdentityArtifact,
-    CacheManifest,
-    CacheManifestArtifact,
-    CacheManifestArtifactPart,
-)
 from ..strict_json import serialize_json_value
 from .constants import (
     _DIGEST_LENGTH,
@@ -28,6 +21,13 @@ from .constants import (
     _WEIGHT_ROLES,
     SCHEMA_VERSION,
     SOURCE_POLICY,
+)
+from .contract import (
+    CacheIdentity,
+    CacheIdentityArtifact,
+    CacheManifest,
+    CacheManifestArtifact,
+    CacheManifestArtifactPart,
 )
 from .errors import ModelCacheResolutionInvalid
 from .source_helpers import _valid_relative_path

@@ -17,9 +17,7 @@ from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_forge_contracts import EndpointAlias
 
 from ..child_phases import FleetProfileChildPhase
-from ..run_switch_contract import (
-    RunSwitchProfileStopScope,
-)
+from ..run_switch_contract.requests import RunSwitchProfileStopScope
 from ..strict_json import StrictModel
 from .vocabulary import Digest, NodeId, UuidId
 

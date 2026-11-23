@@ -16,8 +16,8 @@ from vonk_control.catalog.entities import (
     CatalogConflict,
     CatalogEntityService,
 )
-from vonk_control.models import (
-    Base,
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,

@@ -30,10 +30,11 @@ from ..agent_operation_facts import aware as _aware
 from ..agent_outcome import stored_report
 from ..auth import AgentSource
 from ..jobs import states as job_states
-from ..lifecycle import CancelRequested, LeaseLapsed, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..models import AgentOperation as StoredOperation
-from ..models import AgentOperationAttempt, Job
+from ..lifecycle.types import CancelRequested, LeaseLapsed, Outcome, Reported
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from ..offline_stops import is_deferred_stop
 from ..optimistic import Stale, transition
 from ..own_cleanup import CLEANUP_KINDS

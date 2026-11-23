@@ -34,13 +34,11 @@ from vonk_control.failure_classification import (
 )
 from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
 from vonk_control.model_cache.catalog_helpers import _validate_source
-from vonk_control.models import (
-    AgentOperation,
-    FleetProfileApplication,
-    Job,
-    NodeInventorySnapshot,
-)
-from vonk_control.run_switch_contract import RunSwitchOperationResult
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 
 from . import test_recipe_operations as recipe_fixtures
 from .test_profile_port_claims import _load, _ready_profile

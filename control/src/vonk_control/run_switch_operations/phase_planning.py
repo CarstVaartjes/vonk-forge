@@ -23,27 +23,23 @@ from ..cluster_mappings import (
     mapping_option_choices,
     validate_mapping_parameters,
 )
-from ..models import (
-    ClusterMapping,
-    ClusterMappingNode,
-    ResourceReservation,
-)
-from ..recipe_operations import (
-    RecipeOperationConflict,
-)
-from ..run_switch_contract import (
+from ..models.execution import ResourceReservation
+from ..models.mapping import ClusterMapping, ClusterMappingNode
+from ..recipe_operations.errors import RecipeOperationConflict
+from ..run_switch_contract.evidence import (
     ArtifactStorageImpact,
     MappingSelection,
-    RunSwitchAction,
     RunSwitchPhase,
-    RunSwitchPhaseKind,
-    RunSwitchPlan,
     RunSwitchReason,
-    RunSwitchSubphase,
     RuntimeImageStorageImpact,
-    SparkGroup,
-    SparkGroupNode,
     StopImpact,
+)
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_contract.requests import SparkGroup, SparkGroupNode
+from ..run_switch_contract.vocabulary import (
+    RunSwitchAction,
+    RunSwitchPhaseKind,
+    RunSwitchSubphase,
 )
 from .identity_helpers import _is_hex_digest
 from .interfaces import ArtifactInspection

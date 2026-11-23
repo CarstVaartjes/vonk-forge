@@ -15,15 +15,16 @@ from vonk_agent_protocol import (
     ModelCacheCode,
     RuntimeImageCode,
 )
-from vonk_control.models import Base, Job
-from vonk_control.recipe_image_availability_view_contract import (
+from vonk_control.model_primitives import Base
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeCacheRemovalStatus,
 )
 from vonk_control.recovery_policy import RecoveryPolicy
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
+from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImagePreparationError,
 )
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .recipe_removal_review_support import remove_after_review
 from .runtime_image_fixtures import place_test_image

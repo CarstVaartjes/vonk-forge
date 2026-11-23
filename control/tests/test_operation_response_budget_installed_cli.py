@@ -17,23 +17,22 @@ from vonk_agent_protocol import (
     OperationProgress,
     canonical_message,
 )
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.jobs.queue import JobService
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    Base,
-    Job,
-)
-from vonk_control.operation_api import (
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operation_api.contracts import (
     OperationDetailResponse,
     OperationListPage,
     OperationsResponse,
+)
+from vonk_control.operation_api.durable import durable_operation_services
+from vonk_control.operation_api.responses import (
     _response_bytes,
-    durable_operation_services,
     operation_detail_response,
 )
 from vonk_control.operations.item_contract import operation_item

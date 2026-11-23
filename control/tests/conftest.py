@@ -20,7 +20,7 @@ from hypothesis import HealthCheck, settings
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
-from vonk_control.models import Base
+from vonk_control.model_primitives import Base
 from vonk_control.stored.json_values import install_write_guard
 
 from . import metadata_type_snapshot
@@ -557,7 +557,7 @@ def no_model_object_io(monkeypatch: pytest.MonkeyPatch):
     """
     from pathlib import Path
 
-    from vonk_control.model_cache import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
     real_lstat = Path.lstat
 

@@ -23,7 +23,7 @@ from vonk_control.harnesses.canonical import (
     _validate_argv_size,
 )
 from vonk_control.harnesses.common import structured_command
-from vonk_control.recipe_runtime_specs import (
+from vonk_control.recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     compile_runtime_spec,
 )

@@ -7,14 +7,10 @@ from sqlalchemy import select
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 from vonk_control.inventory.items import record_preflight
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    CatalogDocumentRevision,
-    Job,
-)
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.runtime.preflight import (
     mandatory_capabilities,
     recipe_requirements,

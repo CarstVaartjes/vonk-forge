@@ -15,16 +15,11 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-from vonk_control.db import reconcile_schema
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    Base,
-    Job,
-    JobAttempt,
-)
+from vonk_control.db.schema import reconcile_schema
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job, JobAttempt
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
 from .test_catalog_revision_collection import Catalog
 

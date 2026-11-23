@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from vonk_agent_protocol import InstallationState, UnknownOutcomeError, WaitReason
 
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     lock_reference_gates,
@@ -23,14 +23,10 @@ from ..capabilities import CapabilityUnavailableError
 from ..exact_integer_storage import DecimalIntegerOrderKey
 from ..inventory.repository import INVENTORY_MAX_AGE
 from ..logging import log_event
-from ..models import (
-    ArtifactLifecycleGate,
-    InstallationNode,
-    ModelCacheSet,
-    RecipeInstallation,
-)
+from ..models.cache import ArtifactLifecycleGate, ModelCacheSet
+from ..models.execution import InstallationNode, RecipeInstallation
 from ..persisted_waits import schedule_wait, wait_due
-from ..runtime_image_preparation import RuntimeImagePreparationError
+from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
 from ..storage_demands import NAS_IMAGES, NAS_MODELS, StorageDemand, spark_scope
 from .common import (
     _LOGGER,

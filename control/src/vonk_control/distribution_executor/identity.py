@@ -18,30 +18,28 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileEffectState
 
-from ..agent_jobs import AgentJobService
+from ..agent_jobs.service import AgentJobService
 from ..content_identity import ImageContent, same_image
-from ..distribution import DistributionService
+from ..distribution.service import DistributionService
 from ..distribution.types import content_objects, plan_objects
 from ..distribution_assignment import NodeDistributionAssignment
-from ..models import RecipeInstallation
+from ..models.execution import RecipeInstallation
 from ..oci_image_store import StoreUnknown
-from ..recipe_execution_contract import (
+from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )
-from ..run_switch_contract import (
-    RunSwitchMemberState,
-    RunSwitchOperationResult,
-    RunSwitchPlan,
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.phase_results import (
     RunSwitchRuntimeImageResult,
     RunSwitchRuntimePlanResult,
 )
-from ..run_switch_operations import effective_build_receipt
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_contract.vocabulary import RunSwitchMemberState
 from ..run_switch_operations.constants import _MEMBER_STATE_ADAPTER
 from ..run_switch_operations.errors import RunSwitchRetryLater
-from ..runtime_image_preparation import (
-    RuntimeImageStorage,
-)
+from ..run_switch_operations.image_receipts import effective_build_receipt
+from ..runtime_image_preparation.contracts import RuntimeImageStorage
 from .receipts import RuntimeImagePull
 
 

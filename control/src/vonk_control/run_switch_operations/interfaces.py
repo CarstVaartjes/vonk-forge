@@ -18,26 +18,23 @@ from vonk_agent_protocol import (
 )
 
 from ..lifecycle_preflight import LifecyclePreflightCheckpoint
-from ..models import (
-    RecipeBuild,
-    RecipeRun,
-    RunNode,
-)
-from ..recipe_operations import (
-    RecipeOperationView,
-)
-from ..run_switch_contract import (
+from ..models.cache import RecipeBuild
+from ..models.execution import RecipeRun, RunNode
+from ..recipe_operations.interfaces import RecipeOperationView
+from ..run_switch_contract.evidence import (
     ConditionalPostStopMemoryCheck,
     FreshnessEvidence,
-    RunSwitchCoverage,
-    RunSwitchOperation,
-    RunSwitchOperationResult,
     RunSwitchPhase,
-    RunSwitchPhaseResult,
-    RunSwitchPlan,
     RunSwitchReason,
     SparkFit,
 )
+from ..run_switch_contract.operations import (
+    RunSwitchOperation,
+    RunSwitchOperationResult,
+)
+from ..run_switch_contract.phase_results import RunSwitchPhaseResult
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_contract.vocabulary import RunSwitchCoverage
 
 if TYPE_CHECKING:
     from ..distribution_executor.receipts import _ChildView

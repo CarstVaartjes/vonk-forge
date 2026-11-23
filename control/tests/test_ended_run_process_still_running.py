@@ -14,7 +14,7 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import select
 from vonk_control.agent_api import ended_runs
-from vonk_control.models import RecipeRun, RunNode
+from vonk_control.models.execution import RecipeRun, RunNode
 
 from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 

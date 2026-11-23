@@ -15,17 +15,16 @@ from vonk_agent_protocol import (
     ModelFileState,
 )
 
-from .. import model_cache_states
 from ..agent_operation_facts import aware as _aware
-from ..lifecycle import Outcome, Reported, State
-from ..model_cache_contract import ModelCacheSetState, ModelCacheTransferArtifact
-from ..model_cache_progress import cache_phase, progress_document
-from ..models import ModelCacheOperation, ModelCacheSet
+from ..fleet_profiles.read_observation import observe_storage
+from ..lifecycle.types import Outcome, Reported, State
+from ..models.cache import ModelCacheOperation, ModelCacheSet
 from ..operations.progress import STALE_AFTER_SECONDS, STALL_AFTER_SECONDS
-from ..profile_read_observation import observe_storage
+from . import states as model_cache_states
 from .artifacts import ArtifactSetManifest, ArtifactSpec
 from .catalog_helpers import _iso, _iso_now
 from .constants import _RETRY_BASE_SECONDS, _TRANSFER_CLAIM_SECONDS
+from .contract import ModelCacheSetState, ModelCacheTransferArtifact
 from .errors import _ArtifactWriterBusy
 from .persistence import (
     _cache_failure,
@@ -34,6 +33,7 @@ from .persistence import (
     _operation_progress,
     _store_operation_payload,
 )
+from .progress import cache_phase, progress_document
 
 if TYPE_CHECKING:
     from .service import ModelCacheService

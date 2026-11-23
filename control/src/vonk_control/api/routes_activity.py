@@ -25,19 +25,17 @@ from ..failure_evidence import FailureEvidenceService
 from ..fleet_stream import parse_last_event_id
 from ..fleet_stream_contract import FLEET_SSE_EVENTS, FleetStreamEvent
 from ..metrics.prometheus_api import PrometheusReader
-from ..operation_api import (
-    OperationDetailResponse,
-    OperationOwnerReference,
-    bounded_error_responses,
-    operation_detail_response,
-)
+from ..operation_api.contracts import OperationDetailResponse, bounded_error_responses
+from ..operation_api.responses import operation_detail_response
 from ..operations.contract import OperationRecoveryAction
-from ..operations.item_contract import OperationRow, operation_item
-from ..operations.summary import UNREADABLE_SUMMARY
-from ..operator_projection_api import (
-    FleetOperatorServices,
-    install_operator_projection_routes,
+from ..operations.item_contract import (
+    OperationOwnerReference,
+    OperationRow,
+    operation_item,
 )
+from ..operations.summary import UNREADABLE_SUMMARY
+from ..operator_projection_api.routes import install_operator_projection_routes
+from ..operator_projection_api.services import FleetOperatorServices
 from ..strict_json import read_stored_model, warn_unreadable_once
 from .common import (
     _FleetEventStreamResponse,

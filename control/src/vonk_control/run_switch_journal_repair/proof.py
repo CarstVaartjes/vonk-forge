@@ -15,26 +15,22 @@ from vonk_agent_protocol import (
 
 from ..content_identity import same_image
 from ..jobs.documents import RecipeInstallParent
-from ..models import (
-    AgentCertificate,
-    AgentOperation,
-    AgentOperationAttempt,
-    FleetProfileApplication,
-    Job,
-)
+from ..models.fleet import AgentCertificate, FleetProfileApplication
+from ..models.jobs import Job
+from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..operations.progress import stored_progress
-from ..recipe_operations import current_recipe_progress_attribution
-from ..run_switch_contract import (
-    RunSwitchOperationResult,
+from ..recipe_operations.progress import current_recipe_progress_attribution
+from ..run_switch_contract.journal import (
+    JournalRepairPurpose,
+    NativeProgressWitness,
+)
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.phase_results import (
     RunSwitchRuntimeImageResult,
     RunSwitchRuntimeInstallResult,
     RunSwitchRuntimePlanResult,
     RunSwitchTargetTransferEvidenceResult,
     RunSwitchVerifyResult,
-)
-from ..run_switch_journal_contract import (
-    JournalRepairPurpose,
-    NativeProgressWitness,
 )
 from ..stored.json_values import read_row_column
 
@@ -47,18 +43,18 @@ def _prove(
     purpose: JournalRepairPurpose,
 ) -> list[NativeProgressWitness] | None:
     # Import the sole owner predicates, not a second plan/authority interpreter.
-    from ..fleet_profiles import FleetProfileService, _stored_progress
+    from ..fleet_profiles.persistence import _stored_progress
+    from ..fleet_profiles.service import FleetProfileService
     from ..lifecycle.evidence import Residue
-    from ..run_switch_operations import (
-        RecipeLifecyclePhaseExecutor,
-        RunSwitchOperationService,
-        _digest,
-        _phase_request_key,
+    from ..run_switch_operations.artifact_validation import _validate_artifact_execution
+    from ..run_switch_operations.executor import RecipeLifecyclePhaseExecutor
+    from ..run_switch_operations.image_receipts import (
         _plan_target_node_ids,
         _planned_transfer_parts,
-        _run_switch_payload,
-        _validate_artifact_execution,
     )
+    from ..run_switch_operations.observation_helpers import _phase_request_key
+    from ..run_switch_operations.planning_helpers import _digest, _run_switch_payload
+    from ..run_switch_operations.service import RunSwitchOperationService
 
     parent = _run_switch_payload(job)
     plan = parent.plan if parent is not None else None

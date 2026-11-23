@@ -35,21 +35,18 @@ from vonk_agent_protocol import (
     OperationProgress,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload, RecipeStopResult
-from vonk_control import artifact_job_states as ajs
-from vonk_control.agent_jobs import AgentJobService, StaleAgentFence
-from vonk_control.artifact_job_evidence import (
+from vonk_control.agent_jobs.contracts import StaleAgentFence
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.artifact_jobs import states as ajs
+from vonk_control.artifact_jobs.evidence import (
     ArtifactJobResultEvidence,
     dump_result_evidence,
 )
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
-from vonk_control.models import (
-    AgentOperation,
-    AgentOperationAttempt,
-    ArtifactJob,
-    Job,
-    RecipeRun,
-)
-from vonk_control.recipe_operations import (
+from vonk_control.models.execution import ArtifactJob, RecipeRun
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.recipe_operations.errors import (
     RecipeArtifactJobCancellationPending,
     RecipeRequestInvalid,
     RecipeRetryLater,

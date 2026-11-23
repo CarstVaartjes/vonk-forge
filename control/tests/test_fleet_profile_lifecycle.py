@@ -30,14 +30,18 @@ from vonk_agent_protocol import (
     LifecycleState,
 )
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
-from vonk_control.fleet_profile_contract import (
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
+)
+from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchChildState,
 )
-from vonk_control.fleet_profiles import (
-    build_production_fleet_profile_service,
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.lifecycle.fleet_profile import (
+    CANCEL_BUDGET,
+    FleetProfileAdapter,
 )
-from vonk_control.lifecycle import (
+from vonk_control.lifecycle.types import (
     CancelRequested,
     Effect,
     LeaseLapsed,
@@ -47,11 +51,8 @@ from vonk_control.lifecycle import (
     State,
     Tick,
 )
-from vonk_control.lifecycle.fleet_profile import (
-    CANCEL_BUDGET,
-    FleetProfileAdapter,
-)
-from vonk_control.models import FleetProfileApplication, Job
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
 
 from .test_fleet_profile_cancel import _application
 from .test_fleet_profiles import _uuid

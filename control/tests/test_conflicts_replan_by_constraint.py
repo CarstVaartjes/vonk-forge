@@ -12,7 +12,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import Index, PrimaryKeyConstraint, UniqueConstraint, event, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_control import profile_capacity, profile_claim_restore
+from vonk_control import profile_capacity
 from vonk_control.admission_locking import (
     CONSTRAINTS,
     Conflict,
@@ -20,11 +20,14 @@ from vonk_control.admission_locking import (
     ConstraintReplan,
     admitting,
 )
-from vonk_control.fleet_profiles import FleetProfileConflict
+from vonk_control.fleet_profiles import claim_restore as profile_claim_restore
+from vonk_control.fleet_profiles.contracts import FleetProfileConflict
 from vonk_control.jobs.queue import JobService
 from vonk_control.model_primitives import Base
-from vonk_control.models import FleetProfileApplication, Job, ResourceReservation
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .test_profile_colocated_ports import _admitted, _promises, _two_on_one_spark
 from .test_profile_port_claims import _ready_profile

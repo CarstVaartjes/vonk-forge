@@ -19,10 +19,12 @@ import pytest
 from sqlalchemy import func, select
 from vonk_agent_protocol.route_activation import SupervisorPhase
 from vonk_control.gateway.litellm import ServedModelInfo
-from vonk_control.models import AgentOperation, Job, RecipeRun, ResourceReservation
-from vonk_control.recipe_execution_contract import parse_stored_run_plan
-from vonk_control.recipe_progress import _parent_identity
-from vonk_control.recipe_routes import RecipeRouteNotReady
+from vonk_control.models.execution import RecipeRun, ResourceReservation
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
+from vonk_control.recipe_operations.progress import _parent_identity
+from vonk_control.recipe_routes.shared import RecipeRouteNotReady
 
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.world import PAIR, SOLO, SOLO_B, World, build_world
@@ -382,7 +384,9 @@ def test_crashed_rank_recovery_authority_holds_after_a_rename(
 def test_new_run_plans_carry_no_alias_and_keep_digests_and_routes(
     tmp_path, postgres_engine
 ) -> None:
-    from vonk_control.recipe_execution_contract import RecipeExecutionContractError
+    from vonk_control.recipe_operations.execution_contract import (
+        RecipeExecutionContractError,
+    )
 
     world = build_world(tmp_path, postgres_engine)
     try:
@@ -486,8 +490,10 @@ def test_a_rename_owns_the_name_over_a_newer_run_the_same_plan_stops(
 
 
 def _coordinator(world: World):
-    from vonk_control.agent_jobs import AgentJobService
-    from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
+    from vonk_control.agent_jobs.service import AgentJobService
+    from vonk_control.distributed_recovery.coordinator import (
+        DistributedRecoveryCoordinator,
+    )
 
     return DistributedRecoveryCoordinator(
         world.sessions,
@@ -506,7 +512,7 @@ def _recover(world: World, sim: Simulation, run_id: str, rounds: int = 80) -> No
     that leg is proven on the wire in ``test_recipe_observation_wire_bridge``.)
     """
 
-    from vonk_control.models import RunNode
+    from vonk_control.models.execution import RunNode
 
     with world.sessions.begin() as session:
         run = session.get(RecipeRun, run_id)

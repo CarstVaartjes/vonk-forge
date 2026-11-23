@@ -14,12 +14,12 @@ from ..admission_locking import (
     label_transaction,
     lock_admission_rows,
 )
-from ..lifecycle import Lifecycle
 from ..lifecycle.agent_operation import AgentOperationAdapter, parked_orders, same_order
 from ..lifecycle.reconciler import settle
-from ..lifecycle.types import Tick
-from ..models import AgentOperation as StoredOperation
-from ..models import AgentOperationAttempt, Job
+from ..lifecycle.types import Lifecycle, Tick
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from .contracts import _LOGGER
 from .ownership import observation_ownership
 from .retirement import operator_resume_candidates_in_session

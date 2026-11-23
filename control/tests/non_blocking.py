@@ -14,15 +14,10 @@ from typing import Protocol
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_control import agent_operation_states
-from vonk_control.models import (
-    AgentOperation,
-    AgentOperationAttempt,
-    ArtifactLifecycleGate,
-    Job,
-    JobAttempt,
-    ModelCacheOperation,
-    ResourceReservation,
-)
+from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheOperation
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.jobs import Job, JobAttempt
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.reservation_owners import reservation_owner
 
 NON_BLOCKING_ENDS = frozenset({"cancelled", "superseded", "succeeded", "failed"})

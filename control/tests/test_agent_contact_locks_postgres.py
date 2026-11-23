@@ -36,17 +36,13 @@ from vonk_control.admission_locking import (
     set_admission_timeout,
 )
 from vonk_control.agent_contacts import record_observation_delivery
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.auth import AgentIdentity, AgentSource
 from vonk_control.inventory.items import inventory_items
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentNodeContact,
-    AgentOperation,
-    Base,
-    Job,
-)
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentCertificate, AgentNode, AgentNodeContact
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
 
 from .agent_fences import fenced_operation
 from .recipe_stop_fixtures import recipe_stop_payload

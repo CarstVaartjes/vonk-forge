@@ -31,7 +31,8 @@ from vonk_control.catalog.sync_contract import (
     ManagedCatalogSyncRequest,
     reviewed_catalog_content,
 )
-from vonk_control.models import Base, CatalogDocumentRevision
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.source_bundles import SourceBundleStore
 
 os.environ["VONK_SYNTHETIC_CANARY_INDEX"] = (
@@ -113,10 +114,7 @@ def test_sibling_recipes_sync_as_two_recipes_that_share_one_image_definition() -
 REMOVAL = """
 import runpy
 
-from vonk_control.run_switch_contract import (
-    RunSwitchCleanupVerifyResult,
-    RunSwitchUninstallResult,
-)
+from vonk_control.run_switch_contract.phase_results import RunSwitchCleanupVerifyResult, RunSwitchUninstallResult
 
 removed_by = runpy.run_path("tests/acceptance/test_spark_lifecycle.py")[
     "_installations_removed"

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from .models import AgentOperation, Job
+from .models.jobs import Job
+from .models.operations import AgentOperation
 
 
 def deferred_stop_nodes(job: Job) -> frozenset[str]:

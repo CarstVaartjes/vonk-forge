@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import LifecycleState
 
 from .. import agent_operation_states
-from ..agent_upgrade_contract import AgentUpgradePackage
-from ..agent_upgrade_status import (
+from ..agent_upgrades.contract import AgentUpgradePackage
+from ..agent_upgrades.status import (
     GENERIC_AGENT_UPGRADE_REASONS,
     RECOVERABLE_AGENT_UPGRADE_REASONS,
     agent_upgrade_next_action,
@@ -21,7 +21,9 @@ from ..bounded_json import mapping
 from ..inventory.items import runtime_value
 from ..lifecycle.agent_operation import retry_scheduled
 from ..logging import redact_text
-from ..models import AgentNode, AgentOperation, AgentOperationAttempt, Job
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..strict_json import read_stored_model, warn_unreadable_once
 from .contracts import (
     AgentUpgradeDiagnosticsResponse,

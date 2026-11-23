@@ -12,33 +12,37 @@ import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.exc import OperationalError
 from vonk_agent_protocol import LifecycleState, StorageDemandCode, canonical_message
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.fleet_profile_contract import (
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
-    FleetProfileInput,
+)
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchAdapterState,
+)
+from vonk_control.fleet_profile_contract.vocabulary import (
     profile_switch_child_request_key,
 )
-from vonk_control.fleet_profiles import (
+from vonk_control.fleet_profiles.contracts import FleetProfileStalePlanConflict
+from vonk_control.fleet_profiles.dependencies import (
     _MAX_PARKED_APPLICATION_OBSERVATIONS,
-    FleetProfileService,
-    FleetProfileStalePlanConflict,
 )
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.lifecycle.evidence import Residue
-from vonk_control.models import (
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import (
     AgentCertificate,
     AgentNode,
-    CatalogDocumentRevision,
-    ClusterMapping,
     FleetProfileApplication,
-    Job,
-    NodeInventorySnapshot,
-    RecipeBuild,
-    ResourceReservation,
     User,
 )
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS, RENDEZVOUS_PORT
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.storage_demands import (
     STORAGE_EVICTING,
     STORAGE_INSUFFICIENT,
@@ -1320,7 +1324,9 @@ def _load_short_of_disk(tmp_path, monkeypatch, relief: _Relief | None, engine=No
         _capacity_profile(tmp_path, engine)
     )
     if relief is None:
-        from vonk_control.unused_storage_collection import UnusedStorageCollector
+        from vonk_control.unused_storage_collection.service import (
+            UnusedStorageCollector,
+        )
 
         lifecycle = planner._lifecycle
         assert lifecycle is not None
@@ -1567,7 +1573,7 @@ def test_storage_wait_extends_only_when_measured_available_bytes_increase(
     _later(profiles, PROFILE_STALL_WINDOW_SECONDS - 1)
     # Exercise the real collector's typed bytes, with optional object evidence absent.
     from vonk_control.storage_demands import StorageDemands
-    from vonk_control.unused_storage_collection import UnusedStorageCollector
+    from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
     assert lifecycle is not None
     collector = UnusedStorageCollector(

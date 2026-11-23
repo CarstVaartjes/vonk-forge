@@ -20,22 +20,16 @@ from vonk_agent_protocol import (
 from ..categorized_errors import (
     MissingRecord,
 )
-from ..models import (
-    CatalogDocumentRevision,
-    ClusterMapping,
-    ClusterMappingNode,
-    RecipeBuild,
-    RecipeInstallation,
-    RecipeRun,
-)
-from ..recipe_operations import (
-    RecipeOperationConflict,
-)
-from ..run_switch_contract import (
+from ..models.cache import RecipeBuild
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import RecipeInstallation, RecipeRun
+from ..models.mapping import ClusterMapping, ClusterMappingNode
+from ..recipe_operations.errors import RecipeOperationConflict
+from ..run_switch_contract.evidence import RunSwitchReason
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_contract.requests import (
     InvocationMetadata,
     RunSwitchCleanupPreviewRequest,
-    RunSwitchPlan,
-    RunSwitchReason,
     RunSwitchReconciliationAuthority,
     SparkGroup,
     SparkGroupNode,

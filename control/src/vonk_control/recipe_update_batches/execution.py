@@ -17,17 +17,21 @@ from vonk_agent_protocol import (
 )
 
 from ..categorized_errors import InvalidValue
-from ..lifecycle import State
 from ..lifecycle.recipe_update_batch import CANCEL_BUDGET
+from ..lifecycle.types import State
 from ..logging import redact_text
-from ..models import CatalogDocumentRevision, Job
+from ..models.catalog import CatalogDocumentRevision
+from ..models.jobs import Job
 from ..persisted_waits import schedule_wait, wait_due
-from ..recipe_availability_intent import RecipeRevisionIntent
-from ..recipe_image_availability import (
+from ..recipe_image_availability.contracts import (
     RecipeImageAvailabilityRefused,
     RecipeImageAvailabilityUnknown,
 )
-from ..recipe_update_contract import (
+from ..recipe_operations.availability_intent import RecipeRevisionIntent
+from ..reservation_owners import OwnerKind, OwnerRef, owner
+from ..stall_window import progress_deadline
+from ..strict_json import serialize_json_value
+from .contract import (
     UPDATE_KIND,
     RecipeUpdateChild,
     RecipeUpdateDocument,
@@ -35,9 +39,6 @@ from ..recipe_update_contract import (
     UpdateChildState,
     read_update_document,
 )
-from ..reservation_owners import OwnerKind, OwnerRef, owner
-from ..stall_window import progress_deadline
-from ..strict_json import serialize_json_value
 
 if TYPE_CHECKING:
     from .service import RecipeUpdateBatches
@@ -56,7 +57,7 @@ class ExecutionMixin:
         self, owner: str, requested_id: str | None = None
     ) -> RecipeUpdateClaim | None:
         service = cast("RecipeUpdateBatches", self)
-        from ..recipe_image_availability import RecipeImageAvailabilityError
+        from ..recipe_image_availability.contracts import RecipeImageAvailabilityError
 
         if not owner or len(owner) > 95:
             raise InvalidValue("update worker owner must contain 1 to 95 characters")
@@ -202,8 +203,8 @@ class ExecutionMixin:
 
     def _run_once(self, claim: RecipeUpdateClaim) -> None:
         service = cast("RecipeUpdateBatches", self)
-        from ..recipe_image_availability import (
-            RecipeImageAvailabilityError,
+        from ..recipe_image_availability.contracts import RecipeImageAvailabilityError
+        from ..recipe_image_availability.view_contract import (
             RecipeImageAvailabilityView,
         )
 

@@ -13,7 +13,7 @@ from vonk_agent_protocol import (
     stored_words,
 )
 
-from .models import (
+from .models.execution import (
     STOPPABLE_RUN_STATES,
     ArtifactJob,
     InstallationNode,

@@ -9,8 +9,8 @@ from vonk_control.execution_plan_service import (
     _image_digest,
     _runtime_image_receipt,
 )
-from vonk_control.models import RecipeBuild
-from vonk_control.runtime_image_preparation import RuntimeImageReceipt
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 
 
 def test_unfinished_build_is_observed_instead_of_invalidating_the_plan() -> None:

@@ -23,7 +23,7 @@ from vonk_agent_protocol import (
     RecipeBuildRequest,
     canonical_message,
 )
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,
 )
@@ -32,15 +32,11 @@ from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperation,
-    Job,
-    RecipeBuild,
-    User,
-)
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.fleet import AgentCertificate, AgentNode, User
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent

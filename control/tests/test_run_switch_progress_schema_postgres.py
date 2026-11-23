@@ -6,7 +6,9 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentOperation as OperationKind
 from vonk_agent_protocol import LifecycleState
-from vonk_control.models import AgentOperation, Job, RecipeRun
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
 
 from .test_run_switch_postgres import _awaiting_final_verification
 from .test_run_switch_postgres import (

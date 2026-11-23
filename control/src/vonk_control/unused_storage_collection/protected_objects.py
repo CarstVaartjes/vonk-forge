@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session
 from vonk_forge_contracts import ModelDefinition
 
 from ..catalog.revision_contract import read_catalog_document
-from ..model_cache_contract import CacheManifest
-from ..models import CatalogDocumentRevision, ModelCacheSet
+from ..model_cache.contract import CacheManifest
+from ..models.cache import ModelCacheSet
+from ..models.catalog import CatalogDocumentRevision
 from ..strict_json import read_stored_model
 
 

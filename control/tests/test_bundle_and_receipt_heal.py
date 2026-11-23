@@ -13,21 +13,18 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy.orm import sessionmaker
-from vonk_control.models import (
-    Base,
-    RecipeSourceBundle,
-    SourceBundleArchive,
-)
-from vonk_control.recipe_builds import (
-    RecipeBuildService,
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import RecipeSourceBundle, SourceBundleArchive
+from vonk_control.recipe_builds.common import (
     RecipeBuildUnknown,
     rederive_source_bundle_from_closure,
 )
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
+from vonk_control.recipe_builds.service import RecipeBuildService
+from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImagePreparationUnknown,
-    prepare_runtime_image,
 )
+from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_bundles import (
     DatabaseSourceBundleStore,
     GeneratedSourceBundle,

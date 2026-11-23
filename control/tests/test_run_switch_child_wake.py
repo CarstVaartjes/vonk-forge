@@ -18,9 +18,10 @@ from vonk_control.jobs.documents import (
     RecipeStartParent,
     controller_recipe_document,
 )
-from vonk_control.models import Job, ModelCacheOperation
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.models.jobs import Job
 from vonk_control.persisted_waits import read_wait
-from vonk_control.run_switch_contract import RunSwitchApplyRequest
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 from vonk_control.run_switch_contract.vocabulary import RunSwitchPhaseKind
 from vonk_control.run_switch_operations.awaited_children import start_request_key
 from vonk_control.run_switch_operations.child_wake import CHILD_ROWS, ChildEndWake

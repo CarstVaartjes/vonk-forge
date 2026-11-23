@@ -31,8 +31,8 @@ from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_control.agent_jobs.stored import column_message
 from vonk_control.failure_evidence import safe_text
-from vonk_control.models import AgentOperationAttempt
-from vonk_control.operation_api import (
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.operation_api.contracts import (
     JobDetailResponse,
     JobProgress,
     OperationApiServices,

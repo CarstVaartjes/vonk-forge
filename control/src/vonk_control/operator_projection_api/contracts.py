@@ -12,7 +12,7 @@ from vonk_agent_protocol import (
     ModelCacheOperatorStatus,
 )
 
-from ..agent_api import EnrollmentGrantResponse
+from ..agent_api.common import EnrollmentGrantResponse
 from ..enrollment.contract import (
     EnrollmentGrantStatus,
     EnrollmentId,

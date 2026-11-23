@@ -21,40 +21,40 @@ import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import RecipeStartPayload, canonical_message
-from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
+from vonk_control.distribution_executor.preparation import (
+    CompositeDistributionPhaseExecutor,
+)
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
-from vonk_control.fleet_profiles import build_production_fleet_profile_service
-from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import (
-    AgentOperation,
-    FleetProfileApplication,
-    Job,
-    NodeInventorySnapshot,
-    RecipeBuild,
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import (
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
 )
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.presence import ManagementAddressPolicy
-from vonk_control.recipe_builds import RecipeBuildService
-from vonk_control.recipe_execution_contract import parse_stored_installation_plan
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
-from vonk_control.recipe_operations import RecipeOperationService
-from vonk_control.recipe_routes import RecipeRouteService
+from vonk_control.recipe_builds.service import RecipeBuildService
+from vonk_control.recipe_operations.execution_contract import (
+    parse_stored_installation_plan,
+)
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.recipe_routes.service import RecipeRouteService
 from vonk_control.run_admission import RunAdmissionService
-from vonk_control.run_switch_operations import (
-    PhaseExecution,
-    RunSwitchOperationService,
-    _phase_result,
-)
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
-    RuntimeImageReceipt,
-)
+from vonk_control.run_switch_operations.interfaces import PhaseExecution
+from vonk_control.run_switch_operations.result_helpers import _phase_result
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_bundles import SourceBundleStore
 
 from .runtime_image_fixtures import place_test_image, remove_test_image
@@ -86,7 +86,9 @@ class _PreparedArtifactExecutor(RecordingArtifactExecutor):
         if phase.subphase == "target-copy" and phase.kind in {"transfer", "verify"}:
             evidence = _target_copy_evidence(plan, phase, kwargs["progress"])
             if phase.kind == "verify":
-                from vonk_control.run_switch_operations import effective_build_receipt
+                from vonk_control.run_switch_operations.image_receipts import (
+                    effective_build_receipt,
+                )
 
                 image = effective_build_receipt(plan, kwargs["progress"])
                 assert image is not None
@@ -369,7 +371,9 @@ def _worker_process(config: dict, crash: str) -> None:
                     )
                 )
                 return
-            from vonk_control.run_switch_contract import RunSwitchOperationResult
+            from vonk_control.run_switch_contract.operations import (
+                RunSwitchOperationResult,
+            )
             from vonk_control.stored.json_values import read_row_column
 
             # Follow persisted due times instead of ending the harness before

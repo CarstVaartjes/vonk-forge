@@ -18,12 +18,11 @@ import pytest
 from sqlalchemy.exc import OperationalError
 from vonk_agent_protocol import AgentFailureKind, FailureCode, LifecycleState
 from vonk_control.failure_evidence import FailureEvidenceService
-from vonk_control.models import Job
-from vonk_control.run_switch_contract import (
-    ArtifactVerificationEvidence,
-    RunSwitchApplyRequest,
-)
-from vonk_control.run_switch_operations import PhaseExecution, _phase_result
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_contract.progress import ArtifactVerificationEvidence
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
+from vonk_control.run_switch_operations.interfaces import PhaseExecution
+from vonk_control.run_switch_operations.result_helpers import _phase_result
 
 from .non_blocking import assert_ended_without_blocking
 from .test_recipe_operations import installed_recipe, setup_services

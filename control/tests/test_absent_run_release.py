@@ -5,15 +5,11 @@ from __future__ import annotations
 from datetime import timedelta
 
 from sqlalchemy import select
-from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    Job,
-    RecipeRun,
-    ResourceReservation,
-    RunNode,
-)
+from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
+from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
 
 from .test_recipe_operations import (
     NOW,

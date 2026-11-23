@@ -13,7 +13,7 @@ from datetime import timedelta
 
 from vonk_agent_protocol import canonical_message
 from vonk_control.oci_image_store import OCI_MANIFEST
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 RUNTIME_CONFIG = {
     "architecture": "arm64",
@@ -75,7 +75,7 @@ def refresh_inventory(sessions, now) -> None:
         InventoryRepository,
         NodeInventoryReport,
     )
-    from vonk_control.models import NodeInventorySnapshot
+    from vonk_control.models.telemetry import NodeInventorySnapshot
 
     with sessions() as session:
         snapshots = {
@@ -129,7 +129,7 @@ def install_image_of_replaced_source(
     Its installed ranks keep that image on their Sparks; it is simply not the
     image this revision builds now.
     """
-    from vonk_control.models import RecipeBuild
+    from vonk_control.models.cache import RecipeBuild
 
     install_another_image(installation, digest=digest)
     current = session.get(RecipeBuild, installation.recipe_build_id)
@@ -162,7 +162,7 @@ def copy_as_another_recipe(session, revision_id: str, *, model_content_sha256=No
     import copy as copying
     from uuid import uuid4
 
-    from vonk_control.models import CatalogDocument, CatalogDocumentRevision
+    from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 
     revision = session.get(CatalogDocumentRevision, revision_id)
     assert revision is not None
@@ -204,12 +204,9 @@ def hold_image_through_another_recipe(lifecycle, sessions, *, now) -> None:
     it and no load of this recipe reuses it."""
     from sqlalchemy import select
     from vonk_control.install_admission.identity import _primary_model_sha256
-    from vonk_control.models import (
-        ClusterMapping,
-        InstallationNode,
-        RecipeBuild,
-        RecipeInstallation,
-    )
+    from vonk_control.models.cache import RecipeBuild
+    from vonk_control.models.execution import InstallationNode, RecipeInstallation
+    from vonk_control.models.mapping import ClusterMapping
     from vonk_control.strict_json import serialize_json_value
 
     with sessions() as session:

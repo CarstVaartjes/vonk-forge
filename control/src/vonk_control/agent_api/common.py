@@ -44,15 +44,14 @@ from vonk_agent_protocol.state_machines import (
     NodeIdentityState,
 )
 
-from ..agent_jobs import AgentJobService
+from ..agent_jobs.service import AgentJobService
 from ..auth import (
     AgentIdentity,
     AgentSource,
     agent_source_from_scope,
     validated_agent_identity_from_scope,
 )
-from ..distribution import DistributionService
-from ..enrollment import EnrollmentService
+from ..distribution.service import DistributionService
 from ..enrollment.bootstrap import EnrollmentBootstrapConfig, InstallerUrl
 from ..enrollment.contract import EnrollmentId
 from ..enrollment.responses import (  # noqa: F401 -- shared package exports
@@ -61,10 +60,12 @@ from ..enrollment.responses import (  # noqa: F401 -- shared package exports
     _now,
     _wire,
 )
+from ..enrollment.service import EnrollmentService
 from ..host_helper_authority import HostRuntimeAuthorityService
 from ..http_errors import SecurityHTTPError, temporary_http_answer
 from ..logging import log_event
-from ..models import AgentCertificate, AgentNode, AgentOperation
+from ..models.fleet import AgentCertificate, AgentNode
+from ..models.operations import AgentOperation
 from ..presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
 from ..source_bundles import SourceBundleStoreProtocol
 from ..strict_json import StrictJSONModel, read_stored_model

@@ -10,17 +10,14 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentResult, AgentResultState
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentFailureResult
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.api import create_app
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperationAttempt,
-    Base,
-    Job,
-)
-from vonk_control.operation_api import durable_operation_services
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.operation_api.durable import durable_operation_services
 from vonk_control.strict_json import serialize_json_value
 
 from .runtime_identity_support import (

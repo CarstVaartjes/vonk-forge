@@ -22,8 +22,9 @@ from vonk_agent_protocol import (
 )
 
 from . import agent_operation_states
-from .models import AgentOperation as StoredOperation
-from .models import AgentOperationAttempt, Job
+from .models.jobs import Job
+from .models.operations import AgentOperation as StoredOperation
+from .models.operations import AgentOperationAttempt
 from .operations.progress import stored_progress
 from .stall_window import (
     last_progress_at,

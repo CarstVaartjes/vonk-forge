@@ -47,17 +47,17 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.host_helper import HostRuntimeRequest
 from vonk_agent_protocol.route_activation import SupervisorPhase
 from vonk_control.agent_contacts import record_contact
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog.entities import _digest
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
+from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
 from vonk_control.execution_plan_service import (
     ControllerExecutionPlanService,
 )
-from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import build_production_fleet_profile_service
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.gateway.litellm import LiteLlmGeneration, ServedModelInfo
 from vonk_control.gateway.route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
@@ -70,14 +70,14 @@ from vonk_control.host_helper_authority import (
     HostRuntimeAuthorityService,
 )
 from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
-from vonk_control.install_admission import (
+from vonk_control.install_admission.contracts import (
     AdmissionReason,
     InstallAdmissionBusy,
-    InstallAdmissionService,
     InstallNodePlan,
     InstallPlan,
 )
-from vonk_control.install_admission import (
+from vonk_control.install_admission.service import InstallAdmissionService
+from vonk_control.install_admission.validation import (
     require_admissible as require_install_admissible,
 )
 from vonk_control.inventory.items import inventory_items
@@ -86,55 +86,51 @@ from vonk_control.inventory.repository import (
     NodeInventoryReport,
 )
 from vonk_control.jobs.documents import RecipeStopParent
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    Base,
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
-    ClusterMapping,
+)
+from vonk_control.models.execution import (
     InstallationNode,
-    Job,
-    RecipeBuild,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
-    RoutePublication,
-    RoutePublicationOwner,
     RunNode,
-    User,
 )
+from vonk_control.models.fleet import AgentCertificate, AgentNode, User
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.models.routes import RoutePublication, RoutePublicationOwner
 from vonk_control.presence import ManagementAddressPolicy
-from vonk_control.recipe_execution_contract import parse_stored_run_plan
-from vonk_control.recipe_lifecycle_contract import (
+from vonk_control.recipe_operations.errors import (
+    RecipeOperationConflict,
+    RecipeRequestInvalid,
+)
+from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
+from vonk_control.recipe_operations.lifecycle_contract import (
     LifecycleCodeFailureResult,
     RecipeOperationProgressResult,
     RecipeOperationResult,
 )
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
-from vonk_control.recipe_operations import (
-    RecipeOperationConflict,
-    RecipeOperationService,
-    _recipe_model_identities,
+from vonk_control.recipe_operations.observation_helpers import (
     prepare_exact_recipe_run_observation_nodes,
 )
-from vonk_control.recipe_operations.errors import RecipeRequestInvalid
-from vonk_control.recipe_routes import (
-    AtomicRecipeRoutePublisher,
-    RecipeRecoveryDeadlineError,
-    RecipeRouteService,
-)
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.progress import _recipe_model_identities
+from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
+from vonk_control.recipe_routes.service import RecipeRouteService
+from vonk_control.recipe_routes.shared import RecipeRecoveryDeadlineError
 from vonk_control.run_admission import RunAdmissionBusy, RunAdmissionService
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime.adapters import resolve_runtime_adapter
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
-    PulledImageEvidence,
-    prepare_runtime_image,
-)
+from vonk_control.runtime_image_preparation.contracts import PulledImageEvidence
+from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
@@ -5977,7 +5973,7 @@ def test_every_failed_start_leaves_what_it_launched_stoppable_or_queues_its_stop
     is queued (under the intent that owns the Sparks now, never taking a new one),
     or, with no single owner, the run stays stoppable for its owner."""
 
-    from vonk_control.models import STOPPABLE_RUN_STATES
+    from vonk_control.models.execution import STOPPABLE_RUN_STATES
 
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2
@@ -7333,11 +7329,17 @@ def test_installation_requests_exact_receipt_repair_before_any_agent_effect(
     tmp_path: Path,
     fault: str,
 ) -> None:
-    from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
-    from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
-    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+    from vonk_control.recipe_image_availability.availability_contract import (
+        AvailabilityBuildReceipt,
+    )
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
     from vonk_control.runtime_image_preparation.preparation import (
         stored_runtime_image_resolver,
+    )
+    from vonk_control.runtime_image_preparation.storage import (
+        FilesystemRuntimeImageStorage,
     )
 
     sessions, service, _queue, mapping_id, build_id, _nodes = setup_services(tmp_path)
@@ -7383,8 +7385,10 @@ def test_installation_requests_exact_receipt_repair_before_any_agent_effect(
     with sessions() as session:
         previous_jobs = set(session.scalars(select(Job.id)))
     from vonk_agent_protocol import RecipeImageCode, WaitReason
-    from vonk_control.recipe_image_availability import BuildUnsettled
-    from vonk_control.recipe_image_availability.contracts import OPERATION_KIND
+    from vonk_control.recipe_image_availability.contracts import (
+        OPERATION_KIND,
+        BuildUnsettled,
+    )
 
     blocked = [fault == "persistent"]
     now = [NOW]

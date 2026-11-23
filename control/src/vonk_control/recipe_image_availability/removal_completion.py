@@ -14,24 +14,16 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     clear_removal,
     lock_removal_fences,
     retryable_artifact_database_error,
 )
-from ..artifact_reference_scan import (
-    runtime_image_reference_reasons,
-)
+from ..artifact_reference_scan.image_references import runtime_image_reference_reasons
 from ..jobs import states as job_states
-from ..models import (
-    Job,
-)
-from ..recipe_image_removal_contract import (
-    RecipeCacheRemovalOwner,
-    RecipeCacheRemovalResult,
-)
+from ..models.jobs import Job
 from ..strict_json import serialize_json_value
 from .contracts import (
     REMOVE_OPERATION_KIND,
@@ -40,6 +32,10 @@ from .contracts import (
     RecipeImageAvailabilityUnknown,
     _removal_retry_is_due,
     availability_disposition,
+)
+from .removal_contract import (
+    RecipeCacheRemovalOwner,
+    RecipeCacheRemovalResult,
 )
 
 if TYPE_CHECKING:

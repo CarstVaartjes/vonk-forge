@@ -15,22 +15,18 @@ from vonk_agent_protocol import (
     RunState,
     canonical_message,
 )
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import (
-    FleetProfileService,
-    RunSwitchFleetProfileAdapter,
-)
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.jobs.documents import RecipeStopParent
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    Job,
-    RecipeRun,
-    ResourceReservation,
-)
+from vonk_control.models.execution import RecipeRun, ResourceReservation
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
 from vonk_control.offline_stops import is_deferred_stop
-from vonk_control.run_switch_contract import RunSwitchApplyRequest, RunSwitchOperation
+from vonk_control.run_switch_contract.operations import RunSwitchOperation
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 
 from .agent_fences import fenced_operation
 from .node_contacts import contact_row

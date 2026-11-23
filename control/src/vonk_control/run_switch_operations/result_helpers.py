@@ -23,38 +23,38 @@ from ..failure_classification import disposition, error_detail, is_security_fail
 from ..lifecycle.evidence import (
     Residue,
 )
-from ..models import (
-    Job,
-)
+from ..models.jobs import Job
 from ..operations.blockers import OperationBlocker
 from ..operations.progress import sample_progress
 from ..persisted_waits import read_wait
-from ..recipe_lifecycle_contract import RecipeLifecycleResult
-from ..recipe_operations import (
-    RecipeOperationView,
-)
+from ..recipe_operations.interfaces import RecipeOperationView
+from ..recipe_operations.lifecycle_contract import RecipeLifecycleResult
 from ..recovery_policy import (
     FailureKind,
     kind_for_failure_fields,
 )
-from ..run_switch_contract import (
-    RunSwitchDistributionChildResult,
-    RunSwitchMemberReceipt,
-    RunSwitchMemberState,
-    RunSwitchOperation,
-    RunSwitchOperationResult,
-    RunSwitchPhase,
-    RunSwitchPhaseKind,
-    RunSwitchPhaseResult,
-    RunSwitchPlan,
-    RunSwitchProgressState,
-    RunSwitchSubphase,
-)
-from ..run_switch_observation_contract import (
+from ..run_switch_contract.evidence import RunSwitchPhase
+from ..run_switch_contract.observation import (
     RunSwitchObservedEvidence,
     RunSwitchStoredLifecycle,
 )
-from ..run_switch_progress import RECOVERY_STALL_WINDOW
+from ..run_switch_contract.operations import (
+    RunSwitchOperation,
+    RunSwitchOperationResult,
+)
+from ..run_switch_contract.phase_results import (
+    RunSwitchDistributionChildResult,
+    RunSwitchPhaseResult,
+)
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_contract.progress import RunSwitchMemberReceipt
+from ..run_switch_contract.progress_view import RECOVERY_STALL_WINDOW
+from ..run_switch_contract.vocabulary import (
+    RunSwitchMemberState,
+    RunSwitchPhaseKind,
+    RunSwitchProgressState,
+    RunSwitchSubphase,
+)
 from ..stall_window import stall_deadline
 from .constants import (
     _MEMBER_STATE_ADAPTER,

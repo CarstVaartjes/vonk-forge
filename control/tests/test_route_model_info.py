@@ -44,9 +44,9 @@ from vonk_control.gateway.route_runtime import (
     verify_active_route_bundle,
 )
 from vonk_control.presence import ManagementAddressPolicy
-from vonk_control.recipe_routes import AtomicRecipeRoutePublisher
+from vonk_control.recipe_operations.runtime_specs import split_option_choices
+from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.shared import _RecipeEndpoint
-from vonk_control.recipe_runtime_specs import split_option_choices
 from vonk_forge_contracts import read_recipe, read_recipe_api
 
 FIXTURES = Path(__file__).parent / "fixtures" / "route_model_info"
@@ -317,7 +317,7 @@ def _store_api(base, api_document: dict | None, *, corrupt: bool = False) -> Non
         rederive_projection,
         write_catalog_projection,
     )
-    from vonk_control.models import CatalogDocumentRevision
+    from vonk_control.models.catalog import CatalogDocumentRevision
 
     with base.sessions.begin() as session:
         revision = session.scalars(
@@ -393,7 +393,7 @@ def test_the_published_route_carries_its_recipes_facts_and_never_depends_on_them
 
 def _choose_an_unknown_option(service) -> None:
     from sqlalchemy import update
-    from vonk_control.models import ClusterMapping
+    from vonk_control.models.mapping import ClusterMapping
 
     with service.sessions.begin() as session:
         session.execute(
@@ -498,7 +498,7 @@ def test_a_recovery_restart_of_the_same_run_applies_the_current_facts(
     """A restarted run is a route change: its facts are read again, not frozen."""
     from sqlalchemy import update
     from vonk_agent_protocol import RouteState as RunRouteState
-    from vonk_control.models import RecipeRun, RunNode
+    from vonk_control.models.execution import RecipeRun, RunNode
 
     from .test_recipe_routes import NOW, MutableClock, atomic_service, setup
 

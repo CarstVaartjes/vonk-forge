@@ -16,8 +16,9 @@ from vonk_control.catalog.revision_contract import (
     read_catalog_projection,
 )
 from vonk_control.catalog.service import CatalogService
-from vonk_control.library_projection import LibraryProjection
-from vonk_control.models import Base, CatalogDocumentRevision
+from vonk_control.library_projection.service import LibraryProjection
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.operation_api.contracts import OperationListPage, OperationProvider
 from vonk_control.operation_api.providers import merge_operation_providers
 from vonk_control.operations.item_contract import OperationItem
@@ -238,7 +239,7 @@ def test_activity_keeps_healthy_siblings_and_recovers_provider_observations(clea
 def test_exact_ingress_restores_missing_root_and_selected_consumer():
     from sqlalchemy import delete
     from vonk_control.catalog.queries import active_head_revision
-    from vonk_control.models import CatalogDocument, CatalogDocumentHead
+    from vonk_control.models.catalog import CatalogDocument, CatalogDocumentHead
 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

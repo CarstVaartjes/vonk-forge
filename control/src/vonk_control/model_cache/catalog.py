@@ -15,7 +15,7 @@ from ..catalog.revision_contract import (
     read_shared_catalog_document,
 )
 from ..categorized_errors import InvalidType
-from ..models import CatalogDocumentRevision
+from ..models.catalog import CatalogDocumentRevision
 from .artifacts import (
     ArtifactPart,
     ArtifactSpec,

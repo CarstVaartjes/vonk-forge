@@ -8,17 +8,16 @@ from typing import Any
 from sqlalchemy import select, text
 from vonk_agent_protocol import canonical_message
 from vonk_control.jobs.documents import RunSwitchJobPayload
-from vonk_control.models import Job, RecipeRun
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.jobs import Job
 from vonk_control.preparation_contract import ModelArtifactIdentity
-from vonk_control.run_switch_contract import (
-    RunSwitchApplyRequest,
-    RunSwitchOperationResult,
-    RunSwitchStartResult,
-)
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import RunSwitchStartResult
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 from vonk_control.run_switch_operations.observation_helpers import (
     _start_child_request_key,
 )
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.strict_json import read_stored_model
 
 from .test_recipe_operations import installed_recipe, setup_services

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 
 from vonk_agent_protocol import RecipeJobRunRequest
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.service import AgentJobService
 
 from .runtime_identity_support import claim_agent
 from .test_artifact_jobs import (

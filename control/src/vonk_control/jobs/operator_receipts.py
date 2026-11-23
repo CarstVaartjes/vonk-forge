@@ -7,7 +7,7 @@ from vonk_agent_protocol import InvalidRequestReason, canonical_message
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from ..categorized_errors import InvalidValue
-from ..models import Job
+from ..models.jobs import Job
 from ..operator_receipt_contract import (
     JobOperatorDecision,
     JobOperatorDecisions,

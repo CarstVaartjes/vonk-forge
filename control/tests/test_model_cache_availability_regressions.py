@@ -24,21 +24,19 @@ from vonk_control.bounded_json import (
     text,
 )
 from vonk_control.failure_classification import is_security_failure
-from vonk_control.model_cache import ModelCacheService, ModelCacheStorageError
 from vonk_control.model_cache.constants import ProviderKind
+from vonk_control.model_cache.contract import (
+    ModelCacheOperationProgress,
+)
+from vonk_control.model_cache.errors import ModelCacheStorageError
 from vonk_control.model_cache.ingress_mismatch import (
     IngressMismatchStep,
     observe_ingress_mismatch,
 )
-from vonk_control.model_cache_contract import (
-    ModelCacheOperationProgress,
-)
-from vonk_control.models import (
-    Base,
-    CatalogDocument,
-    CatalogDocumentRevision,
-    ModelCacheOperation,
-)
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.settings import MODEL_CACHE_PARALLEL_DOWNLOADS
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
@@ -901,7 +899,7 @@ def test_resume_access_keeps_its_own_receipt_while_an_older_transfer_is_live(
     from fastapi import Depends, FastAPI
     from fastapi.testclient import TestClient
     from vonk_control.auth import Actor
-    from vonk_control.model_cache_api import install_model_operator_routes
+    from vonk_control.model_cache.api import install_model_operator_routes
 
     sessions = _database(tmp_path)
     token_path = tmp_path / "hf-token"

@@ -19,19 +19,13 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..inventory.items import runtime_value
-from ..models import (
-    AgentNode,
-    CatalogDocumentRevision,
-    RecipeBuild,
-)
-from ..recipe_operations import (
-    RecipeOperationConflict,
-)
+from ..models.cache import RecipeBuild
+from ..models.catalog import CatalogDocumentRevision
+from ..models.fleet import AgentNode
+from ..recipe_operations.errors import RecipeOperationConflict
 from ..revision_images import revision_source_bundle
-from ..run_switch_contract import (
-    FreshnessEvidence,
-    SparkGroup,
-)
+from ..run_switch_contract.evidence import FreshnessEvidence
+from ..run_switch_contract.requests import SparkGroup
 from .identity_helpers import _is_hex_digest
 from .interfaces import _BuildSelection
 from .planning_helpers import PlanInventory, _as_reason

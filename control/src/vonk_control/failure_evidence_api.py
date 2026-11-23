@@ -7,7 +7,7 @@ from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 
 from .api_availability import AVAILABILITY_ERRORS
 from .failure_evidence import FailureEvidenceBundle, FailureEvidenceService
-from .operation_api import bounded_error_responses
+from .operation_api.contracts import bounded_error_responses
 
 
 def install_failure_evidence_routes(

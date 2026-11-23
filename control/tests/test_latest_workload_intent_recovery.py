@@ -18,26 +18,21 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import build_production_fleet_profile_service
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.inventory.repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import (
-    AgentNode,
-    CatalogDocumentRevision,
-    Job,
-    NodeInventorySnapshot,
-    RecipeRun,
-    ResourceReservation,
-)
-from vonk_control.run_switch_operations import (
-    RecipeLifecyclePhaseExecutor,
-    RunSwitchOperationService,
-)
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeRun, ResourceReservation
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime.preflight import mandatory_capabilities
 
 from .agent_fences import fenced_operation

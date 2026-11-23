@@ -52,8 +52,9 @@ def test_unclassified_distribution_ends_without_poisoning_fresh_work() -> None:
 
 def test_uncertain_distribution_observation_never_becomes_unverified_success() -> None:
     from vonk_agent_protocol import FailureCode, LifecycleState
-    from vonk_control.lifecycle import Effect, Outcome, Reported, transition
+    from vonk_control.lifecycle.core import transition
     from vonk_control.lifecycle.image_availability import ImageAvailabilityAdapter
+    from vonk_control.lifecycle.types import Effect, Outcome, Reported
     from vonk_control.recovery_policy import kind_for_failure_fields
 
     from .test_image_availability_lifecycle import NOW, _job

@@ -16,8 +16,9 @@ import pytest
 from sqlalchemy import Table, text
 from sqlalchemy.exc import IntegrityError
 from vonk_agent_protocol import LifecycleState
-from vonk_control.db import reconcile_schema
-from vonk_control.models import Base, ModelCacheOperation
+from vonk_control.db.schema import reconcile_schema
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation
 
 CHECK = "ck_model_cache_operations_state"
 #: The constraint the previous release created.

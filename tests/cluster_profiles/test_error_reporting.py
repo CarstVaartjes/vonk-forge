@@ -12,7 +12,7 @@ from email.message import Message
 from pathlib import Path
 
 import pytest
-from vonk_control.fleet_projection import FleetSnapshot
+from vonk_control.fleet_projection.common import FleetSnapshot
 from vonk_control.observation.transfer import (
     OBSERVATION_MEDIA_TYPE,
     observation_response,

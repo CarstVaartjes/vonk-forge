@@ -23,7 +23,8 @@ from vonk_control.catalog.revision_contract import (
     read_catalog_projection,
 )
 from vonk_control.catalog.service import CatalogService
-from vonk_control.models import Base, CatalogDocumentRevision
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_forge_contracts import RecipeDefinition
 
 from .test_catalog_entities import _model, _recipe

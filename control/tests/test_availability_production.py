@@ -38,40 +38,39 @@ from vonk_control.availability_production.scheduler import (
 from vonk_control.bounded_json import require_mapping
 from vonk_control.catalog.service import CatalogService
 from vonk_control.failure_evidence import FailureEvidenceService
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import (
-    AgentNode,
-    AgentOperationAttempt,
-    Base,
-    CatalogDocument,
-    CatalogDocumentRevision,
-    Job,
-    RecipeBuild,
-)
-from vonk_control.models import AgentOperation as AgentOperationRow
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as AgentOperationRow
+from vonk_control.models.operations import AgentOperationAttempt
 from vonk_control.persisted_waits import schedule_wait
-from vonk_control.recipe_builds import (
+from vonk_control.recipe_builds.common import (
     RecipeBuildPlan,
     RecipeBuildResolution,
-    RecipeBuildService,
     RecipeSourcePolicyError,
 )
-from vonk_control.recipe_image_availability import (
+from vonk_control.recipe_builds.service import RecipeBuildService
+from vonk_control.recipe_image_availability import requests as availability_requests
+from vonk_control.recipe_image_availability.api import install_recipe_operator_routes
+from vonk_control.recipe_image_availability.availability_contract import (
+    AvailabilityBuildReceipt,
+)
+from vonk_control.recipe_image_availability.contracts import (
     SOURCE_POLICY_REFUSED_CODE,
     BuildUnsettled,
     RecipeImageAvailabilityClaim,
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityRefused,
+)
+from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
-from vonk_control.recipe_image_availability import requests as availability_requests
-from vonk_control.recipe_image_availability_api import install_recipe_operator_routes
-from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
 from vonk_control.revision_images import revision_images
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
-    PulledImageEvidence,
-)
+from vonk_control.runtime_image_preparation.contracts import PulledImageEvidence
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_policy import SourcePolicyFinding, SourcePolicyReport
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
@@ -716,7 +715,7 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
     class Operations:
         def build(self, plan, **_kwargs):
             if capacity_busy:
-                from vonk_control.recipe_builds import RecipeBuildAdmissionBusy
+                from vonk_control.recipe_builds.common import RecipeBuildAdmissionBusy
 
                 raise RecipeBuildAdmissionBusy()
             return SimpleNamespace(
@@ -2500,7 +2499,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
 
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_build_progress_reads_current_attempt_upload_from_persisted_json() -> None:
-    from vonk_control.models import AgentOperation, AgentOperationAttempt
+    from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
     engine = create_engine("sqlite://")
     AgentOperation.metadata.tables[AgentOperation.__tablename__].create(engine)
@@ -2568,7 +2567,7 @@ def test_build_progress_reads_current_attempt_upload_from_persisted_json() -> No
 def test_unknown_build_planning_preserves_typed_reason_and_retry_policy() -> None:
     """A stale plan must re-enter observation rather than become terminal debt."""
     from vonk_agent_protocol import RecipeBuildCode, WaitReason
-    from vonk_control.recipe_builds import RecipeBuildUnknown
+    from vonk_control.recipe_builds.common import RecipeBuildUnknown
 
     failure = availability_production._planning_failure(
         RecipeBuildUnknown(

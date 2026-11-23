@@ -12,8 +12,9 @@ import pytest
 from sqlalchemy import event
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.pool import QueuePool
-from vonk_control import db
 from vonk_control.db import connections as connection_owner
+from vonk_control.db.startup import initialize_database
+from vonk_control.settings import DATABASE_WAIT_BUDGETS
 
 from .test_database_adoption_recovery_postgres import (
     CONFIG,
@@ -122,7 +123,7 @@ def test_initialize_database_silent_handshake_timeout_releases_attempt_then_same
     monkeypatch.setattr(
         connection_owner,
         "DATABASE_WAIT_BUDGETS",
-        replace(db.DATABASE_WAIT_BUDGETS, connect_timeout_seconds=2),
+        replace(DATABASE_WAIT_BUDGETS, connect_timeout_seconds=2),
     )
     with silent_then_forwarding_peer((host, port)) as (
         peer_port,
@@ -173,7 +174,7 @@ def test_initialize_database_silent_handshake_timeout_releases_attempt_then_same
             # Same public call and same URL/credentials; only the actual peer
             # changes from silent handshake to transparent PG transport.
             with watch_native_attempts() as attempts:
-                db.initialize_database(
+                initialize_database(
                     same_url.render_as_string(hide_password=False), config_path=CONFIG
                 )
                 attempts.assert_released(database.engine)

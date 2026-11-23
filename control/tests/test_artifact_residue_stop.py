@@ -24,7 +24,7 @@ from vonk_agent_protocol.host_helper import (
     SignedHostHelperGrant,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload, RecipeStopResult
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
@@ -33,12 +33,9 @@ from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import (
-    AgentOperation,
-    Job,
-    RecipeRun,
-    ResourceReservation,
-)
+from vonk_control.models.execution import RecipeRun, ResourceReservation
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
 
 from .runtime_identity_support import claim_agent
 from .test_artifact_job_lifecycle import CANCEL_KEY, _drive, _issued_job

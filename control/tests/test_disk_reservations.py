@@ -8,13 +8,13 @@ from threading import Barrier
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import canonical_message
-from vonk_control.install_admission import InstallPlanConflict
+from vonk_control.install_admission.contracts import InstallPlanConflict
 from vonk_control.inventory.repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import (
+from vonk_control.models.execution import (
     InstallationNode,
     RecipeInstallation,
     ResourceReservation,

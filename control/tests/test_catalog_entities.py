@@ -20,9 +20,9 @@ from vonk_control.catalog.revision_contract import (
     read_catalog_projection,
 )
 from vonk_control.catalog.service import CatalogService
-from vonk_control.library_projection import LibraryProjection
-from vonk_control.models import (
-    Base,
+from vonk_control.library_projection.service import LibraryProjection
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,

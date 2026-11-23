@@ -9,7 +9,7 @@ from typing import Self
 
 from httpx import Response
 from httpx2 import Response as Response2
-from vonk_control.fleet_projection import FleetSnapshot
+from vonk_control.fleet_projection.common import FleetSnapshot
 
 from cluster_profiles.control_client import ControlClient
 

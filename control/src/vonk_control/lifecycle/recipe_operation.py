@@ -39,7 +39,7 @@ from vonk_agent_protocol import Disposition, InvalidRequestReason, WaitOwnerKind
 from ..agent_operation_facts import aware
 from ..categorized_errors import InvalidValue
 from ..jobs import states as job_states
-from ..models import Job
+from ..models.jobs import Job
 from ..persisted_waits import initialize_wait, lifecycle_wait, wait_due
 from .adapter import Dispatch
 from .core import transition

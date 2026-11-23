@@ -8,12 +8,9 @@ from pathlib import Path
 import pytest
 from sqlalchemy import delete, select
 from vonk_control.inventory.repository import InventoryRepository
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNodeContact,
-    NodeInventorySnapshot,
-)
-from vonk_control.recipe_builds import RecipeBuildService
+from vonk_control.models.fleet import AgentCertificate, AgentNodeContact
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.run_switch_operations.planning_helpers import PlanInventory
 from vonk_control.unused_storage_collection.references import _latest_snapshots
 

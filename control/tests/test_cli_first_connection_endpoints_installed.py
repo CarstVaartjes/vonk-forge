@@ -18,45 +18,45 @@ from vonk_agent_protocol import (
     ObservedAssignmentState,
     canonical_message,
 )
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.fleet_profile_contract import (
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
-    FleetProfileAssignment,
-    FleetProfileAssignmentInput,
-    FleetProfileAssignmentPreview,
-    FleetProfileEffects,
-    FleetProfileEndpointsView,
     FleetProfileIntendedConfiguration,
-    FleetProfileNode,
+)
+from vonk_control.fleet_profile_contract.assessment import (
+    FleetProfileAssignmentPreview,
     FleetProfilePlanSummary,
-    FleetProfilePreview,
-    FleetProfileScope,
     FleetProfileScopePreview,
 )
-from vonk_control.fleet_profiles import (
-    FleetProfileService,
+from vonk_control.fleet_profile_contract.definitions import (
+    FleetProfileAssignment,
+    FleetProfileAssignmentInput,
+    FleetProfileNode,
+    FleetProfileScope,
+)
+from vonk_control.fleet_profile_contract.effects import FleetProfileEffects
+from vonk_control.fleet_profile_contract.endpoints import FleetProfileEndpointsView
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profiles.projection_support import (
     _digest,
     _profile_document,
     _roster_digest,
 )
-from vonk_control.fleet_projection import FleetProjection
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.jobs.queue import JobService
-from vonk_control.models import (
-    Base,
-    CatalogDocument,
-    CatalogDocumentRevision,
-    ClusterMapping,
-    ClusterMappingNode,
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.models.fleet import (
     FleetProfile,
     FleetProfileApplication,
     FleetProfileSelection,
-    RecipeBuild,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
 )
-from vonk_control.operation_api import durable_operation_services
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.operation_api.durable import durable_operation_services
 
 from cluster_profiles.cli_json_contract import DocumentKind
 

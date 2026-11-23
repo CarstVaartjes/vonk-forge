@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..agent_api import AgentApiServices
-from ..agent_upgrades import AgentUpgradeService
+from ..agent_api.common import AgentApiServices
+from ..agent_upgrades.service import AgentUpgradeService
 from .logs import AgentFailureLogProvider
 from .services import FleetLogProvider, FleetOperatorServices, _AgentEnrollmentAdapter
 

@@ -9,20 +9,21 @@ from vonk_agent_protocol.agent_words import ProfileChildJobKind
 
 from .auth import MUTATION_ROLES, Actor
 from .logging import redact_text
-from .operation_api import _ADMIN_OPERATION_IDS, bounded_error_responses
+from .operation_api.constants import _ADMIN_OPERATION_IDS
+from .operation_api.contracts import bounded_error_responses
 from .operator_acceptance import (
     OperatorReceiptResolver,
     ReceiptPolicy,
     operator_acceptance,
 )
-from .run_switch_contract import (
+from .run_switch_contract.operations import RunSwitchOperation
+from .run_switch_contract.plans import RunSwitchPlan
+from .run_switch_contract.requests import (
     InstallationReconcileRequest,
     RunSwitchCleanupApplyRequest,
     RunSwitchCleanupPreviewRequest,
-    RunSwitchOperation,
-    RunSwitchPlan,
 )
-from .run_switch_operations import RunSwitchOperationConflict
+from .run_switch_operations.errors import RunSwitchOperationConflict
 
 _UUID = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"

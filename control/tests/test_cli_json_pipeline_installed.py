@@ -14,18 +14,18 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.fleet_projection import FleetProjection
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.jobs.queue import JobService
-from vonk_control.models import (
+from vonk_control.model_primitives import Base
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.fleet import (
     AgentNode,
     AgentNodeContact,
-    Base,
     FleetProfileApplication,
-    Job,
-    RecipeRun,
 )
+from vonk_control.models.jobs import Job
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment

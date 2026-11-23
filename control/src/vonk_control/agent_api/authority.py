@@ -43,17 +43,21 @@ from vonk_agent_protocol.grant_requests import (
 )
 from vonk_agent_protocol.reason_codes import ControllerErrorCode as Code
 
-from ..agent_jobs import CLAIM_LEASE_SECONDS, AgentResultRefused, StaleAgentAttempt
+from ..agent_jobs.contracts import (
+    CLAIM_LEASE_SECONDS,
+    AgentResultRefused,
+    StaleAgentAttempt,
+)
 from ..auth import AgentIdentity, validated_agent_identity_from_scope
 from ..contract_graph import raw_json_body
-from ..enrollment import (
+from ..enrollment.body import _bounded_enrollment_body
+from ..enrollment.responses import unknown_response
+from ..enrollment.types import (
     EnrollmentDenied,
     EnrollmentIssuanceUncertain,
     ExpiredRenewalGraceExhausted,
     RenewalIssuanceUncertain,
 )
-from ..enrollment.body import _bounded_enrollment_body
-from ..enrollment.responses import unknown_response
 from ..evidence_repeats import note_repeat, note_success
 from ..host_helper_authority import (
     HostHelperAuthorityError,
@@ -64,7 +68,8 @@ from ..host_helper_authority import (
 )
 from ..http_errors import SecurityHTTPError
 from ..logging import redact_text
-from ..models import AgentOperation, AgentOperationAttempt, Job
+from ..models.jobs import Job
+from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..operator_acceptance import ReceiptPolicy, operator_acceptance
 from ..repeated_evidence_contract import RepeatedEvidenceSubject, host_grant_subject
 from ..strict_json import ControllerAPIRoute

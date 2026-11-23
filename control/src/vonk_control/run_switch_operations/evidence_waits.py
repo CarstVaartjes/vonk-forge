@@ -21,7 +21,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LifecycleState
 
 from ..jobs import states as job_states
-from ..models import Job, NodeInventorySnapshot
+from ..models.jobs import Job
+from ..models.telemetry import NodeInventorySnapshot
 from ..persisted_waits import schedule_wait
 from ..stored.json_values import read_row_column
 from .constants import _OPERATION_KINDS

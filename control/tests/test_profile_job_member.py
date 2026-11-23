@@ -27,31 +27,22 @@ from vonk_agent_protocol import (
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
-from vonk_control import artifact_job_states as ajs
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.artifact_blob_store import ArtifactBlobStore
-from vonk_control.artifact_jobs import ArtifactJobService
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.artifact_jobs import states as ajs
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
+from vonk_control.artifact_jobs.service import ArtifactJobService
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.fleet_projection import FleetProjection
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.inventory.items import inventory_items, runtime_value
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    ArtifactJob,
-    FleetProfileApplication,
-    Job,
-    RecipeRun,
-    ResourceReservation,
-)
-from vonk_control.recipe_execution_contract import parse_stored_run_plan
-from vonk_control.run_switch_contract import (
-    RunSwitchOperationResult,
-    RunSwitchRuntimeInstallResult,
-)
-from vonk_control.run_switch_operations import (
-    RecipeLifecyclePhaseExecutor,
-    RunSwitchOperationService,
-)
+from vonk_control.models.execution import ArtifactJob, RecipeRun, ResourceReservation
+from vonk_control.models.fleet import AgentNode, FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import RunSwitchRuntimeInstallResult
+from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from cluster_profiles.fleet_qualification_campaign_cli import _serving_run
 from cluster_profiles.fleet_qualification_campaign_cli.contracts import Lane, Row

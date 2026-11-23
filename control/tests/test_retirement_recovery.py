@@ -17,26 +17,27 @@ from vonk_agent_protocol import (
     WaitOwnerKind,
     canonical_message,
 )
-from vonk_control.agent_jobs import (
-    AgentJobService,
+from vonk_control.agent_jobs.contracts import (
     OperatorRetirementRefused,
     StaleAgentAttempt,
 )
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.auth import TokenCodec
 from vonk_control.due_waits import DueWaitBackstop, WaitSource
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    Job,
+from vonk_control.models.execution import (
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
 )
-from vonk_control.operation_api import durable_operation_services
-from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
-from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operation_api.durable import durable_operation_services
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.run_admission import RunAdmissionBusy
 from vonk_control.stored.json_values import read_row_column

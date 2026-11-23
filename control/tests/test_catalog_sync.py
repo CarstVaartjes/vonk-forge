@@ -32,16 +32,13 @@ from vonk_control.catalog.sync_contract import (
     ManagedCatalogSyncRequest,
     reviewed_catalog_content,
 )
-from vonk_control.library_projection import LibraryProjection
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import (
-    Base,
-    CatalogDocumentHead,
-    CatalogDocumentRevision,
-    RecipeLibrarySyncRun,
-)
+from vonk_control.library_projection.service import LibraryProjection
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeLibrarySyncRun
+from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
 from vonk_control.owner_liveness import SYNC_HEARTBEAT_WINDOW
-from vonk_control.recipe_builds import RecipeBuildService
+from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_library_types import (
     RecipeLibraryError,
     RecipeLibraryItem,

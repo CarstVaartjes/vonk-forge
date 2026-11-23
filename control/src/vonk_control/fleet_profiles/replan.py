@@ -12,16 +12,17 @@ from sqlalchemy.orm import Session, object_session
 from vonk_agent_protocol import ProfileReasonCode, SupersedeCode
 from vonk_forge_contracts import RecipeDefinition
 
-from ..fleet_profile_contract import (
+from ..fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
-    FleetProfileAssignment,
     FleetProfileIntendedConfiguration,
-    FleetProfilePreview,
 )
+from ..fleet_profile_contract.definitions import FleetProfileAssignment
+from ..fleet_profile_contract.review import FleetProfilePreview
 from ..lifecycle.evidence import Residue
 from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..lifecycle.types import State as _LifecycleState
-from ..models import CatalogDocumentRevision, FleetProfile, FleetProfileApplication
+from ..models.catalog import CatalogDocumentRevision
+from ..models.fleet import FleetProfile, FleetProfileApplication
 from ..operations.blockers import OperationBlocker, bound_blockers, make_blocker
 from ..persisted_waits import schedule_wait
 from ..settings import PROFILE_STALL_WINDOW_SECONDS

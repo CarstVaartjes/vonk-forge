@@ -6,17 +6,12 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    Base,
-    Job,
-)
-from vonk_control.operation_api import (
-    durable_operation_services,
-    operation_detail_response,
-)
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operation_api.durable import durable_operation_services
+from vonk_control.operation_api.responses import operation_detail_response
 
 from .test_operation_api import COMMIT, DIGEST, NODE_ID, _client
 
