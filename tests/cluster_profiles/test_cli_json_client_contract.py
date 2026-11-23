@@ -11,8 +11,6 @@ import json
 import sys
 from pathlib import Path
 
-import jsonschema
-
 # The artifact-job fixtures own the Controller job shapes and their clock.
 from test_cli_artifact_jobs import (  # noqa: F401
     CANCEL_KEY,
@@ -26,6 +24,7 @@ from test_cli_artifact_jobs import (  # noqa: F401
     _succeeded_job,
     artifact_clock,
 )
+from vonkctl_schemas import validator
 
 from cluster_profiles import cli
 from cluster_profiles.cli_json_contract import (
@@ -42,7 +41,7 @@ SCHEMAS = Path(__file__).resolve().parents[2] / "schemas" / "vonkctl"
 def _validate(kind: DocumentKind, document: dict) -> None:
     [path] = SCHEMAS.glob(f"{kind}-v*.schema.json")
     assert path.name == f"{kind}-v{document['schema_version']}.schema.json"
-    jsonschema.Draft202012Validator(json.loads(path.read_text())).validate(document)
+    validator(kind).validate(document)
 
 
 def _run(client, capsys, *argv: str, request_key: str | None = None) -> dict:

@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Self
 
 import httpx2
-import jsonschema
 import pytest
 from vonk_control.cli_update_contract import CliUpdateContract
 from vonk_control.library.contract import (
@@ -36,9 +35,10 @@ from vonk_control.observation.transfer import (
     OBSERVATION_MEDIA_TYPE,
     observation_response,
 )
+from vonkctl_schemas import validator
 
 from cluster_profiles import cli
-from cluster_profiles.cli_json_contract import DOCUMENT_VERSIONS, DocumentKind
+from cluster_profiles.cli_json_contract import DocumentKind
 from cluster_profiles.control_client import (
     ControlClient,
     ControlContractMismatch,
@@ -50,10 +50,6 @@ from control.tests.observation_transfer_peer import ObservationHTTPPeer
 
 SHIPPED = "a" * 64
 SERVED = "e" * 64
-ERROR_SCHEMA = (
-    Path(__file__).resolve().parents[2]
-    / f"schemas/vonkctl/error-v{DOCUMENT_VERSIONS[DocumentKind.ERROR]}.schema.json"
-)
 
 type Answer = _Response | ObservationHTTPPeer
 
@@ -190,9 +186,7 @@ def _library_failure(
     status = cli.main(("--json", "recipe", "library"), control_client=client)
     document = json.loads(capsys.readouterr().out)
     assert status == 2, document
-    jsonschema.Draft202012Validator(json.loads(ERROR_SCHEMA.read_text())).validate(
-        document
-    )
+    validator(DocumentKind.ERROR).validate(document)
     return document
 
 

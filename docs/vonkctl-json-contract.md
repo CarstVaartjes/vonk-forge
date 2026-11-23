@@ -6,6 +6,17 @@ below are a versioned contract. Each is defined by one Pydantic model, has a
 published JSON Schema in [`schemas/vonkctl/`](../schemas/vonkctl), and is proven
 against the real Controller in CI.
 
+Every definition lives once in
+[`definitions.schema.json`](../schemas/vonkctl/definitions.schema.json). A
+kind's file holds only its root and refers into it with
+`"$ref": "definitions.schema.json#/$defs/X"`, so a client loads the kind file
+together with the shared file (a JSON Schema registry keyed by file name, for
+example `referencing.Registry` with `jsonschema`). The shared file is not
+versioned on its own: it is the union of the definitions the kind files use, and
+a change to one is judged through the kinds that reference it. Moving the
+definitions out of the kind files changed no document, so the kind versions
+stayed (the rules below bump a version only for a changed document).
+
 ## Version field
 
 Every document in the table carries a top-level integer `schema_version`. The
@@ -74,8 +85,8 @@ the page is the last.
   it does not guess at the fields. `--check-connection --json` `.client.version`
   identifies the CLI build.
 - Regeneration refuses to rewrite a published file with an incompatible schema
-  (a removed property, a `required` list that grew, a changed type). A test
-  fails when a committed file is not exactly the model's current export, so a
+  (checked with the shared definitions inlined; a removed property, a `required` list that grew, a changed type). A test
+  fails when a committed file (shared definitions included) is not exactly the model's current export, so a
   stale or hand-edited file is caught. Telling an incompatible change from a
   compatible one needs the previously published file, which only that
   regeneration step reads; the version bump is a review decision.
