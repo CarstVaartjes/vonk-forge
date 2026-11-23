@@ -278,6 +278,14 @@ class OperationCheckpoint(WireModel):
     digest: Digest | None = None
 
 
+class NetworkFetch(WireModel):
+    """What an attempt received over the network: never present or resumed bytes."""
+
+    bytes: int = Field(strict=True, ge=0)
+    # The span from the first to the last received byte; zero for one chunk.
+    seconds: float = Field(strict=True, ge=0)
+
+
 class OperationMemberProgress(WireModel):
     """Progress for one node, rank, shard, or other operation member."""
 
@@ -345,11 +353,8 @@ class OperationProgress(WireModel):
     completed_items: int | None = Field(default=None, strict=True, ge=0)
     total_items: int | None = Field(default=None, strict=True, ge=0)
     elapsed_seconds: float | None = Field(default=None, strict=True, ge=0)
-    # Only an object transfer reports these: the bytes this attempt received
-    # over the network (never present or resumed bytes) and the time between
-    # its first and last received byte. Present together or not at all.
-    fetched_bytes: int | None = Field(default=None, strict=True, ge=0)
-    fetch_seconds: float | None = Field(default=None, strict=True, ge=0)
+    # Only an object transfer reports what it fetched over the network.
+    fetched: NetworkFetch | None = None
     observed_at: str | None = Field(default=None, max_length=64)
     last_progress_at: str | None = Field(default=None, max_length=64)
     activity: Literal["active", "waiting", "possibly_stalled"] | None = None
@@ -384,8 +389,6 @@ class OperationProgress(WireModel):
             and (self.completed_items or 0) > self.total_items
         ):
             raise ValueError("completed items cannot exceed total items")
-        if (self.fetched_bytes is None) != (self.fetch_seconds is None):
-            raise ValueError("fetched bytes and fetch seconds are reported together")
         member_ids = [member.member_id for member in self.members]
         if len(member_ids) != len(set(member_ids)):
             raise ValueError("operation progress members must be unique")
@@ -403,6 +406,7 @@ def normalize_operation_progress(value: Mapping[str, object]) -> dict[str, objec
 __all__ = [
     "ERROR_CODE_PATTERN",
     "ErrorCode",
+    "NetworkFetch",
     "OperationCheckpoint",
     "OperationMemberProgress",
     "OperationProgress",

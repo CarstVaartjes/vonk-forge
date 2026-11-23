@@ -34,8 +34,12 @@ impl LoopClient for AgentHttpClient {
             total_bytes: counters.total_bytes.map(Into::into),
             total_bytes_known: counters.total_bytes.is_some(),
             activity_sequence: Some(counters.activity.into()),
-            fetched_bytes: counters.fetched.map(|(bytes, _)| bytes.into()),
-            fetch_seconds: counters.fetched.map(|(_, span)| span.as_secs_f64()),
+            fetched: counters
+                .fetched
+                .map(|(bytes, span)| vonk_agent_protocol::NetworkFetch {
+                    bytes: bytes.into(),
+                    seconds: span.as_secs_f64(),
+                }),
             ..phase_progress(counters.phase)
         })
     }

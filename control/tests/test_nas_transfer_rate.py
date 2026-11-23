@@ -15,10 +15,8 @@ from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
-from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.nas_transfer_rate import (
     NasTransferNotice,
-    nas_link_ceilings,
     nas_transfer_detail,
     slow_nas_transfers,
     wifi_link_detail,
@@ -32,7 +30,6 @@ FAST = "spk_" + "2818" * 8
 SLOW = "spk_" + "9a86" * 8
 NAMES = {FAST: "spark-3542", SLOW: "spark-2297"}
 GB = 10**9
-TEN_GBE = 10_000 * 1e6 / 8
 
 
 def _sessions() -> sessionmaker[Session]:
@@ -119,7 +116,7 @@ def _transfer(
                     **(
                         {}
                         if seconds is None
-                        else {"fetched_bytes": size, "fetch_seconds": seconds}
+                        else {"fetched": {"bytes": size, "seconds": seconds}}
                     ),
                 },
             )
@@ -127,12 +124,10 @@ def _transfer(
 
 
 def _notices(
-    sessions: sessionmaker[Session],
-    names: dict[str, str] = NAMES,
-    ceilings: dict[str, float] | None = None,
+    sessions: sessionmaker[Session], names: dict[str, str] = NAMES
 ) -> dict[str, object]:
     with sessions() as session:
-        return dict(slow_nas_transfers(session, names, ceilings or {}, NOW))
+        return dict(slow_nas_transfers(session, names, NOW))
 
 
 def test_production_shape_names_the_slow_spark_and_both_rates() -> None:
@@ -142,7 +137,7 @@ def test_production_shape_names_the_slow_spark_and_both_rates() -> None:
     _transfer(sessions, SLOW, int(25.8 * GB), 7089)
 
     with sessions() as session:
-        notices = slow_nas_transfers(session, NAMES, {}, NOW)
+        notices = slow_nas_transfers(session, NAMES, NOW)
 
     assert set(notices) == {SLOW}
     notice = notices[SLOW]
@@ -197,33 +192,6 @@ def test_a_genuinely_slow_nas_path_is_still_named_beside_reuse() -> None:
     _transfer(sessions, SLOW, 25 * GB, 7000, reused=30 * GB)
 
     assert set(_notices(sessions)) == {SLOW}
-
-
-def test_a_rate_above_the_link_speed_is_misattributed_and_dropped() -> None:
-    # 48 GB in 20 s is 2.4 GB/s: more than a 10 GbE link can carry.
-    sessions = _sessions()
-    _transfer(sessions, FAST, 48 * GB, 20)
-    _transfer(sessions, SLOW, 25 * GB, 7000)
-    assert set(_notices(sessions)) == {SLOW}
-
-    assert _notices(sessions, ceilings={FAST: TEN_GBE, SLOW: TEN_GBE}) == {}
-
-
-def test_the_link_ceiling_is_the_nas_route_speed() -> None:
-    nics = [
-        NetworkInterface(
-            name="enP7s7", kind="wired", carrier=True, link_speed_mbps=10_000
-        ),
-        NetworkInterface(
-            name="fabric0", kind="fabric", carrier=True, link_speed_mbps=200_000
-        ),
-    ]
-    routed = NodeInventorySnapshot(node_id=FAST, nas_route_interface="enP7s7")
-    routed.network_interfaces = nics
-    unrouted = NodeInventorySnapshot(node_id=SLOW, nas_route_interface=None)
-    unrouted.network_interfaces = nics
-
-    assert nas_link_ceilings({FAST: routed, SLOW: unrouted}) == {FAST: TEN_GBE}
 
 
 def test_unreadable_or_unmeasured_progress_is_skipped_not_fatal() -> None:
@@ -327,3 +295,13 @@ def test_link_evidence_fits_the_warning_bound_without_cutting_it_off() -> None:
     )
     assert "median of 5 recent transfers" in reason.detail
     assert reason.detail.endswith("RX 866.7 Mbit/s.")
+
+
+def test_reuse_only_transfers_cannot_crowd_out_the_real_ones() -> None:
+    sessions = _sessions()
+    _transfer(sessions, FAST, 48 * GB, 550, ago=timedelta(hours=5))
+    for minutes in range(1, 21):
+        _transfer(sessions, FAST, 0, 0, reused=60 * GB, ago=timedelta(minutes=minutes))
+    _transfer(sessions, SLOW, 25 * GB, 7000)
+
+    assert set(_notices(sessions)) == {SLOW}

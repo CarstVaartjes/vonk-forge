@@ -27,6 +27,7 @@ from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.nas_transfer_rate import nas_rates
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .agent_jobs_support import (
@@ -218,6 +219,37 @@ def test_successful_distribution_receipt_preserves_observed_order_wide_bytes(
         assert attempt.progress["completed_bytes"] == 100
         assert attempt.progress["completed_items"] == 2
         assert attempt.progress["phase"] == "completed"
+
+
+def test_the_nas_rate_survives_the_distribution_receipt(service) -> None:
+    # The receipt rebuilds the final progress; what the agent measured of its
+    # network fetch must still be there for the rate to read.
+    jobs, sessions, clock = service
+    jobs.enqueue(
+        parent(sessions, clock).id,
+        NODE_A,
+        ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value,
+        COMMIT,
+        distribution_payload(),
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    jobs.heartbeat(
+        claim,
+        {
+            "phase": "copying",
+            "completed_bytes": 40 * 10**9,
+            "total_bytes": 40 * 10**9,
+            "total_bytes_known": True,
+            "fetched": {"bytes": 20 * 10**9, "seconds": 40.0},
+        },
+        60,
+    )
+    jobs.succeed(claim, {"downloaded_bytes": 40 * 10**9})
+
+    with sessions() as session:
+        rates = nas_rates(session, [NODE_A], clock() - timedelta(days=1))
+    assert rates[NODE_A].bytes_per_second == 5 * 10**8
 
 
 @pytest.mark.parametrize("explicit_null", [False, True])

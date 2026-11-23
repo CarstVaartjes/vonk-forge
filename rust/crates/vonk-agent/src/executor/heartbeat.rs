@@ -20,8 +20,7 @@ pub(super) fn phase_progress(phase: ProgressPhase) -> OperationProgress {
         smoothed_bytes_per_second: None,
         eta_seconds: None,
         elapsed_seconds: None,
-        fetched_bytes: None,
-        fetch_seconds: None,
+        fetched: None,
         checkpoint: None,
         members: Vec::new(),
     }
