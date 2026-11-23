@@ -9,7 +9,8 @@
       "*.ts",
       "!src/api/generated",
       "!src/generated",
-      "!src/**/vocabulary.generated.ts",
+      "!src/**/*.generated.ts",
+      "!src/**/*.generated.test.ts",
       "!src/api/generated.d.ts",
       "!src/api/runtime.generated.d.ts"
     ]
