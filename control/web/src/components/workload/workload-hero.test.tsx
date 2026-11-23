@@ -130,7 +130,10 @@ test("an engine figure takes its title and unit from the catalogue; a metric it 
 class FakeApi {
   reads = 0;
   failures = 0;
-  constructor(private readonly adapter: string) {}
+  private readonly adapter: string;
+  constructor(adapter: string) {
+    this.adapter = adapter;
+  }
   async recipeDetail(selector: string) {
     this.reads += 1;
     if (selector !== REVISION || this.failures-- > 0) throw new Error("404 recipe not found");

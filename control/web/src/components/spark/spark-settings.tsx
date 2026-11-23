@@ -5,10 +5,8 @@ import { ConfirmDialog } from "../ui/confirm-dialog";
 import { EnrollmentGrant } from "../ui/enrollment-grant";
 import { useToast } from "../ui/toast";
 
-enum Dialog {
-  Remove,
-  Reenroll,
-}
+const Dialog = { Remove: 0, Reenroll: 1 } as const;
+type Dialog = (typeof Dialog)[keyof typeof Dialog];
 
 /** The Settings tab: rename, re-enroll and remove. `onChanged` tells the page to re-read the fleet. */
 export function SparkSettings({

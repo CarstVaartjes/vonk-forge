@@ -125,15 +125,19 @@ export interface FleetEventStream {
 /** One connection at a time; only applied domain state supplies reconnect ID. */
 export class FleetEventConnection extends EventTarget {
   readonly url = "/api/fleet/stream";
-  private controller?: AbortController;
-  private timer?: ReturnType<typeof setTimeout>;
+  private controller?: AbortController | undefined;
+  private timer?: ReturnType<typeof setTimeout> | undefined;
   private retryMilliseconds = 2000n;
   private closed = false;
+  private readonly appliedCursor: () => string;
+  private readonly authorize: (response: Response) => void;
   constructor(
-    private readonly appliedCursor: () => string,
-    private readonly authorize: (response: Response) => void = () => undefined,
+    appliedCursor: () => string,
+    authorize: (response: Response) => void = () => undefined,
   ) {
     super();
+    this.appliedCursor = appliedCursor;
+    this.authorize = authorize;
     void this.connect();
   }
   close(): void {

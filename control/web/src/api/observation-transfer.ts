@@ -4,12 +4,15 @@ import { ContractViolation, validateComponent, validateControlBody } from "./con
 import { formatWire } from "./contract-numeric";
 
 type Record = components["schemas"]["ObservationTransferRecord"];
+type ErrorReason =
+  Extract<Record, { reason_code: unknown }> extends { reason_code: infer Reason } ? Reason : never;
 export class ObservationUnavailable extends Error {
-  constructor(
-    readonly reason_code: Extract<Record, { type: "error" }>["reason_code"],
-    readonly detail: string,
-  ) {
+  readonly reason_code: ErrorReason;
+  readonly detail: string;
+  constructor(reason_code: ErrorReason, detail: string) {
     super(`${reason_code}: ${detail}`);
+    this.reason_code = reason_code;
+    this.detail = detail;
     this.name = "ObservationUnavailable";
   }
 }

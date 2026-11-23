@@ -18,7 +18,9 @@ class FakeFleetConnection {
   closed = false;
   private listeners = new Map<string, Set<EventListener>>();
 
-  constructor(readonly appliedCursor: () => string) {
+  readonly appliedCursor: () => string;
+  constructor(appliedCursor: () => string) {
+    this.appliedCursor = appliedCursor;
     this.url = "/api/fleet/stream";
     FakeFleetConnection.instances.push(this);
   }
