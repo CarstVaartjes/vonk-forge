@@ -793,7 +793,9 @@ def _derived_fixture(
     index = json.loads(fixture.index_bytes)
     index["recipes"] = [entry]
     digest = str(entry["content_sha256"])
-    index["source_commit"] = hashlib.sha1(digest.encode()).hexdigest()
+    index["source_commit"] = hashlib.sha1(
+        digest.encode(), usedforsecurity=False
+    ).hexdigest()
     return fixture._replace(
         index_bytes=json.dumps(index, sort_keys=True).encode(),
         package_bytes=package_bytes,
@@ -828,7 +830,8 @@ def _sibling_recipes(
     index = json.loads(fixture.index_bytes)
     index["recipes"] = [entry for entry, _ in built]
     commit = hashlib.sha1(
-        "".join(str(entry["content_sha256"]) for entry, _ in built).encode()
+        "".join(str(entry["content_sha256"]) for entry, _ in built).encode(),
+        usedforsecurity=False,
     ).hexdigest()
     index["source_commit"] = commit
     index_bytes = json.dumps(index, sort_keys=True).encode()
