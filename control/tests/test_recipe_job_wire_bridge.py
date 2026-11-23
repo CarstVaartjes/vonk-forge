@@ -9,9 +9,9 @@ import pytest
 
 from tests.wire_probes import prebuilt_probe
 from vonk_agent_protocol.contracts import AgentResult
+from vonk_agent_protocol.job_inputs import RecipeJobInputRequest
 from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
-    RecipeJobInputRequest,
     RecipeJobOutputLimits,
     RecipeJobRunRequest,
     RecipeJobRunResult,

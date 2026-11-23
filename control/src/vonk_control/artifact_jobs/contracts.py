@@ -18,6 +18,11 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
+from vonk_agent_protocol.job_inputs import (
+    RecipeJobInputFile,
+    RecipeJobInputManifest,
+    RecipeJobInputRequest,
+)
 from vonk_agent_protocol.job_limits import (
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
@@ -41,9 +46,6 @@ from vonk_agent_protocol.outcome import (
 )
 from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
-    RecipeJobInputFile,
-    RecipeJobInputManifest,
-    RecipeJobInputRequest,
     RecipeJobOutputLimits,
     RecipeJobOutputMapping,
 )

@@ -29,12 +29,13 @@ from vonk_agent_protocol.host_helper import (
     SignedHostHelperGrant,
     host_helper_grant_signing_bytes,
 )
+from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_agent_protocol.package_upgrade import (
     PackageActivationOutcome,
     PackageActivationPhase,
     PackageActivationReceipt,
 )
-from vonk_agent_protocol.recipe_jobs import RecipeJobInputManifest, RecipeJobRunRequest
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import (
     RecipeReconciliationIdentity,
     RecipeStartPayload,

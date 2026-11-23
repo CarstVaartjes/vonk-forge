@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from typing import Annotated, Any, Literal
 
 from pydantic import (
     BeforeValidator,
     Field,
     StringConstraints,
-    ValidationError,
     field_validator,
     model_validator,
 )
@@ -19,72 +18,42 @@ from pydantic import (
 from vonk_agent_protocol.agent_words import FailureStage
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.job_inputs import RecipeJobInputFile, RecipeJobInputManifest
 from vonk_agent_protocol.job_limits import (
-    MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
     MAX_INPUT_TOTAL_BYTES,
     MAX_OUTPUT_FILE_BYTES,
     MAX_OUTPUT_FILES,
     MAX_OUTPUT_TOTAL_BYTES,
 )
+from vonk_agent_protocol.job_wire import (
+    MEDIA_TYPE_PATTERN,
+    ArtifactName,
+    ArtifactSlot,
+    Digest,
+    MediaType,
+    _parse_model,
+    _RecipeJobModel,
+)
 from vonk_agent_protocol.wire_model import (
     MAX_RUN_GENERATION,
     AgentProtocolError,
-    WireModel,
     canonical_message,
 )
 
-_DIGEST = r"^[0-9a-f]{64}$"
-_NAME = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-_SLOT = r"^[A-Za-z][A-Za-z0-9_-]{0,31}$"
 _EXTENSION = r"^\.[a-z0-9][a-z0-9._-]{0,15}$"
-MEDIA_TYPE_PATTERN = (
-    r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$"
-)
 _UUID = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
     r"[0-9a-f]{12}$"
 )
 
-Digest = Annotated[str, StringConstraints(pattern=_DIGEST)]
 CanonicalUUID = Annotated[str, StringConstraints(pattern=_UUID)]
-ArtifactName = Annotated[str, StringConstraints(pattern=_NAME)]
-ArtifactSlot = Annotated[str, StringConstraints(pattern=_SLOT)]
 ArtifactExtension = Annotated[str, StringConstraints(pattern=_EXTENSION)]
-MediaType = Annotated[str, StringConstraints(pattern=MEDIA_TYPE_PATTERN)]
 
 
 def _as_tuple(value: object) -> object:
     """Accept JSON arrays while retaining immutable tuples in the model."""
     return tuple(value) if isinstance(value, (list, tuple)) else value
-
-
-def _thaw(value: object) -> object:
-    """Turn the immutable envelope projection back into Pydantic input."""
-    if isinstance(value, Mapping):
-        return {key: _thaw(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_thaw(item) for item in value]
-    return value
-
-
-class _RecipeJobModel(WireModel):
-    def to_mapping(self) -> dict[str, object]:
-        return self.model_dump(mode="json")
-
-
-def _parse_model[ModelT: _RecipeJobModel](
-    cls: type[ModelT], raw: Any, *, label: str
-) -> ModelT:
-    try:
-        return cls.model_validate(_thaw(raw))
-    except ValidationError as error:
-        first = error.errors()[0]
-        location = ".".join(str(item) for item in first.get("loc", ()))
-        message = str(first.get("msg", f"{label} is invalid"))
-        raise AgentProtocolError(
-            f"{location}: {message}" if location else message
-        ) from error
 
 
 class RecipeJobFile(_RecipeJobModel):
@@ -105,49 +74,6 @@ class RecipeJobFile(_RecipeJobModel):
         if parsed.size_bytes > maximum_bytes:
             raise AgentProtocolError("artifact size_bytes is invalid")
         return parsed
-
-
-class RecipeJobInputRequest(_RecipeJobModel):
-    """What a client declares for one input: the Controller derives its type."""
-
-    slot: ArtifactSlot
-    name: ArtifactName
-    size_bytes: int = Field(ge=0, le=MAX_INPUT_FILE_BYTES)
-    sha256: Digest
-
-    @model_validator(mode="after")
-    def name_is_safe(self) -> RecipeJobInputRequest:
-        if self.name == "manifest.json":
-            raise ValueError("artifact name is invalid")
-        return self
-
-
-class RecipeJobInputFile(RecipeJobInputRequest):
-    media_type: MediaType
-
-    @classmethod
-    def parse(cls, raw: Any, *, maximum_bytes: int) -> RecipeJobInputFile:
-        parsed = _parse_model(cls, raw, label="artifact input file")
-        if parsed.size_bytes > maximum_bytes:
-            raise AgentProtocolError("artifact size_bytes is invalid")
-        return parsed
-
-
-class RecipeJobInputManifest(WireModel):
-    """Declared user files; manifest.json itself is platform metadata."""
-
-    schema_version: Literal[1]
-    total_bytes: int = Field(ge=0, le=MAX_INPUT_TOTAL_BYTES)
-    files: list[RecipeJobInputFile] = Field(max_length=MAX_INPUT_FILES)
-
-    @model_validator(mode="after")
-    def files_match_totals(self) -> RecipeJobInputManifest:
-        names = [file.name for file in self.files]
-        if names != sorted(set(names), key=lambda name: name.encode("utf-8")):
-            raise ValueError("input filenames must be unique and canonically sorted")
-        if self.total_bytes != sum(file.size_bytes for file in self.files):
-            raise ValueError("input total_bytes does not match declared files")
-        return self
 
 
 def _manifest_document(
@@ -433,8 +359,6 @@ __all__ = [
     "RecipeJobEnding",
     "RecipeJobEvidence",
     "RecipeJobFile",
-    "RecipeJobInputFile",
-    "RecipeJobInputManifest",
     "RecipeJobOutputLimits",
     "RecipeJobOutputManifest",
     "RecipeJobOutputMapping",

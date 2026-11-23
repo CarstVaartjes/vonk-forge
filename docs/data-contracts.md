@@ -152,13 +152,15 @@ module defines its own.
 | `agent_protocol/src/vonk_agent_protocol/installer_release.py` | agent-protocol | 14 | Complete installer publication graphs and the forward-compatible signed CLI updater projection. |
 | `agent_protocol/src/vonk_agent_protocol/installer_setup.py` | agent-protocol | 23 | Documents the NAS and Spark setup programs read and exchange. |
 | `agent_protocol/src/vonk_agent_protocol/inventory.py` | agent-protocol | 2 | Authenticated schema-1 inventory evidence reported by an agent. |
+| `agent_protocol/src/vonk_agent_protocol/job_inputs.py` | agent-protocol | 3 | The exact input manifest shared by job staging and container adapters. |
+| `agent_protocol/src/vonk_agent_protocol/job_wire.py` | agent-protocol | 1 | Constrained values and the base model the recipe-job wire models share. |
 | `agent_protocol/src/vonk_agent_protocol/lifecycle_vocabulary.py` | agent-protocol | 1 | The lifecycle and outcome vocabulary shared by Python, Rust and TypeScript. |
 | `agent_protocol/src/vonk_agent_protocol/optional_evidence.py` | agent-protocol | 1 | Mixin that drops invalid optional agent evidence and reports it as a typed warning instead of refusing the report. |
 | `agent_protocol/src/vonk_agent_protocol/outcome.py` | agent-protocol | 9 | The one outcome envelope of an agent operation result. |
 | `agent_protocol/src/vonk_agent_protocol/package_source.py` | agent-protocol | 1 | Immutable publication lookup for an exact installed agent binary. |
 | `agent_protocol/src/vonk_agent_protocol/package_upgrade.py` | agent-protocol | 3 | Exact source-bound rollback authority for the current package transaction. |
 | `agent_protocol/src/vonk_agent_protocol/reason_codes/vocabulary.py` | agent-protocol | 1 | Closed reason, blocker, warning and attention codes shared by Python, Rust and TypeScript. |
-| `agent_protocol/src/vonk_agent_protocol/recipe_jobs.py` | agent-protocol | 13 | Closed Pydantic protocol for one-shot artifact-producing recipe jobs. |
+| `agent_protocol/src/vonk_agent_protocol/recipe_jobs.py` | agent-protocol | 9 | Closed Pydantic protocol for one-shot artifact-producing recipe jobs. |
 | `agent_protocol/src/vonk_agent_protocol/recipe_observations.py` | agent-protocol | 2 | Recipe run observation report sent by the mTLS-authenticated agent. |
 | `agent_protocol/src/vonk_agent_protocol/recipe_operations.py` | agent-protocol | 11 | Closed declarative protocol for digest-bound recipe lifecycle work. |
 | `agent_protocol/src/vonk_agent_protocol/route_activation.py` | agent-protocol | 2 | Canonical schema-2 activation receipt shared with the LiteLLM supervisor. |

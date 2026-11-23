@@ -38,9 +38,10 @@ from vonk_forge_contracts.qualification_status import (
     QualificationStatus,
 )
 
+from vonk_agent_protocol.job_wire import MEDIA_TYPE_PATTERN
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleVocabulary
 from vonk_agent_protocol.reason_codes.vocabulary import ReasonCodeVocabulary
-from vonk_agent_protocol.recipe_jobs import MEDIA_TYPE_PATTERN, canonical_media_types
+from vonk_agent_protocol.recipe_jobs import canonical_media_types
 from vonk_control import control_limits
 from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec

@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.job_inputs import RecipeJobInputFile, RecipeJobInputManifest
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     RunAdmissionCode,
@@ -18,8 +19,6 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
-    RecipeJobInputFile,
-    RecipeJobInputManifest,
     RecipeJobOutputLimits,
     RecipeJobRunRequest,
     RecipeJobRunResult,

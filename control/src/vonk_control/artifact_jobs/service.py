@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
+from vonk_agent_protocol.job_inputs import RecipeJobInputManifest, RecipeJobInputRequest
 from vonk_agent_protocol.job_limits import (
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
@@ -24,12 +25,7 @@ from vonk_agent_protocol.job_limits import (
 )
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
-from vonk_agent_protocol.recipe_jobs import (
-    RecipeJobInputManifest,
-    RecipeJobInputRequest,
-    RecipeJobOutputLimits,
-    RecipeJobRunRequest,
-)
+from vonk_agent_protocol.recipe_jobs import RecipeJobOutputLimits, RecipeJobRunRequest
 from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )

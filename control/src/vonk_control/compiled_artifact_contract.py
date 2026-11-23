@@ -40,7 +40,8 @@ from vonk_agent_protocol.job_limits import (
     MAX_OUTPUT_TOTAL_BYTES,
     MAX_TIMEOUT_SECONDS,
 )
-from vonk_agent_protocol.recipe_jobs import MediaType, canonical_media_types
+from vonk_agent_protocol.job_wire import MediaType
+from vonk_agent_protocol.recipe_jobs import canonical_media_types
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.strict_json import StrictJSONModel
 
