@@ -493,6 +493,71 @@ class _ImageAvailabilitySteps:
         # Why each Spark was passed over, so a wait names its causes.
         skipped: dict[str, tuple[str, str]] = {}
         prebuilt_unused: PrebuiltDecision | None = None
+
+        def _same_image(job: Job) -> bool:
+            # Exact same content is this request's own image, not other
+            # work: identical requests share it and never wait on each
+            # other's retry clock (content identity, request-led).
+            if job.id == parent.id:
+                return True
+            other = job.payload
+            if job.kind != "recipe.image.availability.v2" or not isinstance(
+                other, Mapping
+            ):
+                return False
+            mine = parent_payload
+            if other.get("recipe_content_sha256") != mine.get("recipe_content_sha256"):
+                return False
+            build = mine.get("build_input_sha256")
+            if build is not None and other.get("build_input_sha256") == build:
+                return True
+            intent = parent_runtime.get("input_intent_sha256")
+            other_runtime = other.get("runtime")
+            return (
+                intent is not None
+                and isinstance(other_runtime, Mapping)
+                and other_runtime.get("input_intent_sha256") == intent
+            )
+
+        def work_for(node_id: str, jobs: tuple[Job, ...]) -> int:
+            return sum(
+                1
+                for job in jobs
+                if not _same_image(job)
+                if (
+                    job.kind == "recipe.build.v1"
+                    and node_id in (job.targets or ())
+                    and not _pulls_prebuilt_image(job)
+                    and session.scalar(
+                        select(AgentOperation.id)
+                        .where(
+                            AgentOperation.parent_job_id == job.id,
+                            AgentOperation.state.in_(
+                                job_states.words(
+                                    LifecycleState.QUEUED,
+                                    LifecycleState.RUNNING,
+                                    LifecycleState.BACKOFF,
+                                    LifecycleState.OBSERVING,
+                                )
+                            ),
+                        )
+                        .limit(1)
+                    )
+                    is not None
+                )
+                or (
+                    job.kind == "recipe.image.availability.v2"
+                    and isinstance(job.payload, Mapping)
+                    and job.payload.get(PREBUILT_PULL_KEY) is not True
+                    and not isinstance(job.payload.get("image_result"), Mapping)
+                    and isinstance(
+                        (job_runtime := job.payload.get("runtime")),
+                        Mapping,
+                    )
+                    and job_runtime.get("builder_node_id") == node_id
+                )
+            )
+
         if not isinstance(builder_node_id, str):
             # Read the parent and choose a candidate in a short transaction.
             # The candidate is locked again only for final persistence, after
@@ -520,77 +585,6 @@ class _ImageAvailabilitySteps:
                     )
                     candidate_ids = tuple(candidate.node_id for candidate in candidates)
                     occupied: list[str] = []
-
-                    def _same_image(job: Job) -> bool:
-                        # Exact same content is this request's own image, not other
-                        # work: identical requests share it and never wait on each
-                        # other's retry clock (content identity, request-led).
-                        if job.id == parent.id:
-                            return True
-                        other = job.payload
-                        if job.kind != "recipe.image.availability.v2" or not isinstance(
-                            other, Mapping
-                        ):
-                            return False
-                        mine = parent_payload
-                        if other.get("recipe_content_sha256") != mine.get(
-                            "recipe_content_sha256"
-                        ):
-                            return False
-                        build = mine.get("build_input_sha256")
-                        if (
-                            build is not None
-                            and other.get("build_input_sha256") == build
-                        ):
-                            return True
-                        intent = parent_runtime.get("input_intent_sha256")
-                        other_runtime = other.get("runtime")
-                        return (
-                            intent is not None
-                            and isinstance(other_runtime, Mapping)
-                            and other_runtime.get("input_intent_sha256") == intent
-                        )
-
-                    def work_for(node_id: str, jobs: tuple[Job, ...]) -> int:
-                        return sum(
-                            1
-                            for job in jobs
-                            if not _same_image(job)
-                            if (
-                                job.kind == "recipe.build.v1"
-                                and node_id in (job.targets or ())
-                                and not _pulls_prebuilt_image(job)
-                                and session.scalar(
-                                    select(AgentOperation.id)
-                                    .where(
-                                        AgentOperation.parent_job_id == job.id,
-                                        AgentOperation.state.in_(
-                                            job_states.words(
-                                                LifecycleState.QUEUED,
-                                                LifecycleState.RUNNING,
-                                                LifecycleState.BACKOFF,
-                                                LifecycleState.OBSERVING,
-                                            )
-                                        ),
-                                    )
-                                    .limit(1)
-                                )
-                                is not None
-                            )
-                            or (
-                                job.kind == "recipe.image.availability.v2"
-                                and isinstance(job.payload, Mapping)
-                                and job.payload.get(PREBUILT_PULL_KEY) is not True
-                                and not isinstance(
-                                    job.payload.get("image_result"), Mapping
-                                )
-                                and isinstance(
-                                    (job_runtime := job.payload.get("runtime")),
-                                    Mapping,
-                                )
-                                and job_runtime.get("builder_node_id") == node_id
-                            )
-                        )
 
                     for candidate_id in candidate_ids:
                         try:

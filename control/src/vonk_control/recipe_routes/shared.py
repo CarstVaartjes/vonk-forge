@@ -291,8 +291,8 @@ def route_publication_transaction(
     last: RecipeRouteNotReady | None = None
     for _attempt in bounded_attempts(pauses):
         stack = ExitStack()
+        session = stack.enter_context(sessions())
         try:
-            session = stack.enter_context(sessions())
             if session.get_bind().dialect.name == "sqlite":
                 if not _SQLITE_ROUTE_PUBLICATION_LOCK.acquire(blocking=False):
                     raise RecipeRouteOwnerBusy("route publication owner is busy")

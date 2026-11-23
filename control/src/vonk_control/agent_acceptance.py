@@ -183,6 +183,7 @@ def resolve_agent_receipt(
         if policy == ReceiptPolicy.AGENT_TELEMETRY:
             _require(isinstance(body, TelemetryRequest))
             assert isinstance(body, TelemetryRequest)
+            saved = None
             for sample in body.samples:
                 saved = session.scalar(
                     select(NodeTelemetrySample).where(
@@ -194,6 +195,8 @@ def resolve_agent_receipt(
                 _require(saved is not None)
                 assert saved is not None
                 _require(_same_sample(saved, sample))
+            # TelemetryRequest.samples has min_length=1, so the loop bound it.
+            assert saved is not None
             return AcceptanceReceipt(
                 owner=ReceiptOwner.TELEMETRY,
                 id=saved.id,
@@ -248,6 +251,7 @@ def resolve_agent_receipt(
                 content_digest=saved.oci_layout_sha256,
             )
 
+        claim: AgentClaim | None = None
         if policy == ReceiptPolicy.AGENT_CLAIM:
             _require(isinstance(body, ClaimRequest) and isinstance(result, Response))
             assert isinstance(body, ClaimRequest)
@@ -329,6 +333,8 @@ def resolve_agent_receipt(
         attempt, operation = saved
         _require(operation.node_id == identity.node_id)
         if policy == ReceiptPolicy.AGENT_CLAIM:
+            # The AGENT_CLAIM branch above bound the claim or returned.
+            assert claim is not None
             _require(
                 attempt.agent_certificate_serial == identity.certificate_serial
                 and operation.current_attempt == attempt.attempt

@@ -238,10 +238,9 @@ class SourceBundleStore:
         if destination.exists():
             try:
                 existing = destination.read_bytes()
-                present = existing == archive
             except FileNotFoundError:
-                present = False
-            if present:
+                existing = None
+            if existing is not None and existing == archive:
                 _publish_verification(destination, manifest)
                 return StoredBundle(destination, manifest, len(existing))
             # A stored copy that no longer verifies is damaged data, and the

@@ -344,7 +344,6 @@ class DistributedRecoveryCoordinator:
                         run_nodes[0].observation_failure_diagnostics = None
                         run_nodes[0].observation_observed_at = None
                         run_nodes[0].observation_endpoint_ready = None
-                    if singleton:
                         if self._recovery_run_stops is None:
                             unowned = _unproven(
                                 run.id,

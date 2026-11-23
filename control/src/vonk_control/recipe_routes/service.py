@@ -172,6 +172,9 @@ class RecipeRouteService:
             except RecipeRouteOwnerBusy:
                 if attempt == len(pauses):
                     raise
+        else:
+            # bounded_attempts yields at least once and the last attempt re-raises.
+            raise AssertionError
         if isinstance(outcome, Stale):
             raise _RecipeRunContended(
                 "RecipeRun publication changed; re-plan on the next reconcile tick"

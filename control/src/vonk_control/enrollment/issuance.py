@@ -439,7 +439,6 @@ class EnrollmentCore:
                         public_key_fingerprint,
                     )
                     _submission_input(csr, evidence_error)
-                if failure is None:
                     node_id = values["node_id"]
                     enrollment = AgentEnrollment(
                         id=str(uuid.uuid4()),

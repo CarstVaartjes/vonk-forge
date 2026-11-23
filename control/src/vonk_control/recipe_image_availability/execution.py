@@ -180,22 +180,23 @@ def _run(
     operation_id = claim.operation_id
     with self._sessions.begin() as session:
         operation = self._claim_operation(session, claim)
+        claimed = None
         if operation is not None:
             payload = self._payload(operation)
             if isinstance(payload, Residue):
                 return
-            operation_actor = operation.actor
-            operation_request_id = operation.request_id
+            claimed = (payload, operation.actor, operation.request_id)
             operation.updated_at = self._clock()
             self._set_progress(
                 operation,
                 "prepare",
                 total_bytes=_known_total(payload.runtime),
             )
-    if operation is None:
+    if claimed is None:
         self._release_cancelled_claim(claim)
         self._reconcile_availability_cancellation(operation_id)
         return
+    payload, operation_actor, operation_request_id = claimed
     heartbeat_stop = threading.Event()
     heartbeat = threading.Thread(
         target=self._renew_claim_loop,

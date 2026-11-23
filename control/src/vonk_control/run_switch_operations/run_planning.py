@@ -235,6 +235,7 @@ class RunPlanningMixin:
             build_selection = None
             build = None
             build_candidate = None
+            reuse_installed = installed_image is not None
             if installed_image is not None:
                 build_evidence, runtime_storage, build_blockers, build_warnings = (
                     service._build_evidence(
@@ -248,8 +249,7 @@ class RunPlanningMixin:
                         image_installed=True,
                     )
                 )
-            reuse_installed = installed_image is not None
-            if not reuse_installed:
+            else:
                 build = service._matching_build(
                     session,
                     revision.id,

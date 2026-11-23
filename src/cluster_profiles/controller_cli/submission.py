@@ -196,15 +196,14 @@ def _submit_idempotent_request(
             # not a second admission decision.
             may_replay = False
 
+    def reconcile(_remaining: float) -> object:
+        return request("GET", lookup, "lookup", receipt_validator=lookup_validate)
+
     if lookup == path:
         # This endpoint owns idempotency; one exact same-key replay also
         # reconciles an unreadable receipt without authorizing another effect.
         may_replay = True
     else:
-
-        def reconcile(_remaining: float) -> object:
-            return request("GET", lookup, "lookup", receipt_validator=lookup_validate)
-
         try:
             return request("GET", lookup, "lookup", receipt_validator=lookup_validate)
         except ControlNotFound:

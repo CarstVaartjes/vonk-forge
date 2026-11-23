@@ -319,6 +319,9 @@ def run_update(
             if attempt == 2:
                 raise
             sleeper(0.25 * 2**attempt)
+    else:
+        # The last attempt re-raises, so only a break leaves the loop.
+        raise AssertionError
     current = current_build()
     target_source = release["source_sha"]
     result: dict[str, object] = {
@@ -358,6 +361,9 @@ def run_update(
                 raise CliUpdateIngressError(
                     "CLI wheel digest or size is invalid"
                 ) from None
+    else:
+        # The last attempt raises, so only a break leaves the loop.
+        raise AssertionError
     installed_content = installed_content_identity()
     equal_content = (
         target_content is not None

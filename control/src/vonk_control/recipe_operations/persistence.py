@@ -449,6 +449,7 @@ class PersistenceMixin:
                 ]
                 for group in phase_groups
             ]
+        context: RecipeOperationContext | None = None
         if job_context is not None:
             context = RecipeOperationContext.model_validate_json(
                 canonical_message(job_context)
@@ -468,7 +469,7 @@ class PersistenceMixin:
             require_mapping(controller_recipe_document(parent), "recipe parent")
         )
         # A formatted timestamp binds its spelling as well as its instant.
-        if job_context is not None and context.start_deadline is not None:
+        if context is not None and context.start_deadline is not None:
             job_document["start_deadline"] = context.start_deadline
         if kind in {
             WireAgentOperation.RECIPE_INSTALL.value,

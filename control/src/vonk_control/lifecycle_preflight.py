@@ -153,6 +153,7 @@ class LifecyclePreflight:
                     checkpoint.attempts[node_id] = attempt
                 receipt = latest_result(session, node_id, requirements_sha256=digest)
                 child_id = checkpoint.pending_jobs.get(node_id)
+                failure = None
                 if child_id is not None:
                     child = session.get(Job, child_id)
                     operation = session.scalar(
@@ -161,7 +162,6 @@ class LifecyclePreflight:
                             AgentOperation.node_id == node_id,
                         )
                     )
-                    failure = None
                     error_code = None
                     if child is None:
                         failure = RuntimePreflightCode.CHILD_MISSING

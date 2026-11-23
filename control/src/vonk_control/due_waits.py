@@ -156,7 +156,7 @@ class DueWaitBackstop:
             statement = statement.order_by(*keys).limit(1)
             # Read one raw identity at a time. A corrupt JSON decoder in one
             # row cannot abort materialization of another row's batch.
-            selected = False
+            selected_key: RowKey | None = None
             fingerprint: bytes | None = None
             try:
                 with self._sessions() as session:
@@ -172,7 +172,7 @@ class DueWaitBackstop:
                 seen.add(key)
                 self._row_cursors[index] = key
                 examined += 1
-                selected = True
+                selected_key = key
                 retry_key = (table.name, key)
                 retry_at = self._retry_at.get(retry_key)
                 if retry_at is not None and now < retry_at:
@@ -213,8 +213,8 @@ class DueWaitBackstop:
             except Exception as error:  # noqa: BLE001 - isolate one row/owner observation
                 if disposition(error) in {Disposition.WAIT, Disposition.OBSERVE}:
                     retry_at = self._clock() + timedelta(seconds=WAIT_STEP)
-                    if selected:
-                        self._retry_at[(table.name, key)] = retry_at
+                    if selected_key is not None:
+                        self._retry_at[(table.name, selected_key)] = retry_at
                     log_event(
                         _LOGGER,
                         "worker.due_wait.wait",
@@ -223,13 +223,14 @@ class DueWaitBackstop:
                         row=repr(self._row_cursors.get(index)),
                         reason=wait_reason(error),
                         detail=error_detail(error),
-                        retry_at=retry_at if selected else None,
+                        retry_at=retry_at if selected_key is not None else None,
                     )
-                    if not selected:
+                    if selected_key is None:
                         exhausted.add(index)
                     continue
-                if fingerprint is not None:
-                    failure_key = (table.name, key)
+                # A fingerprint is taken only after the row's key was selected.
+                if fingerprint is not None and selected_key is not None:
+                    failure_key = (table.name, selected_key)
                     if self._failures.get(failure_key) == fingerprint:
                         continue
                     self._failures[failure_key] = fingerprint
@@ -244,6 +245,6 @@ class DueWaitBackstop:
                 )
                 # A failed selection has no trustworthy identity. Do not spin
                 # on the table; the next worker pass retries the observation.
-                if not selected:
+                if selected_key is None:
                     exhausted.add(index)
         return examined

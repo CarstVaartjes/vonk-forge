@@ -517,6 +517,7 @@ def _claim_once(
                 )
                 return None
         resumable_progress = None
+        previous: AgentOperationAttempt | None = None
         if operation.current_attempt:
             previous = session.scalar(
                 select(AgentOperationAttempt)

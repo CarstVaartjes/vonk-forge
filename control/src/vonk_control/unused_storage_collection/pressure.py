@@ -331,6 +331,14 @@ def _remove(
     label = "image receipt" if item.kind == "image" else item.kind
     group_key = (item.kind, item.key)
     done = 0
+    # Installations have no artifact gate; every other kind maps to one.
+    artifact_kind = (
+        "runtime-image"
+        if item.kind == "image"
+        else "model-set"
+        if item.kind == "model-set"
+        else "model-object"
+    )
     for member in item.members:
         key = (item.kind, member)
         attempted[key] = False
@@ -338,13 +346,6 @@ def _remove(
             if item.kind == StorageItemKind.INSTALLATION:
                 wait_owner = session.get(RecipeInstallation, member)
             else:
-                artifact_kind = (
-                    "runtime-image"
-                    if item.kind == "image"
-                    else "model-set"
-                    if item.kind == "model-set"
-                    else "model-object"
-                )
                 wait_owner = session.get(ArtifactLifecycleGate, (artifact_kind, member))
             retry_at = wait_due(wait_owner) if wait_owner is not None else None
         if retry_at is not None and self._clock() < retry_at:
