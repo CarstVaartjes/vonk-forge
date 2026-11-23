@@ -19,7 +19,7 @@ from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .model_cache_support import _artifact, cache  # noqa: F401
-from .test_recipe_image_availability import (
+from .recipe_image_availability_support import (
     Transport,
     _add_revision,
     _download_preview,

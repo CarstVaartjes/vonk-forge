@@ -45,7 +45,7 @@ from cluster_profiles.cli import main
 from cluster_profiles.control_client import ControlClient
 
 from .model_cache_support import _artifact
-from .test_recipe_image_availability import (
+from .recipe_image_availability_support import (
     Transport,
     _add_head,
     _add_revision,

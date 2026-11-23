@@ -38,7 +38,7 @@ from vonk_control.strict_json import serialize_json_value
 from vonk_control.unused_storage_collection.common import InstallationRemoval, _Kept
 from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
-from .test_recipe_image_availability import (
+from .recipe_image_availability_support import (
     ARCHIVE_SHA,
     _add_head,
     _add_revision,

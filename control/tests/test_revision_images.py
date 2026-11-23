@@ -31,7 +31,7 @@ from vonk_control.revision_images import (
     revision_images,
 )
 
-from .test_recipe_image_availability import (
+from .recipe_image_availability_support import (
     ARCHIVE,
     ARCHIVE_SHA,
     IMAGE_DIGEST,

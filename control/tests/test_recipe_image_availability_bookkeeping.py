@@ -38,7 +38,7 @@ from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImag
 from vonk_control.stored.json_values import Residue, read_row_column
 from vonk_forge_contracts import RecipeDefinition
 
-from .test_recipe_image_availability import (
+from .recipe_image_availability_support import (
     _add_revision,
     _recipe,
     _runtime,
@@ -561,14 +561,14 @@ def test_recovered_removal_releases_storage_gate_before_a_fresh_preparation(
     from vonk_control.recovery_policy import RecoveryPolicy
 
     from .non_blocking import assert_ended_without_blocking
-    from .recipe_removal_review_support import remove_after_review
-    from .runtime_image_fixtures import place_test_image
-    from .test_recipe_image_availability import (
+    from .recipe_image_availability_support import (
         ARCHIVE,
         ARCHIVE_SHA,
         _add_head,
         _reference_receipt,
     )
+    from .recipe_removal_review_support import remove_after_review
+    from .runtime_image_fixtures import place_test_image
 
     recipe = _recipe("recipe-source-build.json")
     engine = create_engine(f"sqlite:///{tmp_path / 'terminal-removal.sqlite'}")

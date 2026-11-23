@@ -76,6 +76,7 @@ from vonk_control.source_bundles import SourceBundleStore, generate_source_bundl
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
 from .display_fixtures import create_draft, reword
+from .recipe_image_availability_support import _typed_availability_payload
 from .recipe_removal_review_support import remove_after_review
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
@@ -83,7 +84,6 @@ from .runtime_identity_support import (
     set_inventory_identity,
 )
 from .runtime_image_fixtures import place_test_image, remove_test_image
-from .test_recipe_image_availability import _typed_availability_payload
 
 _CACHED_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 
