@@ -35,6 +35,22 @@ def test_documentation_still_runs_every_fast_suite() -> None:
     )
 
 
+def test_fuzz_crate_changes_select_only_the_fast_tier() -> None:
+    # rust/fuzz is outside the workspace; only the scheduled fuzz run builds it.
+    module = _module()
+    path = ["rust/fuzz/fuzz_targets/parse.rs"]
+    selected = module.select(path, "pull_request")
+    assert not any(
+        selected[area] for area in ("compose", "nas_install", "agent_package")
+    )
+    assert module.carry_selected(path, "pull_request") is False
+    assert module.rust_changed(path, "pull_request") is False
+    # Mixed with a workspace crate, the workspace crate still decides.
+    assert module.rust_changed(
+        [*path, "rust/crates/vonk-agent/src/lib.rs"], "pull_request"
+    )
+
+
 @pytest.mark.parametrize("event", ["push", "workflow_dispatch", "unknown"])
 def test_missing_diff_is_conservative(event: str) -> None:
     assert all(_module().select(["docs/operator.md"], event).values())

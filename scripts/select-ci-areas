@@ -28,6 +28,12 @@ AREAS = (
 DIFF_EVENTS = ("pull_request", "merge_group")
 
 
+# rust/fuzz is outside the Cargo workspace: no batch build, image or upgrade
+# compiles it. Only the scheduled fuzz workflow runs it, so a change there
+# selects the fast tier and nothing else (docs/testing-and-ci.md, "Fuzzing").
+FUZZ_CRATE = "rust/fuzz/"
+
+
 def _matches(path: str, prefixes: tuple[str, ...], exact: tuple[str, ...] = ()) -> bool:
     return path in exact or path.startswith(prefixes)
 
@@ -128,6 +134,8 @@ def carry_selected(paths: Iterable[str], event: str) -> bool:
     if event not in DIFF_EVENTS or not changed:
         return True
     for path in changed:
+        if path.startswith(FUZZ_CRATE):
+            continue
         if path.startswith(CARRY_INPUTS):
             return True
         top_level_prose = "/" not in path and path.endswith((".md", ".mdx"))
@@ -179,7 +187,10 @@ def rust_changed(paths: Iterable[str], event: str) -> bool:
     inputs = rust_build_inputs()
     if event not in DIFF_EVENTS or not changed or inputs is None:
         return True
-    return any(path.startswith((*RUST_INPUTS, *inputs)) for path in changed)
+    return any(
+        path.startswith((*RUST_INPUTS, *inputs)) and not path.startswith(FUZZ_CRATE)
+        for path in changed
+    )
 
 
 # Suites no path can deselect; they retain their output names for the
@@ -223,7 +234,7 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
         return {area: True for area in AREAS}
     selected = {area: area in FAST_AREAS for area in AREAS}
     for path in changed:
-        if _core_test_input(path):
+        if _core_test_input(path) or path.startswith(FUZZ_CRATE):
             continue
         # README prose inside an executable dependency tree is conservative too.
         documentation = path.startswith("docs/") or (
