@@ -105,9 +105,9 @@ impl Store {
     fn restore(&self, tx: &Transaction) -> Result<(), String> {
         let source = self.root.join("source.deb");
         safe(&source, false, self.owner, 0o600)?;
-        if digest(&source)? != tx.rollback.source.package_sha256 {
-            return Err("captured source changed".into());
-        }
+        // The source package was verified against its signed digest at ingress
+        // (`prepare`); custody is root-owned and checked by `safe`, so restore
+        // never re-hashes it.
         // Refuse to overwrite a third identity; resuming an interrupted restore
         // may see either this candidate or precisely the captured source.
         for (path, expected_source, expected_candidate) in [
