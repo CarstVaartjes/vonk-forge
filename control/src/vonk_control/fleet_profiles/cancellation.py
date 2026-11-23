@@ -13,7 +13,6 @@ from vonk_agent_protocol.agent_words import (
     ProfileCancellationCause,
     ProfileOperationKind,
 )
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -24,6 +23,7 @@ from vonk_agent_protocol.state_machines import (
     DesiredAssignmentState,
     ObservedAssignmentState,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract.applications import (

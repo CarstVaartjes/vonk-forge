@@ -19,13 +19,13 @@ from vonk_forge_contracts import (
     document_sha256,
 )
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_operations import (
     RecipeInstallPayload,
     RecipeStartPayload,
     RecipeStopPayload,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.admission_locking import ConstraintReplay
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.bounded_json import require_mapping, require_sequence

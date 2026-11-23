@@ -11,7 +11,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -19,7 +18,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control.lifecycle.evidence import Residue
 
 from ..catalog.queries import active_head_revision

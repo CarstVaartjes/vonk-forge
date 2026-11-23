@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from sqlalchemy import select, update
 
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,

@@ -18,8 +18,6 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
-from vonk_agent_protocol.contracts import AgentProtocolError, canonical_message
-from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_agent_protocol.job_limits import (
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
@@ -44,6 +42,7 @@ from vonk_agent_protocol.outcome import (
 from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
     RecipeJobInputFile,
+    RecipeJobInputManifest,
     RecipeJobInputRequest,
     RecipeJobOutputLimits,
     RecipeJobOutputMapping,
@@ -51,6 +50,7 @@ from vonk_agent_protocol.recipe_jobs import (
 from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
+from vonk_agent_protocol.wire_model import AgentProtocolError, canonical_message
 
 from ..compiled_artifact_contract import (
     ArtifactSlotContract,

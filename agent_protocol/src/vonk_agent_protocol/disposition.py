@@ -22,8 +22,8 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
+from .agent_operations import AgentFailureKind
 from .agent_words import Disposition
-from .contracts import AgentFailureKind
 from .lifecycle_vocabulary import WaitReason
 
 _FAIL = Disposition.FAIL

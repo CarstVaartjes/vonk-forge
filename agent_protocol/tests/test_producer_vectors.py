@@ -13,7 +13,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from vonk_agent_protocol.contracts import AgentFailureResult, AgentResult
+from vonk_agent_protocol.agent_operations import AgentFailureResult
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.inventory import GpuHealth, InventoryRequest
 from vonk_agent_protocol.outcome import OutcomeUnknown
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire

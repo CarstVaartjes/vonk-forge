@@ -13,10 +13,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReportedPhase
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import RunState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..inventory.repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
 from ..lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint

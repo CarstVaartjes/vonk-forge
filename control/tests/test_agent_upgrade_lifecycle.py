@@ -14,11 +14,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from vonk_agent_protocol.contracts import (
-    AgentFailureKind,
-    AgentFailureResult,
-    AgentUpgradePayload,
-)
+from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentFailureResult
+from vonk_agent_protocol.contracts import AgentUpgradePayload
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
 from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
 from vonk_control.agent_jobs.service import AgentJobService

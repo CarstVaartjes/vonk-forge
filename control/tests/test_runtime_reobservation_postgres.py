@@ -10,18 +10,19 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
 
+from vonk_agent_protocol.agent_operations import (
+    AgentFailureKind,
+    AgentFailureResult,
+    RecipeStartResult,
+)
+from vonk_agent_protocol.agent_operations import AgentOperation as Kind
 from vonk_agent_protocol.agent_words import FailureStage
 from vonk_agent_protocol.contracts import (
     AgentClaim,
-    AgentFailureKind,
-    AgentFailureResult,
     AgentPayload,
     AgentResult,
     AgentResultPayload,
-    RecipeStartResult,
-    canonical_message,
 )
-from vonk_agent_protocol.contracts import AgentOperation as Kind
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
@@ -47,6 +48,7 @@ from vonk_agent_protocol.recipe_jobs import (
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload, RecipeStopResult
 from vonk_agent_protocol.state_machines import RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.contracts import StaleAgentFence
 from vonk_control.agent_jobs.observation_receipts import OBSERVATION_KINDS
 from vonk_control.agent_jobs.service import AgentJobService

@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.route_activation import ActivationMarker, SupervisorPhase

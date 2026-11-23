@@ -12,13 +12,11 @@ from datetime import timedelta
 
 import pytest
 
-from vonk_agent_protocol.contracts import (
-    AgentFailureResult,
-    AgentResult,
-    canonical_message,
-)
-from vonk_agent_protocol.contracts import AgentOperation as WireOperation
+from vonk_agent_protocol.agent_operations import AgentFailureResult
+from vonk_agent_protocol.agent_operations import AgentOperation as WireOperation
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.contracts import _REFUSAL_PREFIXES
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.models.jobs import Job

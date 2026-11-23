@@ -18,9 +18,12 @@ from vonk_agent_protocol.agent_words import (
     ProgressPhase,
     adopt_progress_phase,
 )
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-from vonk_agent_protocol.wire_model import OperationMemberProgress, OperationProgress
+from vonk_agent_protocol.wire_model import (
+    OperationMemberProgress,
+    OperationProgress,
+    canonical_message,
+)
 
 from .. import agent_operation_states
 from ..jobs import states as job_states

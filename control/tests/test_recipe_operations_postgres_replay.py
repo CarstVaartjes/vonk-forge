@@ -14,12 +14,13 @@ from vonk_forge_contracts import (
     read_recipe,
 )
 
-from vonk_agent_protocol.contracts import AgentInstallResult, canonical_message
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.agent_operations import AgentInstallResult
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.admission import InstallAdmissionCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from vonk_control.install_admission.contracts import (
     AdmissionReason,

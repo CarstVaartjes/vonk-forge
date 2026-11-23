@@ -8,8 +8,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.outcome import InvalidRequestError
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.auth import TokenCodec
 from vonk_control.jobs.queue import JobService, StaleAttempt
 from vonk_control.metrics.registry import read_runnable_job_ages

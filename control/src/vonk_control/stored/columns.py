@@ -38,9 +38,8 @@ from vonk_agent_protocol.inventory import (
     NetworkInterface,
     RunScopeId,
 )
-from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_agent_protocol.reason_codes.model_cache import CacheReferenceReason
-from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
+from vonk_agent_protocol.recipe_jobs import RecipeJobInputManifest, RecipeJobRunResult
 from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_agent_protocol.source_bundles import SourceBundleManifest

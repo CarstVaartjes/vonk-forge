@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.install_admission.identity import _primary_model_sha256
 from vonk_control.inventory.repository import (
     InventoryRepository,

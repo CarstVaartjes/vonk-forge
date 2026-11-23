@@ -40,8 +40,8 @@ from vonk_forge_contracts.recipe import (
 )
 
 from vonk_agent_protocol.build_import import RecipeBuildOptions
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..bounded_json import require_mapping
 from ..strict_json import StrictJSONModel, serialize_json_value, stored_document_detail

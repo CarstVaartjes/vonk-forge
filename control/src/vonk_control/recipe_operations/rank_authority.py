@@ -8,12 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_forge_contracts import RecipeDefinition
 
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.build_import import (
     RecipeBuildCleanupRequest,
     RecipeBuildRequest,
 )
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import (
     RecipeInstallPayload,
@@ -22,6 +21,7 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeStopPayload,
     RecipeUninstallPayload,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..fleet_profiles.stop_authority import (
     ProfileJobRunStopJob,

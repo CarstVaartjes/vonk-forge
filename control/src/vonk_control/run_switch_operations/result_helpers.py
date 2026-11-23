@@ -7,14 +7,14 @@ from datetime import datetime
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from vonk_agent_protocol.agent_operations import AgentFailureResult
 from vonk_agent_protocol.agent_words import Disposition, ProfileChildPhase
-from vonk_agent_protocol.contracts import AgentFailureResult, canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     OutcomeKind,
     WaitReason,
 )
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 
 from ..bounded_json import require_mapping
 from ..distribution_assignment import NodeDistributionAssignment

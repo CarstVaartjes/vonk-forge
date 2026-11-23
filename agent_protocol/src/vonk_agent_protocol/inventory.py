@@ -8,7 +8,6 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from .contracts import canonical_message
 from .display_memory import DisplayMemoryObservation
 from .gpu_clock import GpuClockSupport
 from .host_helper import SignedHostHelperGrant
@@ -25,6 +24,7 @@ from .wire_model import (
     MAX_TELEMETRY_CAPACITY_BYTES,
     WireEnum,
     WireModel,
+    canonical_message,
     strict_json_datetime,
 )
 

@@ -6,13 +6,13 @@ from pathlib import Path
 import pytest
 
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.display_memory import (
     DisplayMemoryObservation,
     DisplayMemorySignal,
 )
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_projection.display_memory import display_memory_advice
 
 VECTORS = (

@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import select
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightFindingCode
 from vonk_agent_protocol.recipe_operations import (
@@ -22,6 +22,7 @@ from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightResult,
 )
 from vonk_agent_protocol.state_machines import InstallationState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import terminal_history_collection
 from vonk_control.agent_contacts import record_contact
 from vonk_control.agent_jobs.service import AgentJobService

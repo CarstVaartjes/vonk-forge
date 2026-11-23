@@ -8,7 +8,6 @@ from typing import get_args
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     OperatorActionName,
@@ -18,6 +17,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitResumeCondition,
 )
 from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .agent_operation_facts import aware
 from .jobs import states as job_states

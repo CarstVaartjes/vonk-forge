@@ -31,7 +31,6 @@ from vonk_forge_contracts.recipe import (
     RecipeSetting,
 )
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.job_limits import (
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
@@ -42,6 +41,7 @@ from vonk_agent_protocol.job_limits import (
     MAX_TIMEOUT_SECONDS,
 )
 from vonk_agent_protocol.recipe_jobs import MediaType, canonical_media_types
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .strict_json import StrictJSONModel
 

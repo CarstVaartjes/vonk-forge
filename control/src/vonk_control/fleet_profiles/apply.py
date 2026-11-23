@@ -12,12 +12,12 @@ from sqlalchemy.exc import OperationalError
 from vonk_agent_protocol.agent_words import (
     ProfileOperationKind,
 )
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
 )
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..admission_locking import (
     AdmissionLockBusy,

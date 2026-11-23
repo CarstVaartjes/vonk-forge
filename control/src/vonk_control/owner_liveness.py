@@ -35,14 +35,14 @@ from sqlalchemy import Text, cast, exists, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import (
     EnrollmentRecordState,
     InstallationNodeState,
     InstallationState,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 
 from . import agent_operation_states
 from .agent_contacts import last_seen

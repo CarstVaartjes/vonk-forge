@@ -25,7 +25,7 @@ from types import SimpleNamespace
 
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import AgentFailureKind, canonical_message
+from vonk_agent_protocol.agent_operations import AgentFailureKind
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     FailureCode,
@@ -33,6 +33,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeFailed, outcome_body
 from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.retry import result_disposition
 from vonk_control.inventory.repository import (
     InventoryRepository,

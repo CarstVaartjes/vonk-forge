@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentClaim, AgentOperation, canonical_payload
+from vonk_agent_protocol.agent_operations import AgentOperation
+from vonk_agent_protocol.contracts import AgentClaim, canonical_payload
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.state_machines import NodeIdentityState
 

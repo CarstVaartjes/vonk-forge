@@ -14,9 +14,9 @@ from vonk_forge_contracts import (
 )
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.inventory import GPU_RESET_RECOVERY, GpuHealth, MemoryPool
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.inventory.repository import (

@@ -4,8 +4,8 @@ import os
 import subprocess
 from datetime import datetime
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.host_helper import SignedHostHelperGrant
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .test_artifact_residue_stop import (
     test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt as _ordinary_job_target_recovery,

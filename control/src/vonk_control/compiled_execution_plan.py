@@ -53,10 +53,10 @@ from vonk_agent_protocol.compiled_execution_plan import (
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledRuntimeImage as WireCompiledRuntimeImage,
 )
-from vonk_agent_protocol.contracts import (
+from vonk_agent_protocol.document_limits import (
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
-    canonical_message,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .content_identity import same_model_object
 from .runtime.spec_contract import RuntimeSpec

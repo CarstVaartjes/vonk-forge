@@ -8,8 +8,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from .contracts import canonical_message
-from .wire_model import WireModel
+from .wire_model import WireModel, canonical_message
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 

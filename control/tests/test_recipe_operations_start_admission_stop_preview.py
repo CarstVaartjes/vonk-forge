@@ -13,8 +13,8 @@ from typing import Any
 import pytest
 from sqlalchemy import event, select
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.host_helper import ContainerRuntimeAction
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.admission_locking import AdmissionLockBusy as NodeLocksHeld
 from vonk_control.bounded_json import require_mapping
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator

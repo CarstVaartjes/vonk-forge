@@ -17,13 +17,9 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import (
-    AgentOperation,
-    AgentProtocolError,
-    AgentUpgradePayload,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentUpgradePayload
 from vonk_agent_protocol.host_helper import (
     HOST_HELPER_AUTHORITY,
     MAX_HOST_HELPER_GRANT_SECONDS,
@@ -37,7 +33,6 @@ from vonk_agent_protocol.host_helper import (
     HostOperationKind,
     HostRuntimeRequest,
     InstallVonkDebOperation,
-    RecipeReconciliationIdentity,
     SignedHostHelperGrant,
     host_helper_grant_signing_bytes,
 )
@@ -50,9 +45,11 @@ from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import (
     RecipeReconcilePayload,
+    RecipeReconciliationIdentity,
     RecipeUninstallPayload,
 )
 from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdentityState
+from vonk_agent_protocol.wire_model import AgentProtocolError, canonical_message
 
 from . import agent_operation_states
 from .agent_jobs.contracts import _WORKLOAD_INTENT_OPERATIONS

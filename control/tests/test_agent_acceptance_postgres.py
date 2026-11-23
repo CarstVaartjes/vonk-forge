@@ -15,18 +15,14 @@ from sqlalchemy import event, func, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import (
-    AgentClaim,
-    AgentProgress,
-    AgentResult,
-    canonical_message,
-)
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.contracts import AgentClaim, AgentProgress, AgentResult
 from vonk_agent_protocol.inventory import InventoryRequest
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_acceptance
 from vonk_control.agent_api.common import AgentApiServices
 from vonk_control.agent_jobs.service import AgentJobService

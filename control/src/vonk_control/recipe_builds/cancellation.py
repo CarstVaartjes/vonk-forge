@@ -13,13 +13,13 @@ from sqlalchemy.orm import Session
 from vonk_forge_contracts import read_recipe
 
 from vonk_agent_protocol.agent_words import Disposition, ProfileChildJobKind
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
 )
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..admission_locking import is_admission_contention
 from ..agent_jobs.predicates import _JsonFlagIsTrue

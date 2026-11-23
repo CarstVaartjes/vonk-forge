@@ -18,12 +18,13 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from vonk_agent_protocol.agent_operations import AgentFailureResult
 from vonk_agent_protocol.agent_words import FailureStage
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentFailureResult, canonical_message
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.availability_production import (
     build_observation as availability_production_obs,

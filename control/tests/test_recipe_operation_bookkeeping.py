@@ -20,13 +20,14 @@ from pathlib import Path
 import pytest
 from sqlalchemy import delete, select
 
+from vonk_agent_protocol.agent_operations import RecipeStartResult
 from vonk_agent_protocol.build_import import RecipeBuildCleanupEvidence
-from vonk_agent_protocol.contracts import RecipeStartResult, canonical_message
 from vonk_agent_protocol.host_helper import ContainerRuntimeAction
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload, RecipeStopResult
 from vonk_agent_protocol.state_machines import ReservationState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import recipe_operations
 from vonk_control.bounded_json import require_mapping
 from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding

@@ -45,7 +45,7 @@ CANDIDATE_ONLY = {
 # RecipeLibrarySnapshot, RecipePackageEntry): their fields follow the release.
 # ManagedCatalogSyncRequest is built by keyword: a reviewed claim like the rest.
 ENTRY_POINTS: dict[str, frozenset[str]] = {
-    "vonk_agent_protocol.contracts": frozenset({"AgentResult", "RecipeStartResult"}),
+    "vonk_agent_protocol.contracts": frozenset({"AgentResult", "RESULT_MODELS"}),
     "vonk_agent_protocol.outcome": frozenset({"OutcomeDone", "outcome_body"}),
     "vonk_agent_protocol.reason_codes.catalog": frozenset({"CatalogSyncCode"}),
     "vonk_control.api.production": frozenset({"production_app"}),

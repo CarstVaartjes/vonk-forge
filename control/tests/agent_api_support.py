@@ -24,8 +24,8 @@ from starlette.types import Message
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as AgentCompiledExecutionPlan,
 )
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_api.common import (
     AgentApiServices,
 )

@@ -14,8 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -23,6 +22,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 from vonk_agent_protocol.state_machines import RouteState, RunState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..admission_locking import ConstraintReplay, admitting, is_admission_contention
 from ..bounded_json import require_mapping

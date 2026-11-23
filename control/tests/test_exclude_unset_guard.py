@@ -14,10 +14,10 @@ from pathlib import Path
 import pytest
 
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.wire_model import (
     OperationMemberProgress,
     OperationProgress,
+    canonical_message,
 )
 
 from .parsed_sources import parse_file

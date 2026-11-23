@@ -11,9 +11,8 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -24,6 +23,7 @@ from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.state_machines import RouteState, RunState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states
 from ..agent_jobs.retry import superseded_cancellation_deadline

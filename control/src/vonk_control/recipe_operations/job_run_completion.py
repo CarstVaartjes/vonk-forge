@@ -8,7 +8,6 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     TERMINAL_LIFECYCLE_STATES,
     LifecycleState,
@@ -16,6 +15,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.state_machines import RunState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states as aos
 from ..fleet_profiles.stop_authority import (

@@ -13,9 +13,9 @@ from sqlalchemy import event, select, text
 from sqlalchemy.exc import OperationalError
 
 from cluster_profiles.cli_render.dispatch import render_payload
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.resources import StorageDemandCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,

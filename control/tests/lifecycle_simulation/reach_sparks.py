@@ -26,8 +26,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS, StaleAgentAttempt
 from vonk_control.agent_jobs.evidence import _failure_result
 from vonk_control.inventory.items import inventory_items

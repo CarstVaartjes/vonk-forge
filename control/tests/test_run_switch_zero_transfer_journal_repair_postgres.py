@@ -17,10 +17,10 @@ from psycopg.errors import LockNotAvailable
 from sqlalchemy import delete, event, inspect, select
 from sqlalchemy.engine import ExceptionContext
 
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import JournalRepairCode
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control import terminal_history_collection
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.db.startup import initialize_database

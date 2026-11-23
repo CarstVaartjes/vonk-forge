@@ -4,12 +4,12 @@ from typing import Literal
 
 from starlette.responses import Response
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.error_response import (
     BoundedErrorResponse,
     ErrorContextResponse,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..categorized_errors import BookkeepingUnknown
 

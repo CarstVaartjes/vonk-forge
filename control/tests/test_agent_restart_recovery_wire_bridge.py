@@ -27,18 +27,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from tests.wire_probes import prebuilt_probe
+from vonk_agent_protocol.agent_operations import ArtifactDistributionResult
 from vonk_agent_protocol.agent_state import (
     AgentExecutorProbeMode,
     AgentExecutorProbeRequest,
 )
-from vonk_agent_protocol.contracts import (
-    AgentResult,
-    ArtifactDistributionPayload,
-    ArtifactDistributionResult,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentResult, ArtifactDistributionPayload
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, WaitReason
 from vonk_agent_protocol.outcome import OutcomeDone, OutcomeUnknown
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource

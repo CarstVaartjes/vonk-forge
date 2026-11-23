@@ -16,8 +16,8 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.contracts import AgentDirective, AgentProgress, AgentResult
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.enrollment import (
     ActivateRequest,
     EnrollmentObservationReply,

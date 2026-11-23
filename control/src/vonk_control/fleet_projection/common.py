@@ -14,7 +14,6 @@ from vonk_forge_contracts import (
 )
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.failure_evidence import ModelStoreLayoutFault
 from vonk_agent_protocol.gpu_clock import (
     GpuClockPolicy,
@@ -33,6 +32,7 @@ from vonk_agent_protocol.state_machines import CertificateState
 from vonk_agent_protocol.swap import SwapIntent, SwapPolicy
 from vonk_agent_protocol.wire_model import (
     MAX_TELEMETRY_CAPACITY_BYTES,
+    canonical_message,
     strict_json_datetime,
 )
 

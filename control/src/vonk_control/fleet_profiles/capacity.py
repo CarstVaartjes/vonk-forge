@@ -22,12 +22,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.inventory import MemoryPool
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import DesiredAssignmentState, ReservationState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..content_identity import same_image
 from ..fleet_profile_contract.applications import FleetProfileApplicationProgress

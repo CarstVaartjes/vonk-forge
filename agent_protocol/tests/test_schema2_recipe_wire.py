@@ -8,18 +8,15 @@ from pathlib import Path
 
 import pytest
 
+from vonk_agent_protocol.agent_operations import AgentOperation, RecipeStartResult
 from vonk_agent_protocol.compiled_execution_plan import (
     MAX_COMPILED_EXECUTION_PLAN_MOUNTS,
     CompiledExecutionPlan,
     CompiledJobInput,
 )
-from vonk_agent_protocol.contracts import (
-    AgentClaim,
-    AgentOperation,
-    AgentProtocolError,
-    RecipeStartResult,
-)
+from vonk_agent_protocol.contracts import AgentClaim
 from vonk_agent_protocol.recipe_operations import RecipeOperationRequest
+from vonk_agent_protocol.wire_model import AgentProtocolError
 
 PLAN = json.loads(
     (Path(__file__).parent / "fixtures" / "compiled-execution-plan-v2.json").read_text()

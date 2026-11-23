@@ -9,19 +9,19 @@ from pathlib import Path
 import pytest
 from pydantic import ConfigDict, Field, JsonValue, RootModel
 
-from vonk_agent_protocol.contracts import (
-    AgentClaim,
-    AgentProtocolError,
-    canonical_message,
-    canonical_payload,
-)
+from vonk_agent_protocol.contracts import AgentClaim, canonical_payload
 from vonk_agent_protocol.host_helper import (
     HOST_HELPER_GRANT_DOMAIN,
     HostHelperGrantClaims,
     HostRuntimeRequest,
     host_helper_grant_signing_bytes,
 )
-from vonk_agent_protocol.wire_model import OperationProgress, WireModel
+from vonk_agent_protocol.wire_model import (
+    AgentProtocolError,
+    OperationProgress,
+    WireModel,
+    canonical_message,
+)
 
 VECTORS = Path(__file__).parents[1] / "src/vonk_agent_protocol/vectors"
 

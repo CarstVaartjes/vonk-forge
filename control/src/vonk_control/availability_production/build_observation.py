@@ -8,14 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import RecipeDefinition
 
+from vonk_agent_protocol.agent_operations import AgentFailureResult
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.build_import import RecipeBuildEvidence
-from vonk_agent_protocol.contracts import AgentFailureResult, canonical_message
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 
 from ..failure_classification import disposition, is_security_failure
 from ..failure_evidence import safe_text

@@ -11,8 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.reason_codes.recipes import ReconcileCode
 from vonk_agent_protocol.recipe_operations import (
@@ -20,6 +19,7 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeUninstallPayload,
 )
 from vonk_agent_protocol.state_machines import InstallationNodeState, InstallationState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..admission_locking import (
     AdmissionLockBusy,

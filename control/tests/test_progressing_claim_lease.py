@@ -12,7 +12,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
+)
 from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS, PROGRESSING_LEASE
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 

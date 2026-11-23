@@ -13,9 +13,9 @@ import pytest
 from sqlalchemy import select
 from starlette.types import Message
 
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_api.authority import RESULT_REFUSALS
 from vonk_control.agent_api.common import (
     AgentApiServices,

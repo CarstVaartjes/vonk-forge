@@ -618,7 +618,9 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
             ).model_dump(mode="json", exclude_none=True)
     now = RECIPE_NOW + timedelta(seconds=5)
     if superseded:
-        from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+        from vonk_agent_protocol.agent_operations import (
+            AgentOperation as WireAgentOperation,
+        )
 
         with sessions.begin() as session:
             service._admit_workload_intent(

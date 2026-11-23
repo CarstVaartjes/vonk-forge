@@ -12,7 +12,6 @@ from pydantic import field_validator
 from sqlalchemy import func, literal_column, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.state_machines import RouteState
 from vonk_agent_protocol.telemetry import (
@@ -21,7 +20,7 @@ from vonk_agent_protocol.telemetry import (
     TelemetryRequest,
     TelemetrySample,
 )
-from vonk_agent_protocol.wire_model import strict_json_datetime
+from vonk_agent_protocol.wire_model import canonical_message, strict_json_datetime
 
 from ..categorized_errors import InvalidValue
 from ..dialect_insert import dialect_insert

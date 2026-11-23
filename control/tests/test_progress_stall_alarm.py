@@ -16,12 +16,12 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select, update
 
+from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentOperation
 from vonk_agent_protocol.agent_words import (
     ProfileChildPhase,
     ProfileReasonSeverity,
     ProgressPhase,
 )
-from vonk_agent_protocol.contracts import AgentFailureKind, AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     ProgressAlarmCode,

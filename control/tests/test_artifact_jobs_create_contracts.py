@@ -14,8 +14,7 @@ from sqlalchemy import event, select
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
-from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as AgentOperationKind
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
@@ -27,7 +26,7 @@ from vonk_agent_protocol.recipe_jobs import (
 from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control.agent_jobs.contracts import (
     _WORKLOAD_INTENT_OPERATIONS,
     fencing_intent,

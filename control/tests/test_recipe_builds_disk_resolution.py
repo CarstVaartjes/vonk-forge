@@ -16,9 +16,9 @@ from vonk_forge_contracts import document_sha256, read_recipe
 import vonk_control.availability_production.production as availability_production_module
 import vonk_control.runtime.adapters as runtime_adapters_module
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,
 )

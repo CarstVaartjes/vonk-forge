@@ -26,7 +26,6 @@ from vonk_forge_contracts import (
 )
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
@@ -35,6 +34,7 @@ from vonk_agent_protocol.host_helper import (
 )
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 from vonk_agent_protocol.route_activation import SupervisorPhase
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_contacts import record_contact
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.bounded_json import require_mapping, require_sequence

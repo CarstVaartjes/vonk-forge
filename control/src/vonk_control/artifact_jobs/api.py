@@ -17,7 +17,6 @@ from fastapi import (
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import StreamingResponse
 
-from vonk_agent_protocol.contracts import AgentProtocolError
 from vonk_agent_protocol.job_limits import (
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
@@ -35,6 +34,7 @@ from vonk_agent_protocol.outcome import (
     UnknownOutcomeError,
 )
 from vonk_agent_protocol.recipe_jobs import RecipeJobInputRequest, RecipeJobOutputLimits
+from vonk_agent_protocol.wire_model import AgentProtocolError
 from vonk_control.operator_receipt_contract import ReceiptPolicy
 
 from ..auth import Actor, agent_identity_from_scope

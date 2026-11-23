@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 from pydantic import BaseModel
 
-from vonk_agent_protocol.contracts import AgentProtocolError, canonical_message
 from vonk_agent_protocol.distribution import DistributionAssignment, DistributionObject
+from vonk_agent_protocol.wire_model import AgentProtocolError, canonical_message
 
 
 def _assignment() -> DistributionAssignment:

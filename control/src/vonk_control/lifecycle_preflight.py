@@ -16,8 +16,7 @@ from pydantic import (
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     ProgressAlarmCode,
@@ -26,6 +25,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
 from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .failure_classification import is_security_failure
 from .inventory.items import inventory_items

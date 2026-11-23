@@ -11,10 +11,9 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, object_session
 from sqlalchemy.sql.elements import ColumnElement
 
+from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentOperation
 from vonk_agent_protocol.agent_words import Disposition, FailureStage
 from vonk_agent_protocol.contracts import (
-    AgentFailureKind,
-    AgentOperation,
     canonical_payload,
     validate_result_for_operation,
 )

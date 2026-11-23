@@ -22,7 +22,7 @@ from vonk_forge_contracts.resolver import (
     validate_recipe_models,
 )
 
-from vonk_agent_protocol.host_helper import MAX_ARGV_BYTES
+from vonk_agent_protocol.document_limits import MAX_ARGV_BYTES
 from vonk_agent_protocol.telemetry import EngineFormat
 
 from ..platform_ports import rebind_port_argument, serving_port

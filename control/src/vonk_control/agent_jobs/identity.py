@@ -11,18 +11,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import (
-    AgentClaim,
-    AgentProgress,
-    AgentResult,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentClaim, AgentProgress, AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
     SecurityRefusalReason,
 )
 from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..agent_contacts import record_contact
 from ..agent_operation_facts import aware as _aware

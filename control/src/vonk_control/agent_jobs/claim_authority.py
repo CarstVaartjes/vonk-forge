@@ -9,15 +9,10 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from vonk_agent_protocol.agent_operations import AgentFailureResult, AgentOperation
 from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import (
-    AgentFailureResult,
-    AgentOperation,
-    AgentResult,
-    AgentUpgradePayload,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentResult, AgentUpgradePayload
 from vonk_agent_protocol.lifecycle_vocabulary import (
     FailureCode,
     InvalidRequestReason,
@@ -28,6 +23,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states
 from ..agent_operation_facts import (

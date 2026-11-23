@@ -7,7 +7,6 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -15,7 +14,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import SecurityRefusalError
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 
 from ..admission_locking import ConstraintDefect
 from ..jobs.documents import AvailabilityModelChild
