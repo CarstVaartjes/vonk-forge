@@ -2036,6 +2036,14 @@ progress {
   height: 1px;
   background: var(--line-strong);
 }
+/* A fieldset used as a plain labelled group; zero specificity, so a component's own rules win. */
+:where(.group-reset) {
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
 .content-frame {
   width: min(100%, 100rem);
   margin: 0 auto;
@@ -2094,9 +2102,17 @@ progress {
   padding: clamp(1.25rem, 3.5vw, 3.5rem);
 }
 
+/* The version line sits after <main>, so it is a page footer; it keeps the content gutters. */
+.shell > .shell-footer {
+  padding: 0 clamp(1.25rem, 3.5vw, 3.5rem) clamp(1.25rem, 3.5vw, 3.5rem);
+}
+
 @media (max-width: 54rem) {
   .shell > main {
     padding: 1.25rem 1rem 2.5rem;
+  }
+  .shell > .shell-footer {
+    padding: 0 1rem 2.5rem;
   }
 }
 
@@ -2262,6 +2278,9 @@ progress {
 .connection-examples {
   display: grid;
   gap: 0.5rem;
+}
+.connection-examples figure {
+  margin: 0;
 }
 .connection-examples pre {
   margin: 0;
@@ -2550,6 +2569,13 @@ progress {
   padding: 0;
   list-style: none;
   pointer-events: none;
+}
+.toast-region ol {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 .toast {
   display: grid;
@@ -2867,6 +2893,9 @@ progress {
     box-shadow: inset 0 2px var(--green);
   }
   .shell > main {
+    padding-bottom: 5.5rem;
+  }
+  .shell > .shell-footer {
     padding-bottom: 5.5rem;
   }
   .toast-region {

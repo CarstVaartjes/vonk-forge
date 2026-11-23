@@ -86,7 +86,7 @@ test("hashes a synthetic large blob through bounded worker chunks", async () => 
   expect(chunks).toHaveLength(18);
   expect(Math.max(...chunks)).toBe(1024 * 1024);
   expect(progress.at(-1)).toBe(blob.size);
-  expect(harness.workers[0].terminated).toBe(true);
+  expect(harness.workers[0]?.terminated).toBe(true);
 });
 
 test("terminates hashing and releases the large blob when the operator cancels", async () => {
@@ -103,5 +103,5 @@ test("terminates hashing and releases the large blob when the operator cancels",
 
   await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   expect(chunks.length).toBeLessThan(20);
-  expect(harness.workers[0].terminated).toBe(true);
+  expect(harness.workers[0]?.terminated).toBe(true);
 });

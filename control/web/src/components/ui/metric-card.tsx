@@ -27,7 +27,7 @@ export function MetricCard({
   range: MetricRange;
   data: MetricsSeriesResponse | null | undefined;
   line: "average" | "peak";
-  threshold?: { value: number; label: string };
+  threshold?: { value: number; label: string } | undefined;
   color: string;
   crosshair?: { at: number | null; onChange(at: number | null): void };
 }) {

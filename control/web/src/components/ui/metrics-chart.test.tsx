@@ -32,7 +32,7 @@ const model = {
   source: "gateway",
   summary_total: true,
 } as const;
-const SPECS: Record<string, MetricSpec> = {
+const SPECS = {
   gpu_utilization: spec("gpu_utilization", "GPU utilisation", "percent"),
   host_memory_used: spec("host_memory_used", "Unified memory used", "bytes"),
   gpu_temperature: spec("gpu_temperature", "GPU temperature", "celsius"),
@@ -42,7 +42,7 @@ const SPECS: Record<string, MetricSpec> = {
     hint: "Counted by the gateway.",
   }),
   certificate_expiry: spec("certificate_expiry", "Certificate expiry", "seconds"),
-};
+} satisfies Record<string, MetricSpec>;
 const summary = { latest: 80, average: 50, peak: 90, total: null, share: null, coverage: 1 };
 
 /** The Controller answers with each metric's own spec; the fake does the same. */
@@ -52,7 +52,7 @@ const fakeApi = (metricsSeries: (metric: string, ...rest: never[]) => unknown) =
     metricsSeries: (metric: string, ...rest: never[]) =>
       Promise.resolve(metricsSeries(metric, ...rest)).then((data) => ({
         ...(data as MetricsSeriesResponse),
-        spec: SPECS[metric],
+        spec: Object.values(SPECS).find((item) => item.metric === metric),
       })),
   }) as unknown as ControlApi;
 
