@@ -119,7 +119,19 @@ Run `git diff --check` before committing. Use the active task worktree for all
 commands and a writable task-specific cache. Keep `tests` and `control/tests`
 in separate invocations.
 
-For the complete local repository and Controller pytest suites, run:
+**The local check before pushing is `scripts/test changed [--base REF]`** (base
+defaults to `origin/main`). It runs the fast guards (`scripts/test guards`), then
+only the test files your diff edits and those that import a touched module,
+statically (an `ast` import graph over `tests/`, `control/tests/` and
+`agent_protocol/tests/`, followed through test support modules and conftests; a
+touched package `__init__` selects importers of anything inside the package).
+It prints the selected files first, runs `control/tests` and the root tests in
+separate pytest processes with `-n 2`, and prints which selected files hold
+`built_image`, `corpus_acceptance` or Postgres tests: those run in CI (or
+`scripts/test-vm-lane`). An empty selection runs the guards only. Full suites run
+in batch CI; do not run them locally.
+
+For the complete local repository and Controller pytest suites (rarely needed), run:
 
 ```bash
 scripts/test-local

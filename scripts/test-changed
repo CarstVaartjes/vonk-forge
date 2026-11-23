@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Local "test what my change touches" (scripts/test changed [--base REF]):
+# the fast guards, then only the test files the diff edits or that import a
+# touched module. Full suites run in batch CI.
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$root"
+
+base=origin/main
+while (($#)); do
+    case "$1" in
+        --base) base=${2:?--base needs a ref}; shift 2 ;;
+        -h|--help) echo "Usage: scripts/test changed [--base REF]"; exit 0 ;;
+        *) echo "Usage: scripts/test changed [--base REF]" >&2; exit 2 ;;
+    esac
+done
+
+status=0
+echo "== guards =="
+scripts/test guards -- -n 2 || status=1
+
+# Committed and working-tree changes since the merge base, plus untracked files.
+patch=$(mktemp "${TMPDIR:-/tmp}/test-changed-patch.XXXXXX")
+selected=$(mktemp "${TMPDIR:-/tmp}/test-changed-files.XXXXXX")
+trap 'rm -f "$patch" "$selected"' EXIT
+git diff -M "$(git merge-base "$base" HEAD)" >"$patch"
+untracked=()
+while IFS= read -r path; do untracked+=("$path"); done < <(git ls-files --others --exclude-standard)
+python3 -m tools.touched_tests "$patch" "${untracked[@]}" >"$selected"
+
+if [[ ! -s "$selected" ]]; then
+    echo "== no test file edited or importing a touched module; guards only =="
+    exit "$status"
+fi
+
+echo "== selected test files =="
+cat "$selected"
+# Marked tests are deselected below; name the files that hold them.
+ci_only=$(grep -lE 'mark\.(postgres|built_image|corpus_acceptance)|pytestmark' \
+    $(awk '{print $2}' "$selected") 2>/dev/null || true)
+if [[ -n "$ci_only" ]]; then
+    echo "built_image, corpus_acceptance and postgres tests in these files run in CI (or scripts/test-vm-lane):"
+    echo "$ci_only" | sed 's/^/  /'
+fi
+
+for suite in control repository; do
+    files=$(mktemp "${TMPDIR:-/tmp}/test-changed-suite.XXXXXX")
+    awk -v suite="$suite" '$1 == suite {print $2}' "$selected" >"$files"
+    if [[ -s "$files" ]]; then
+        echo "== $suite =="
+        scripts/test "$suite" --files-from "$files" --markers "not postgres and not built_image and not corpus_acceptance" -- -n 2 || status=1
+    fi
+    rm -f "$files"
+done
+exit "$status"
