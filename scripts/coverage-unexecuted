@@ -14,9 +14,57 @@ import json
 import sys
 from collections import defaultdict
 from pathlib import Path
+from typing import NotRequired, TypedDict
 
 
-def python_candidates(report: dict) -> tuple[list[str], list[str]]:
+class _PythonLines(TypedDict):
+    executed_lines: list[int]
+    missing_lines: list[int]
+
+
+class _PythonFile(_PythonLines):
+    functions: NotRequired[dict[str, _PythonLines]]
+
+
+class PythonReport(TypedDict):
+    """The part of `coverage json` this script reads."""
+
+    files: dict[str, _PythonFile]
+
+
+class _RustLineSummary(TypedDict):
+    count: int
+    covered: int
+
+
+class _RustSummary(TypedDict):
+    lines: _RustLineSummary
+
+
+class _RustFile(TypedDict):
+    filename: str
+    summary: _RustSummary
+
+
+class _RustFunction(TypedDict):
+    name: str
+    count: int
+    filenames: list[str]
+    regions: list[list[int]]
+
+
+class _RustExport(TypedDict):
+    files: list[_RustFile]
+    functions: list[_RustFunction]
+
+
+class RustReport(TypedDict):
+    """The part of `cargo llvm-cov --json` this script reads."""
+
+    data: list[_RustExport]
+
+
+def python_candidates(report: PythonReport) -> tuple[list[str], list[str]]:
     files, functions = [], []
     for path, data in sorted(report["files"].items()):
         if not data["missing_lines"]:
@@ -31,7 +79,7 @@ def python_candidates(report: dict) -> tuple[list[str], list[str]]:
     return files, functions
 
 
-def rust_candidates(report: dict) -> tuple[list[str], list[str]]:
+def rust_candidates(report: RustReport) -> tuple[list[str], list[str]]:
     export = report["data"][0]
     files = [
         item["filename"]
@@ -40,7 +88,7 @@ def rust_candidates(report: dict) -> tuple[list[str], list[str]]:
     ]
     # Generic functions have one entry per instantiation at the same line: the
     # function is unexecuted only when every instantiation is.
-    by_place: dict[tuple[str, int], list[dict]] = defaultdict(list)
+    by_place: dict[tuple[str, int], list[_RustFunction]] = defaultdict(list)
     for function in export["functions"]:
         by_place[(function["filenames"][0], function["regions"][0][0])].append(function)
     functions = [
