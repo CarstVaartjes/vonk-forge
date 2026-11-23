@@ -66,6 +66,10 @@ impl Exited {
         self.claim_at("http://127.0.0.1:9/").await
     }
 
+    #[expect(
+        clippy::used_underscore_binding,
+        reason = "a field held to keep its temporary directory alive and read once for its path"
+    )]
     async fn claim_at(&self, endpoint: &str) -> ExecutionResult {
         let client = AgentHttpClient::for_http_test(endpoint, NODE_ID);
         let executor = RecipeExecutor {

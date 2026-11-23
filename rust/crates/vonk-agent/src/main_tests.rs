@@ -13,7 +13,7 @@ async fn refused_control_reports_and_resumes_without_certificate_change() {
         while tokio::time::Instant::now() < deadline {
             if authority
                 .observe_before_claim(async { reports.set(reports.get() + 1) }, |s| {
-                    statuses.borrow_mut().push(s.to_owned())
+                    statuses.borrow_mut().push(s.to_owned());
                 })
                 .await
                 .is_none()
@@ -55,7 +55,7 @@ async fn running_workloads_are_reported_while_a_long_claim_executes() {
     let reports = RefCell::new(Vec::new());
     let output = super::observing_during(
         async {
-            tokio::time::sleep(Duration::from_secs(40 * 60)).await;
+            tokio::time::sleep(Duration::from_mins(40)).await;
             "downloaded"
         },
         super::RUN_OBSERVATION_INTERVAL,
@@ -66,13 +66,9 @@ async fn running_workloads_are_reported_while_a_long_claim_executes() {
     let reports = reports.into_inner();
     // The Controller calls a rank stale after five minutes of silence.
     let mut last = Duration::ZERO;
-    for at in reports
-        .iter()
-        .copied()
-        .chain([Duration::from_secs(40 * 60)])
-    {
+    for at in reports.iter().copied().chain([Duration::from_mins(40)]) {
         assert!(
-            at - last < Duration::from_secs(60),
+            at.checked_sub(last).unwrap() < Duration::from_secs(60),
             "silent from {last:?} to {at:?}"
         );
         last = at;
@@ -143,8 +139,8 @@ async fn inventory_lane_survives_refusal_and_reports_after_recovery() {
     );
     tokio::pin!(lane);
     tokio::select! {
-        _ = &mut lane => panic!("inventory lane exited"),
-        _ = tokio::time::sleep(Duration::from_secs(180)) => {}
+        () = &mut lane => panic!("inventory lane exited"),
+        () = tokio::time::sleep(Duration::from_secs(180)) => {}
     }
     assert!(recovered.get());
 }
@@ -172,12 +168,12 @@ async fn inventory_collections(stop_at: Option<u64>) -> Vec<u64> {
                 tokio::time::sleep(Duration::from_secs(at)).await;
                 stops.stopped();
             }
-            future::pending::<()>().await
+            future::pending::<()>().await;
         };
         tokio::select! {
-            _ = &mut lane => panic!("inventory lane exited"),
-            _ = stop => {}
-            _ = tokio::time::sleep(Duration::from_secs(130)) => {}
+            () = &mut lane => panic!("inventory lane exited"),
+            () = stop => {}
+            () = tokio::time::sleep(Duration::from_secs(130)) => {}
         }
     }
     collected.into_inner()

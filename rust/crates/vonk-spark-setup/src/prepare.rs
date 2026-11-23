@@ -308,8 +308,8 @@ pub fn prepare_setup_with_authority(
         }
         if !safe_existing_file(&paths.ca, paths.required_owner).unwrap_or(false)
             || !safe_existing_file(&paths.helper_authority, paths.required_owner).unwrap_or(false)
-            || !installation::read_generated(&paths.ca, MAX_CA_BYTES, paths.required_owner)
-                .is_some_and(|ca| verify_ca(&ca, &config.ca_sha256).is_ok())
+            || installation::read_generated(&paths.ca, MAX_CA_BYTES, paths.required_owner)
+                .is_none_or(|ca| verify_ca(&ca, &config.ca_sha256).is_err())
             || installed_helper_authority(paths).is_err()
         {
             // Re-observe through the pinned CA ingress, never invent authority.
@@ -350,9 +350,10 @@ pub(super) fn encode_apply_frame(envelope: &ApplyEnvelope) -> Result<Vec<u8>, Se
     if payload.is_empty() || payload.len() > MAX_APPLY_FRAME_BYTES {
         return Err(SetupError::PrivilegedInput);
     }
+    let length = u32::try_from(payload.len()).map_err(|_| SetupError::PrivilegedInput)?;
     let mut frame = Vec::with_capacity(APPLY_FRAME_MAGIC.len() + 4 + payload.len() + 32);
     frame.extend_from_slice(APPLY_FRAME_MAGIC);
-    frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    frame.extend_from_slice(&length.to_be_bytes());
     frame.extend_from_slice(&payload);
     frame.extend_from_slice(&Sha256::digest(&payload));
     Ok(frame)
@@ -416,7 +417,7 @@ pub(super) fn read_bounded_regular(path: &Path, maximum: usize) -> Result<Vec<u8
     if !same_file(&before, &open) {
         return Err(SetupError::ReleaseSignature);
     }
-    let mut raw = Vec::with_capacity(open.len() as usize);
+    let mut raw = Vec::with_capacity(usize::try_from(open.len()).unwrap_or_default());
     Read::by_ref(&mut input)
         .take((maximum + 1) as u64)
         .read_to_end(&mut raw)

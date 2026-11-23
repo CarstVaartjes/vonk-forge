@@ -411,7 +411,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
 }
 
 /// Runs before receipt delivery and claims, including an entirely idle fleet.
-/// Startup reaches this same pass through run_once; it never dispatches effects.
+/// Startup reaches this same pass through `run_once`; it never dispatches effects.
 /// A claim this process is executing (on the lane or beside it) is its
 /// executor's to settle and is never probed.
 pub async fn reobserve_operations<E: Executor>(

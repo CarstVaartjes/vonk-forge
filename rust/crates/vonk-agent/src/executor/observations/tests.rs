@@ -375,7 +375,7 @@ fn lifecycle_inspector(socket: &Path, running: bool) -> thread::JoinHandle<()> {
         };
         let body = canonical_generated_json(&response).unwrap();
         stream
-            .write_all(&(body.len() as u32).to_be_bytes())
+            .write_all(&u32::try_from(body.len()).unwrap().to_be_bytes())
             .unwrap();
         stream.write_all(&body).unwrap();
     })
@@ -567,19 +567,6 @@ async fn durable_partial_history_page_does_not_starve_an_unrelated_ready_claim()
 
 #[tokio::test]
 async fn ended_observation_loss_does_not_hold_the_next_claim() {
-    let directory = tempdir().unwrap();
-    let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
-    let client = RecordingClient {
-        cancel_requested: false,
-        claim: Arc::new(Mutex::new(Some(claim()))),
-        fail_heartbeat: false,
-        heartbeats: Arc::new(Mutex::new(Vec::new())),
-        results: Arc::new(Mutex::new(Vec::new())),
-    };
-    let events = Arc::new(Mutex::new(Vec::new()));
-    struct RecoveringExecutor {
-        events: Arc<Mutex<Vec<&'static str>>>,
-    }
     #[async_trait(?Send)]
     impl Executor for RecoveringExecutor {
         async fn observe(
@@ -604,6 +591,19 @@ async fn ended_observation_loss_does_not_hold_the_next_claim() {
             }
         }
     }
+    struct RecoveringExecutor {
+        events: Arc<Mutex<Vec<&'static str>>>,
+    }
+    let directory = tempdir().unwrap();
+    let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+    let client = RecordingClient {
+        cancel_requested: false,
+        claim: Arc::new(Mutex::new(Some(claim()))),
+        fail_heartbeat: false,
+        heartbeats: Arc::new(Mutex::new(Vec::new())),
+        results: Arc::new(Mutex::new(Vec::new())),
+    };
+    let events = Arc::new(Mutex::new(Vec::new()));
     let executor = RecoveringExecutor {
         events: events.clone(),
     };
@@ -684,7 +684,7 @@ async fn exited_serving_workload_carries_its_retained_output() {
             }
             let body = canonical_generated_json(&response).unwrap();
             stream
-                .write_all(&(body.len() as u32).to_be_bytes())
+                .write_all(&u32::try_from(body.len()).unwrap().to_be_bytes())
                 .unwrap();
             stream.write_all(&body).unwrap();
         }
@@ -834,7 +834,7 @@ async fn an_observation_names_the_generation_of_its_run() {
         };
         let body = canonical_generated_json(&response).unwrap();
         stream
-            .write_all(&(body.len() as u32).to_be_bytes())
+            .write_all(&u32::try_from(body.len()).unwrap().to_be_bytes())
             .unwrap();
         stream.write_all(&body).unwrap();
         inspected.run_generation

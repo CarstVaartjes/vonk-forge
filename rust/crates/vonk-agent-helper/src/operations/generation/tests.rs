@@ -361,11 +361,11 @@ fn newer_generation_survives_failed_start_and_old_exact_stop_without_rewinding_f
     executor
         .update_runtime_generation_fence(&current, RuntimeGenerationFenceUse::Start)
         .unwrap();
-    let nonce =
-        match executor.accept_installation_intent(current.installation_id, None, Some(1), false) {
-            Err(OperationError::InstallationIntentObservationRequired { nonce }) => nonce,
-            _ => panic!("current intent challenge was not issued"),
-        };
+    let Err(OperationError::InstallationIntentObservationRequired { nonce }) =
+        executor.accept_installation_intent(current.installation_id, None, Some(1), false)
+    else {
+        panic!("current intent challenge was not issued")
+    };
     // A new authorized Start reserves its generation before validating or
     // invoking Docker. Force it to fail at the malformed launch boundary,
     // then prove the old named container can still be removed: it is this

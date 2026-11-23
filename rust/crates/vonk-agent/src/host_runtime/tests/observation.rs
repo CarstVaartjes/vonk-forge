@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// Real Unix framing and the production spawn_blocking boundary prove
+/// Real Unix framing and the production `spawn_blocking` boundary prove
 /// ownership survives abandoned logical pages. Only native process-running
 /// evidence is a fixture response; permits/socket/request cleanup are real.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -24,7 +24,10 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
     impl Drop for Gate {
         fn drop(&mut self) {
             let mut cleanup_complete = true;
-            let tasks = self.tasks.lock().unwrap_or_else(|error| error.into_inner());
+            let tasks = self
+                .tasks
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             for task in tasks.iter() {
                 task.abort();
             }
@@ -32,7 +35,7 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
                 .release
                 .0
                 .lock()
-                .unwrap_or_else(|error| error.into_inner()) = true;
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
             self.release.1.notify_all();
             self.stop.store(true, Ordering::SeqCst);
             if let Some(server) = self.server.take() {
@@ -52,15 +55,14 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
             {
                 std::thread::sleep(Duration::from_millis(1));
             }
-            cleanup_complete &= tasks.iter().all(|task| task.is_finished());
+            cleanup_complete &= tasks.iter().all(tokio::task::AbortHandle::is_finished);
             // An aborted async task can leave real spawn_blocking work
             // alive. Returning all permits fences its request cleanup.
             let slots = super::super::background_inspection_slots(&self.socket);
             loop {
-                if let Ok(permits) = slots
-                    .clone()
-                    .try_acquire_many_owned(BACKGROUND_RUN_INSPECTION_CONCURRENCY as u32)
-                {
+                if let Ok(permits) = slots.clone().try_acquire_many_owned(
+                    u32::try_from(BACKGROUND_RUN_INSPECTION_CONCURRENCY).unwrap(),
+                ) {
                     drop(permits);
                     break;
                 }
@@ -77,9 +79,10 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
                     let _retained = fixture.keep();
                 }
                 eprintln!("inspection fixture cleanup unresolved; owned files retained");
-                if !std::thread::panicking() {
-                    panic!("inspection fixture cleanup exceeded its elapsed budget or failed");
-                }
+                assert!(
+                    std::thread::panicking(),
+                    "inspection fixture cleanup exceeded its elapsed budget or failed"
+                );
             }
         }
     }
@@ -187,7 +190,7 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
                     active.fetch_sub(1, Ordering::SeqCst);
                 }
                 stream
-                    .write_all(&(body.len() as u32).to_be_bytes())
+                    .write_all(&u32::try_from(body.len()).unwrap().to_be_bytes())
                     .unwrap();
                 stream.write_all(&body).unwrap();
             }));
@@ -268,7 +271,9 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
                         Ok(Ok(_)) => {
                             panic!("inspection fixture unexpectedly completed before release")
                         }
-                        Err(_) => panic!("inspection fixture startup task failed to join"),
+                        Err(error) => {
+                            panic!("inspection fixture startup task failed to join: {error}")
+                        }
                     }
                 }
             }
@@ -349,7 +354,7 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
     let permits = tokio::time::timeout(
         Duration::from_secs(2),
         super::super::background_inspection_slots(&socket)
-            .acquire_many_owned(BACKGROUND_RUN_INSPECTION_CONCURRENCY as u32),
+            .acquire_many_owned(u32::try_from(BACKGROUND_RUN_INSPECTION_CONCURRENCY).unwrap()),
     )
     .await
     .unwrap()

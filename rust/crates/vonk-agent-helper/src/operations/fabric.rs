@@ -6,6 +6,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
     /// Current signed placement owns admission. A stale firewall observation
     /// triggers one bounded reapplication of the kit's existing isolation rules;
     /// unavailable local tooling never vetoes the Controller's decision.
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "the Result keeps the signature shared with its sibling operations"
+    )]
     pub(super) fn require_authorised_published_endpoint(
         &self,
         run: &ValidatedDockerRun,

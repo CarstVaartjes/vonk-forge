@@ -87,7 +87,9 @@ fn run_inner(command: &mut Command, timeout: Duration) -> Result<Output, String>
     let mut child = command
         .spawn()
         .map_err(|e| format!("package command could not start: {e}"))?;
-    let group = rustix::process::Pid::from_raw(child.id() as i32);
+    let group = i32::try_from(child.id())
+        .ok()
+        .and_then(rustix::process::Pid::from_raw);
     let result = (|| {
         let mut stdout = child
             .stdout

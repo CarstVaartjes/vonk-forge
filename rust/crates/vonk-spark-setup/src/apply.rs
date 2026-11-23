@@ -75,8 +75,8 @@ pub fn apply_setup_from_with_authority(
             vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
         ))?;
         refresh_configuration(paths, config, owner)?;
-        if !installation::read_generated(&paths.ca, MAX_CA_BYTES, paths.required_owner)
-            .is_some_and(|ca| verify_ca(&ca, &config.ca_sha256).is_ok())
+        if installation::read_generated(&paths.ca, MAX_CA_BYTES, paths.required_owner)
+            .is_none_or(|ca| verify_ca(&ca, &config.ca_sha256).is_err())
             || installed_helper_authority(paths).is_err()
         {
             let discovery = prepare::observe_enrollment(

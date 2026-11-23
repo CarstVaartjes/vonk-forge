@@ -84,7 +84,11 @@ impl BaseImageStore {
         }
         let data_root_file = OpenOptions::new()
             .read(true)
-            .custom_flags((OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC).bits() as i32)
+            .custom_flags(
+                (OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC)
+                    .bits()
+                    .cast_signed(),
+            )
             .open(data_root)
             .map_err(BaseImageError::Io)?;
         let after = data_root_file.metadata().map_err(BaseImageError::Io)?;
@@ -975,7 +979,7 @@ fn read_archive_entry<R: Read + Seek>(
             if entry.size() > maximum_bytes {
                 return Err(BaseImageError::Limit);
             }
-            let mut value = Vec::with_capacity(entry.size() as usize);
+            let mut value = Vec::with_capacity(usize::try_from(entry.size()).unwrap_or_default());
             entry.read_to_end(&mut value)?;
             return Ok(value);
         }
@@ -1036,7 +1040,7 @@ fn read_bounded(file: &File, maximum_bytes: u64) -> Result<Vec<u8>, BaseImageErr
     }
     let mut source = file.try_clone()?;
     source.seek(SeekFrom::Start(0))?;
-    let mut value = Vec::with_capacity(size as usize);
+    let mut value = Vec::with_capacity(usize::try_from(size).unwrap_or_default());
     source
         .take(maximum_bytes.saturating_add(1))
         .read_to_end(&mut value)?;

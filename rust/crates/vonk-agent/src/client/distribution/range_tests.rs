@@ -26,7 +26,7 @@ struct Served {
 /// Serve ranges of [`BODY`], one connection per request. The first `hold`
 /// requests are answered only once all of them are open (or after a few
 /// seconds, which a test then sees in `peak`); request number `refuse` (from
-/// 1) is answered with another object's ETag.
+/// 1) is answered with another object's `ETag`.
 fn range_server(hold: usize, refuse: Option<usize>) -> (String, Arc<(Mutex<Served>, Condvar)>) {
     let listener = TcpListener::bind(FIXTURE_BIND).unwrap();
     let address = listener.local_addr().unwrap();
@@ -76,7 +76,7 @@ fn range_server(hold: usize, refuse: Option<usize>) -> (String, Arc<(Mutex<Serve
                 } else {
                     hex_sha256(BODY)
                 };
-                let body = &BODY[start as usize..=end as usize];
+                let body = &BODY[usize::try_from(start).unwrap()..=usize::try_from(end).unwrap()];
                 let _ = write!(
                     stream,
                     "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\n\

@@ -98,7 +98,7 @@ pub fn verify_readiness_at(
     {
         return Err(ReadinessError::Unsafe);
     }
-    let mut raw = Vec::with_capacity(metadata.len() as usize);
+    let mut raw = Vec::with_capacity(usize::try_from(metadata.len()).unwrap_or_default());
     File::open(path)?
         .take(MAX_RECEIPT_BYTES + 1)
         .read_to_end(&mut raw)?;

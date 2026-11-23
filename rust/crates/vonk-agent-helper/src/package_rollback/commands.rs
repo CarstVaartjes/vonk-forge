@@ -45,16 +45,13 @@ pub(super) fn command(path: &str, arguments: &[&str], offline: bool) -> Result<S
     // Package metadata output is small. Mutating commands deliberately suppress
     // output so a verbose package cannot fill this pipe while its parent waits.
 
-    let status = match child
+    let Some(status) = child
         .wait_timeout(Duration::from_secs(180))
         .map_err(|e| e.to_string())?
-    {
-        Some(status) => status,
-        None => {
-            let _ = child.kill();
-            let _ = child.wait_timeout(Duration::from_secs(5));
-            return Err("package command timed out".into());
-        }
+    else {
+        let _ = child.kill();
+        let _ = child.wait_timeout(Duration::from_secs(5));
+        return Err("package command timed out".into());
     };
     if !status.success() {
         return Err(format!("package command failed: {path}"));

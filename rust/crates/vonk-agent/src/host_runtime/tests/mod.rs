@@ -107,7 +107,7 @@ fn request_root_publication_has_no_permissive_intermediate_state() {
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         // Reserve one second inside the existing total budget to reap
         // this exact child; killing is not itself proof of completion.
-        let work_deadline = deadline - Duration::from_secs(1);
+        let work_deadline = deadline.checked_sub(Duration::from_secs(1)).unwrap();
         loop {
             if let Some(status) = child.try_wait().unwrap() {
                 assert!(
@@ -119,11 +119,10 @@ fn request_root_publication_has_no_permissive_intermediate_state() {
             if std::time::Instant::now() >= work_deadline {
                 let kill_error = child.kill().err();
                 while std::time::Instant::now() < deadline {
-                    if child.try_wait().unwrap().is_some() {
-                        panic!(
-                            "request root publication counterproof exceeded its elapsed budget; exact child reaped"
-                        );
-                    }
+                    assert!(
+                        child.try_wait().unwrap().is_none(),
+                        "request root publication counterproof exceeded its elapsed budget; exact child reaped"
+                    );
                     std::thread::sleep(Duration::from_millis(1));
                 }
                 panic!(

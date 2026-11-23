@@ -17,11 +17,7 @@ impl CommandRunner for MissingContainerRunner {
             success: daemon_probe || missing_listing,
             stdout: Vec::new(),
             stderr: Vec::new(),
-            exit_code: Some(if daemon_probe || missing_listing {
-                0
-            } else {
-                1
-            }),
+            exit_code: Some(i32::from(!(daemon_probe || missing_listing))),
         })
     }
 }
@@ -172,7 +168,7 @@ impl CommandRunner for DeniedContainerInspectRunner {
             success: daemon_probe,
             stdout: Vec::new(),
             stderr: Vec::new(),
-            exit_code: Some(if daemon_probe { 0 } else { 1 }),
+            exit_code: Some(i32::from(!daemon_probe)),
         })
     }
 }
@@ -209,6 +205,10 @@ pub(in crate::operations) struct PullRunner {
 }
 
 impl CommandRunner for PullRunner {
+    #[expect(
+        clippy::format_collect,
+        reason = "builds a small string; a fold would read worse"
+    )]
     fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
         assert_eq!(executable, Path::new("/usr/bin/docker"));
         self.calls.lock().unwrap().push(arguments.to_vec());

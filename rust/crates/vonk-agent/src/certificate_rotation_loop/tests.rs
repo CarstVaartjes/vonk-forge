@@ -48,8 +48,8 @@ async fn expired_recovery_waits_for_retry_after_then_recovers() {
         );
         tokio::pin!(lane);
         tokio::select! {
-            _ = &mut lane => panic!("recovery lane exited"),
-            _ = tokio::time::sleep(Duration::from_secs(61)) => {}
+            () = &mut lane => panic!("recovery lane exited"),
+            () = tokio::time::sleep(Duration::from_secs(61)) => {}
         }
         assert!(recovered.get(), "recovery stayed blocked after {status}");
     }
@@ -85,13 +85,13 @@ async fn ca_outage_retries_retry_after_until_recovery_and_clears_health() {
         |status| {
             statuses
                 .borrow_mut()
-                .push((started.elapsed(), status.map(str::to_owned)))
+                .push((started.elapsed(), status.map(str::to_owned)));
         },
     );
     tokio::pin!(lane);
     tokio::select! {
-        _ = &mut lane => panic!("renewal lane exited"),
-        _ = tokio::time::sleep(Duration::from_secs(50)) => {}
+        () = &mut lane => panic!("renewal lane exited"),
+        () = tokio::time::sleep(Duration::from_secs(50)) => {}
     }
     assert!(recovered.get());
     let statuses = statuses.borrow();
@@ -142,8 +142,8 @@ async fn refused_identity_rechecks_without_certificate_change_and_reports_until_
         );
         tokio::pin!(lane);
         tokio::select! {
-            _ = &mut lane => panic!("refused renewal killed the daemon lane"),
-            _ = tokio::time::sleep(Duration::from_secs(120)) => {}
+            () = &mut lane => panic!("refused renewal killed the daemon lane"),
+            () = tokio::time::sleep(Duration::from_secs(120)) => {}
         }
         assert!(attempts.get() >= 3);
         let statuses = statuses.borrow();
@@ -167,7 +167,10 @@ async fn non_security_errors_retry_and_recover() {
         let recovered = Cell::new(false);
         let lane = reconcile(
             || {
-                future::ready(if !failed.replace(true) {
+                future::ready(if failed.replace(true) {
+                    recovered.set(true);
+                    Ok(true)
+                } else {
                     let error = if code == 0 {
                         // Invalid TLS configuration is a non-retryable transport error.
                         ClientError::Transport(
@@ -182,9 +185,6 @@ async fn non_security_errors_retry_and_recover() {
                     };
                     assert!(!error.retryable());
                     Err(RotationError::Client(error))
-                } else {
-                    recovered.set(true);
-                    Ok(true)
                 })
             },
             || Some(vec![1]),
@@ -194,8 +194,8 @@ async fn non_security_errors_retry_and_recover() {
         );
         tokio::pin!(lane);
         tokio::select! {
-            _ = &mut lane => panic!("renewal lane exited"),
-            _ = tokio::time::sleep(Duration::from_secs(3)) => {}
+            () = &mut lane => panic!("renewal lane exited"),
+            () = tokio::time::sleep(Duration::from_secs(3)) => {}
         }
         assert!(recovered.get(), "renewal stayed blocked after {code}");
     }
@@ -243,8 +243,8 @@ async fn replacing_disk_certificate_clears_refusal_without_restart() {
         tokio::time::sleep(Duration::from_secs(35)).await;
     };
     tokio::select! {
-        _ = &mut lane => panic!("renewal lane exited"),
-        _ = reenroll => {}
+        () = &mut lane => panic!("renewal lane exited"),
+        () = reenroll => {}
     }
     assert!(recovered.get());
     assert!(status.borrow().is_none());

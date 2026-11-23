@@ -54,6 +54,10 @@ pub(super) struct BuildEgressStart<'a> {
 }
 
 impl<'a, R: ProcessRunner + ?Sized> BuildEgress<'a, R> {
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the call takes ownership at this boundary; the caller's value is consumed"
+    )]
     pub(super) fn start(
         runner: &'a R,
         context: BuildEgressStart<'a>,
@@ -408,7 +412,7 @@ pub(super) fn network_boundary_error(
 /// mount namespace, including the commands that create Podman's pause process.
 /// Use an operation-private runtime directory consistently for build and egress.
 /// Podman 4.9 replaces /run inside its rootless network namespace and preserves
-/// only XDG_RUNTIME_DIR. Its runroot must therefore be inside that directory,
+/// only `XDG_RUNTIME_DIR`. Its runroot must therefore be inside that directory,
 /// not its parent, or Netavark loses access to networks/ipam.db.
 pub(super) fn podman_user_service_arguments(
     unit: &str,

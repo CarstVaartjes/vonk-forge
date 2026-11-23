@@ -184,7 +184,7 @@ pub fn response_head(status: reqwest::StatusCode, headers: &HeaderMap) -> String
     );
     for name in FORWARDED_HEADERS {
         if let Some(value) = headers.get(name).and_then(|value| value.to_str().ok()) {
-            head.push_str(&format!("{name}: {value}\r\n"));
+            head = format!("{head}{name}: {value}\r\n");
         }
     }
     head.push_str("connection: close\r\n\r\n");

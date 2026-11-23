@@ -213,19 +213,18 @@ impl<R: CommandRunner> OperationExecutor<R> {
         image_reference: &str,
     ) -> Result<Option<(RuntimeImageInspection, String)>, OperationError> {
         let (local_image, _) = parse_local_image_reference(image_reference)?;
-        match self.inspect_runtime_image_if_present(image_reference)? {
-            Some(inspected) => Ok(Some((inspected, image_reference.to_owned()))),
-            None => {
-                // Docker may discard the digest-qualified alias. Keep the
-                // daemon's surviving managed name: containerd's manifest ID
-                // is an observation identity, not a supported launch name.
-                // The caller compares its content with the signed identity
-                // before use; labels never authorize substituted content.
-                let Some(inspected) = self.inspect_runtime_image_if_present(&local_image)? else {
-                    return Ok(None);
-                };
-                Ok(Some((inspected, local_image)))
-            }
+        if let Some(inspected) = self.inspect_runtime_image_if_present(image_reference)? {
+            Ok(Some((inspected, image_reference.to_owned())))
+        } else {
+            // Docker may discard the digest-qualified alias. Keep the
+            // daemon's surviving managed name: containerd's manifest ID
+            // is an observation identity, not a supported launch name.
+            // The caller compares its content with the signed identity
+            // before use; labels never authorize substituted content.
+            let Some(inspected) = self.inspect_runtime_image_if_present(&local_image)? else {
+                return Ok(None);
+            };
+            Ok(Some((inspected, local_image)))
         }
     }
 }
@@ -277,6 +276,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the call takes ownership at this boundary; the caller's value is consumed"
+    )]
     pub(super) fn write_image_receipt(
         &self,
         receipt: RuntimeImageReceipt,
@@ -308,7 +311,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
             .mode(0o600)
             .open(&staged)?;
         let result = (|| {
@@ -360,7 +363,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let mut file = OpenOptions::new()
             .read(true)
             .custom_flags(
-                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                    .bits()
+                    .cast_signed(),
             )
             .open(path)
             .map_err(|_| OperationError::RuntimeImageInspectFailed)?;

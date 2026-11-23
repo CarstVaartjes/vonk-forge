@@ -424,7 +424,8 @@ fn oversized_observation_cannot_poison_the_durable_retry_record() {
     // Raw driver output in a parse error must not exceed the record read bound.
     let temp = tempfile::tempdir().unwrap();
     let driver = Driver::default();
-    *driver.observation.lock().unwrap() = Some(vec![b'9'; RECORD_BYTES as usize + 1]);
+    *driver.observation.lock().unwrap() =
+        Some(vec![b'9'; usize::try_from(RECORD_BYTES).unwrap() + 1]);
     let desired = intent(1, 1800);
     helper(temp.path(), &driver)
         .reconcile_gpu_clock_at(Some(&desired), false, 1000)

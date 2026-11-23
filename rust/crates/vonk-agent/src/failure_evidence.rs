@@ -379,7 +379,7 @@ pub fn log_tail(bytes: &[u8]) -> FailureLogTail {
     let selected_bytes = selected.iter().map(|(_, source_bytes)| source_bytes).sum();
     let mut safe_lines = Vec::with_capacity(selected.len());
     let mut dropped_by_line = 0_usize;
-    for (line, _) in selected.iter() {
+    for (line, _) in &selected {
         // Redact each complete logical line before its byte window is clipped.
         // Otherwise an Authorization/token marker at the front of an oversized
         // line could be lost while leaving its credential-bearing suffix.
@@ -813,8 +813,10 @@ pub fn from_failure(operation: &AgentOperation, failure: &Failure) -> FailureDia
     .collect::<Vec<_>>()
     .join(" ");
     let mut value = collect(&phase, &code, &[], &[]);
-    value.model_store_layout = failure.model_store_layout.clone();
-    value.page_cache = failure.page_cache.clone();
+    value
+        .model_store_layout
+        .clone_from(&failure.model_store_layout);
+    value.page_cache.clone_from(&failure.page_cache);
     if let Some(logs) = &failure.process_logs {
         value.process_exit_code = logs.exit_code;
         value.stdout = logs.stdout.clone();
@@ -850,7 +852,7 @@ fn exit_properties(failure: &Failure) -> Vec<FailureProperty> {
         found.push(FailureProperty {
             name: name.into(),
             value: value.chars().take(256).collect(),
-        })
+        });
     };
     // The helper's whole exit summary when the failure kept one: the wire
     // diagnostic is a bounded copy that can cut its facts.

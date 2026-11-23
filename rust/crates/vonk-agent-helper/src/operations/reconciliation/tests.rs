@@ -250,7 +250,7 @@ fn reconciliation_refuses_active_unknown_failed_or_truncated_runtime_inventory()
             1 => format!("{}\texited\tvonk-old-{}\ttrue\t\n", "2".repeat(64), RUN_ID).into_bytes(),
             2 => format!("{}\texited\tvonk-legacy-{}\t\t\n", "3".repeat(64), RUN_ID).into_bytes(),
             3 => Vec::new(),
-            _ => vec![b'x'; MAX_COMMAND_OUTPUT_BYTES as usize + 1],
+            _ => vec![b'x'; usize::try_from(MAX_COMMAND_OUTPUT_BYTES).unwrap() + 1],
         };
         let response = CommandOutput {
             success: case != 3,
@@ -260,7 +260,7 @@ fn reconciliation_refuses_active_unknown_failed_or_truncated_runtime_inventory()
             } else {
                 Vec::new()
             },
-            exit_code: Some(if case == 3 { 1 } else { 0 }),
+            exit_code: Some(i32::from(case == 3)),
         };
         let receipt_path = roots
             .data

@@ -80,7 +80,7 @@ fn background_inspection_slots(socket: &Path) -> std::sync::Arc<tokio::sync::Sem
     let mut slots = SLOTS
         .get_or_init(Default::default)
         .lock()
-        .unwrap_or_else(|error| error.into_inner());
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     slots.retain(|_, slot| slot.strong_count() != 0);
     if let Some(slot) = slots.get(socket).and_then(std::sync::Weak::upgrade) {
         return slot;
@@ -548,7 +548,7 @@ impl HostRuntimeBoundary<'_> {
             }),
             (Some(false), Some(code)) if code <= 255 && (code != 0 || !evidence) => {
                 Ok(RuntimeReobservation::Exited(HostRuntimeOutcome {
-                    exit_code: Some(code as i32),
+                    exit_code: i32::try_from(code).ok(),
                     stop_uncertain: false,
                     diagnostic: response
                         .diagnostic
@@ -890,7 +890,7 @@ impl HostRuntimeBoundary<'_> {
                         HostRuntimeAction::Start | HostRuntimeAction::InstallationCleanup
                     )
                 {
-                    nonce = response.installation_intent_nonce.clone();
+                    nonce.clone_from(&response.installation_intent_nonce);
                     if nonce.as_deref().is_none_or(|value| {
                         value.len() != 64
                             || !value
@@ -919,7 +919,7 @@ impl HostRuntimeBoundary<'_> {
             }
             require_executed_outcome(&response, stop_uncertain)?;
             Ok(HostRuntimeOutcome {
-                exit_code: response.exit_code.map(|code| code as i32),
+                exit_code: response.exit_code.and_then(|code| i32::try_from(code).ok()),
                 stop_uncertain,
                 diagnostic: response
                     .diagnostic

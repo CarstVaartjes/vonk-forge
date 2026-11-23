@@ -13,6 +13,10 @@ enum EffectObservation {
 /// is named in the failure, so it can never read as a container with nothing to
 /// say: it carries its logs, or a typed reason they are missing, and an exit
 /// summary.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 pub(crate) fn process_exited(
     logs: Result<CommandOutput, String>,
     exit: Result<crate::runtime_logs::ContainerExit, &'static str>,
@@ -259,10 +263,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         &self,
         run_id: &str,
     ) -> Result<NamedContainer, OperationError> {
-        if uuid::Uuid::parse_str(run_id)
-            .map(|parsed| parsed.to_string() != run_id)
-            .unwrap_or(true)
-        {
+        if uuid::Uuid::parse_str(run_id).map_or(true, |parsed| parsed.to_string() != run_id) {
             return Err(OperationError::InvalidOperation);
         }
         let name = format!("vonk-{run_id}");

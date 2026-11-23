@@ -167,7 +167,7 @@ impl AgentUpgradeExecutor<'_> {
         progress: impl Fn(u64),
     ) -> Result<PathBuf, AgentUpgradeError> {
         ensure_private_directory(self.incoming)?;
-        let destination = self.incoming.join(format!("{}.deb", package_sha256));
+        let destination = self.incoming.join(format!("{package_sha256}.deb"));
         if verified_file(&destination, package_bytes, package_sha256)? {
             return Ok(destination);
         }
@@ -195,7 +195,7 @@ impl AgentUpgradeExecutor<'_> {
             .truncate(false)
             .read(true)
             .write(true)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
             .mode(0o600)
             .open(&temporary)?;
 
@@ -241,7 +241,9 @@ impl AgentUpgradeExecutor<'_> {
             // bounded by the bytes remaining, not by time.
             let mut remaining = offset;
             while remaining > 0 {
-                let wanted = remaining.min(buffer.len() as u64) as usize;
+                let wanted = usize::try_from(remaining)
+                    .unwrap_or(usize::MAX)
+                    .min(buffer.len());
                 let count = file.read(&mut buffer[..wanted])?;
                 if count == 0 {
                     return Err(std::io::Error::other("partial package unavailable").into());
@@ -320,7 +322,7 @@ fn verified_file(
     }
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
         .open(path)?;
     let mut digest = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
@@ -329,7 +331,9 @@ fn verified_file(
     // read (one more proves the file too long), never by time.
     let mut remaining = expected_bytes.saturating_add(1);
     while remaining > 0 {
-        let wanted = remaining.min(buffer.len() as u64) as usize;
+        let wanted = usize::try_from(remaining)
+            .unwrap_or(usize::MAX)
+            .min(buffer.len());
         let count = file.read(&mut buffer[..wanted])?;
         if count == 0 {
             break;
@@ -392,12 +396,13 @@ pub(crate) fn call_helper_within(
     if body.is_empty() || body.len() > MAX_HELPER_MESSAGE_BYTES {
         return Err(AgentUpgradeError::HelperResponseInvalid);
     }
+    let length = u32::try_from(body.len()).map_err(|_| AgentUpgradeError::HelperResponseInvalid)?;
     let mut stream = UnixStream::connect(socket).map_err(AgentUpgradeError::HelperUnavailable)?;
     stream
         .set_write_timeout(Some(Duration::from_secs(10)))
         .map_err(AgentUpgradeError::HelperUnavailable)?;
     stream
-        .write_all(&(body.len() as u32).to_be_bytes())
+        .write_all(&length.to_be_bytes())
         .map_err(AgentUpgradeError::HelperUnavailable)?;
     stream
         .write_all(body)
@@ -445,7 +450,7 @@ pub(crate) fn validate_helper_response(
         return Err(match code {
             Some(code) => AgentUpgradeError::HelperRejectedWithCode {
                 code,
-                exit_code: response.exit_code.map(|code| code as i32),
+                exit_code: response.exit_code.and_then(|code| i32::try_from(code).ok()),
                 diagnostic: response
                     .diagnostic
                     .as_deref()

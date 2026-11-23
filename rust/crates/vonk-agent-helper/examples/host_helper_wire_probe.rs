@@ -7,6 +7,10 @@ use vonk_agent_protocol::canonical_json;
 
 const ALLOWED_GID: u32 = 971;
 
+#[expect(
+    clippy::match_same_arms,
+    reason = "the arms stay apart on purpose: each names a distinct case of the state machine"
+)]
 fn main() {
     let mut raw = Vec::new();
     io::stdin().read_to_end(&mut raw).unwrap();

@@ -346,7 +346,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(
-                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                    .bits()
+                    .cast_signed(),
             )
             .open(self.roots.agent_data.join("store-retention.json"))
             .ok()?;
@@ -470,7 +472,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         for address in plan_image_addresses(&plan) {
             let _ = OpenOptions::new()
                 .write(true)
-                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
                 .open(self.roots.runtime_image_receipts.join(address))
                 .and_then(|receipt| receipt.set_modified(std::time::SystemTime::now()));
         }
@@ -498,7 +500,11 @@ fn read_plan(path: &Path) -> std::io::Result<Option<CompiledExecutionPlan>> {
     let limit = vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES as u64;
     let file = match OpenOptions::new()
         .read(true)
-        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
+        .custom_flags(
+            (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                .bits()
+                .cast_signed(),
+        )
         .open(path)
     {
         Ok(file) => file,

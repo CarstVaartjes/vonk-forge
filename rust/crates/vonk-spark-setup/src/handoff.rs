@@ -28,17 +28,14 @@ pub(super) fn authenticate_sudo_foreground(sudo: &Path) -> Result<(), SetupError
         // Unlike the framed apply command, sudo -v performs authentication only.
         .spawn()
         .map_err(|_| SetupError::Command("could not start sudo authentication".to_owned()))?;
-    let status = match child.wait_timeout(DEFAULT_COMMAND_TIMEOUT) {
-        Ok(Some(status)) => status,
-        _ => {
-            // This child shares our foreground group: terminate only the child,
-            // never the caller or the other processes attached to its terminal.
-            let _ = child.kill();
-            let _ = child.wait_timeout(TERMINATION_GRACE);
-            return Err(SetupError::ObservationUnavailable(
-                vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
-            ));
-        }
+    let Ok(Some(status)) = child.wait_timeout(DEFAULT_COMMAND_TIMEOUT) else {
+        // This child shares our foreground group: terminate only the child,
+        // never the caller or the other processes attached to its terminal.
+        let _ = child.kill();
+        let _ = child.wait_timeout(TERMINATION_GRACE);
+        return Err(SetupError::ObservationUnavailable(
+            vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
+        ));
     };
     if !status.success() {
         return Err(SetupError::Command("sudo authentication failed".to_owned()));

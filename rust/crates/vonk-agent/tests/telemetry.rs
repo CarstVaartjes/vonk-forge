@@ -126,7 +126,7 @@ fn collector(
             uptime: directory.join("uptime"),
             cpu_root: directory.join("cpu"),
             store: directory.to_path_buf(),
-            host: Default::default(),
+            host: vonk_agent::telemetry::host_readings::HostRoots::default(),
         },
         Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
     )
@@ -353,7 +353,7 @@ fn failed_query_is_typed_and_same_collector_recovers_without_latching() {
                 uptime: directory.path().join("uptime"),
                 cpu_root: directory.path().join("cpu"),
                 store: directory.path().to_path_buf(),
-                host: Default::default(),
+                host: vonk_agent::telemetry::host_readings::HostRoots::default(),
             },
             Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
         )
@@ -479,7 +479,9 @@ fn gb10_driver_readings_report_power_uptime_and_gpu_process_memory() {
     assert_eq!(sample.gpu_power_watts, expected["gpu_power_watts"].as_f64());
     assert_eq!(
         sample.uptime_seconds,
-        expected["uptime_seconds"].as_u64().map(|v| v as u32)
+        expected["uptime_seconds"]
+            .as_u64()
+            .map(|v| u32::try_from(v).unwrap())
     );
     assert_eq!(
         sample.gpu_process_memory_bytes,

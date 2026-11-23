@@ -33,7 +33,7 @@ pub(super) fn parse_numeric_user(value: &str) -> Result<(u32, Option<u32>), Oper
         .ok_or(OperationError::InvalidOperation)?;
     let gid = parts
         .next()
-        .map(|value| value.parse::<u32>())
+        .map(str::parse::<u32>)
         .transpose()
         .map_err(|_| OperationError::InvalidOperation)?;
     Ok((uid, gid))

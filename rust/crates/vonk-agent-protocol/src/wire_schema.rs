@@ -15,7 +15,7 @@ use std::{
 /// Preserve original JSON kinds before schema validation. Serde's
 /// arbitrary-precision Value visitor recognizes a private number-object marker;
 /// a real input object must remain an object rather than acquire numeric authority.
-/// RawValue also works for nested/from_value deserializers, so there is one path.
+/// `RawValue` also works for `nested/from_value` deserializers, so there is one path.
 fn deserialize_original_value<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<WireInstance, D::Error> {
@@ -202,10 +202,7 @@ fn may_match_object_shape(pointer: &str, object_keys: Option<&[&str]>) -> bool {
         schema
     };
     if schema.get("type").and_then(|value| value.as_str()) != Some("object")
-        || schema
-            .get("additionalProperties")
-            .and_then(|value| value.as_bool())
-            != Some(false)
+        || schema.get("additionalProperties").and_then(Value::as_bool) != Some(false)
         || [
             "$ref",
             "$dynamicRef",
@@ -241,10 +238,7 @@ fn may_match_object_shape(pointer: &str, object_keys: Option<&[&str]>) -> bool {
     {
         return false;
     }
-    schema
-        .get("x-vonk-ignore-unknown")
-        .and_then(|value| value.as_bool())
-        == Some(true)
+    schema.get("x-vonk-ignore-unknown").and_then(Value::as_bool) == Some(true)
         || keys.iter().all(|key| properties.contains_key(*key))
 }
 
@@ -325,7 +319,7 @@ fn strict_numbers(pointer: &str, value: &Value) -> Result<(), String> {
                 )?;
             } else if schema
                 .get("additionalProperties")
-                .is_some_and(|value| value.is_object())
+                .is_some_and(Value::is_object)
             {
                 strict_numbers(&format!("{pointer}/additionalProperties"), child)?;
             }
@@ -415,7 +409,7 @@ fn materialize_float_numbers(pointer: &str, value: &mut Value) -> Result<(), Str
                 )?;
             } else if schema
                 .get("additionalProperties")
-                .is_some_and(|value| value.is_object())
+                .is_some_and(Value::is_object)
             {
                 materialize_float_numbers(&format!("{pointer}/additionalProperties"), child)?;
             }

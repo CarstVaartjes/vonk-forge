@@ -50,9 +50,8 @@ pub(super) fn read_installation_metadata(
         }
         Err(_) => return Ok(None),
     };
-    let receipt = match serde_json::from_slice(&value) {
-        Ok(receipt) => receipt,
-        Err(_) => return Ok(None),
+    let Ok(receipt) = serde_json::from_slice(&value) else {
+        return Ok(None);
     };
     Ok(Some(receipt))
 }
@@ -193,7 +192,7 @@ pub(crate) fn exact_runtime_file_acl(file: &impl std::os::fd::AsFd) -> bool {
     let mut group_object = false;
     let mut mask = false;
     let mut other = false;
-    for entry in value[4..].as_chunks::<8>().0.iter() {
+    for entry in value[4..].as_chunks::<8>().0 {
         let [tag, permissions, low, high] = entry.as_chunks::<2>().0 else {
             unreachable!("an eight-byte entry yields four two-byte fields")
         };
@@ -223,7 +222,11 @@ pub(super) fn open_trusted_model_file(
     }
     let file = OpenOptions::new()
         .read(true)
-        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
+        .custom_flags(
+            (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC)
+                .bits()
+                .cast_signed(),
+        )
         .open(path)?;
     let opened_metadata = file.metadata()?;
     if !trusted_model_file(&file, &opened_metadata, expected_bytes, shared)

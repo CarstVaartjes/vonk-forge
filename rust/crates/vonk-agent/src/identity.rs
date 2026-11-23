@@ -69,6 +69,10 @@ pub fn generate_pending(node_id: &str) -> Result<PendingIdentity, IdentityError>
     pending_from_key(node_id, KeyPair::generate_for(&PKCS_ED25519)?)
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 fn pending_from_key(node_id: &str, key: KeyPair) -> Result<PendingIdentity, IdentityError> {
     if !valid_node_id(node_id) {
         return Err(IdentityError::Node);
@@ -153,19 +157,18 @@ pub fn prepare_pending(root: &Path, node_id: &str) -> Result<PendingIdentity, Id
         .ok()
         .and_then(|raw| String::from_utf8(raw).ok())
         .and_then(|pem| KeyPair::from_pem(&pem).ok());
-    let pending = match key {
-        Some(key) => pending_from_key(node_id, key)?,
-        None => {
-            // Preserve unusable projections without following their paths.
-            // A surviving valid key instead reconstructs the same CSR above.
-            ensure_private_directory(root)?;
-            if fs::symlink_metadata(root.join("pending-key.pem")).is_ok()
-                || fs::symlink_metadata(root.join("pending-csr.pem")).is_ok()
-            {
-                quarantine_pending(root)?;
-            }
-            generate_pending(node_id)?
+    let pending = if let Some(key) = key {
+        pending_from_key(node_id, key)?
+    } else {
+        // Preserve unusable projections without following their paths.
+        // A surviving valid key instead reconstructs the same CSR above.
+        ensure_private_directory(root)?;
+        if fs::symlink_metadata(root.join("pending-key.pem")).is_ok()
+            || fs::symlink_metadata(root.join("pending-csr.pem")).is_ok()
+        {
+            quarantine_pending(root)?;
         }
+        generate_pending(node_id)?
     };
     let matches = read_private(&root.join("pending-key.pem"))
         .is_ok_and(|raw| raw == pending.private_key_pem)

@@ -167,7 +167,7 @@ pub(super) fn peers(job_id: Uuid, script: Vec<Answer>) -> Peers {
             helper_log.lock().unwrap().push(event);
             let body = canonical_generated_json(&response).unwrap();
             stream
-                .write_all(&(body.len() as u32).to_be_bytes())
+                .write_all(&u32::try_from(body.len()).unwrap().to_be_bytes())
                 .unwrap();
             stream.write_all(&body).unwrap();
         }
@@ -254,7 +254,12 @@ async fn settle_dispatch_error(
     let (_cancel, mut cancellation) = tokio::sync::watch::channel(false);
     let broken = InterruptibleJob::Completed(Err(error));
     let settled = executor
-        .settle_job_dispatch(&job, broken, Instant::now() - ago, &mut cancellation)
+        .settle_job_dispatch(
+            &job,
+            broken,
+            Instant::now().checked_sub(ago).unwrap(),
+            &mut cancellation,
+        )
         .await;
     (settled, peers.log())
 }
@@ -449,7 +454,7 @@ async fn a_job_without_its_record_reports_its_kept_exit_and_never_runs_again() {
     let receipt = match &result {
         ExecutionResult::Failed(failure) => failure.receipt.as_ref(),
         ExecutionResult::Unknown(unconfirmed) => unconfirmed.receipt.as_ref(),
-        _ => None,
+        ExecutionResult::Done(_) => None,
     };
     assert_eq!(
         receipt.map(|receipt| receipt.exit_code),

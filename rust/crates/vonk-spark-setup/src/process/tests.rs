@@ -36,14 +36,14 @@ fn exited_parent_with_inherited_pipes_ends_and_next_command_runs() {
     assert!(result.is_err());
     assert_eq!(fs::read(exited).unwrap(), b"probe-marker");
     assert!(started.elapsed() < Duration::from_secs(5));
-    assert!(
+    assert_eq!(
         run_process(
             Command::new("/bin/sh", ["-c", "printf probe-bytes"]),
             Duration::from_secs(1)
         )
         .unwrap()
-        .stdout
-            == b"probe-bytes"
+        .stdout,
+        b"probe-bytes"
     );
     thread::sleep(Duration::from_millis(1100));
     assert!(!escaped_effect.exists());

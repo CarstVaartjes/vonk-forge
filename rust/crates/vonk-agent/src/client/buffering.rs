@@ -114,7 +114,8 @@ impl RangeRecord {
             } else {
                 length
             };
-            let mut bitmap = vec![0; bitmap_len(total, range_bytes) as usize];
+            let mut bitmap =
+                vec![0; usize::try_from(bitmap_len(total, range_bytes)).unwrap_or_default()];
             for index in 0..total.div_ceil(range_bytes) {
                 if range_end(index, range_bytes, total) < prefix {
                     bitmap[(index / 8) as usize] |= 1 << (index % 8);
@@ -234,7 +235,7 @@ fn read_record(
     {
         return Ok(None);
     }
-    let mut bitmap = vec![0; bitmap_bytes as usize];
+    let mut bitmap = vec![0; usize::try_from(bitmap_bytes).unwrap_or_default()];
     file.read_exact_at(&mut bitmap, total + RANGE_RECORD_HEADER)?;
     Ok(Some((range_bytes, bitmap)))
 }

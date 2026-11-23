@@ -15,7 +15,7 @@ use super::*;
 pub const MAX_HELPER_FRAME_BYTES: usize = 1024 * 1024;
 /// The authoritative ceiling on one canonical [`HostRuntimeRequest`], in bytes.
 ///
-/// A request carries its exact typed Start, JobRun, or Stop plan plus projected
+/// A request carries its exact typed Start, `JobRun`, or Stop plan plus projected
 /// argv. The nested compiled plan is separately limited to 16 MiB and its
 /// enclosing typed claim to 18 MiB; one helper frame of additional space bounds
 /// the remaining request envelope. The helper reads the canonical request from

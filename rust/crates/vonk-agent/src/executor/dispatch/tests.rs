@@ -153,7 +153,7 @@ fn helper_install_and_response_loss_reach_unknown_wire_then_accept_a_fresh_hando
                 match listener.accept() {
                     Ok(connection) => break connection,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(Duration::from_millis(1))
+                        std::thread::sleep(Duration::from_millis(1));
                     }
                     Err(error) => panic!("helper fixture unavailable: {error}"),
                 }
@@ -184,7 +184,7 @@ fn helper_install_and_response_loss_reach_unknown_wire_then_accept_a_fresh_hando
             };
             let bytes = canonical_json(&response).unwrap();
             stream
-                .write_all(&(bytes.len() as u32).to_be_bytes())
+                .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
                 .unwrap();
             stream.write_all(&bytes).unwrap();
         }

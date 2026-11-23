@@ -69,7 +69,7 @@ pub(crate) fn observe<R: ProcessRunner>(runner: &R, root: &Path, page_size: u64)
         snaps: snaps(&root.join("snap")),
         watermark_boost_factor: read("proc/sys/vm/watermark_boost_factor")
             .and_then(|text| text.trim().parse().ok())
-            .filter(|factor| *factor <= i32::MAX as u32),
+            .filter(|factor| i32::try_from(*factor).is_ok()),
         compaction_proactiveness: read("proc/sys/vm/compaction_proactiveness")
             .and_then(|text| text.trim().parse().ok())
             .filter(|value| *value <= 100),

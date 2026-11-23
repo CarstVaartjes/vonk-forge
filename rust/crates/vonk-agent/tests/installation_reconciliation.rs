@@ -305,7 +305,7 @@ fn separate_process_lock_contention_is_retryable_after_the_owner_exits() {
         let file = fs::OpenOptions::new()
             .read(true)
             .write(true)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
             .open(lock_path)
             .unwrap();
         flock(&file, FlockOperation::NonBlockingLockExclusive).unwrap();

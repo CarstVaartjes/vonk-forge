@@ -47,7 +47,8 @@ fn launch_shared_memory_as_declared(arguments: &mut [String], image_index: usize
         value_of(arguments, "--memory"),
         value_of(arguments, "--shm-size"),
     ) {
-        arguments[shm + 1] = arguments[memory + 1].clone();
+        let memory_value = arguments[memory + 1].clone();
+        arguments[shm + 1] = memory_value;
     }
 }
 
@@ -212,8 +213,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             );
             let fields = std::str::from_utf8(&existing.stdout)
                 .ok()
-                .map(str::trim)
-                .unwrap_or("");
+                .map_or("", str::trim);
             if fields != expected {
                 return Err(OperationError::InvalidArtifact);
             }

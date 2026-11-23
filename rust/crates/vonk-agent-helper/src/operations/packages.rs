@@ -191,7 +191,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let mut source = OpenOptions::new()
             .read(true)
             .custom_flags(
-                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                    .bits()
+                    .cast_signed(),
             )
             .open(incoming)?;
         let source_before = source.metadata()?;
@@ -200,7 +202,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
             .open(custody.path())?;
         let mut digest = Sha256::new();
         let mut consumed = 0_u64;

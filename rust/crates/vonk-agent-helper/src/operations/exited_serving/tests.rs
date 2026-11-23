@@ -92,6 +92,10 @@ fn a_run_the_agent_still_claims_keeps_its_container() {
 }
 
 #[test]
+#[expect(
+    clippy::used_underscore_binding,
+    reason = "a field held to keep its temporary directory alive and read once for its path"
+)]
 fn unreadable_claims_or_listing_remove_nothing() {
     let host = Host::with(&[job(ENDED, ENDED, "exited")]);
     let (_temp, executor) = host_executor(&host);

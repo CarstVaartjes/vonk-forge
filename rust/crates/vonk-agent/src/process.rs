@@ -657,6 +657,10 @@ impl ProcessRunner for SystemProcessRunner {
     }
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 fn run_process(
     program: Program,
     arguments: &[String],
@@ -689,12 +693,9 @@ fn run_process(
         .spawn()?;
     let pipe_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let _pipe_owner = PipeOwner(pipe_stop.clone());
-    let stdout_pipe = match child.stdout.take() {
-        Some(pipe) => pipe,
-        None => {
-            terminate_process(&mut child, program, arguments)?;
-            return Err(std::io::Error::other("subprocess stdout is unavailable").into());
-        }
+    let Some(stdout_pipe) = child.stdout.take() else {
+        terminate_process(&mut child, program, arguments)?;
+        return Err(std::io::Error::other("subprocess stdout is unavailable").into());
     };
     let stdout = match capture_diagnostics(
         stdout_pipe,
@@ -708,12 +709,9 @@ fn run_process(
             return Err(error.into());
         }
     };
-    let stderr_pipe = match child.stderr.take() {
-        Some(pipe) => pipe,
-        None => {
-            terminate_process(&mut child, program, arguments)?;
-            return Err(std::io::Error::other("subprocess stderr is unavailable").into());
-        }
+    let Some(stderr_pipe) = child.stderr.take() else {
+        terminate_process(&mut child, program, arguments)?;
+        return Err(std::io::Error::other("subprocess stderr is unavailable").into());
     };
     let stderr = match capture_diagnostics(
         stderr_pipe,
@@ -820,7 +818,10 @@ fn run_process(
     let (stdout, stderr) = captured?;
     // Even a descendant that redirected every pipe still belongs to the
     // command. systemd services have their separate exact cgroup owner.
-    if let Some(group) = rustix::process::Pid::from_raw(child.id() as i32) {
+    if let Some(group) = i32::try_from(child.id())
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    {
         let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
     }
     if options.cancellation.is_some_and(|cancelled| cancelled()) {
@@ -959,7 +960,10 @@ fn terminate_process(
 ) -> Result<(), std::io::Error> {
     let deadline = Instant::now() + Duration::from_secs(2);
     // Local ownership never depends on the service-manager reply.
-    if let Some(group) = rustix::process::Pid::from_raw(child.id() as i32) {
+    if let Some(group) = i32::try_from(child.id())
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    {
         let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
     }
     let _ = child.kill();
@@ -1049,12 +1053,9 @@ fn run_process_to_file(
         .spawn()?;
     let pipe_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let _pipe_owner = PipeOwner(pipe_stop.clone());
-    let stderr_pipe = match child.stderr.take() {
-        Some(pipe) => pipe,
-        None => {
-            terminate_process(&mut child, program, arguments)?;
-            return Err(std::io::Error::other("subprocess stderr is unavailable").into());
-        }
+    let Some(stderr_pipe) = child.stderr.take() else {
+        terminate_process(&mut child, program, arguments)?;
+        return Err(std::io::Error::other("subprocess stderr is unavailable").into());
     };
     let stderr = match capture_diagnostics(
         stderr_pipe,
@@ -1126,7 +1127,10 @@ fn run_process_to_file(
         terminate_process(&mut child, program, arguments)?;
     }
     let stderr = captured?;
-    if let Some(group) = rustix::process::Pid::from_raw(child.id() as i32) {
+    if let Some(group) = i32::try_from(child.id())
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    {
         let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
     }
     sink.flush()?;

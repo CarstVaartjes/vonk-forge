@@ -632,7 +632,7 @@ fn rewrite_frame(
     let payload = serde_json::to_vec(&payload).unwrap();
     let mut frame = Vec::new();
     frame.extend_from_slice(MAGIC);
-    frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    frame.extend_from_slice(&u32::try_from(payload.len()).unwrap().to_be_bytes());
     frame.extend_from_slice(&payload);
     frame.extend_from_slice(&Sha256::digest(&payload));
     frame

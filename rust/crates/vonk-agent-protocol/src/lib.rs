@@ -9,6 +9,7 @@ pub const WORKLOAD_MEMLOCK_ULIMIT: &str = "memlock=-1:-1";
 #[expect(
     clippy::large_enum_variant,
     clippy::enum_variant_names,
+    clippy::if_not_else,
     reason = "generated wire types mirror the canonical model and word names"
 )]
 pub mod generated {

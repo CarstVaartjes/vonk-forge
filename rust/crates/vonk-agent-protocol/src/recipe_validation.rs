@@ -25,8 +25,7 @@ pub(super) fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
         files: value.inputs.clone(),
     };
     let manifest_valid = canonical_json(&manifest)
-        .ok()
-        .is_some_and(|bytes| hex_sha256(&bytes) == value.input_manifest_sha256);
+        .is_ok_and(|bytes| hex_sha256(&bytes) == value.input_manifest_sha256);
     let limits = &value.output_limits;
     let mappings_valid = (1..=32).contains(&value.output_mappings.len())
         && value

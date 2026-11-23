@@ -116,7 +116,8 @@ fn main() {
     let issued_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
-        .as_secs() as i64;
+        .as_secs()
+        .cast_signed();
     let operation = HostOperation::ExecuteContainerRuntimeRequestOperation(
         vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
             type_: "execute-container-runtime-request".into(),

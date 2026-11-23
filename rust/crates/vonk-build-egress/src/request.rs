@@ -256,6 +256,10 @@ mod tests {
     /// Invariant for any input: no panic, and an accepted request names an
     /// allowlisted host on port 80 or 443.
     #[test]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "a pseudo-random byte takes the low 8 bits by intent"
+    )]
     fn accepted_requests_stay_inside_the_allowlist() {
         let hosts = BTreeSet::from(["pypi.org".to_owned(), "files.pythonhosted.org".to_owned()]);
         let seeds: [&[u8]; 4] = [

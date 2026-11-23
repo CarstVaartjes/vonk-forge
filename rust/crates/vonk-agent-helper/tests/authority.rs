@@ -364,7 +364,7 @@ impl CommandRunner for AdversarialPackageRunner {
         Ok(CommandOutput {
             success,
             stdout: Vec::new(),
-            exit_code: Some(if success { 0 } else { 1 }),
+            exit_code: Some(i32::from(!success)),
             stderr: Vec::new(),
         })
     }
@@ -489,7 +489,7 @@ impl CommandRunner for RecordingRunner {
         Ok(CommandOutput {
             success,
             stdout,
-            exit_code: Some(if success { 0 } else { 1 }),
+            exit_code: Some(i32::from(!success)),
             stderr: Vec::new(),
         })
     }
@@ -669,9 +669,10 @@ fn installation_cleanup_is_bound_to_the_signed_request_identity() {
     let executor =
         OperationExecutor::new(roots.clone(), release.public_key().as_ref(), runner, None).unwrap();
 
-    let nonce = match executor.execute(&operation) {
-        Err(OperationError::InstallationIntentObservationRequired { nonce }) => nonce,
-        _ => panic!("cleanup must first obtain current authority"),
+    let Err(OperationError::InstallationIntentObservationRequired { nonce }) =
+        executor.execute(&operation)
+    else {
+        panic!("cleanup must first obtain current authority")
     };
     let mut accepted = operation.clone();
     let HostOperation::ExecuteContainerRuntimeRequestOperation(binding) = &mut accepted else {

@@ -30,7 +30,7 @@ use crate::host_memory_guard::meminfo_bytes;
 use crate::protocol::{GrantVerifier, HelperError, PeerIdentity};
 
 /// `1`: the page cache only. Measured on both Sparks 2026-10-27 at idle:
-/// Cached 6.5 and 13.5 GB against SReclaimable 0.4 GB, so dentries and inodes
+/// Cached 6.5 and 13.5 GB against `SReclaimable` 0.4 GB, so dentries and inodes
 /// (`3`) add little while the starting container needs them for its opens.
 const DROP_PAGE_CACHE: &[u8] = b"1";
 const DROP_CACHES: &str = "proc/sys/vm/drop_caches";
@@ -60,27 +60,26 @@ impl SyncLane {
         let mut pending = self
             .pending
             .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let receiver = match pending.take() {
-            Some(receiver) => receiver,
-            None => {
-                let (done, receiver) = mpsc::channel();
-                let sync = self.sync;
-                let spawned = thread::Builder::new()
-                    .name("vonk-helper-sync".to_owned())
-                    .spawn(move || {
-                        sync();
-                        // The lane keeps the receiver until this answer is read.
-                        done.send(()).is_ok()
-                    });
-                if let Err(error) = spawned {
-                    eprintln!(
-                        "vonk-agent-helper: page cache sync not started: {error}; the drop proceeds"
-                    );
-                    return None;
-                }
-                receiver
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let receiver = if let Some(receiver) = pending.take() {
+            receiver
+        } else {
+            let (done, receiver) = mpsc::channel();
+            let sync = self.sync;
+            let spawned = thread::Builder::new()
+                .name("vonk-helper-sync".to_owned())
+                .spawn(move || {
+                    sync();
+                    // The lane keeps the receiver until this answer is read.
+                    done.send(()).is_ok()
+                });
+            if let Err(error) = spawned {
+                eprintln!(
+                    "vonk-agent-helper: page cache sync not started: {error}; the drop proceeds"
+                );
+                return None;
             }
+            receiver
         };
         Some(match receiver.recv_timeout(bound) {
             Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => PageCacheSync::Completed,
@@ -171,7 +170,7 @@ pub fn drop_page_cache(
 }
 
 /// The last authorized load-purpose drop ask: the agent asks before each
-/// serving start and every PAGE_CACHE_DROP_INTERVAL while any run loads, so
+/// serving start and every `PAGE_CACHE_DROP_INTERVAL` while any run loads, so
 /// this cadence is the one owner of "a load is in progress" for the host memory
 /// guard. Hygiene-purpose asks (a job's drops) never set it: R4 stays strict
 /// while a job runs.
@@ -182,7 +181,7 @@ fn record_load_ask(purpose: PageCacheDropPurpose, now: Instant) -> bool {
     record(
         &mut LAST_LOAD_ASK
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
         purpose,
         now,
     )
@@ -207,7 +206,7 @@ pub fn loading(now: Instant) -> bool {
     loading_since(
         *LAST_LOAD_ASK
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
         now,
     )
 }

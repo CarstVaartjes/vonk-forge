@@ -38,6 +38,10 @@ impl Systemd {
     }
 }
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the Result keeps the signature shared with its sibling operations"
+)]
 fn answer(success: bool, word: &str) -> Result<CommandOutput, String> {
     Ok(CommandOutput {
         success,

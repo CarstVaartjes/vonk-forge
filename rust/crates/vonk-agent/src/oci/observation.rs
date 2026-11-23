@@ -311,6 +311,10 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         )))
     }
 
+    #[expect(
+        clippy::unused_self,
+        reason = "a method so it stays beside its siblings behind the same type"
+    )]
     pub(super) fn read_run_lifecycle(&self, path: &Path) -> Result<Option<RunLifecycle>, OciError> {
         read_run_lifecycle(path)
     }

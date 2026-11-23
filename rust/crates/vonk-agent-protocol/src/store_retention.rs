@@ -1,7 +1,10 @@
 //! Store ownership shared by the unprivileged agent and privileged helper.
 use crate::generated::StoragePolicy;
-use Collector::*;
-use StoreRoot::*;
+use Collector::{
+    BaseImages, Bookkeeping, BuildStaging, Claim, Ended, ModelObjects, Ownership, Reconciliation,
+    Untracked, UntrackedRuns,
+};
+use StoreRoot::{Agent, Helper};
 
 // The low-space line shared by the Controller, the agent and the helper.
 include!(concat!(env!("OUT_DIR"), "/storage_policy.rs"));
@@ -17,7 +20,7 @@ pub const HOST_SETTING_ATTEMPT_SECONDS: u64 = 10 * 60;
 /// The privileged helper's data root, which the agent reads receipts from.
 pub const HELPER_DATA_ROOT: &str = "/var/lib/vonk-forge";
 /// All unused Spark data, including model copies, expires after one day.
-pub const GRACE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+pub const GRACE: std::time::Duration = std::time::Duration::from_hours(24);
 
 /// How one store's entries leave.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

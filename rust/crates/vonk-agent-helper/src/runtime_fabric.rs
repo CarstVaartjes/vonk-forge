@@ -122,7 +122,7 @@ struct Pci {
 }
 
 /// The PCI function behind an RDMA device. A DGX Spark reaches one cabled QSFP
-/// port over two PCIe links: the same bus/slot/function in two PCI domains.
+/// port over two `PCIe` links: the same bus/slot/function in two PCI domains.
 fn pci(device: &Path) -> Option<Pci> {
     let target = fs::read_link(device.join("device")).ok()?;
     let address = target.file_name()?.to_str()?;

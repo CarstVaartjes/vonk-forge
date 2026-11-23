@@ -382,6 +382,10 @@ fn bounded_reason(reason: &str) -> String {
     }
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "borrowed to match the sibling signatures that take the operation by reference"
+)]
 fn finish_failure(operation: &AgentOperation, failure: Failure) -> OutcomeFailed {
     if failure.cancelled() {
         // A confirmed cancellation carries its reason and, for a job, its
@@ -459,6 +463,10 @@ fn finish_failure(operation: &AgentOperation, failure: Failure) -> OutcomeFailed
 }
 
 /// The helper codes that cross the wire, per operation.
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "borrowed to match the sibling signatures that take the operation by reference"
+)]
 fn helper_error_code_allowed(operation: &AgentOperation, code: HelperErrorCode) -> bool {
     if matches!(
         code,

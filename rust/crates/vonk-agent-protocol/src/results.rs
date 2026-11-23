@@ -88,6 +88,10 @@ impl AgentResult {
 }
 
 /// Whether a success body is the one the operation reports.
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "borrowed to match the sibling signatures that take the operation by reference"
+)]
 pub(super) fn success_matches(
     operation: &generated::AgentOperation,
     body: &generated::AgentResultResult,

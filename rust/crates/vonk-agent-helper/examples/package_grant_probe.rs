@@ -45,7 +45,8 @@ fn send(key: &Ed25519KeyPair, node_id: &str) {
     let issued_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
-        .as_secs() as i64;
+        .as_secs()
+        .cast_signed();
     let claims = GrantClaims {
         schema_version: 1,
         authority: AUTHORITY.to_owned(),

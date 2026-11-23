@@ -145,7 +145,7 @@ async fn collective_readiness_retries_inspection_without_repreparing_a_launched_
             };
             let body = canonical_generated_json(&response).unwrap();
             stream
-                .write_all(&(body.len() as u32).to_be_bytes())
+                .write_all(&u32::try_from(body.len()).unwrap().to_be_bytes())
                 .unwrap();
             stream.write_all(&body).unwrap();
             return true;
@@ -351,7 +351,7 @@ async fn collective_start_with_drops(
         };
         let body = canonical_generated_json(&response).unwrap();
         stream
-            .write_all(&(body.len() as u32).to_be_bytes())
+            .write_all(&u32::try_from(body.len()).unwrap().to_be_bytes())
             .unwrap();
         stream.write_all(&body).unwrap();
     });

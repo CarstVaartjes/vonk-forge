@@ -238,7 +238,7 @@ fn package_failure_evidence_redacts_details_and_bounds_exit_codes() {
                     helper_sha256: "d".repeat(64),
                 },
                 attempt_nonce: "e".repeat(64),
-                activation_deadline: 2100000000,
+                activation_deadline: 2_100_000_000,
             },
             package_sha256: "a".repeat(64),
             package_signature: "b".repeat(128),

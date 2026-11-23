@@ -44,10 +44,10 @@ fn every_valid_shape_is_the_variant_its_name_says() {
             | ("run-name", RunInspectTarget::RunNameTarget(_))
             | ("job-identity", RunInspectTarget::JobIdentityTarget(_))
             | ("runtime-identity", RunInspectTarget::RuntimeIdentityTarget(_))
-            | ("container-run", RunInspectTarget::ContainerRunTarget(_))
-            | ("container-run bound to its generation", RunInspectTarget::ContainerRunTarget(_)) => {
-                true
-            }
+            | (
+                "container-run" | "container-run bound to its generation",
+                RunInspectTarget::ContainerRunTarget(_),
+            ) => true,
             ("stop-identity", RunInspectTarget::StopIdentityTarget(stop)) => {
                 !stop.cancel_pending_start
             }

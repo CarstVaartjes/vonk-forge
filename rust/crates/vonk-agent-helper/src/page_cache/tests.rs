@@ -35,6 +35,12 @@ fn hygiene_drops_never_mark_a_load_and_load_drops_do() {
 
 #[test]
 fn the_drop_cadence_marks_a_load_until_it_falls_silent() {
+    // The agent's longest healthy gap (its interval after an answer that
+    // took the whole reply bound) stays inside the window.
+    use vonk_agent_protocol::host_memory_guard_policy::{
+        PAGE_CACHE_DROP_INTERVAL, PAGE_CACHE_DROP_REPLY_TIMEOUT,
+    };
+    assert!(LOADING_PHASE_WINDOW > PAGE_CACHE_DROP_INTERVAL + PAGE_CACHE_DROP_REPLY_TIMEOUT);
     let ask = Instant::now();
     assert!(!loading_since(None, ask));
     assert!(loading_since(Some(ask), ask + LOADING_PHASE_WINDOW));
@@ -42,12 +48,6 @@ fn the_drop_cadence_marks_a_load_until_it_falls_silent() {
         Some(ask),
         ask + LOADING_PHASE_WINDOW + Duration::from_millis(1)
     ));
-    // The agent's longest healthy gap (its interval after an answer that
-    // took the whole reply bound) stays inside the window.
-    use vonk_agent_protocol::host_memory_guard_policy::{
-        PAGE_CACHE_DROP_INTERVAL, PAGE_CACHE_DROP_REPLY_TIMEOUT,
-    };
-    assert!(LOADING_PHASE_WINDOW > PAGE_CACHE_DROP_INTERVAL + PAGE_CACHE_DROP_REPLY_TIMEOUT);
     // The phase's first ask (sync, drop, compaction) answers before the
     // agent stops waiting: the bounded parts take at most half the reply
     // bound, the rest is headroom for the unbounded drop write and reads.

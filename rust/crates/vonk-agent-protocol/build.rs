@@ -84,7 +84,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("TelemetrySample.memory_total_bytes needs an integer maximum in the wire schema")?;
     fs::write(
         output.join("telemetry_capacity.rs"),
-        format!("pub const MAX_TELEMETRY_CAPACITY_BYTES: u64 = {capacity};"),
+        format!(
+            "pub const MAX_TELEMETRY_CAPACITY_BYTES: u64 = {};",
+            digit_groups(capacity)
+        ),
     )?;
     // The lists of reported ids (installation directories, run scopes) are
     // bounded by the wire contract; the agent's own validation and its listing
@@ -101,10 +104,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let maximum = list["maxItems"]
             .as_u64()
             .ok_or("every reported id list needs a maxItems in the wire schema")?;
-        limits.push_str(&format!(
-            "/// The most {field} one inventory names (the wire limit).\npub const MAX_REPORTED_{}: usize = {maximum};\n",
+        limits = format!(
+            "{limits}/// The most {field} one inventory names (the wire limit).\npub const MAX_REPORTED_{}: usize = {maximum};\n",
             field.to_uppercase()
-        ));
+        );
     }
     fs::write(output.join("reported_limits.rs"), limits)?;
     fs::write(
@@ -112,4 +115,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         vonk_wire_codegen::render(schema.to_str().ok_or("non-UTF8 schema path")?)?,
     )?;
     Ok(())
+}
+
+/// The decimal digits of `value` in groups of three, as `clippy::unreadable_literal` wants.
+fn digit_groups(value: u64) -> String {
+    let digits = value.to_string();
+    let mut grouped = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            grouped.push('_');
+        }
+        grouped.push(digit);
+    }
+    grouped
 }

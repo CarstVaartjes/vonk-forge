@@ -85,9 +85,10 @@ pub(super) fn untagged_deserialize_impl(
             }
         }
     }).unzip();
-    let schema_owner = match schema_name {
-        Some(schema_name) => quote! { Some(#schema_name) },
-        None => quote! { None },
+    let schema_owner = if let Some(schema_name) = schema_name {
+        quote! { Some(#schema_name) }
+    } else {
+        quote! { None }
     };
     let implementation = parse_quote! {
         impl<'de> ::serde::Deserialize<'de> for #ident {

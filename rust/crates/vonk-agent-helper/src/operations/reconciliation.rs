@@ -27,7 +27,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let agent_data = OpenOptions::new()
             .read(true)
             .custom_flags(
-                (rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::NOFOLLOW).bits() as i32,
+                (rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::NOFOLLOW)
+                    .bits()
+                    .cast_signed(),
             )
             .open(&self.roots.agent_data)?;
         let installations = match rustix::fs::openat(
@@ -228,7 +230,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .read(true)
             .write(true)
             .create(true)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
             .mode(0o600)
             .open(lock_path)?;
         let metadata = lock.metadata()?;
@@ -252,6 +254,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "the Result keeps the signature shared with its sibling operations"
+    )]
     pub(super) fn refuse_reconciled_runtime(
         &self,
         installation_id: &str,

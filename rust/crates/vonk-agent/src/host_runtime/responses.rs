@@ -52,7 +52,7 @@ pub(super) fn require_executed_outcome(
         return Err(malformed());
     }
     let evidence = response.diagnostic.is_some() || response.process_logs.is_some();
-    if evidence && !response.exit_code.is_some_and(|code| code != 0)
+    if evidence && response.exit_code.is_none_or(|code| code == 0)
         || !stop_uncertain
             && response.status != HostHelperResponseStatus::ContainerRuntimeRequestExecuted
     {

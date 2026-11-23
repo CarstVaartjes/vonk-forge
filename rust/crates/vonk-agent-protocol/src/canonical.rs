@@ -10,6 +10,10 @@ pub fn canonical_json<T: Serialize>(value: &T) -> Result<Vec<u8>, ProtocolError>
     Ok(passthrough::WireDocument::of(value)?.canonical_bytes()?)
 }
 
+#[expect(
+    clippy::format_collect,
+    reason = "builds a small string; a fold would read worse"
+)]
 pub fn hex_sha256(value: &[u8]) -> String {
     Sha256::digest(value)
         .iter()

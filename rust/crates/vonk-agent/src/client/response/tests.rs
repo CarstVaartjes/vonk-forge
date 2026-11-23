@@ -123,7 +123,7 @@ fn a_union_refusal_digest_reports_the_broken_constraint_not_the_branches() {
     // The Controller reports every union branch that did not match, so the
     // digest must surface the one constraint the producer broke and count
     // the rest, instead of listing branch shape mismatches.
-    let body = rejection_problem(serde_json::json!([
+    let body = rejection_problem(&serde_json::json!([
         {
             "type": "missing",
             "loc": ["body", "result", "RuntimePreflightResult", "schema_version"],
@@ -169,7 +169,7 @@ fn a_refusal_digest_falls_back_to_shape_errors_and_stays_bounded() {
     // remain are still more useful than nothing, and an over-long location
     // is truncated rather than refusing the record.
     let long = "segment".repeat(40);
-    let body = rejection_problem(serde_json::json!([
+    let body = rejection_problem(&serde_json::json!([
         {"type": "missing", "loc": ["body", long, "state"], "msg": "Field required"}
     ]));
 
@@ -212,7 +212,7 @@ async fn a_refused_result_records_the_controller_validation_digest() {
     // End to end over the real transport: the 422 problem the Controller
     // publishes is what the durable refusal keeps, so an operator can read
     // the failing field and rule from the agent's own record.
-    let body = rejection_problem(serde_json::json!([
+    let body = rejection_problem(&serde_json::json!([
         {
             "type": "missing",
             "loc": ["body", "result", "RuntimePreflightResult", "schema_version"],

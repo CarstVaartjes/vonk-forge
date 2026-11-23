@@ -207,6 +207,28 @@ fn firewall_unknown_ends_boundedly_then_kernel_repair_admits_fresh_binding() {
 
 #[test]
 fn native_fabric_requires_complete_bounded_shape_without_publications() {
+    impl CommandRunner for FabricRunner {
+        fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+            assert_eq!(executable, Path::new(DOCKER_FIREWALL));
+            assert_eq!(
+                &arguments[2..],
+                [
+                    "check-fabric-run",
+                    "192.168.100.10",
+                    "192.168.100.10",
+                    "29500",
+                    "8000"
+                ]
+            );
+            Ok(CommandOutput {
+                success: true,
+                stdout: b"enp1s0f1np1\n".to_vec(),
+                exit_code: Some(0),
+                stderr: Vec::new(),
+            })
+        }
+    }
+    struct FabricRunner;
     let (temp, roots) = runtime_fixture();
     let model = artifact_path(&roots, 'a');
     fs::create_dir_all(&model).unwrap();
@@ -327,28 +349,6 @@ fn native_fabric_requires_complete_bounded_shape_without_publications() {
         "192.168.100.10,not-an-address",
     ] {
         assert!(validate_docker_run(&with_peers(wrong), &roots, None).is_err());
-    }
-    struct FabricRunner;
-    impl CommandRunner for FabricRunner {
-        fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
-            assert_eq!(executable, Path::new(DOCKER_FIREWALL));
-            assert_eq!(
-                &arguments[2..],
-                [
-                    "check-fabric-run",
-                    "192.168.100.10",
-                    "192.168.100.10",
-                    "29500",
-                    "8000"
-                ]
-            );
-            Ok(CommandOutput {
-                success: true,
-                stdout: b"enp1s0f1np1\n".to_vec(),
-                exit_code: Some(0),
-                stderr: Vec::new(),
-            })
-        }
     }
     let sysfs = temp.path().join("sysfs");
     crate::runtime_fabric::tests::gid(

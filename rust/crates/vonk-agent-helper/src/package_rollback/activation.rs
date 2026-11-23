@@ -237,6 +237,10 @@ impl Store {
             timestamp,
         )
     }
+    #[expect(
+        clippy::unused_self,
+        reason = "a method so it stays beside its siblings behind the same type"
+    )]
     pub(super) fn check_acknowledgement(
         &self,
         tx: &Transaction,

@@ -14,7 +14,7 @@ impl AgentHttpClient {
             )),
             controller: Url::parse(controller).expect("test controller URL must be valid"),
             node_id: node_id.to_owned(),
-            identity_content: Default::default(),
+            identity_content: Arc::default(),
             progress_phase: Arc::new(Mutex::new(None)),
             transfer_inactivity: TRANSFER_INACTIVITY,
             distribution_range_bytes: DISTRIBUTION_RANGE_BYTES,
@@ -64,7 +64,7 @@ impl AgentHttpClient {
                     )),
                     controller: config.controller_url.clone(),
                     node_id: config.node_id.clone(),
-                    identity_content: Default::default(),
+                    identity_content: Arc::default(),
                     progress_phase: Arc::new(Mutex::new(None)),
                     transfer_inactivity: TRANSFER_INACTIVITY,
                     distribution_range_bytes: DISTRIBUTION_RANGE_BYTES,
@@ -91,6 +91,11 @@ impl AgentHttpClient {
         }
     }
 
+    #[expect(
+        clippy::unused_async,
+        clippy::unused_async_trait_impl,
+        reason = "async to keep one awaitable signature across the trait and its callers"
+    )]
     pub async fn observe_active_identity(&self, config: &AgentConfig) -> Result<(), ClientError> {
         let paths = active_identity_paths(&config.data_dir.join("credentials"))
             .map_err(|_| ClientError::Identity)?;

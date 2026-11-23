@@ -223,8 +223,8 @@ async fn telemetry_rejects_empty_or_more_than_sixteen_samples_before_transport()
         client: Arc::new(RwLock::new(Client::new())),
         controller: Url::parse("http://127.0.0.1:9/").unwrap(),
         node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-        identity_content: Default::default(),
-        progress_phase: Default::default(),
+        identity_content: Arc::default(),
+        progress_phase: Arc::default(),
         transfer_inactivity: TRANSFER_INACTIVITY,
         distribution_range_bytes: DISTRIBUTION_RANGE_BYTES,
     };

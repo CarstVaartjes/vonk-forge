@@ -1,6 +1,6 @@
 //! Linux production wire probe. `persist-binding` exercises OCI start
 //! persistence and retained inspection planning; `serialize` uses the exact
-//! client envelope factory used by AgentHttpClient.
+//! client envelope factory used by `AgentHttpClient`.
 
 use std::fs;
 use std::io::{self, BufRead};
@@ -47,6 +47,10 @@ struct SerializeInput {
     runs: Vec<ExactRecipeRunObservation>,
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 fn persist_binding(
     input: PersistBindingInput,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {

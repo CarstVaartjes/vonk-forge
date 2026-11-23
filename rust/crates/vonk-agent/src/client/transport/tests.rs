@@ -176,7 +176,7 @@ async fn rotation_drains_requests_without_starving_heartbeats() {
         tokio::select! {
             result = &mut rotation => panic!("rotation interrupted an active request: {result:?}"),
             result = &mut probe => result.unwrap(),
-            _ = tokio::time::sleep(Duration::from_secs(2)) => panic!("rotation starved the heartbeat"),
+            () = tokio::time::sleep(Duration::from_secs(2)) => panic!("rotation starved the heartbeat"),
         }
         release_first.notify_one();
         request.await.unwrap();

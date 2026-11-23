@@ -50,8 +50,7 @@ impl RecipeJobRunResult {
                 == Some(u64::from(self.output_manifest.total_bytes))
             && self.output_manifest.total_bytes <= 2 * 1024 * 1024 * 1024
             && canonical_json(&manifest)
-                .ok()
-                .is_some_and(|bytes| hex_sha256(&bytes) == self.output_manifest.manifest_sha256)
+                .is_ok_and(|bytes| hex_sha256(&bytes) == self.output_manifest.manifest_sha256)
             && self.evidence.elapsed_milliseconds <= 7 * 24 * 60 * 60 * 1000
             && self
                 .evidence
@@ -124,6 +123,10 @@ impl RecipeOperationRequest {
         Ok(request)
     }
 
+    #[expect(
+        clippy::match_same_arms,
+        reason = "the arms stay apart on purpose: each names a distinct case of the state machine"
+    )]
     pub(super) fn validate(&self) -> Result<(), ProtocolError> {
         let valid = match self {
             Self::RuntimePreflight(_) => true,

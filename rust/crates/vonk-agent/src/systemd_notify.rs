@@ -3,7 +3,7 @@ use std::{env, os::unix::net::UnixDatagram, path::Path, sync::Mutex};
 static RENEWAL_STATUS: Mutex<Option<String>> = Mutex::new(None);
 
 /// Best-effort notification to the system service manager. Missing
-/// NOTIFY_SOCKET is expected for foreground and test invocations.
+/// `NOTIFY_SOCKET` is expected for foreground and test invocations.
 pub fn notify(message: &str) {
     let Some(socket) = env::var_os("NOTIFY_SOCKET") else {
         return;
@@ -24,7 +24,7 @@ pub fn notify(message: &str) {
 pub fn progress(status: &str) {
     let renewal = RENEWAL_STATUS
         .lock()
-        .unwrap_or_else(|error| error.into_inner());
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let status = combined_status(status, renewal.as_deref());
     notify(&progress_payload(&status, watchdog_enabled()));
 }
@@ -33,7 +33,7 @@ pub fn progress(status: &str) {
 pub fn renewal_status(status: Option<&str>) {
     *RENEWAL_STATUS
         .lock()
-        .unwrap_or_else(|error| error.into_inner()) = status.map(str::to_owned);
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = status.map(str::to_owned);
     progress("Agent certificate status");
 }
 

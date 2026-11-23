@@ -270,22 +270,21 @@ impl StateStore {
         // A page this agent cannot read again (an older shape after an
         // upgrade, an oversized or damaged row) can never be delivered:
         // discard it, and the cycle collects fresh evidence instead.
-        match Some(&body)
+        if let Some(report) = Some(&body)
             .filter(|body| body.len() <= 1024 * 1024)
             .and_then(|body| parse_strict(body.as_bytes()).ok())
         {
-            Some(report) => Ok(Some(report)),
-            None => {
-                eprintln!(
-                    "vonk-agent: discarding unreadable pending recipe observation bytes={}; fresh evidence is collected instead",
-                    body.len()
-                );
-                self.connection.execute(
-                    "DELETE FROM metadata WHERE key='pending_recipe_observation' AND value=?1",
-                    [&body],
-                )?;
-                Ok(None)
-            }
+            Ok(Some(report))
+        } else {
+            eprintln!(
+                "vonk-agent: discarding unreadable pending recipe observation bytes={}; fresh evidence is collected instead",
+                body.len()
+            );
+            self.connection.execute(
+                "DELETE FROM metadata WHERE key='pending_recipe_observation' AND value=?1",
+                [&body],
+            )?;
+            Ok(None)
         }
     }
 
@@ -645,7 +644,10 @@ impl StateStore {
             // longer refusal: offer the result again.
             rejection.retry_due_at > now
                 && rejection.retry_due_at
-                    <= now + chrono::Duration::seconds(RESULT_RETRY_MAX_SECONDS as i64)
+                    <= now
+                        + chrono::Duration::seconds(
+                            i64::try_from(RESULT_RETRY_MAX_SECONDS).unwrap_or(i64::MAX),
+                        )
         }))
     }
 
@@ -869,11 +871,15 @@ impl StateStore {
     pub fn next_delivery_result(
         &mut self,
     ) -> Result<Option<(AgentOperation, AgentResult)>, StateError> {
+        #[expect(
+            clippy::cast_possible_wrap,
+            reason = "a byte limit of a few MiB fits i64; `try_from` is not const"
+        )]
+        const RECEIPT_READ_BYTES: i64 =
+            vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES as i64;
         if !self.durable_custody {
             return Ok(None);
         }
-        const RECEIPT_READ_BYTES: i64 =
-            vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES as i64;
         let row = self.connection.query_row(
             "SELECT o.rowid,o.fence,o.operation,CASE WHEN length(o.result_json)<=?2 THEN o.result_json END
              FROM operations o LEFT JOIN result_reconciliation r ON r.fence=o.fence
@@ -979,6 +985,10 @@ impl StateStore {
     /// Reopen exact accepted requests for the shared startup/tick observer.
     /// A claim leaves this set once [`Self::end_observation`] records that
     /// its final outcome is durable and nothing live remains to observe.
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "a byte limit of a few MiB fits i64; `try_from` is not const"
+    )]
     pub fn observation_claims(&mut self) -> Result<Vec<AgentClaim>, StateError> {
         // One maximum-sized accepted claim per pass bounds memory and probe
         // latency. Rotate independently of claim/heartbeat traffic.
@@ -1042,6 +1052,10 @@ impl StateStore {
     }
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "borrowed to match the sibling signatures that take the operation by reference"
+)]
 fn uncertain_receipt(fence: uuid::Uuid, operation: &AgentOperation) -> AgentResult {
     let finished = ExecutionResult::unknown(
         WaitReason::AgentRestartInterrupted,

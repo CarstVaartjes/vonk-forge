@@ -422,9 +422,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         "vonk-agent: installation {installation_id} model store listing deferred ({}); its shared objects are kept",
                         error.safe_category()
                     );
-                    Default::default()
+                    Vec::default()
                 }),
-            None => Default::default(),
+            None => Vec::default(),
         };
         let identity = RecipeReconciliationIdentity {
             installation_id: installation_uuid,
@@ -477,23 +477,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         if *cancellation.borrow() {
             return cancelled("controller cancellation observed after runtime cache cleanup");
         }
-        if !store_objects.is_empty() {
-            // Keep discovery while shared-object reclamation remains unconfirmed.
-            if let Some(model) = request.cleanup_model_content_sha256.as_deref()
-                && let Err(error) = self.runtime.uninstall_with_model_cleanup(
-                    &identity,
-                    &request.recipe_content_sha256,
-                    model,
-                )
-            {
-                return unconfirmed(
-                    WaitReason::CleanupUnconfirmed,
-                    "installation removal is unconfirmed",
-                    UnknownEvidence::at(FailureStage::InstallationRemoval)
-                        .because(error.safe_category()),
-                );
-            }
-        } else {
+        if store_objects.is_empty() {
             match self.runtime.finalize_reconciliation(&identity) {
                 Ok(done) if done.complete => {}
                 Ok(_) => {
@@ -510,6 +494,22 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         "reconcile_finalize",
                     );
                 }
+            }
+        } else {
+            // Keep discovery while shared-object reclamation remains unconfirmed.
+            if let Some(model) = request.cleanup_model_content_sha256.as_deref()
+                && let Err(error) = self.runtime.uninstall_with_model_cleanup(
+                    &identity,
+                    &request.recipe_content_sha256,
+                    model,
+                )
+            {
+                return unconfirmed(
+                    WaitReason::CleanupUnconfirmed,
+                    "installation removal is unconfirmed",
+                    UnknownEvidence::at(FailureStage::InstallationRemoval)
+                        .because(error.safe_category()),
+                );
             }
         }
         if *cancellation.borrow() {

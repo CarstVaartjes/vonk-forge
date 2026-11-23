@@ -171,7 +171,7 @@ async fn settle_failed(seen: Seen, failed: Failed) -> Settled {
             }
             let body = canonical_generated_json(&response).unwrap();
             stream
-                .write_all(&(body.len() as u32).to_be_bytes())
+                .write_all(&u32::try_from(body.len()).unwrap().to_be_bytes())
                 .unwrap();
             stream.write_all(&body).unwrap();
         }

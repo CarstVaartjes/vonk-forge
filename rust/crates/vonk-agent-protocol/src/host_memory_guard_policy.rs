@@ -80,7 +80,7 @@ pub const RECENT_SAMPLES: usize = 6;
 pub const RECENT_SAMPLE_SPACING: Duration = Duration::from_secs(1);
 /// The kill evidence's two packed properties: each value is `field:reading`
 /// pairs joined by `+`, one summary token the agent keeps as one exit fact
-/// (the agent keeps at most MAX_PREFLIGHT_PROPERTIES facts per failure).
+/// (the agent keeps at most `MAX_PREFLIGHT_PROPERTIES` facts per failure).
 pub const PRESSURE_PROPERTY: &str = "pressure_readings";
 pub const RECENT_PROPERTY: &str = "recent_samples";
 /// The readings `PRESSURE_PROPERTY` packs, in order.

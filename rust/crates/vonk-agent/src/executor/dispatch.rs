@@ -21,9 +21,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 .execute_distribution(claim, lease_deadline, cancellation)
                 .await;
         }
-        let request = match RecipeOperationRequest::parse(claim) {
-            Ok(request) => request,
-            Err(_) => return failed("recipe operation payload is invalid"),
+        let Ok(request) = RecipeOperationRequest::parse(claim) else {
+            return failed("recipe operation payload is invalid");
         };
         // The one place a compiled plan is validated; parse stays structural so
         // journal re-observation survives upgrades that tighten the rules.

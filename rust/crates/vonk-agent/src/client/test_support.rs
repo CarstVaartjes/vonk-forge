@@ -5,7 +5,7 @@ pub(super) const TEST_PLAN_DIGEST: &str =
 
 pub(super) const TEST_NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
 
-/// Every TCP test fixture binds here, never on `127.0.0.1`. OrbStack's port
+/// Every TCP test fixture binds here, never on `127.0.0.1`. `OrbStack`'s port
 /// forwarder in the `vonk-ci` VM probes each new `127.0.0.1` listener with a
 /// `GET /` that a fixture would count as the client under test; the rest of
 /// `127.0.0.0/8` reaches the same loopback interface and is not probed.
@@ -126,6 +126,10 @@ impl Drop for CapturePeer {
     }
 }
 
+#[expect(
+    clippy::format_collect,
+    reason = "builds a small string; a fold would read worse"
+)]
 pub(super) async fn request_capture_client(
     response_status: u16,
     response_headers: Vec<String>,
@@ -260,7 +264,7 @@ pub(super) fn distribution_assignment_fixture(model: &[u8]) -> DistributionAssig
 pub(super) enum DistributionFixtureMode {
     Good,
     WrongEtagFirstObject,
-    /// Serve the requested range with the correct length and ETag but
+    /// Serve the requested range with the correct length and `ETag` but
     /// different bytes, so only the content check can reject it.
     InterruptFirstObject,
     UnavailableFirstObject,
@@ -290,8 +294,8 @@ pub(super) fn authenticated_test_client(controller: &str, node_id: &str) -> Agen
         )),
         controller: Url::parse(controller).unwrap(),
         node_id: node_id.to_owned(),
-        identity_content: Default::default(),
-        progress_phase: Default::default(),
+        identity_content: Arc::default(),
+        progress_phase: Arc::default(),
         transfer_inactivity: TRANSFER_INACTIVITY,
         distribution_range_bytes: DISTRIBUTION_RANGE_BYTES,
     }
@@ -496,8 +500,8 @@ pub(super) fn job_input_client(
             client: Arc::new(RwLock::new(Client::new())),
             controller: Url::parse(&format!("http://{address}/")).unwrap(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            identity_content: Default::default(),
-            progress_phase: Default::default(),
+            identity_content: Arc::default(),
+            progress_phase: Arc::default(),
             transfer_inactivity: TRANSFER_INACTIVITY,
             distribution_range_bytes: DISTRIBUTION_RANGE_BYTES,
         },
@@ -509,13 +513,13 @@ pub(super) fn telemetry_sample() -> TelemetrySample {
     serde_json::from_value(serde_json::json!({
         "boot_id": "00000000-0000-4000-8000-000000000001",
         "observed_at": "2026-08-15T12:00:01Z",
-        "memory_total_bytes": 128000000000_u64,
-        "memory_available_bytes": 64000000000_u64,
-        "disk_total_bytes": 1000000000000_u64,
-        "disk_free_bytes": 750000000000_u64,
+        "memory_total_bytes": 128_000_000_000_u64,
+        "memory_available_bytes": 64_000_000_000_u64,
+        "disk_total_bytes": 1_000_000_000_000_u64,
+        "disk_free_bytes": 750_000_000_000_u64,
         "gpu_utilization_percent": null,
-        "gpu_memory_total_bytes": 128000000000_u64,
-        "gpu_memory_free_bytes": 63000000000_u64
+        "gpu_memory_total_bytes": 128_000_000_000_u64,
+        "gpu_memory_free_bytes": 63_000_000_000_u64
     }))
     .unwrap()
 }
@@ -602,8 +606,8 @@ pub(super) fn delayed_upload_client(
             client: Arc::new(RwLock::new(http_client)),
             controller: base_client.controller,
             node_id: base_client.node_id,
-            identity_content: Default::default(),
-            progress_phase: Default::default(),
+            identity_content: Arc::default(),
+            progress_phase: Arc::default(),
             transfer_inactivity: Duration::from_millis(50),
             distribution_range_bytes: DISTRIBUTION_RANGE_BYTES,
         },
@@ -637,7 +641,7 @@ pub(super) fn progress() -> AgentProgress {
     }
 }
 
-pub(super) fn rejection_problem(issues: Value) -> Vec<u8> {
+pub(super) fn rejection_problem(issues: &Value) -> Vec<u8> {
     serde_json::json!({
         "context": null,
         "detail": "request is invalid",
@@ -714,7 +718,7 @@ pub(super) fn accept_peer(
                 return stream;
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(5))
+                thread::sleep(Duration::from_millis(5));
             }
             Err(error) => panic!("fixture acceptance failed: {error}"),
         }

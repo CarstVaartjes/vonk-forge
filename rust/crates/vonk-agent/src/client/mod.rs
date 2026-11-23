@@ -190,15 +190,29 @@ pub struct AgentHttpClient {
     distribution_range_bytes: u64,
 }
 
-use reporting::*;
+use reporting::local_hostname;
+#[cfg(test)]
+use reporting::valid_reported_hostname;
 pub use response::parse_claim_response;
-use response::*;
-use storage::*;
+use response::{
+    bounded_body, bounded_body_limit, bounded_claim_body, classify_response,
+    controller_rejection_digest, response_controller_error,
+};
+use storage::{
+    ensure_managed_directory, ensure_private_parent, inspect_trusted_final, isolate_managed_entry,
+    mark_claimed, open_trusted_partial, partial_path, same_file_content_identity,
+    same_file_metadata, sync_parent, valid_oci_digest, valid_sha256,
+    validate_trusted_final_metadata, validate_trusted_metadata,
+};
 
 #[cfg(test)]
 pub(crate) mod test_support;
 
-use buffering::*;
+#[cfg(test)]
+use buffering::range_end;
+use buffering::{
+    ObjectPlacement, PendingRange, RangeRecord, preallocate, release_distribution_page_cache,
+};
 pub(crate) use errors::endpoint_name;
 pub use errors::{
     ClientError, ControllerError, Disposition, Refusal, http_status_disposition, local_disposition,
@@ -208,6 +222,5 @@ pub use errors::{
 pub(crate) use grants::build_host_runtime_grant_request;
 pub use progress::{DistributionDownloadEvidence, DistributionProgress};
 use progress::{DistributionProgressTracker, ProgressSnapshot};
-#[cfg(test)]
 pub(crate) use response::controller_error;
-use streaming::*;
+use streaming::{next_chunk, send_streaming};

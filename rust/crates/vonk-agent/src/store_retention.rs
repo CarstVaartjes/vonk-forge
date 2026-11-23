@@ -37,7 +37,10 @@ use std::{
 };
 
 use crate::held_lock::HeldLock;
-use Collector::*;
+use Collector::{
+    BaseImages, Bookkeeping, BuildStaging, Claim, ControllerOrder, Ended, ModelObjects, Ownership,
+    Reconciliation, UntrackedRuns,
+};
 
 /// How long an unused entry stays after its last use or change: a claim that
 /// ended on a fault resumes from it within this time.
@@ -55,7 +58,7 @@ pub const RESERVE_FLOOR_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 /// How long the Controller's inventory verdict is acted on: inventory reports
 /// every two minutes, so a verdict this old means the Controller is not
 /// answering, and nothing is removed on it.
-pub const VERDICT_MAX_AGE: Duration = Duration::from_secs(10 * 60);
+pub const VERDICT_MAX_AGE: Duration = Duration::from_mins(10);
 
 /// The file a verdict that the Controller does not track an installation or a
 /// run scope leaves in its directory; its age is the grace.
@@ -179,6 +182,10 @@ pub fn run_scope_names(data_root: &Path) -> Option<Vec<uuid::Uuid>> {
 
 /// Persist the next rotation across collect-inventory subprocesses and agent
 /// restarts. A failed report skips a page only until the next rotation.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 fn rotating_page(
     data_root: &Path,
     cursor_file: &str,
@@ -391,7 +398,7 @@ fn sweep_with(
                 pass.ended(&images, &|name, _| name.starts_with(".damaged-"));
                 pass.base_images(&images);
             }
-            Untracked => {
+            Collector::Untracked => {
                 // A name that is no installation's was isolated (`.damaged`).
                 pass.ended(&root, &|name, _| !installation_name(name));
                 // A started run's installation stays whatever the verdict.
@@ -555,7 +562,11 @@ pub fn retention_failure(
     use std::io::Read;
     let file = fs::OpenOptions::new()
         .read(true)
-        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
+        .custom_flags(
+            (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                .bits()
+                .cast_signed(),
+        )
         .open(data_root.join(FAILURE_FILE))
         .ok()?;
     if !file.metadata().ok()?.is_file() {
@@ -635,6 +646,7 @@ fn unused_model_objects(
 pub fn model_objects(
     data_root: &Path,
 ) -> Option<Vec<vonk_agent_protocol::generated::ModelStoreObject>> {
+    const EVIDENCE_BYTES: usize = (crate::inventory::INVENTORY_OUTPUT_BYTES / 2) as usize;
     let owner = rustix::process::geteuid().as_raw();
     if !owned_directory(data_root, owner) {
         return None;
@@ -647,7 +659,6 @@ pub fn model_objects(
     };
     // Reserve half of the one-MiB inventory document for other observations.
     // Bound memory while scanning, rather than after constructing a huge list.
-    const EVIDENCE_BYTES: usize = (crate::inventory::INVENTORY_OUTPUT_BYTES / 2) as usize;
     let mut evidence_bytes = 2_usize;
     let mut objects = Vec::new();
     for entry in entries {
@@ -829,7 +840,7 @@ impl Pass<'_> {
             }
             match fs::DirBuilder::new().mode(0o700).create(runs.join(&name)) {
                 Ok(()) => {
-                    eprintln!("vonk-agent: restored observation directory for retained run {name}")
+                    eprintln!("vonk-agent: restored observation directory for retained run {name}");
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
                 Err(error) => eprintln!(
@@ -936,7 +947,7 @@ impl Pass<'_> {
                         "vonk-agent: store retention: {kind} {name} is unused; it leaves after a day unless used again"
                     ),
                     Err(error) => {
-                        eprintln!("vonk-agent: store retention cannot mark {kind} {name}: {error}")
+                        eprintln!("vonk-agent: store retention cannot mark {kind} {name}: {error}");
                     }
                 },
                 (true, Some(since)) => {
@@ -1079,6 +1090,7 @@ impl Pass<'_> {
 
     /// Remove one entry; true when it is gone.
     fn remove(&mut self, path: &Path, metadata: &fs::Metadata) -> bool {
+        use vonk_agent_protocol::generated::{AgentRetainedStore, AgentStoreRemovalRequest};
         if Instant::now() >= self.deadline {
             self.swept.pending = true;
             return false;
@@ -1086,7 +1098,6 @@ impl Pass<'_> {
         // Runtime/helper writers own descendants of these scopes. Always use
         // the helper, rather than partially deleting (including the grace
         // marker) before discovering a foreign-owned directory.
-        use vonk_agent_protocol::generated::{AgentRetainedStore, AgentStoreRemovalRequest};
         let scope = path.strip_prefix(self.data_root).ok().and_then(|relative| {
             let mut components = relative.iter();
             let store = components
@@ -1314,7 +1325,11 @@ fn retention_projection(
     use std::io::Read;
     let file = fs::OpenOptions::new()
         .read(true)
-        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
+        .custom_flags(
+            (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                .bits()
+                .cast_signed(),
+        )
         .open(data_root.join("store-retention.json"))
         .ok()?;
     let metadata = file.metadata().ok()?;

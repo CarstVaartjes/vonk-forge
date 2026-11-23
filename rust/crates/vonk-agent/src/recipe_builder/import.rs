@@ -166,6 +166,10 @@ pub(crate) fn podman_build_diagnostic(
     }
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 pub(super) fn podman_import_process_error(error: ProcessError) -> RecipeBuildError {
     let diagnostic = match error {
         // Import uses the filesystem free-space guard, not a directory-size

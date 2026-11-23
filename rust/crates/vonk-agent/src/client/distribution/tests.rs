@@ -288,7 +288,9 @@ fn transfers_plan_files_in_sixty_four_mebibyte_ranges_with_adaptive_streams() {
 async fn write_path_reserves_space_without_changing_the_length_and_writes_exact_bytes() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("object.partial");
-    let payload: Vec<u8> = (0..5 * 1024 * 1024_u32).map(|value| value as u8).collect();
+    let payload: Vec<u8> = (0..5 * 1024 * 1024_u32)
+        .map(|value| value.to_le_bytes()[0])
+        .collect();
     let total = payload.len() as u64;
     let file = open_trusted_partial(&path).await.unwrap();
     preallocate(&file, 0, total);
@@ -310,7 +312,9 @@ async fn write_path_reserves_space_without_changing_the_length_and_writes_exact_
     assert_eq!(pending.len(), 5);
     assert!(fs::metadata(&path).unwrap().len() > total);
     for range in pending.into_iter().rev() {
-        let bytes = payload[range.start as usize..=range.end as usize].to_vec();
+        let bytes = payload
+            [usize::try_from(range.start).unwrap()..=usize::try_from(range.end).unwrap()]
+            .to_vec();
         record.write(range.start, bytes).await.unwrap();
         record.complete(range).await.unwrap();
     }
@@ -338,7 +342,7 @@ async fn distribution_acceptance_uses_authenticated_ranges_and_replays_without_r
     let mut snapshots = Vec::new();
     let evidence = client
         .download_distribution_with_progress(TEST_PLAN_DIGEST, &assignment_root, |item| {
-            snapshots.push(item)
+            snapshots.push(item);
         })
         .await
         .unwrap();
@@ -737,8 +741,8 @@ async fn distribution_reuses_an_existing_object_without_hashing_or_fetching() {
         client: Arc::new(RwLock::new(Client::new())),
         controller: Url::parse("http://127.0.0.1:1/").unwrap(),
         node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-        identity_content: Default::default(),
-        progress_phase: Default::default(),
+        identity_content: Arc::default(),
+        progress_phase: Arc::default(),
         transfer_inactivity: TRANSFER_INACTIVITY,
         distribution_range_bytes: DISTRIBUTION_RANGE_BYTES,
     };

@@ -343,7 +343,7 @@ async fn completed_job_upload_recovers_without_reexecution_and_new_jobs_are_admi
                 match listener.accept() {
                     Ok((stream, _)) => break stream,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(1))
+                        thread::sleep(Duration::from_millis(1));
                     }
                     Err(error) => panic!("output peer: {error}"),
                 }

@@ -1475,7 +1475,10 @@ fn a_refused_result_is_due_once_its_cool_down_has_elapsed() {
             .reject_result(&result, &ingress_refusal(), now)
             .unwrap();
     }
-    let later = now + ChronoDuration::seconds(10 * crate::state::RESULT_RETRY_MAX_SECONDS as i64);
+    let later = now
+        + ChronoDuration::seconds(
+            10 * i64::try_from(crate::state::RESULT_RETRY_MAX_SECONDS).unwrap(),
+        );
     assert!(state.result_rejection(&result, later).unwrap().is_none());
     assert_eq!(state.pending_results().unwrap().len(), 1);
 }

@@ -52,7 +52,7 @@ impl<F: FnMut(DistributionProgress)> DistributionProgressTracker<F> {
             completed_items: self.completed_items,
             total_items: self.object_bytes.len() as u64,
             object_sha256: object.sha256.clone(),
-            kind: object.kind.to_string(),
+            kind: object.kind.clone(),
             bytes: self.bytes,
             total_bytes: Some(self.total_bytes),
         });

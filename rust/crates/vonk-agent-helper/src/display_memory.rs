@@ -1,4 +1,4 @@
-//! Read-only evidence. No guessed subtraction of 128 GB minus MemTotal.
+//! Read-only evidence. No guessed subtraction of 128 GB minus `MemTotal`.
 use std::{fs, io::Read, path::Path};
 use vonk_agent_protocol::generated::{DisplayMemoryObservation, DisplayMemorySignal};
 
@@ -8,9 +8,9 @@ const MAX_EVIDENCE_BYTES: u64 = 1024 * 1024;
 
 // Owner measurements, 2026-10-22, spark-2297 before/after and spark-3542.
 // The block ending here contains display RAM plus unchanged firmware memory.
-const RESERVED_END: u64 = 0x3237fffff;
-const OTHER_FIRMWARE_BYTES: u64 = 0x23800000;
-const CALIBRATIONS: &[(u64, u64)] = &[(0xA3800000, 0x80000000), (0x43800000, 0x20000000)];
+const RESERVED_END: u64 = 0x0003_237f_ffff;
+const OTHER_FIRMWARE_BYTES: u64 = 0x2380_0000;
+const CALIBRATIONS: &[(u64, u64)] = &[(0xA380_0000, 0x8000_0000), (0x4380_0000, 0x2000_0000)];
 
 fn read_bytes(path: &Path) -> Option<Vec<u8>> {
     let file = fs::File::open(path).ok()?;

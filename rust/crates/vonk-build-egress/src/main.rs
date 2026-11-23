@@ -20,7 +20,7 @@ const MAX_CONNECTIONS: usize = 64;
 const MAX_RESOLVED_ADDRESSES: usize = 16;
 const MAX_TUNNEL_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 /// Byte budget for one connection, shared across both copy directions so a
-/// tunnel cannot move MAX_TUNNEL_BYTES in each direction.
+/// tunnel cannot move `MAX_TUNNEL_BYTES` in each direction.
 const IO_TIMEOUT: Duration = Duration::from_secs(120);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 static RESOLVER_OWNERS: AtomicUsize = AtomicUsize::new(0);
@@ -35,6 +35,10 @@ fn main() -> ExitCode {
     }
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 fn run(arguments: Vec<String>) -> Result<(), String> {
     if arguments == ["--probe"] {
         probe_available(
@@ -94,6 +98,10 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
     }
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 fn serve(hosts: Arc<BTreeSet<String>>) -> io::Result<()> {
     let listener = TcpListener::bind(LISTEN)?;
     let active = Arc::new(AtomicUsize::new(0));
@@ -186,12 +194,9 @@ fn handle_until(
             return Ok(());
         }
     };
-    let mut upstream = match connect(&addresses, deadline) {
-        Ok(value) => value,
-        Err(()) => {
-            reject(client, 502);
-            return Ok(());
-        }
+    let Ok(mut upstream) = connect(&addresses, deadline) else {
+        reject(client, 502);
+        return Ok(());
     };
     upstream.set_read_timeout(Some(IO_TIMEOUT))?;
     upstream.set_write_timeout(Some(IO_TIMEOUT))?;
@@ -251,7 +256,7 @@ fn resolve_observed(
                 }
             }
             if valid && !addresses.is_empty() {
-                return validate_resolved(addresses).map_err(|_| 502);
+                return validate_resolved(addresses).map_err(|()| 502);
             }
         }
         if attempt < 2 {
@@ -375,7 +380,7 @@ fn retain_resolver_with(
     let spawned = start(Box::new(move || {
         let Some((mut child, owner)) = reaper_slot
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take()
         else {
             return;
@@ -393,19 +398,19 @@ fn retain_resolver_with(
         // ownership in one short critical section, with no external wait.
         RETAINED_RESOLVERS
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push((child, owner));
     }));
     if spawned.is_err()
         && let Some(pair) = slot
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take()
     {
         // Service supervision takes over at once; no claim is dropped.
         RETAINED_RESOLVERS
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(pair);
     }
 }

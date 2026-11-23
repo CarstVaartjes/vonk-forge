@@ -146,7 +146,7 @@ fn an_ask_is_answered_only_by_the_helpers_report_for_it() {
             }
             let body = canonical_generated_json(&answer).unwrap();
             stream
-                .write_all(&(body.len() as u32).to_be_bytes())
+                .write_all(&u32::try_from(body.len()).unwrap().to_be_bytes())
                 .unwrap();
             stream.write_all(&body).unwrap();
         }

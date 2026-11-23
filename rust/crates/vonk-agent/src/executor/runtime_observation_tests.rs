@@ -281,7 +281,7 @@ async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims
                     };
                     let body = canonical_json(&response).unwrap();
                     stream
-                        .write_all(&(body.len() as u32).to_be_bytes())
+                        .write_all(&u32::try_from(body.len()).unwrap().to_be_bytes())
                         .unwrap();
                     stream.write_all(&body).unwrap();
                 }
@@ -384,7 +384,7 @@ async fn refused_reobservation_stays_unconfirmed_instead_of_failing_the_start() 
         };
         let body = canonical_json(&response).unwrap();
         stream
-            .write_all(&(body.len() as u32).to_be_bytes())
+            .write_all(&u32::try_from(body.len()).unwrap().to_be_bytes())
             .unwrap();
         stream.write_all(&body).unwrap();
     });

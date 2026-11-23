@@ -93,7 +93,7 @@ pub(super) fn prepare(value: &mut Value) {
                     && object
                         .get("maximum")
                         .and_then(Value::as_u64)
-                        .is_some_and(|maximum| maximum <= u8::MAX as u64))
+                        .is_some_and(|maximum| u8::try_from(maximum).is_ok()))
                     || object
                         .get("const")
                         .and_then(Value::as_u64)
@@ -106,7 +106,7 @@ pub(super) fn prepare(value: &mut Value) {
                     && object
                         .get("maximum")
                         .and_then(Value::as_u64)
-                        .is_some_and(|maximum| maximum <= u32::MAX as u64)
+                        .is_some_and(|maximum| u32::try_from(maximum).is_ok())
                 {
                     "uint32"
                 } else if unsigned {
@@ -233,20 +233,6 @@ pub(super) fn typed_tags(value: &mut Value) {
 /// declarations change: the authoritative schema, which validates every
 /// document, keeps its `anyOf`, and callers match the empty result by content.
 pub(super) fn exclusive_empty_unions(schema: &mut Value) {
-    let empty: Vec<String> = schema
-        .get("$defs")
-        .and_then(Value::as_object)
-        .into_iter()
-        .flatten()
-        .filter(|(_, definition)| {
-            definition.get("type").and_then(Value::as_str) == Some("object")
-                && definition
-                    .get("properties")
-                    .and_then(Value::as_object)
-                    .is_some_and(|properties| properties.is_empty())
-        })
-        .map(|(name, _)| format!("#/$defs/{name}"))
-        .collect();
     fn visit(value: &mut Value, empty: &[String]) {
         match value {
             Value::Object(object) => {
@@ -277,5 +263,19 @@ pub(super) fn exclusive_empty_unions(schema: &mut Value) {
             _ => {}
         }
     }
+    let empty: Vec<String> = schema
+        .get("$defs")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(_, definition)| {
+            definition.get("type").and_then(Value::as_str) == Some("object")
+                && definition
+                    .get("properties")
+                    .and_then(Value::as_object)
+                    .is_some_and(serde_json::Map::is_empty)
+        })
+        .map(|(name, _)| format!("#/$defs/{name}"))
+        .collect();
     visit(schema, &empty);
 }

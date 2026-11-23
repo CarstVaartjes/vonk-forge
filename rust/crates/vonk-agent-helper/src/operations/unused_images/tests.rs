@@ -320,7 +320,7 @@ fn daemon_inventory_collects_images_without_receipts_but_preserves_live_content(
         .write(true)
         .open(&marker)
         .unwrap()
-        .set_modified(std::time::SystemTime::now() - Duration::from_secs(25 * 3600))
+        .set_modified(std::time::SystemTime::now() - Duration::from_hours(25))
         .unwrap();
     *runner.container_query_fails.lock().unwrap() = true;
     executor.sweep_unused_runtime_images();
@@ -388,7 +388,7 @@ fn an_orphan_image_is_collected_however_many_managed_images_the_listing_holds() 
         .join(format!(".untracked-{}", &orphan[7..]));
     File::create(&marker)
         .unwrap()
-        .set_modified(std::time::SystemTime::now() - Duration::from_secs(25 * 3600))
+        .set_modified(std::time::SystemTime::now() - Duration::from_hours(25))
         .unwrap();
 
     executor.sweep_runtime_images_unused_for(UNUSED_IMAGE_GRACE, &|| None);

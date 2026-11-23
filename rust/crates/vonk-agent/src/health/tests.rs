@@ -59,6 +59,7 @@ async fn readiness_honors_a_controller_renewed_deadline() {
 
 #[tokio::test]
 async fn immutable_start_deadline_caps_a_renewed_lease() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let lease =
         (Utc::now() + ChronoDuration::minutes(5)).with_timezone(&FixedOffset::east_opt(0).unwrap());
     let immutable = (Utc::now() - ChronoDuration::milliseconds(1))
@@ -78,7 +79,6 @@ async fn immutable_start_deadline_caps_a_renewed_lease() {
         .is_err()
     );
     assert!(started.elapsed() < Duration::from_secs(1));
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind(crate::client::test_support::FIXTURE_BIND)
         .await
         .unwrap();

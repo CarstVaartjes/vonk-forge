@@ -169,7 +169,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             .diagnostic
             .as_deref()
             .and_then(ExitCause::of_summary);
-        let reason = if code as u32 == JOB_CANCEL_EXIT_CODE {
+        let reason = if code.cast_unsigned() == JOB_CANCEL_EXIT_CODE {
             Some("job adapter exited after interruption")
         } else if cause == Some(ExitCause::HostMemoryExhausted) {
             Some("the host memory guard stopped the job: host memory exhausted")
@@ -178,7 +178,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         };
         let mut receipt = job_receipt(
             job.request,
-            code as u32,
+            code.cast_unsigned(),
             job.started,
             empty_job_output_manifest(),
             reason,
@@ -680,7 +680,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     }
 }
 
-/// The one Stop of a JobRun, sent for cancellation and for cleanup alike: it
+/// The one Stop of a `JobRun`, sent for cancellation and for cleanup alike: it
 /// fences any pending Start of the same job and targets the job's container.
 pub(super) fn job_run_stop_plan(
     claim: &AgentClaim,
@@ -937,7 +937,7 @@ pub(super) fn job_receipt(
 }
 
 mod endings;
-use endings::*;
+use endings::{bounded_job_result, out_of_range_exit};
 mod outputs;
 #[cfg(test)]
 pub(super) use outputs::*;

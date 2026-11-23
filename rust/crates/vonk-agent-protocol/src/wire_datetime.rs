@@ -33,6 +33,10 @@ pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
 
 // Emitted by vonk-wire-codegen only while the wire carries an optional datetime.
 #[allow(dead_code)]
+#[expect(
+    clippy::ref_option,
+    reason = "mirrors the wire field type that serde hands over by reference"
+)]
 pub(crate) fn serialize_optional<S: Serializer>(
     value: &Option<DateTime<FixedOffset>>,
     serializer: S,

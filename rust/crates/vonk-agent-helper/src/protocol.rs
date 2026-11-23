@@ -188,7 +188,8 @@ pub fn write_frame(writer: &mut impl Write, body: &[u8]) -> Result<(), HelperErr
     if body.is_empty() || body.len() > MAX_MESSAGE_BYTES {
         return Err(HelperError::InvalidFrame);
     }
-    writer.write_all(&(body.len() as u32).to_be_bytes())?;
+    let length = u32::try_from(body.len()).map_err(|_| HelperError::InvalidFrame)?;
+    writer.write_all(&length.to_be_bytes())?;
     writer.write_all(body)?;
     writer.flush()?;
     Ok(())

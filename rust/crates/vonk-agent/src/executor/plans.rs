@@ -10,7 +10,7 @@ pub fn parse_compiled_execution_plan(document: &[u8]) -> Result<CompiledExecutio
     Ok(plan)
 }
 
-/// Validate the compiled plan of an Install, Start or JobRun request. The one
+/// Validate the compiled plan of an Install, Start or `JobRun` request. The one
 /// validation of a plan entering the agent: dispatch and the wire probes call
 /// it right after `RecipeOperationRequest::parse`. A refusal carries the rule.
 pub fn refuse_invalid_plan(request: &RecipeOperationRequest) -> Option<ExecutionResult> {

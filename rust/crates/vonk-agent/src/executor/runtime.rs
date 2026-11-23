@@ -3,6 +3,10 @@
 use super::*;
 
 impl<R> RecipeExecutor<'_, R> {
+    #[expect(
+        clippy::unused_async,
+        reason = "async to keep one awaitable signature across the trait and its callers"
+    )]
     pub(super) async fn report_phase(&self, claim: &AgentClaim, phase: ProgressPhase) {
         self.client.set_progress_phase(claim.fence, phase);
     }

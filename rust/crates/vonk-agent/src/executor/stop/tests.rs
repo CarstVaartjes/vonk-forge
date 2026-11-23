@@ -45,7 +45,7 @@ async fn damaged_history_never_prevents_exact_stop_from_reaching_current_authori
                 match listener.accept() {
                     Ok((stream, _)) => break stream,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(1))
+                        thread::sleep(Duration::from_millis(1));
                     }
                     Err(error) => panic!("stop peer: {error}"),
                 }

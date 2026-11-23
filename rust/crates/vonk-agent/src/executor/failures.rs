@@ -28,6 +28,10 @@ pub fn recipe_start_result(request: &RecipeStartRequest) -> RecipeStartResult {
     RecipeStartResult { endpoint }
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 pub fn distribution_success(evidence: DistributionDownloadEvidence) -> ExecutionResult {
     ExecutionResult::done(ArtifactDistributionResult {
         downloaded_bytes: evidence.downloaded_bytes,
@@ -166,11 +170,15 @@ pub(super) fn host_runtime_evidence(
                     error.preflight_code()
                 )
             }
-            _ => error.preflight_code().to_owned(),
+            _ => error.preflight_code().clone(),
         })
         .helper(runtime_helper_code(error))
 }
 
+#[expect(
+    clippy::match_same_arms,
+    reason = "the arms stay apart on purpose: each names a distinct case of the state machine"
+)]
 pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRuntimeError) -> bool {
     use crate::host_runtime::HostRuntimeError;
     match error {

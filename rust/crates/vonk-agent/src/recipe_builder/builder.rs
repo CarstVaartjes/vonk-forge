@@ -48,6 +48,10 @@ impl PodmanBuildStaging {
 }
 
 impl Drop for PodmanBuildStaging {
+    #[expect(
+        clippy::used_underscore_binding,
+        reason = "a field held to keep its temporary directory alive and read once for its path"
+    )]
     fn drop(&mut self) {
         // Rootless Podman may leave overlay layer directories mode 0555. The
         // agent owns this operation-private tree, but TempDir cannot remove a

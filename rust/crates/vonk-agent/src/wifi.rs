@@ -1,5 +1,5 @@
-//! Read-only nl80211 evidence for the wireless NAS route. GET_INTERFACE and
-//! GET_STATION require no CAP_NET_ADMIN (Linux net/wireless/nl80211.c).
+//! Read-only nl80211 evidence for the wireless NAS route. `GET_INTERFACE` and
+//! `GET_STATION` require no `CAP_NET_ADMIN` (Linux net/wireless/nl80211.c).
 //! No subprocess, privileges, cache or retry loop: each inventory probes anew.
 
 use vonk_agent_protocol::generated::NetworkInterface;

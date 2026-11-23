@@ -441,7 +441,7 @@ impl Drop for FakeHost {
 
 fn reply(stream: &mut std::os::unix::net::UnixStream, response: &HostHelperResponse) {
     let body = vonk_agent_protocol::canonical_generated_json(response).unwrap();
-    let _ = stream.write_all(&(body.len() as u32).to_be_bytes());
+    let _ = stream.write_all(&u32::try_from(body.len()).unwrap().to_be_bytes());
     let _ = stream.write_all(&body);
 }
 

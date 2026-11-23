@@ -1,7 +1,7 @@
 //! Stdin/stdout probe for the connected schema-2 recipe install/start wire.
 //!
-//! Each input line is a Controller AgentClaim.  The probe validates the claim,
-//! invokes the production RecipeOperationRequest parser, projects the typed
+//! Each input line is a Controller `AgentClaim`.  The probe validates the claim,
+//! invokes the production `RecipeOperationRequest` parser, projects the typed
 //! compiled plan through the production OCI argument builder, and emits the
 //! exact success body used by the production executor. Uninstall operations
 //! are structural wire probes: they do not mutate the probe filesystem.

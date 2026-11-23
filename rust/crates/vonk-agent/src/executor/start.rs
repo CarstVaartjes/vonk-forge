@@ -45,14 +45,13 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         let installation_id = request.installation_id.to_string();
         let collective_readiness =
             matches!(request.phase, Some(RecipeStartPhase::CollectiveReadiness));
-        let phase_deadline = match request
+        let Ok(phase_deadline) = request
             .start_deadline
             .as_deref()
             .map(DateTime::parse_from_rfc3339)
             .transpose()
-        {
-            Ok(deadline) => deadline,
-            Err(_) => return failed("recipe start deadline is invalid"),
+        else {
+            return failed("recipe start deadline is invalid");
         };
         let spec = request.compiled_execution_plan.clone();
         let Some(endpoint) = spec.endpoint.as_ref() else {

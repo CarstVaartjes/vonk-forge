@@ -4,7 +4,7 @@
 //! transfer while its wired port may sit unplugged. The agent only reports
 //! what the kernel says (interface kind, negotiated speed, carrier, and which
 //! interface the NAS address routes through, over IPv4 or IPv6); the Controller
-//! owns the warning. A route through a virtual overlay (Tailscale, WireGuard) is
+//! owns the warning. A route through a virtual overlay (Tailscale, `WireGuard`) is
 //! reported as a `tunnel` interface, which is never a Wi-Fi finding.
 
 use std::{collections::BTreeSet, fs, net::IpAddr, path::Path, time::Duration};
@@ -220,8 +220,8 @@ fn mellanox_driver(path: &Path) -> bool {
         .is_some_and(|name| name.starts_with("mlx5") || name.starts_with("mlx4"))
 }
 
-/// A virtual point-to-point overlay (Tailscale, WireGuard, a TUN device): no
-/// backing hardware, and the kernel reports it as ARPHRD_NONE (65534).
+/// A virtual point-to-point overlay (Tailscale, `WireGuard`, a TUN device): no
+/// backing hardware, and the kernel reports it as `ARPHRD_NONE` (65534).
 fn virtual_overlay(path: &Path, name: &str) -> bool {
     !path.join("device").exists()
         && (fs::read_to_string(path.join("type")).is_ok_and(|value| value.trim() == "65534")

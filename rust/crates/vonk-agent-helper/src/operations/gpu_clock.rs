@@ -79,7 +79,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .create(true)
             .truncate(false)
             .mode(0o600)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
             .open(root.join("lock"))?;
         let _guard = HeldLock::try_exclusive(lock)
             .map_err(|_| OperationError::InstallationReconciliationBusy)?;
@@ -87,7 +87,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let current = match OpenOptions::new()
             .read(true)
             .custom_flags(
-                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                    .bits()
+                    .cast_signed(),
             )
             .open(&path)
         {

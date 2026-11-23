@@ -7,9 +7,8 @@ fn failure(code: u8) -> ExitCode {
 }
 
 fn main() -> ExitCode {
-    let status = match fs::read_to_string("/proc/self/status") {
-        Ok(value) => value,
-        Err(_) => return failure(21),
+    let Ok(status) = fs::read_to_string("/proc/self/status") else {
+        return failure(21);
     };
     for key in ["CapEff:", "CapPrm:", "CapAmb:"] {
         if !status.lines().any(|line| {

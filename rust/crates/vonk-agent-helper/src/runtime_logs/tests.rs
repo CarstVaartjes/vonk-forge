@@ -1,5 +1,6 @@
 #![cfg(test)]
 use super::*;
+use std::fmt::Write as _;
 
 /// Scales the fixtures that are sized against the retained bound.
 const SCALE: usize = RETAINED_BYTES / 2048;
@@ -9,10 +10,10 @@ const SCALE: usize = RETAINED_BYTES / 2048;
 fn cut_off_traceback() -> Vec<u8> {
     let mut value = String::from("Traceback (most recent call last):\n");
     for index in 0..24 * SCALE {
-        value.push_str(&format!(
-                "(APIServer pid=56) File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/async_llm.py\", line {}, in from_vllm_config\n",
+        writeln!(value,
+                "(APIServer pid=56) File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/async_llm.py\", line {}, in from_vllm_config",
                 200 + index
-            ));
+            ).unwrap();
         value.push_str("(APIServer pid=56)     return cls(\n");
         value.push_str("(APIServer pid=56) ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n");
     }
@@ -114,7 +115,7 @@ fn a_plain_tail_hides_the_cause_it_replaces() {
 }
 
 /// The live shape of the LTX job that aborted on spark-2297 (2026-11-05):
-/// the pipeline's own log, PyTorch's native abort report, its C++ stack,
+/// the pipeline's own log, `PyTorch`'s native abort report, its C++ stack,
 /// then the job adapter's traceback for the child that died, whose
 /// closing line echoes the whole command.
 const FINAL_FRAMES: usize = 60 * SCALE;
@@ -122,9 +123,11 @@ const FINAL_FRAMES: usize = 60 * SCALE;
 fn native_abort_under_a_wrapper(wrapped: bool) -> Vec<u8> {
     let mut stream = String::new();
     for step in 0..80 {
-        stream.push_str(&format!(
-            "INFO:ltx_pipelines:loading transformer block {step} of 80 from the checkpoint\n"
-        ));
+        writeln!(
+            stream,
+            "INFO:ltx_pipelines:loading transformer block {step} of 80 from the checkpoint"
+        )
+        .unwrap();
     }
     stream.push_str("terminate called after throwing an instance of 'c10::Error'\n");
     stream.push_str("  what():  CUDA error: an illegal memory access was encountered\n");
@@ -132,12 +135,12 @@ fn native_abort_under_a_wrapper(wrapped: bool) -> Vec<u8> {
     stream.push_str("For debugging consider passing CUDA_LAUNCH_BLOCKING=1\n\n");
     stream.push_str("Exception raised from c10_cuda_check_implementation at /pytorch/c10/cuda/CUDAException.cpp:44 (most recent call first):\n");
     for frame in 0..9 {
-        stream.push_str(&format!(
-                "frame #{frame}: c10::Error::Error(c10::SourceLocation, std::string) + 0x{frame}c (0xe8472ad284c4 in /usr/local/lib/python3.12/dist-packages/torch/lib/libc10.so)\n"
-            ));
+        writeln!(stream,
+                "frame #{frame}: c10::Error::Error(c10::SourceLocation, std::string) + 0x{frame}c (0xe8472ad284c4 in /usr/local/lib/python3.12/dist-packages/torch/lib/libc10.so)"
+            ).unwrap();
     }
     for frame in 9..FINAL_FRAMES {
-        stream.push_str(&format!("frame #{frame}: python3() [0x4f9e4c]\n"));
+        writeln!(stream, "frame #{frame}: python3() [0x4f9e4c]").unwrap();
     }
     if wrapped {
         stream.push_str("\nTraceback (most recent call last):\n");
@@ -146,10 +149,10 @@ fn native_abort_under_a_wrapper(wrapped: bool) -> Vec<u8> {
         );
         stream.push_str("  File \"/opt/vonk/source/pipelines/run.py\", line 259, in main\n");
         stream.push_str("    subprocess.run(command, check=True, timeout=args.timeout_seconds)\n");
-        stream.push_str(&format!(
-                "subprocess.CalledProcessError: Command '['python3', '-m', 'ltx_pipelines.ti2vid_two_stages', {}]' died with <Signals.SIGABRT: 6>.\n",
+        writeln!(stream,
+                "subprocess.CalledProcessError: Command '['python3', '-m', 'ltx_pipelines.ti2vid_two_stages', {}]' died with <Signals.SIGABRT: 6>.",
                 "'--option', 'value', ".repeat(40)
-            ));
+            ).unwrap();
     }
     stream.into_bytes()
 }
@@ -217,6 +220,10 @@ fn a_native_abort_inside_the_window_is_not_repeated() {
 }
 
 #[test]
+#[expect(
+    clippy::format_collect,
+    reason = "builds a small string; a fold would read worse"
+)]
 fn a_cause_line_the_window_opens_inside_is_kept_whole() {
     // Wrong implementation this catches: a cause line was kept only when
     // it ended before the window's first byte, and the window drops the
@@ -272,7 +279,7 @@ fn a_terminate_without_an_exception_is_one_line() {
 
 /// The live vLLM shape of a start that runs out of memory: the engine
 /// logs what it loaded and what was left for the KV cache, then a
-/// traceback longer than the bound that ends on vLLM's ValueError, and the
+/// traceback longer than the bound that ends on vLLM's `ValueError`, and the
 /// API server's traceback pointing above itself.
 fn kv_cache_exhausted_start(frames: usize) -> Vec<u8> {
     let prefix = "(EngineCore pid=255) INFO 10-27 06:53:40 [gpu_worker.py:462]";
@@ -491,6 +498,10 @@ fn engine_error_then_api_server_traceback() -> Vec<u8> {
 }
 
 #[test]
+#[expect(
+    clippy::naive_bytecount,
+    reason = "small log streams; a counting dependency is not warranted"
+)]
 fn a_summary_pointing_above_itself_keeps_the_engine_error_printed_first() {
     // Wrong implementation this catches: with no traceback above the API
     // server's summary, the window kept only its last frames, and the
@@ -670,7 +681,7 @@ fn triton_engine_core(engine: &str, opener: &str) -> String {
         "    raise RuntimeError(",
         "RuntimeError: Worker failed with error 'Triton Error [CUDA]: an illegal memory access was encountered', please check the stack trace above for the root cause",
     ] {
-        stream.push_str(&format!("{engine}{line}\n"));
+        writeln!(stream, "{engine}{line}").unwrap();
     }
     stream
 }
@@ -678,7 +689,7 @@ fn triton_engine_core(engine: &str, opener: &str) -> String {
 /// The worker's own report in vLLM v0.27.0's shape.  `worker_busy_loop`
 /// adds `traceback.format_exc()` to the exception as a note and then calls
 /// `logger.exception("WorkerProc hit an exception.")`
-/// (multiproc_executor.py:1018), so stdout carries the traceback twice,
+/// (`multiproc_executor.py:1018`), so stdout carries the traceback twice,
 /// every line under the log record's prefix, and a bare prefix last.  The
 /// production capture never retained this block, and the failing worker
 /// may have been rank 1's, so this is a reconstruction: the vLLM and torch
@@ -703,13 +714,13 @@ fn triton_worker() -> String {
     ];
     let mut stream = String::new();
     for index in 0..20 {
-        stream.push_str(&format!("(EngineCore pid=403) INFO 10-25 09:45:{index:02} [gpu_worker.py:707] Compile and warming up model for size {}\n", 8192 >> (index % 8)));
+        writeln!(stream, "(EngineCore pid=403) INFO 10-25 09:45:{index:02} [gpu_worker.py:707] Compile and warming up model for size {}", 8192 >> (index % 8)).unwrap();
     }
-    stream.push_str(&format!("{worker}WorkerProc hit an exception.\n"));
+    writeln!(stream, "{worker}WorkerProc hit an exception.").unwrap();
     for line in traceback.iter().chain(&traceback) {
-        stream.push_str(&format!("{worker}{line}\n"));
+        writeln!(stream, "{worker}{line}").unwrap();
     }
-    stream.push_str(&format!("{worker}\n"));
+    writeln!(stream, "{worker}").unwrap();
     stream
 }
 
@@ -774,9 +785,11 @@ fn a_pointer_keeps_the_exit_summary_when_the_other_stream_is_unrelated() {
         "    return model.load_model_cls()",
         "KeyError: 'model_type'",
     ] {
-        stdout.push_str(&format!(
-            "(APIServer pid=55) ERROR 10-25 09:40:02 [registry.py:1033] {line}\n"
-        ));
+        writeln!(
+            stdout,
+            "(APIServer pid=55) ERROR 10-25 09:40:02 [registry.py:1033] {line}"
+        )
+        .unwrap();
     }
     let stderr = "(APIServer pid=55) Traceback (most recent call last):\n(APIServer pid=55)   File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/utils.py\", line 1250, in wait_for_engine_startup\n(APIServer pid=55)     raise RuntimeError(\n(APIServer pid=55) RuntimeError: Engine core initialization failed. See root cause above. Failed core proc(s): {}\n";
     let capture = CapturedOutput::new(stdout.as_bytes(), stderr.as_bytes());

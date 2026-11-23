@@ -303,7 +303,9 @@ use off_lane::Executing;
 pub use off_lane::{Beside, LaneStep, OffLaneClaim, builds_beside, runs_off_lane};
 mod heartbeat;
 use crate::stall_window::{Inactivity, StallWindow};
-use heartbeat::*;
+#[cfg(test)]
+use heartbeat::classify_heartbeat_failure;
+use heartbeat::{phase_progress, remaining_lease, run_heartbeats};
 
 #[cfg(test)]
 mod test_support;

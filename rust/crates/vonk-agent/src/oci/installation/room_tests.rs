@@ -29,7 +29,7 @@ fn stocked() -> (
         // ctime orders them: the store's recency is the last change.
         std::thread::sleep(Duration::from_millis(20));
         let path = store.join(name.repeat(64));
-        fs::write(&path, vec![0_u8; UNUSED as usize]).unwrap();
+        fs::write(&path, vec![0_u8; usize::try_from(UNUSED).unwrap()]).unwrap();
         path
     };
     let older = unused("a");

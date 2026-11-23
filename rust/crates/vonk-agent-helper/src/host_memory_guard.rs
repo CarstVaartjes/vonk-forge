@@ -31,6 +31,10 @@ fn nvidia_allocation_failure(line: &str) -> bool {
     line.contains("NVRM:") && line.contains("Out of memory") && line.contains("NV_ERR_NO_MEMORY")
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 fn property(name: &str, value: impl ToString) -> FailureProperty {
     FailureProperty {
         name: name.into(),
@@ -412,18 +416,16 @@ fn kernel_events() -> Receiver<Instant> {
         let mut previous: Option<std::process::Child> = None;
         loop {
             if let Some(mut child) = previous.take() {
-                match child.wait_timeout(COMMAND_TIMEOUT) {
-                    Ok(Some(_)) => {}
-                    _ => {
-                        eprintln!(
-                            "host_memory_guard: waiting for kernel follower pid={} deadline=1s resume=child-exited next_attempt=2s",
-                            child.id()
-                        );
-                        let _ = child.kill();
-                        previous = Some(child);
-                        thread::sleep(JOURNAL_RETRY);
-                        continue;
-                    }
+                if let Ok(Some(_)) = child.wait_timeout(COMMAND_TIMEOUT) {
+                } else {
+                    eprintln!(
+                        "host_memory_guard: waiting for kernel follower pid={} deadline=1s resume=child-exited next_attempt=2s",
+                        child.id()
+                    );
+                    let _ = child.kill();
+                    previous = Some(child);
+                    thread::sleep(JOURNAL_RETRY);
+                    continue;
                 }
             }
             let child = Command::new("/usr/bin/journalctl")
@@ -493,7 +495,7 @@ pub fn spawn(data_root: PathBuf) {
             reported.retain(|id| known.contains_key(id));
             if ids != previous {
                 decision = Decision::default();
-                previous = ids.clone();
+                previous.clone_from(&ids);
             }
             while let Ok(event) = kernel.try_recv() {
                 driver_failure = Some((event, ids.clone()));

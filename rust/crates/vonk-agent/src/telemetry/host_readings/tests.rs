@@ -138,7 +138,7 @@ fn a_missing_source_loses_only_its_own_readings() {
     assert_eq!(read.board_temperature_max_c, None);
     assert_eq!(read.fan_rpm_max, None);
     assert_eq!(read.network_lan_rx_bytes, None);
-    assert_eq!(read.cpu_busy_seconds, Some(852046.01));
+    assert_eq!(read.cpu_busy_seconds, Some(852_046.01));
     assert_eq!(read.fabric_ports_active, Some(2));
     assert_eq!(read.oom_kills, Some(124));
 }

@@ -175,6 +175,10 @@ impl ClientError {
         self.retry_delay_with_entropy(attempt, minimum, cap, entropy)
     }
 
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a jitter fraction; f64 precision is ample"
+    )]
     pub(super) fn retry_delay_with_entropy(
         &self,
         attempt: u32,
@@ -275,6 +279,10 @@ impl ClientError {
     /// derived from the same facts as [`Self::decision`]. A wait never spends
     /// a retry and never ends work; a definite failure ends on its first
     /// occurrence with its evidence; only an unconfirmed effect is observed.
+    #[expect(
+        clippy::match_same_arms,
+        reason = "the arms stay apart on purpose: each names a distinct case of the state machine"
+    )]
     pub fn disposition(&self) -> Disposition {
         match self {
             Self::Pin => Disposition::Security,
@@ -372,6 +380,10 @@ impl Refusal {
 /// The one HTTP status table, mirrored from the shared contract
 /// (`HTTP_STATUS_DISPOSITIONS`); `tests/failure_disposition.rs` holds both to
 /// the exported fixture.
+#[expect(
+    clippy::match_same_arms,
+    reason = "the arms stay apart on purpose: each names a distinct case of the state machine"
+)]
 pub fn http_status_disposition(status: u16) -> Disposition {
     match status {
         401 | 403 => Disposition::Security,

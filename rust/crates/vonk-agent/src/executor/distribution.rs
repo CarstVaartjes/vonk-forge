@@ -126,7 +126,7 @@ where
             changed = lease.changed() => {
                 if changed.is_err() { return None; }
             }
-            _ = tokio::time::sleep(lease_remaining) => {
+            () = tokio::time::sleep(lease_remaining) => {
                 if remaining_lease(*lease.borrow()).is_zero() { return None; }
             }
             result = &mut operation => return Some(result),

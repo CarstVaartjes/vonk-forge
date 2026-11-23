@@ -76,8 +76,8 @@ fn job_rank(rank: u64, world_size: u64) -> RecipeJobRunRequest {
             "master_port": 29500,
             "endpoint_address": null,
             "port": null,
-            "memory_floor_bytes": 2147483648_u64,
-            "reserved_memory_bytes": 34359738368_u64,
+            "memory_floor_bytes": 2_147_483_648_u64,
+            "reserved_memory_bytes": 34_359_738_368_u64,
         });
         plan["topology"] = serde_json::json!({"name": "dual", "node_count": world_size});
         plan["security"]["network_mode"] = serde_json::json!("host");

@@ -103,6 +103,10 @@ impl HelperRejection {
         )
     }
 
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the call takes ownership at this boundary; the caller's value is consumed"
+    )]
     fn for_error(
         request_id: impl Into<String>,
         package_install: bool,
@@ -595,7 +599,8 @@ fn handle(
         .map_err(|_| {
             HelperRejection::new(HelperErrorCode::GrantInvalid, "system clock is unavailable")
         })?
-        .as_secs() as i64;
+        .as_secs();
+    let now = i64::try_from(now).unwrap_or(i64::MAX);
     verifier
         .authorize(&request, &peer, now)
         .map_err(|error| HelperRejection::new(error.authorization_code(), error.safe_detail()))?;
@@ -633,6 +638,10 @@ fn handle(
     respond(stream, &request_id, response)
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 fn respond(
     stream: &mut UnixStream,
     request_id: &str,
@@ -772,7 +781,7 @@ fn read_root_text(path: &Path, maximum_bytes: u64) -> Result<String, String> {
     // checks cannot be bypassed by swapping the path after the metadata check.
     let file = OpenOptions::new()
         .read(true)
-        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
         .open(path)
         .map_err(display)?;
     verify_root_text(path, &file.metadata().map_err(display)?, maximum_bytes)?;
@@ -859,6 +868,10 @@ fn display(_error: impl std::fmt::Display) -> String {
 }
 
 #[allow(dead_code)]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the call takes ownership at this boundary; the caller's value is consumed"
+)]
 fn _classify_protocol_error(error: HelperError) -> String {
     error.to_string()
 }

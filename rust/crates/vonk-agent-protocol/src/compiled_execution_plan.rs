@@ -88,7 +88,7 @@ pub fn same_job_workload(
         return false;
     }
     let mut identity = invocation.clone();
-    identity.runtime.argv = installed.runtime.argv.clone();
+    identity.runtime.argv.clone_from(&installed.runtime.argv);
     identity.job.as_mut().unwrap().timeout_seconds = installed_job.timeout_seconds;
     // Addresses, peers, rendezvous and network are bound by the signed start; the
     // installed placement has none, so compare everything else.
@@ -96,7 +96,7 @@ pub fn same_job_workload(
     bound.local_address = installed.runtime.placement.local_address;
     bound.master_address = installed.runtime.placement.master_address;
     bound.master_port = installed.runtime.placement.master_port;
-    bound.peer_addresses = installed.runtime.placement.peer_addresses.clone();
+    bound.peer_addresses.clone_from(&installed.runtime.placement.peer_addresses);
     same_installed_workload(installed, &identity)
         && installed.runtime.placement == bound
         && (installed.security.network_mode == invocation.security.network_mode

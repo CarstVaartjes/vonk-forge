@@ -306,18 +306,24 @@ fn split_sample(line: &str) -> Option<(&str, f64)> {
 
 /// Sum across label sets, as a counter or gauge of the whole engine; the KV
 /// ratio is per pool, so the fullest pool stands for the engine.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    reason = "the range check bounds the float to a non-negative value that fits u64"
+)]
 fn add(reading: &mut EngineReading, field: Field, value: f64) {
-    let count = (0.0..=i64::MAX as f64)
-        .contains(&value)
-        .then_some(value as u64);
+    fn add_seconds(slot: &mut Option<f64>, value: f64) {
+        *slot = Some(slot.unwrap_or(0.0) + value);
+    }
     fn add_count(slot: &mut Option<u64>, value: Option<u64>) {
         if let Some(value) = value {
             *slot = Some(slot.unwrap_or(0).saturating_add(value));
         }
     }
-    fn add_seconds(slot: &mut Option<f64>, value: f64) {
-        *slot = Some(slot.unwrap_or(0.0) + value);
-    }
+    let count = (0.0..=i64::MAX as f64)
+        .contains(&value)
+        .then_some(value as u64);
     match field {
         Field::PromptTokens => add_count(&mut reading.prompt_tokens, count),
         Field::GenerationTokens => add_count(&mut reading.generation_tokens, count),

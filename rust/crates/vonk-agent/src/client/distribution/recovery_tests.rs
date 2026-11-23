@@ -221,10 +221,10 @@ async fn malformed_range_observation_ends_boundedly_and_same_digest_is_admitted_
             }
             requests.push(request);
             let repair_visible = peer_repaired.load(std::sync::atomic::Ordering::Acquire);
-            let range = if !repair_visible {
-                "unreadable".to_owned()
-            } else {
+            let range = if repair_visible {
                 format!("bytes 0-{}/{}", model.len() - 1, model.len())
+            } else {
+                "unreadable".to_owned()
             };
             write!(socket, "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nETag: \"sha256:{}\"\r\nContent-Range: {}\r\nConnection: close\r\n\r\n",
                 model.len(), response_digest, range).unwrap();

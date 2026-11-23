@@ -2,6 +2,7 @@
 
 use super::super::test_support::*;
 use super::*;
+use std::fmt::Write as _;
 
 #[test]
 fn a_process_exit_always_carries_logs_or_a_typed_reason_none_were_read() {
@@ -120,12 +121,12 @@ fn a_cause_the_retained_window_dropped_still_classifies_the_exit() {
     .into_iter()
     .chain(cuda)
     {
-        stdout.push_str(&format!("{worker}{line}\n"));
+        writeln!(stdout, "{worker}{line}").unwrap();
     }
     for frame in 0..300 {
-        stdout.push_str(&format!(
-            "{worker}frame #{frame}: <unknown function> + 0x1357680 (0xf07b08327680 in /usr/local/lib/python3.12/dist-packages/torch/lib/libtorch_cpu.so)\n"
-        ));
+        writeln!(stdout,
+            "{worker}frame #{frame}: <unknown function> + 0x1357680 (0xf07b08327680 in /usr/local/lib/python3.12/dist-packages/torch/lib/libtorch_cpu.so)"
+        ).unwrap();
     }
     for line in [
         "EngineCore failed to start.",
@@ -137,31 +138,37 @@ fn a_cause_the_retained_window_dropped_still_classifies_the_exit() {
     .into_iter()
     .chain(cuda)
     {
-        stdout.push_str(&format!("{engine}{line}\n"));
+        writeln!(stdout, "{engine}{line}").unwrap();
     }
     for frame in 0..63 {
-        stdout.push_str(&format!(
-            "{engine}frame #{frame}: PyObject_Call + 0x118 (0x4c5108 in VLLM::Worker_TP0)\n"
-        ));
+        writeln!(
+            stdout,
+            "{engine}frame #{frame}: PyObject_Call + 0x118 (0x4c5108 in VLLM::Worker_TP0)"
+        )
+        .unwrap();
     }
-    stdout.push_str(&format!(
+    write!(stdout,
         "{engine}', please check the stack trace above for the root cause\n\
 NCCL version 2.30.7+cuda12.9\n\
 (EngineCore pid=176) ERROR 11-02 23:40:39 [multiproc_executor.py:314] Worker proc VllmWorker-0 died unexpectedly (exit code: None), shutting down executor.\n"
-    ));
+    ).unwrap();
     let raw = "(EngineCore pid=176) ";
     let mut stderr = format!(
         "{raw}/usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated.\n"
     )
     .repeat(110);
     for frame in 0..63 {
-        stderr.push_str(&format!(
-            "{raw}frame #{frame}: PyObject_Call + 0x118 (0x4c5108 in VLLM::Worker_TP0)\n"
-        ));
+        writeln!(
+            stderr,
+            "{raw}frame #{frame}: PyObject_Call + 0x118 (0x4c5108 in VLLM::Worker_TP0)"
+        )
+        .unwrap();
     }
-    stderr.push_str(&format!(
-        "{raw}', please check the stack trace above for the root cause\n"
-    ));
+    writeln!(
+        stderr,
+        "{raw}', please check the stack trace above for the root cause"
+    )
+    .unwrap();
     let log = through_docker_logs_capture(stdout.as_bytes(), stderr.as_bytes());
     // Preconditions: the real bounds, the worker's record cut by the capture,
     // the engine's kept whole, and windows that hold no cause.
@@ -245,9 +252,9 @@ fn a_recovered_traceback_far_above_never_names_the_exit() {
             "FileNotFoundError: [Errno 2] No such file or directory: '/models/tuning.json'",
         ),
     ] {
-        stderr.push_str(&format!(
+        write!(stderr,
             "{opener}\nTraceback (most recent call last):\n  File \"/app/net.py\", line 4, in load\n    open_or_connect()\n{exception}\n"
-        ));
+        ).unwrap();
     }
     stderr.push_str(
         &"INFO 11-02 23:31:00 [scheduler.py:120] Running: 0 reqs, Waiting: 0 reqs\n".repeat(300),
@@ -521,7 +528,7 @@ fn a_job_at_its_deadline_is_ended_and_an_unread_one_keeps_its_exit_unknown() {
             RUN.parse().unwrap(),
             PLAN_DIGEST,
             1,
-            Instant::now() - Duration::from_secs(1),
+            Instant::now().checked_sub(Duration::from_secs(1)).unwrap(),
         )
     };
     let running = Host::with(&[job(RUN, JOB, "running")]);
