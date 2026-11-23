@@ -25,6 +25,9 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
+from ..fleet_profiles.stop_authority import (
+    ProfileJobRunStopJob,
+)
 from ..jobs import states as job_states
 from ..jobs.documents import (
     RecipeBuildCleanupParent,
@@ -54,9 +57,6 @@ from ..models.execution import (
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
 from ..owner_liveness import OwnerKind
-from ..profile_stop_authority import (
-    ProfileJobRunStopJob,
-)
 from ..reservation_owners import run_has_live_operation
 from ..stored.json_values import read_row_column
 from ..stored.states import CatalogRevisionState, RecipeBuildState

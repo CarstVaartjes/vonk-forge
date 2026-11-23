@@ -29,6 +29,9 @@ from ..admission_locking import (
     node_admission_key,
 )
 from ..agent_contacts import last_seen
+from ..fleet_profiles.stop_authority import (
+    ProfileJobRunStopJob,
+)
 from ..jobs.documents import RecipeStopParent
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
 from ..logging import redact_text
@@ -39,9 +42,6 @@ from ..models.operations import AgentOperation
 from ..offline_stops import deferred_stop_nodes
 from ..owner_liveness import OwnerKind
 from ..persisted_waits import schedule_wait
-from ..profile_stop_authority import (
-    ProfileJobRunStopJob,
-)
 from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value
 from .intent import _bound_workload_intent

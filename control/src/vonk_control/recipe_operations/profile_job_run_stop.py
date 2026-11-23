@@ -33,6 +33,15 @@ from ..artifact_jobs.evidence import ArtifactJobResultEvidence
 from ..categorized_errors import (
     InvalidValue,
 )
+from ..fleet_profiles.stop_authority import (
+    ProfileJobRunStopAuthorization,
+    ProfileJobRunStopJob,
+    ProfileJobRunStopTarget,
+    ProfileStopAuthorityError,
+    issued_order_link,
+    validate_profile_jobrun_stop_target,
+    validate_profile_stop_owner,
+)
 from ..jobs.documents import RunSwitchJobPayload, controller_recipe_document
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.artifact_job import ArtifactJobAdapter
@@ -46,15 +55,6 @@ from ..models.execution import ArtifactJob, RecipeInstallation, RecipeRun, RunNo
 from ..models.fleet import FleetProfileApplication
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
-from ..profile_stop_authority import (
-    ProfileJobRunStopAuthorization,
-    ProfileJobRunStopJob,
-    ProfileJobRunStopTarget,
-    ProfileStopAuthorityError,
-    issued_order_link,
-    validate_profile_jobrun_stop_target,
-    validate_profile_stop_owner,
-)
 from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..stored.json_values import read_row_column
 from ..strict_json import read_stored_model

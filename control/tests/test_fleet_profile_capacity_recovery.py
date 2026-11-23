@@ -12,15 +12,15 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
-from vonk_control.models.cache import RecipeBuild
-from vonk_control.models.execution import ResourceReservation
-from vonk_control.models.fleet import FleetProfileApplication
-from vonk_control.profile_capacity import (
+from vonk_control.fleet_profiles.capacity import (
     accepted_profile_runtime_image,
     inherited_profile_memory,
     profile_build_memory_claims,
     release_unassigned_profile_claims,
 )
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.strict_json import read_stored_model
 
 from .test_fleet_profile_lifecycle import _World

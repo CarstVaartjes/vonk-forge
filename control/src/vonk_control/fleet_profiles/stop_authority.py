@@ -7,7 +7,7 @@ import re
 import uuid
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import Field, model_validator
 from sqlalchemy import select
@@ -21,7 +21,11 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
-from vonk_agent_protocol.agent_words import ProfileChildJobKind
+from vonk_agent_protocol.agent_words import (
+    ProfileAction,
+    ProfileChildJobKind,
+    ProfileSwitchChildKind,
+)
 from vonk_agent_protocol.enrollment import NodeId
 from vonk_agent_protocol.integer_domains import (
     MAX_DATABASE_BIGINT,
@@ -30,22 +34,25 @@ from vonk_agent_protocol.integer_domains import (
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 
-from .categorized_errors import BookkeepingUnknown
-from .jobs import states as job_states
-from .lifecycle.job_ranks import fan_in_cancellation_key
-from .models.execution import ArtifactJob, RecipeInstallation, RecipeRun, RunNode
-from .models.fleet import (
+from ..categorized_errors import BookkeepingUnknown
+from ..fleet_profile_contract.vocabulary import FleetProfileRunOwnerKind
+from ..jobs import states as job_states
+from ..lifecycle.job_ranks import fan_in_cancellation_key
+from ..models.execution import ArtifactJob, RecipeInstallation, RecipeRun, RunNode
+from ..models.fleet import (
     AgentNode,
     FleetProfile,
     FleetProfileApplication,
     FleetProfileSelection,
 )
-from .models.jobs import Job
-from .models.mapping import ClusterMappingNode
-from .models.operations import AgentOperation
-from .stored.json_values import read_row_column
-from .strict_json import StrictJSONModel, read_stored_model
+from ..models.jobs import Job
+from ..models.mapping import ClusterMappingNode
+from ..models.operations import AgentOperation
+from ..run_switch_contract.vocabulary import RunSwitchPlacementAction
+from ..stored.json_values import read_row_column
+from ..strict_json import StrictJSONModel, read_stored_model
 
+_PLACEMENT_ACTIONS = frozenset(get_args(RunSwitchPlacementAction))
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _NODE_ID = re.compile(r"^spk_[0-9a-f]{32}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -178,7 +185,7 @@ class ProfileJobRunStopJob(StrictJSONModel):
     """The one-shot Stop parent persisted for a current profile owner."""
 
     schema_version: Literal[1]
-    owner_kind: Literal["run"]
+    owner_kind: FleetProfileRunOwnerKind
     owner_id: str = Field(min_length=36, max_length=36, pattern=_UUID.pattern)
     plan_digest: str = Field(min_length=64, max_length=64, pattern=_SHA256.pattern)
     workload_intent_ordinal: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
@@ -198,7 +205,8 @@ class ProfileJobRunStopJob(StrictJSONModel):
         return tuple(item for phase in self.phases for item in phase)
 
     @classmethod
-    def model_validate_parent(cls, raw: Mapping[str, object]) -> ProfileJobRunStopJob:
+    def model_validate_parent(cls, raw: object) -> ProfileJobRunStopJob:
+        """Validate a stored parent document; the strict model is the typed shape."""
         parent = cls.model_validate_json(canonical_message(raw), strict=True)
         authorization = parent.profile_stop_authorization
         if (
@@ -263,21 +271,21 @@ def validate_profile_stop_owner(
 
     # Imports are local because FleetProfileService composes this module's
     # lifecycle owner through RunSwitch.
-    from .fleet_profile_contract.vocabulary import profile_switch_child_request_key
-    from .fleet_profiles.persistence import (
-        _persisted_profile_plan,
-        _persisted_profile_progress,
-    )
-    from .fleet_profiles.service import FleetProfileService
-    from .jobs.documents import RecipeStopParent, RunSwitchJobPayload
-    from .lifecycle.evidence import Residue
-    from .run_switch_contract.operations import RunSwitchOperationResult
-    from .run_switch_contract.plans import RunSwitchPlan
-    from .run_switch_operations.image_receipts import _plan_target_node_ids
-    from .run_switch_operations.observation_helpers import (
+    from ..fleet_profile_contract.vocabulary import profile_switch_child_request_key
+    from ..jobs.documents import RecipeStopParent, RunSwitchJobPayload
+    from ..lifecycle.evidence import Residue
+    from ..run_switch_contract.operations import RunSwitchOperationResult
+    from ..run_switch_contract.plans import RunSwitchPlan
+    from ..run_switch_operations.image_receipts import _plan_target_node_ids
+    from ..run_switch_operations.observation_helpers import (
         _phase_request_key,
         _stop_child_request_key,
     )
+    from .persistence import (
+        _persisted_profile_plan,
+        _persisted_profile_progress,
+    )
+    from .service import FleetProfileService
 
     application = session.get(
         FleetProfileApplication, authorization.profile_application_id
@@ -363,7 +371,7 @@ def validate_profile_stop_owner(
             if (
                 root.operation_kind != profile_operation.kind
                 or root.action != run_switch_plan.action
-                or run_switch_plan.action not in {"run", "install", "switch"}
+                or run_switch_plan.action not in _PLACEMENT_ACTIONS
                 or current.profile_application_id != application.id
                 or current.workload_intent_ordinal
                 != authorization.workload_intent_ordinal
@@ -378,7 +386,7 @@ def validate_profile_stop_owner(
                 )
             phase = run_switch_plan.phases[phase_index]
             if (
-                phase.kind != "stop"
+                phase.kind != ProfileSwitchChildKind.STOP.value
                 or current.phase != phase.kind
                 or current.subphase != phase.subphase
                 or run_switch_plan.stops[item_index].run_id != run.id
@@ -418,9 +426,13 @@ def validate_profile_stop_owner(
     child = pending[0]
     item = switch_adapter.queue[child.queue_index]
     expected_kind = (
-        ("install" if run_switch_plan.action == "install" else "run")
+        (
+            ProfileSwitchChildKind.INSTALL.value
+            if run_switch_plan.action == ProfileSwitchChildKind.INSTALL.value
+            else ProfileSwitchChildKind.RUN.value
+        )
         if switch_stop
-        else "stop"
+        else ProfileSwitchChildKind.STOP.value
     )
     if (
         child.kind != expected_kind
@@ -474,7 +486,7 @@ def validate_profile_stop_owner(
                 )
                 linked_review = linked_document.service_stop_review
                 linked_matches = (
-                    linked_document.owner_kind == "run"
+                    linked_document.owner_kind == ProfileSwitchChildKind.RUN.value
                     and linked_document.owner_id == run.id
                     and linked_document.workload_intent_ordinal
                     == authorization.workload_intent_ordinal
@@ -607,10 +619,10 @@ def validate_profile_stop_owner(
         or application.plan_digest != authorization.profile_plan_digest
         or reviewed.profile_digest != application.profile_digest
         or profile_step is None
-        or profile_step.kind != "switch"
+        or profile_step.kind != ProfileAction.SWITCH.value
         or not set(expected_reachable_ids) <= set(profile_step.node_ids)
         or len(effect_matches) != 1
-        or effect_matches[0].action != "stop"
+        or effect_matches[0].action != ProfileSwitchChildKind.STOP.value
         or effect_matches[0].installation_id != run.installation_id
         or tuple(effect_matches[0].node_ids) != tuple(sorted(node_ids))
         or (
@@ -620,7 +632,10 @@ def validate_profile_stop_owner(
                 and effect_matches[0].profile_stop_scope != profile_scope
             )
         )
-        or (not switch_stop and run_switch_plan.action != "stop")
+        or (
+            not switch_stop
+            and run_switch_plan.action != ProfileSwitchChildKind.STOP.value
+        )
         or (not switch_stop and run_switch_plan.run_id != run.id)
         or run_switch_plan.plan_digest != profile_operation.payload.get("plan_digest")
         or (not switch_stop and switch_members != run_members)
@@ -787,7 +802,7 @@ def validate_profile_jobrun_stop_target(
         typed_parent = ProfileJobRunStopJob.model_validate_parent(stop_parent.payload)
         if (
             stop_parent.kind != "recipe.stop"
-            or stop_parent.payload.get("owner_kind") != "run"
+            or stop_parent.payload.get("owner_kind") != ProfileSwitchChildKind.RUN.value
             or stop_parent.payload.get("owner_id") != run.id
             or typed_parent.plan_digest != authorization.stop_plan_digest
             or typed_parent.profile_stop_authorization != authorization

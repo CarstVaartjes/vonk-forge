@@ -160,8 +160,7 @@ def test_profile_stop_authorization_documents_round_trip():
     import hashlib
 
     from vonk_agent_protocol import RecipeStopPayload
-    from vonk_control.jobs.documents import OfflineStopIntent
-    from vonk_control.profile_stop_authority import (
+    from vonk_control.fleet_profiles.stop_authority import (
         JobRunStopScope,
         ProfileJobRunStopAuthorization,
         ProfileJobRunStopJob,
@@ -169,6 +168,7 @@ def test_profile_stop_authorization_documents_round_trip():
         ProfileJobRunStopTarget,
         ProfileStopOwnerBinding,
     )
+    from vonk_control.jobs.documents import OfflineStopIntent
 
     identity = "11111111-1111-4111-8111-111111111111"
     node = "spk_" + "a" * 32

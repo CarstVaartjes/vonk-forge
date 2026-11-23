@@ -42,6 +42,13 @@ from .admission_locking import (
 )
 from .catalog.revision_contract import published_steady_peaks
 from .categorized_errors import InvalidType, InvalidValue, MissingRecord
+from .fleet_profiles.capacity import (
+    inherited_profile_memory,
+    inherited_profile_ports,
+    kept_runs,
+    reservation_visible,
+    sibling_profile_ports,
+)
 from .fleet_profiles.port_promises import port_binds
 from .gpu.health import gpu_health_reason
 from .install_admission.contracts import AdmissionReason, reason_documents
@@ -64,13 +71,6 @@ from .models.mapping import ClusterMapping, ClusterMappingNode
 from .observed_run_memory import observed_role_peaks, recent_best_available
 from .offline_stops import deferred_stop_nodes
 from .platform_ports import RENDEZVOUS_PORT, service_host_port_candidates
-from .profile_capacity import (
-    inherited_profile_memory,
-    inherited_profile_ports,
-    kept_runs,
-    reservation_visible,
-    sibling_profile_ports,
-)
 from .recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     run_plan_document,

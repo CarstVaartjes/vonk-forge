@@ -29,37 +29,42 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
-from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
+from vonk_agent_protocol.agent_words import (
+    ProfileAction,
+    ProfileChildJobKind,
+    ProfileChildPhase,
+    ProfileSwitchChildKind,
+)
 from vonk_agent_protocol.inventory import MemoryPool
 
-from .content_identity import same_image
-from .fleet_profile_contract.applications import FleetProfileApplicationProgress
-from .fleet_profile_contract.assessment import FleetProfileResourceRequirement
-from .fleet_profile_contract.definitions import FleetProfileAssignment
-from .fleet_profile_contract.effects import FleetProfileEffects
-from .fleet_profile_contract.review import FleetProfilePreview
-from .fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
-from .fleet_profiles import states as fleet_profile_states
-from .fleet_profiles.capacity_repair import (
+from ..content_identity import same_image
+from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
+from ..fleet_profile_contract.assessment import FleetProfileResourceRequirement
+from ..fleet_profile_contract.definitions import FleetProfileAssignment
+from ..fleet_profile_contract.effects import FleetProfileEffects
+from ..fleet_profile_contract.review import FleetProfilePreview
+from ..fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
+from ..jobs import states as job_states
+from ..models.cache import RecipeBuild
+from ..models.execution import RecipeRun, ResourceReservation
+from ..models.fleet import AgentNode, FleetProfileApplication
+from ..models.jobs import Job
+from ..preparation_contract import RuntimeImageIdentity
+from ..resource_planning.memory_kinds import memory_reservation_kind
+from ..run_switch_contract.evidence import StopImpact
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.plans import RunSwitchPlan
+from . import states as fleet_profile_states
+from .capacity_repair import (
     capacity_document as _capacity_document,
 )
-from .fleet_profiles.capacity_repair import (
+from .capacity_repair import (
     memory_claim as _memory_claim,
 )
-from .fleet_profiles.capacity_repair import (
+from .capacity_repair import (
     memory_claim_id as _memory_claim_id,
 )
-from .fleet_profiles.port_promises import clear_port_promises
-from .jobs import states as job_states
-from .models.cache import RecipeBuild
-from .models.execution import RecipeRun, ResourceReservation
-from .models.fleet import AgentNode, FleetProfileApplication
-from .models.jobs import Job
-from .preparation_contract import RuntimeImageIdentity
-from .resource_planning.memory_kinds import memory_reservation_kind
-from .run_switch_contract.evidence import StopImpact
-from .run_switch_contract.operations import RunSwitchOperationResult
-from .run_switch_contract.plans import RunSwitchPlan
+from .port_promises import clear_port_promises
 
 
 def reservation_visible(
@@ -75,7 +80,7 @@ def reservation_visible(
             ResourceReservation.owner_id.not_in(excluded_profile_application_ids),
         ),
         or_(
-            ResourceReservation.owner_kind != "run",
+            ResourceReservation.owner_kind != ProfileSwitchChildKind.RUN.value,
             ResourceReservation.owner_id.not_in(excluded_run_ids),
         ),
         or_(
@@ -333,7 +338,7 @@ def profile_build_memory_claims(
     candidates = tuple(session.scalars(query))
     for candidate in candidates:
         if request_id is not None and request_id != str(
-            uuid5(UUID(candidate.request_id), "container-build")
+            uuid5(UUID(candidate.request_id), ProfileChildPhase.CONTAINER_BUILD.value)
         ):
             continue
         job = session.get(
@@ -388,8 +393,8 @@ def _profile_build_memory_claim(
         return None
     phase = plan.phases[progress.phase_index]
     if (phase.kind, phase.subphase, phase.state) != (
-        "prepare",
-        "container-build",
+        ProfileChildPhase.PREPARE.value,
+        ProfileChildPhase.CONTAINER_BUILD.value,
         "planned",
     ):
         return None
@@ -675,8 +680,8 @@ def sibling_profile_runs(
     A plan that cannot be read is a wait, never an empty set: an empty set would
     plan to stop the siblings.
     """
-    from .fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
-    from .fleet_profiles.service import FleetProfileService
+    from .run_switch_adapter import RunSwitchFleetProfileAdapter
+    from .service import FleetProfileService
 
     application = session.get(FleetProfileApplication, application_id)
     if application is None:
@@ -780,7 +785,9 @@ def plan_kept_runs(effects: FleetProfileEffects) -> frozenset[str]:
     """The runs a profile plan keeps: on their Sparks already, never new demand."""
 
     return frozenset(
-        effect.run_id for effect in effects.runs if effect.action == "keep"
+        effect.run_id
+        for effect in effects.runs
+        if effect.action == ProfileAction.KEEP.value
     )
 
 
@@ -902,9 +909,9 @@ def accepted_profile_runtime_image(
     """
     # Keep intent/reference validation with its existing owner. Import at the
     # call boundary because profile orchestration also consumes capacity helpers.
-    from .fleet_profiles.contracts import FleetProfileConflict
-    from .fleet_profiles.service import FleetProfileService
-    from .lifecycle.evidence import Residue
+    from ..lifecycle.evidence import Residue
+    from .contracts import FleetProfileConflict
+    from .service import FleetProfileService
 
     application = session.get(FleetProfileApplication, application_id)
     if application is None:
