@@ -230,8 +230,8 @@ test("keeps summaries in sync with filters and offers a recoverable empty state"
 
   const loadedSummary = screen.getByRole("region", { name: "Loaded activity summary" });
   expect(loadedSummary).toHaveTextContent("Summary of 4 loaded events");
-  expect(within(loadedSummary).getByRole("img")).toHaveAccessibleName(
-    "1 recorded, 1 in progress, 1 need review, 1 unsuccessful, 0 unknown",
+  expect(loadedSummary).toHaveTextContent(
+    "Recorded1In progress1Needs review1Unsuccessful1Unknown state0",
   );
 
   await user.selectOptions(screen.getByLabelText("Status"), "unsuccessful");
@@ -239,8 +239,8 @@ test("keeps summaries in sync with filters and offers a recoverable empty state"
   expect(screen.getByRole("heading", { name: /Agent enrollment failed$/ })).toBeVisible();
   const statusSummary = screen.getByRole("region", { name: "Matching activity summary" });
   expect(statusSummary).toHaveTextContent("Summary of 1 matching event from 4 loaded");
-  expect(within(statusSummary).getByRole("img")).toHaveAccessibleName(
-    "0 recorded, 0 in progress, 0 need review, 1 unsuccessful, 0 unknown",
+  expect(statusSummary).toHaveTextContent(
+    "Recorded0In progress0Needs review0Unsuccessful1Unknown state0",
   );
 
   await user.selectOptions(screen.getByLabelText("Status"), "attention");
@@ -252,9 +252,9 @@ test("keeps summaries in sync with filters and offers a recoverable empty state"
   await user.type(screen.getByRole("searchbox", { name: "Search activity" }), "no such activity");
   const emptyState = screen.getByText("No results match these filters").closest("section")!;
   expect(emptyState).toBeVisible();
-  expect(
-    within(screen.getByRole("region", { name: "Matching activity summary" })).getByRole("img"),
-  ).toHaveAccessibleName("0 recorded, 0 in progress, 0 need review, 0 unsuccessful, 0 unknown");
+  expect(screen.getByRole("region", { name: "Matching activity summary" })).toHaveTextContent(
+    "Recorded0In progress0Needs review0Unsuccessful0Unknown state0",
+  );
   await user.click(within(emptyState).getByRole("button", { name: "Clear filters" }));
   expect(screen.getByRole("heading", { name: /Recipe start finished$/ })).toBeVisible();
 

@@ -1013,23 +1013,6 @@ function ActivityOverview({
         <span>Unknown state</span>
         <strong>{counts.unknown}</strong>
       </div>
-      <div
-        className="activity-outcome-bar"
-        role="img"
-        aria-label={`${counts.recorded} recorded, ${counts.in_progress} in progress, ${counts.attention} need review, ${counts.unsuccessful} unsuccessful, ${counts.unknown} unknown`}
-      >
-        <span className="is-recorded" style={{ width: `${(counts.recorded / total) * 100}%` }} />
-        <span
-          className="is-in-progress"
-          style={{ width: `${(counts.in_progress / total) * 100}%` }}
-        />
-        <span className="is-attention" style={{ width: `${(counts.attention / total) * 100}%` }} />
-        <span
-          className="is-unsuccessful"
-          style={{ width: `${(counts.unsuccessful / total) * 100}%` }}
-        />
-        <span className="is-unknown" style={{ width: `${(counts.unknown / total) * 100}%` }} />
-      </div>
     </section>
   );
 }
