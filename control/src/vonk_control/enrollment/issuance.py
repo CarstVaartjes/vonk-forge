@@ -34,6 +34,7 @@ from vonk_agent_protocol.state_machines import (
     EnrollmentRecordState,
     NodeIdentityState,
 )
+from vonk_control.enrollment.contract import EnrollmentGrant, EnrollmentIssuanceClaim
 
 from ..categorized_errors import InvalidValue
 from ..models.fleet import (
@@ -61,22 +62,6 @@ from .contract import (
     EnrollmentGrantStatus,
     EnrollmentObservationOutcome,
 )
-from .validation import (
-    EVIDENCE_REFUSAL_REASONS,
-    _decode_token,
-    _digest,
-    _load_csr,
-    _stored_utc,
-    _utc,
-    _validate_actor,
-    _validate_evidence,
-    _validate_node_id,
-)
-
-_LOGGER = logging.getLogger("vonk_control.enrollment")
-
-from vonk_control.enrollment.contract import EnrollmentGrant, EnrollmentIssuanceClaim
-
 from .ending import retain_ended_effect
 from .persistence import (
     _issuance_binding,
@@ -92,6 +77,19 @@ from .types import (
     EnrollmentDenied,
     EnrollmentIssuanceUncertain,
 )
+from .validation import (
+    EVIDENCE_REFUSAL_REASONS,
+    _decode_token,
+    _digest,
+    _load_csr,
+    _stored_utc,
+    _utc,
+    _validate_actor,
+    _validate_evidence,
+    _validate_node_id,
+)
+
+_LOGGER = logging.getLogger("vonk_control.enrollment")
 
 
 def _submission_input(csr: bytes, evidence_error: str | None = None) -> None:

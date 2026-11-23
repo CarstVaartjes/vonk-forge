@@ -24,6 +24,7 @@ from vonk_agent_protocol.state_machines import ModelCacheOperatorStatus
 from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 
 from ..cursor_contract import MAX_CURSOR_LENGTH
+from ..fleet_model_removal_contract import FleetModelRemovalCheckpoint
 from ..machine_states import ModelFileStateField
 from ..operations.blockers import OperationBlocker
 from ..operations.contract import AvailabilityOperationFailure
@@ -402,9 +403,6 @@ class ModelCacheDownloadPayload(_ModelCacheOperationPayload):
 
 class ModelCacheRepairPayload(ModelCacheDownloadPayload):
     repair_checkpoint: ModelCacheRepairCheckpoint
-
-
-from ..fleet_model_removal_contract import FleetModelRemovalCheckpoint
 
 
 class ModelCacheRemovalPayload(_ModelCacheOperationPayload):

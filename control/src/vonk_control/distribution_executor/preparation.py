@@ -57,13 +57,11 @@ from ..runtime_image_preparation.contracts import RuntimeImageReceipt
 from ..stored.states import CatalogRevisionState, RecipeBuildState
 from ..strict_json import read_stored_model
 from ..worker.memory_contract import WorkerMemoryComponent
-
-_LOGGER = logging.getLogger(__name__)
-
-
 from .background import BackgroundPreparations
 from .durable import DurableDistributionPhaseExecutor
 from .receipts import _ChildView, _phase_receipt
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class CompositeDistributionPhaseExecutor(

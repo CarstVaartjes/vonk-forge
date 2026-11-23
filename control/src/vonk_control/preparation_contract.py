@@ -9,6 +9,8 @@ from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints, model_validator
 
+from .strict_json import StrictModel
+
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
 NodeId = Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
@@ -16,9 +18,6 @@ NodeId = Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
 PreparationState = Literal[
     "unknown", "missing", "preparing", "verifying", "ready", "failed", "unsupported"
 ]
-
-
-from .strict_json import StrictModel
 
 
 class PreparationReason(StrictModel):

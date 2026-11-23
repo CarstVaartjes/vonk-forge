@@ -63,6 +63,7 @@ from ..compiled_artifact_contract import (
     CompiledArtifactContract,
     ParameterScalar,
 )
+from ..coordinator_contract import CoordinatorFailureEvidence
 from ..fleet_event_contract import (
     AgentOperationPayload,
     InstallationNodePayload,
@@ -81,6 +82,7 @@ from ..fleet_profile_contract.definitions import FleetProfileAssignmentInput
 from ..fleet_profile_contract.review import FleetProfilePreview
 from ..fleet_profile_contract.vocabulary import LabelName, LabelValue
 from ..fleet_profiles.stop_contract import ProfileJobRunStopJob
+from ..inventory.items_contract import AgentInventoryItems
 from ..jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityJobResult,
@@ -127,6 +129,8 @@ from ..recipe_operations.lifecycle_contract import (
     RecipeOperationStoppedResult,
 )
 from ..recipe_update_batches.contract import RecipeUpdateDocument, RecipeUpdateFailure
+from ..repeated_evidence_contract import RepeatedEvidence
+from ..run_switch_contract.identity import RunSwitchCancellation
 from ..run_switch_contract.journal import (
     JournalRepairPurpose,
     RunSwitchJournalRepairEndEvidence,
@@ -135,6 +139,7 @@ from ..run_switch_contract.journal import (
 )
 from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_contract.phase_results import RunSwitchDistributionChildResult
+from ..wait_contract import WaitEvidence
 from .documents import RouteClaimMarker
 from .json_values import bind
 
@@ -324,7 +329,6 @@ bind(
 bind("agent_operation_attempts", "progress", OperationProgress, nullable=True)
 bind("agent_operation_attempts", "result", AgentResultPayload, nullable=True)
 
-from ..run_switch_contract.identity import RunSwitchCancellation
 
 bind(
     "run_switch_journal_repairs",
@@ -359,7 +363,6 @@ bind(
 bind("local_certificate_issuance", "binding", CertificateIssuanceBinding)
 
 # Every wait uses one contract; next_check is projected from the owner's SQL clock.
-from ..wait_contract import WaitEvidence
 
 for _table in (
     "coordinator_failures",
@@ -379,11 +382,9 @@ for _table in (
 ):
     bind(_table, "wait_evidence", WaitEvidence, nullable=True)
 
-from ..coordinator_contract import CoordinatorFailureEvidence
 
 bind("coordinator_failures", "failure", CoordinatorFailureEvidence)
 
-from ..inventory.items_contract import AgentInventoryItems
 
 bind("node_inventory_snapshots", "agent_items", AgentInventoryItems, nullable=True)
 
@@ -396,7 +397,6 @@ bind(
     nullable=True,
 )
 
-from ..repeated_evidence_contract import RepeatedEvidence
 
 bind(
     "agent_node_contacts",
