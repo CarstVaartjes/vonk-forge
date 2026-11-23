@@ -96,22 +96,20 @@ class RecordingAuthority(FixtureCertificateAuthority):
     def issue_node(
         self,
         node_id: str,
-        public_key_pem: bytes,
+        csr_pem: bytes,
         now: datetime,
         *,
         request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
         self._begin(request)
-        self.calls.append((node_id, public_key_pem, now))
+        self.calls.append((node_id, csr_pem, now))
         self._serial += 1
-        return self._finish(
-            request, _fixture_certificate(node_id, public_key_pem, request)
-        )
+        return self._finish(request, _fixture_certificate(node_id, csr_pem, request))
 
     def renew_node(
         self,
         node_id: str,
-        public_key_pem: bytes,
+        csr_pem: bytes,
         now: datetime,
         *,
         request: CertificateIssuanceBinding,
@@ -119,7 +117,7 @@ class RecordingAuthority(FixtureCertificateAuthority):
         self.renew_request_ids.append(request.request_id)
         if self.observe_renewal is not None:
             self.observe_renewal()
-        issued = self.issue_node(node_id, public_key_pem, now, request=request)
+        issued = self.issue_node(node_id, csr_pem, now, request=request)
         if self.renew_error is not None:
             raise self.renew_error
         return issued
@@ -137,12 +135,12 @@ class FailingIssuanceAuthority(RecordingAuthority):
     def issue_node(
         self,
         node_id: str,
-        public_key_pem: bytes,
+        csr_pem: bytes,
         now: datetime,
         *,
         request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
-        self.calls.append((node_id, public_key_pem, now))
+        self.calls.append((node_id, csr_pem, now))
         raise RuntimeError("provider response deliberately lost")
 
 
@@ -157,14 +155,14 @@ class CompletedRenewalAuthority(RecordingAuthority):
     def renew_node(
         self,
         node_id: str,
-        public_key_pem: bytes,
+        csr_pem: bytes,
         now: datetime,
         *,
         request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
         issued = super().renew_node(
             node_id,
-            public_key_pem,
+            csr_pem,
             now,
             request=request,
         )
@@ -1495,22 +1493,20 @@ class PausingAuthority(RecordingAuthority):
     def issue_node(
         self,
         node_id: str,
-        public_key_pem: bytes,
+        csr_pem: bytes,
         now: datetime,
         *,
         request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
         self._begin(request)
         with self._lock:
-            self.calls.append((node_id, public_key_pem, now))
+            self.calls.append((node_id, csr_pem, now))
             self._serial += 1
             pause = not self.pause_once or len(self.calls) == 1
         if pause:
             self.entered.set()
             assert self.release.wait(timeout=30)
-        return self._finish(
-            request, _fixture_certificate(node_id, public_key_pem, request)
-        )
+        return self._finish(request, _fixture_certificate(node_id, csr_pem, request))
 
 
 def test_postgres_newer_grant_fences_paused_issuer_and_reconciles_late_effect(

@@ -6,6 +6,7 @@ import errno
 import hashlib
 import json
 import uuid
+from collections.abc import Collection, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -326,11 +327,19 @@ class _CountingPreviewLifecycle(RecipeOperationService):
         installation_id: str,
         alias: str,
         *,
+        released_run_ids: Collection[str] = (),
+        kept_run_ids: Collection[str] = (),
         profile_application_id: str | None = None,
+        excluded_profile_application_ids: Sequence[str] = (),
     ):
         self.previews += 1
         return self._inner.preview_run(
-            installation_id, alias, profile_application_id=profile_application_id
+            installation_id,
+            alias,
+            released_run_ids=released_run_ids,
+            kept_run_ids=kept_run_ids,
+            profile_application_id=profile_application_id,
+            excluded_profile_application_ids=excluded_profile_application_ids,
         )
 
     def __getattr__(self, name: str):

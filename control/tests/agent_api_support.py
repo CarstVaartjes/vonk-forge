@@ -189,13 +189,13 @@ class Authority(FixtureCertificateAuthority):
     def issue_node(
         self,
         node_id: str,
-        public_key_pem: bytes,
+        csr_pem: bytes,
         now: datetime,
         *,
         request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
         self._begin(request)
-        csr_request = x509.load_pem_x509_csr(public_key_pem)
+        csr_request = x509.load_pem_x509_csr(csr_pem)
         key = ed25519.Ed25519PrivateKey.generate()
         leaf = (
             x509.CertificateBuilder()
@@ -225,12 +225,12 @@ class Authority(FixtureCertificateAuthority):
     def renew_node(
         self,
         node_id: str,
-        public_key_pem: bytes,
+        csr_pem: bytes,
         now: datetime,
         *,
         request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
-        return self.issue_node(node_id, public_key_pem, now, request=request)
+        return self.issue_node(node_id, csr_pem, now, request=request)
 
     def revocation_bundle(self, now: datetime) -> bytes:
         return b""

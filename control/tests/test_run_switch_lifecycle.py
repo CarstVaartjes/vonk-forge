@@ -176,7 +176,8 @@ class _ScriptedExecutor(RecordingArtifactExecutor):
         super().__init__(**kwargs)
         self.faults: dict[str, Any] = {}
 
-    def execute(self, plan, phase, **kwargs):
+    # Scripted phases return deliberately invalid results.
+    def execute(self, plan, phase, **kwargs):  # pyright: ignore[reportIncompatibleMethodOverride]
         fault = self.faults.get(phase.kind)
         if isinstance(fault, BaseException):
             self.calls.append(phase.kind)

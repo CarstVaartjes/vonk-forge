@@ -36,11 +36,11 @@ class SlowAuthority(RecordingAuthority):
         self.entered = Event()
         self.release = Event()
 
-    def issue_node(self, node_id, public_key_pem, now, *, request):
+    def issue_node(self, node_id, csr_pem, now, *, request):
         if node_id == self.pause_node:
             self.entered.set()
             assert self.release.wait(30)
-        return super().issue_node(node_id, public_key_pem, now, request=request)
+        return super().issue_node(node_id, csr_pem, now, request=request)
 
 
 def prepare(postgres_engine, provider):

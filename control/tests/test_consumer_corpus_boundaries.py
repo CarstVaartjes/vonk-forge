@@ -311,7 +311,7 @@ def test_real_agent_client_reads_bounded_422_and_preserves_503_status(
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, *_args):
+        def log_message(self, format: str, *_args: object) -> None:
             return
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)

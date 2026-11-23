@@ -329,7 +329,7 @@ def test_recipe_lookup_preserves_id_visibility_and_private_request_correlation(
                 for name, value in response.headers.items():
                     self.headers[name] = value
 
-            def read(self, size=-1):
+            def read(self, size: int | None = -1):
                 if self.failure == "lost_body":
                     raise http.client.IncompleteRead(b'{"id":', 100)
                 if self.failure == "malformed_body":

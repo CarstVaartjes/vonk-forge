@@ -87,7 +87,8 @@ def test_recipe_model_identities_include_canonical_companion_dependencies() -> N
     )
 
     class RevisionSession(Session):
-        def scalar(self, _statement: object) -> SimpleNamespace:
+        # A one-method fake: the reader only calls scalar(statement).
+        def scalar(self, _statement: object) -> SimpleNamespace:  # pyright: ignore[reportIncompatibleMethodOverride]
             return next(revisions)
 
     identities = _recipe_model_identities(

@@ -456,7 +456,7 @@ def test_owner_rotation_recovers_a_terminal_revocation_after_ca_outage(postgres_
     revoked = []
 
     class Authority(RevokingAuthority):
-        def revoke_node(self, serial, observed_at):
+        def revoke_node(self, serial, now):
             if not available[0]:
                 raise StepCAUnavailable("CA transport unavailable")
             revoked.append(serial)

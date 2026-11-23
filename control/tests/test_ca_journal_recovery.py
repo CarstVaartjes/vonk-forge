@@ -30,8 +30,8 @@ class LossyAuthority(RecordingAuthority):
         super().__init__()
         self.lose_response = False
 
-    def issue_node(self, node_id, public_key_pem, now, *, request):
-        issued = super().issue_node(node_id, public_key_pem, now, request=request)
+    def issue_node(self, node_id, csr_pem, now, *, request):
+        issued = super().issue_node(node_id, csr_pem, now, request=request)
         if self.lose_response:
             self.lose_response = False
             raise StepCAUnavailable("response deliberately lost")

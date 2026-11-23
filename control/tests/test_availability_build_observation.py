@@ -767,7 +767,9 @@ class _ConvertingStore(OciImageStore):
     def import_archive(self, archive):
         del archive
         place_test_image(self._storage, self._address, self._image_bytes)
-        return self.read(f"sha256:{self._address}")
+        image = self.read(f"sha256:{self._address}")
+        assert image is not None  # placed just above
+        return image
 
 
 def test_a_succeeded_build_is_adopted_after_its_preparation_retried(

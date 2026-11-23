@@ -265,7 +265,7 @@ class DistributionHandler(BaseHTTPRequestHandler):
         ):
             self.wfile.write(selected)
 
-    def log_message(self, _format: str, *_args: object) -> None:
+    def log_message(self, format: str, *_args: object) -> None:
         return
 
 

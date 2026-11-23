@@ -144,7 +144,7 @@ def _transfer(agent_system):  # noqa: F811
     distribution = DistributionService(source, clock=clock, sessions=services.sessions)
 
     class Executor(DurableDistributionPhaseExecutor):
-        def _model_objects(self, _plan, _progress):
+        def _model_objects(self, plan, progress):
             return (MODEL,), "d" * 64, 10
 
         def _archive(self, **_kwargs):

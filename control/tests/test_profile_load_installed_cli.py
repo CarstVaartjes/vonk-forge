@@ -214,7 +214,7 @@ def _https_api_peer(
             self.wfile.write(response_body)
             self.close_connection = True
 
-        def log_message(self, *_args: object) -> None:
+        def log_message(self, format: str, *_args: object) -> None:
             pass
 
     server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

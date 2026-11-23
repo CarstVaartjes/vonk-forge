@@ -8,6 +8,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, timedelta
 from pathlib import Path
+from typing import SupportsIndex, overload
 
 import pytest
 from sqlalchemy import select
@@ -66,7 +67,13 @@ class CopyBoundedChunk(bytes):
         instance.largest_slice = 0
         return instance
 
-    def __getitem__(self, key):
+    @overload
+    def __getitem__(self, key: SupportsIndex, /) -> int: ...
+
+    @overload
+    def __getitem__(self, key: slice, /) -> bytes: ...
+
+    def __getitem__(self, key: SupportsIndex | slice, /) -> int | bytes:
         if isinstance(key, slice):
             start = key.start or 0
             stop = len(self) if key.stop is None else key.stop

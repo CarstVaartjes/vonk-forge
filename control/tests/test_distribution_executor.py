@@ -247,7 +247,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
     class StubExecutor(DurableDistributionPhaseExecutor):
         source_available = True
 
-        def _model_objects(self, _plan, _progress):
+        def _model_objects(self, plan, progress):
             if not self.source_available:
                 raise RuntimeError("NAS source is temporarily unavailable")
             return (model, config), "d" * 64, 15

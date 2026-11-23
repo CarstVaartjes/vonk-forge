@@ -132,7 +132,8 @@ class TransferExecutor(RecordingArtifactExecutor):
         )
         return PhaseExecution(operation_id=child_id)
 
-    def get(self, operation_id):
+    # A child the durable store no longer has reads as missing (None).
+    def get(self, operation_id):  # pyright: ignore[reportIncompatibleMethodOverride]
         return self.durable.get(operation_id)
 
 

@@ -136,9 +136,9 @@ class Events(FleetEventRepository):
 class Telemetry(TelemetryRepository):
     def __init__(self, values: dict[str, TelemetrySampleView] | None = None) -> None:
         self.values = values or {}
-        self.calls: list[tuple[str, ...]] = []
+        self.calls: list[Sequence[str]] = []
 
-    def by_ids(self, sample_ids: tuple[str, ...]) -> dict[str, TelemetrySampleView]:
+    def by_ids(self, sample_ids: Sequence[str]) -> dict[str, TelemetrySampleView]:
         self.calls.append(sample_ids)
         return {
             sample_id: self.values[sample_id]
