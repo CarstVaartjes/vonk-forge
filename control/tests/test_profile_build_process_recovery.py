@@ -15,6 +15,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -189,7 +190,7 @@ def _complete_agent_work(sessions, lifecycle, root: Path) -> None:
             complete_started_recipe(sessions, lifecycle, job.id)
 
 
-def _worker_process(config: dict, crash: str) -> None:
+def _worker_process(config: dict[str, Any], crash: str) -> None:
     root = Path(config["root"])
     now = [datetime.fromisoformat(config["now"])]
     engine = create_engine(

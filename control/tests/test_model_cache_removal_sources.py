@@ -7,7 +7,7 @@ import itertools
 import shutil
 import uuid
 from concurrent.futures import Future, wait
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -139,7 +139,7 @@ def _seed_removal(service, tmp_path: Path, model: str, key: str):
 
 
 def _advance_on_fake_clock(
-    service, sessions, removal_id: str, clock: list, rounds: int
+    service, sessions, removal_id: str, clock: list[datetime], rounds: int
 ):
     for _ in range(rounds):
         clock[0] += timedelta(hours=1)

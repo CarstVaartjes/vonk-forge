@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentResult
@@ -421,10 +422,10 @@ class _WaitingContinuation:
     """A load waiting for admission that continues lane 1 of an older load
     (on Spark 1) and replaces its lane 2 (on Spark 2) with lane C."""
 
-    sessions: sessionmaker
+    sessions: sessionmaker[Session]
     profiles: FleetProfileService
     clock: list[datetime]
-    lanes: list[dict]
+    lanes: list[dict[str, Any]]
     original_id: str
     original_child: str
     waiting_id: str

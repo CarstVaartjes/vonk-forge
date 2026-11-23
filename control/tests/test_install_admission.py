@@ -2,11 +2,12 @@ import json
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
+from typing import Any
 
 import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
@@ -78,7 +79,7 @@ def _canonical_catalog_documents(
     *,
     denied_jurisdictions: tuple[str, ...] = (),
     disk_estimates: tuple[int, int] = (30, 70),
-) -> tuple[ModelDefinition, RecipeDefinition, dict, dict]:
+) -> tuple[ModelDefinition, RecipeDefinition, dict[str, Any], dict[str, Any]]:
     raw_model = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", "model-definition.json")
@@ -109,7 +110,7 @@ def _canonical_catalog_documents(
 
 
 def _seed_canonical_catalog(
-    sessions: sessionmaker,
+    sessions: sessionmaker[Session],
     now: datetime,
     *,
     denied_jurisdictions: tuple[str, ...] = (),

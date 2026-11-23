@@ -16,7 +16,7 @@ from starlette.types import Receive, Scope, Send
 
 from vonk_control.contract_graph import discover_contracts, schema_application
 
-_active_trace: ContextVar[dict | None] = ContextVar(
+_active_trace: ContextVar[dict[str, Any] | None] = ContextVar(
     "api_response_witness_trace", default=None
 )
 
@@ -31,15 +31,19 @@ class ResponseWitnesses:
         self.recording = True
         self.successes: dict[tuple[str, str, int, str], dict[str, Any]] = {}
         self.failures: list[dict[str, Any]] = []
-        self.validators: WeakKeyDictionary = WeakKeyDictionary()
-        self.pending: list[tuple] = []
+        self.validators: WeakKeyDictionary[
+            FastAPI, dict[tuple[str, str, int, str], Draft202012Validator]
+        ] = WeakKeyDictionary()
+        self.pending: list[
+            tuple[FastAPI, dict[str, Any], int, list[tuple[bytes, bytes]], bytes, int]
+        ] = []
 
     def validate(
         self,
         app: FastAPI,
-        scope: dict,
+        scope: dict[str, Any],
         status: int,
-        headers: list,
+        headers: list[tuple[bytes, bytes]],
         body: bytes,
         *,
         body_size: int | None = None,

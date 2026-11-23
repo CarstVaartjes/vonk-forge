@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
+from typing import Any
 
 import pytest
 from cryptography import x509
@@ -141,7 +142,7 @@ def job_diagnostics(job: JobDetailResponse) -> FailureDiagnostics:
     return failure.diagnostics
 
 
-def api_with_diagnostic(leaf: dict):
+def api_with_diagnostic(leaf: dict[str, Any]):
     # Only the observation source is injected; production create_app, projection,
     # authentication, response serialization, generated HTTP and CLI all execute.
     jobs = Jobs()

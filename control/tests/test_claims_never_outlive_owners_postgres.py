@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
@@ -137,7 +137,7 @@ def test_every_claim_is_ended_by_an_owner_liveness_kind(postgres_engine) -> None
                 assert not owner(session, gone, now).live, (table, kind)
 
 
-def _sessions(engine: Engine) -> sessionmaker:
+def _sessions(engine: Engine) -> sessionmaker[Session]:
     Base.metadata.create_all(engine)
     return sessionmaker(engine, expire_on_commit=False)
 

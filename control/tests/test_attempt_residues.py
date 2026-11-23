@@ -15,7 +15,7 @@ import uuid
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import create_engine, select, update
@@ -968,7 +968,10 @@ def test_a_run_switch_copying_into_a_short_installation_keeps_it(
     )
     switch = _switch(load)
     assert switch is not None
-    assert cast(dict, switch.payload["plan"])["installation_id"] == installation_id
+    assert (
+        cast(dict[str, Any], switch.payload["plan"])["installation_id"]
+        == installation_id
+    )
     _reconciler(load, after=LEFTOVER_GRACE + timedelta(days=2)).tick()
     assert not _uninstalls(load, installation_id)
 
@@ -995,7 +998,10 @@ def test_a_queued_cleanup_order_keeps_its_installation_from_the_sweep(
         cleanup = session.get(Job, operation.operation_id)
         assert cleanup is not None
         assert cleanup.kind == "recipe.cleanup.v2"
-        assert cast(dict, cleanup.payload["plan"])["installation_id"] == installation_id
+        assert (
+            cast(dict[str, Any], cleanup.payload["plan"])["installation_id"]
+            == installation_id
+        )
     _agree(load, installation_id, named=True)  # by its plan
     _reconciler(load, after=LEFTOVER_GRACE + timedelta(days=2)).tick()
     assert not _uninstalls(load, installation_id)

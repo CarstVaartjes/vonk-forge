@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
@@ -105,7 +105,7 @@ def _canonical_catalog_documents(
 
 
 def _seed_canonical_catalog(
-    sessions: sessionmaker, now: datetime, *, options: bool = False
+    sessions: sessionmaker[Session], now: datetime, *, options: bool = False
 ) -> CatalogDocumentRevision:
     model, recipe = _canonical_catalog_documents(options=options)
     model_digest = document_sha256(model.model_dump(mode="json"))
@@ -197,7 +197,9 @@ def _seed_canonical_catalog(
                 ),
             ]
         )
-        return session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
+        revision = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
+        assert revision is not None
+        return revision
 
 
 def setup(tmp_path: Path, *, options: bool = False):

@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, event, select, update
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
@@ -100,7 +100,7 @@ RECIPE_DOCUMENT_ID = "00000000-0000-4000-8000-000000000020"
 RECIPE_REVISION_ID = "00000000-0000-4000-8000-000000000021"
 
 
-def _sessions() -> sessionmaker:
+def _sessions() -> sessionmaker[Session]:
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -133,7 +133,7 @@ RECIPE_OPTIONS = [
 ]
 
 
-def _seed(sessions: sessionmaker, *, options: bool = False) -> None:
+def _seed(sessions: sessionmaker[Session], *, options: bool = False) -> None:
     with sessions.begin() as session:
         session.add(User(subject="test", role="administrator"))
     model_document = json.loads(
@@ -468,7 +468,7 @@ def _draft_input(name: str = "Draft") -> FleetProfileDefinition:
     )
 
 
-def _stored_state(sessions: sessionmaker) -> list[tuple]:
+def _stored_state(sessions: sessionmaker[Session]) -> list[tuple[str, int, int, str]]:
     with sessions() as session:
         return [
             (row.id, row.number, row.revision, row.name)
@@ -527,11 +527,9 @@ def test_a_draft_equal_to_the_stored_definition_is_reviewed_as_the_replayed_save
     # A catalog refresh adds options; a save of equal content still replays
     # without normalising, so the draft review must not add them either.
     with sessions() as session:
-        document = json.loads(
-            json.dumps(
-                session.get(CatalogDocumentRevision, RECIPE_REVISION_ID).document
-            )
-        )
+        revision = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
+        assert revision is not None
+        document = json.loads(json.dumps(revision.document))
     document["options"] = RECIPE_OPTIONS
     catalog = CatalogEntityService(sessions, clock=lambda: NOW)
     revision = catalog.revise(RECIPE_DOCUMENT_ID, document, actor="test")
@@ -1636,7 +1634,7 @@ def test_profile_list_skips_cache_check_and_single_read_observes(
     assert read.cache_summary.unknown == 0
 
 
-def _add_recipe(sessions: sessionmaker, slug: str) -> str:
+def _add_recipe(sessions: sessionmaker[Session], slug: str) -> str:
     """Publish another active recipe revision; returns its selector."""
     with sessions.begin() as session:
         base = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)

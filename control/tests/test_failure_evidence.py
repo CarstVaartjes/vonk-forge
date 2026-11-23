@@ -4,6 +4,7 @@ import copy
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -431,7 +432,9 @@ def test_the_omission_marker_is_read_as_the_agent_writes_it(
 
 
 @pytest.mark.parametrize("case", _OMISSION_VECTOR["clamps"])
-def test_a_retained_tail_is_bounded_as_the_agent_bounds_it(case: dict) -> None:
+def test_a_retained_tail_is_bounded_as_the_agent_bounds_it(
+    case: dict[str, Any],
+) -> None:
     """Catches the Controller's bound drifting from the agent's clamp_retained."""
     assert _keep_retained(case["text"], case["limit"]) == (
         case["kept"],

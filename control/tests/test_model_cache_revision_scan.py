@@ -6,6 +6,7 @@ import hashlib
 import logging
 from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -154,7 +155,7 @@ def _held_set_and_alias(tmp_path, now):
     return engine, sessions, service, catalog, held, alias, manifest.digest
 
 
-def _store_document(engine, digest: str, document: dict) -> None:
+def _store_document(engine, digest: str, document: dict[str, Any]) -> None:
     # Bypasses the immutable-active guard, as damage on disk would.
     with engine.begin() as connection:
         connection.execute(
@@ -180,11 +181,11 @@ def _bound(sessions, service, set_digest: str) -> set[str]:
     return {item.content_sha256 for item in stored.verified_models}
 
 
-def _unreadable(alias: dict) -> dict:
+def _unreadable(alias: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in alias.items() if key != "files"}
 
 
-def _divergent(alias: dict) -> dict:
+def _divergent(alias: dict[str, Any]) -> dict[str, Any]:
     # Readable, but its file is not the held file: it resolves to another set.
     return {**alias, "files": [{**alias["files"][0], "size_bytes": 4}]}
 

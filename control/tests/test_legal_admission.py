@@ -1,5 +1,7 @@
 """License notices must never become technical admission authority."""
 
+from typing import Any
+
 import pytest
 from vonk_forge_contracts import ModelDisplay, read_model_display
 
@@ -8,7 +10,7 @@ from vonk_control.legal_admission import territorial_admission
 from .display_fixtures import model_display_denying
 
 
-def _document() -> dict:
+def _document() -> dict[str, Any]:
     return {
         "kind": "model",
         "identity": {"publisher": "vonk-forge", "slug": "synthetic-tiny-fp16"},

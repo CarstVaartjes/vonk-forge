@@ -801,7 +801,7 @@ def test_busy_spark_makes_build_wait_until_it_is_idle(tmp_path) -> None:
     busy_id = "00000000-0000-4000-8000-000000000801"
     waiting_id = "00000000-0000-4000-8000-000000000802"
 
-    def availability_job(job_id: str, request_id: str, payload: dict) -> Job:
+    def availability_job(job_id: str, request_id: str, payload: dict[str, Any]) -> Job:
         return Job(
             id=job_id,
             request_id=request_id,
@@ -1000,7 +1000,7 @@ def test_a_prebuilt_pull_does_not_wait_for_a_free_builder_and_holds_none(
     occupant_id = "00000000-0000-4000-8000-000000000811"
     waiting_id = "00000000-0000-4000-8000-000000000812"
 
-    def availability_job(job_id: str, request_id: str, payload: dict) -> Job:
+    def availability_job(job_id: str, request_id: str, payload: dict[str, Any]) -> Job:
         return Job(
             id=job_id,
             request_id=request_id,
@@ -1171,7 +1171,7 @@ def test_a_prebuilt_pull_does_not_occupy_the_builder_a_spark_build_needs(
     now = datetime.now(UTC)
     waiting_id = "00000000-0000-4000-8000-000000000822"
 
-    def availability_job(job_id: str, request_id: str, payload: dict) -> Job:
+    def availability_job(job_id: str, request_id: str, payload: dict[str, Any]) -> Job:
         return Job(
             id=job_id,
             request_id=request_id,

@@ -12,7 +12,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from cluster_profiles.cli_json_contract import DocumentKind
 from vonk_agent_protocol.state_machines import (
@@ -79,7 +79,7 @@ _CLI_ENDPOINTS = load_tools_module("vonkctl_json_contract").DOCUMENTS[
 
 
 def _api(
-    sessions: sessionmaker,
+    sessions: sessionmaker[Session],
     route_root: Path,
     *,
     profiles: FleetProfileService | None = None,
@@ -219,7 +219,7 @@ def test_installed_cli_first_connection_requires_a_valid_controller_token(
 
 
 def _seed_profile_application_for_run(
-    sessions: sessionmaker,
+    sessions: sessionmaker[Session],
     run_id: str,
     *,
     profile_number: int = 1,
@@ -254,10 +254,11 @@ def _seed_profile_application_for_run(
         # The route fixture is intentionally small. Give its installed group the
         # same complete image identity the production owner validates before it
         # will treat a running assignment as current.
-        build.image_digest = "sha256:" + "d" * 64
+        image_digest = "sha256:" + "d" * 64
+        build.image_digest = image_digest
         build.oci_layout_sha256 = "e" * 64
         build.image_bytes = 1_024
-        installation.image_digest = build.image_digest
+        installation.image_digest = image_digest
         installation.plan_digest = "f" * 64
         installation.plan = _installed_pair_plan(
             mapping_id=mapping.id,

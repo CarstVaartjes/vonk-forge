@@ -97,7 +97,7 @@ def test_concurrent_reference_snapshots_still_exclude_deletion(
 
 
 def test_reference_admission_cannot_cross_uncommitted_deletion_reservation(
-    artifact_sessions: sessionmaker,
+    artifact_sessions: sessionmaker[Session],
 ) -> None:
     identity = ArtifactIdentity("runtime-image", "a" * 64)
     reserved = Event()

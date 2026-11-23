@@ -9,6 +9,7 @@ import os
 import stat
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import httpx2
 import pytest
@@ -58,7 +59,7 @@ class FakeLiteLlm:
     """LiteLLM's /key/* routes, keyed by alias, requiring the master key."""
 
     def __init__(self) -> None:
-        self.keys: dict[str, dict] = {}
+        self.keys: dict[str, dict[str, Any]] = {}
         self.counter = 0
         self.fail_generate_after: int | None = None
 
@@ -1222,7 +1223,7 @@ def test_new_key_grants_native_route_only_inside_its_existing_model_scope():
     assert "forbidden" not in litellm.keys
 
 
-def _entry(index: int) -> dict:
+def _entry(index: int) -> dict[str, Any]:
     return {
         "key": f"sk-listed-{index:032d}",
         "key_alias": f"key-{index:04d}",

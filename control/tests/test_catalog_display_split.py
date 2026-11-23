@@ -11,7 +11,7 @@ import copy
 import json
 from datetime import UTC, datetime
 from importlib import resources
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import create_engine, select, update
@@ -67,11 +67,11 @@ _PREBUILT = {
 }
 
 
-def _example(name: str) -> dict:
+def _example(name: str) -> dict[str, Any]:
     return json.loads((_EXAMPLES / name).read_text(encoding="utf-8"))
 
 
-def _legacy_model() -> dict:
+def _legacy_model() -> dict[str, Any]:
     """The Model document as contracts 2.x published it, display inside."""
     document = _example("model-definition.json")
     identity = document["identity"]
@@ -92,7 +92,7 @@ def _legacy_model() -> dict:
     return document
 
 
-def _legacy_recipe() -> dict:
+def _legacy_recipe() -> dict[str, Any]:
     document = _example("recipe-source-build.json")
     document["metadata"] = {
         "title": "Synthetic Tiny build",
@@ -102,7 +102,7 @@ def _legacy_recipe() -> dict:
     return document
 
 
-def _legacy_projection(document: dict, kind: str) -> dict:
+def _legacy_projection(document: dict[str, Any], kind: str) -> dict[str, Any]:
     """The projection a 2.x Controller stored, with what its sync recorded."""
     if kind == "model":
         model = read_model(document)
@@ -140,7 +140,9 @@ def sessions():
     return sessionmaker(engine, expire_on_commit=False)
 
 
-def _store(sessions, document: dict, kind: str, *, projected: dict) -> str:
+def _store(
+    sessions, document: dict[str, Any], kind: str, *, projected: dict[str, Any]
+) -> str:
     """Insert a revision exactly as a 2.x Controller wrote it."""
     with sessions.begin() as session:
         root = CatalogDocument(

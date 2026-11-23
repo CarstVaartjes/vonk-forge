@@ -27,7 +27,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import func, inspect, select
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import read_model, read_recipe
 
 from vonk_control.auth import Actor, AuthError, TokenCodec
@@ -154,7 +154,7 @@ def _app(
     *,
     catalog: CatalogService,
     sync: ManagedRecipeCatalogSyncService,
-    sessions: sessionmaker,
+    sessions: sessionmaker[Session],
 ) -> TestClient:
     app = FastAPI()
 

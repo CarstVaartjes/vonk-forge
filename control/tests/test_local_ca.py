@@ -17,7 +17,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import create_engine, select
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.reason_codes.admission import CertificateCode
 from vonk_agent_protocol.state_machines import CertificateIssuancePurpose
@@ -578,7 +578,7 @@ def _helper_key(path: Path) -> Path:
     return path
 
 
-def _sessions(tmp_path: Path) -> sessionmaker:
+def _sessions(tmp_path: Path) -> sessionmaker[Session]:
     engine = create_engine(f"sqlite:///{tmp_path / 'runtime.sqlite'}")
     Base.metadata.create_all(engine)
     return sessionmaker(engine, expire_on_commit=False)

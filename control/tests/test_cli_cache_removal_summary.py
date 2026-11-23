@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import Any
 
 import pytest
 
@@ -137,7 +138,7 @@ def _review(*, blocked: bool = False) -> dict[str, object]:
     return seal_cache_removal_review(content).model_dump(mode="json")
 
 
-def _human(capsys: pytest.CaptureFixture[str], review: dict, **kwargs) -> str:
+def _human(capsys: pytest.CaptureFixture[str], review: dict[str, Any], **kwargs) -> str:
     render_payload(review, "model", action="preview", **kwargs)
     return capsys.readouterr().out
 

@@ -209,7 +209,7 @@ def model() -> ModelDefinition:
     return read_model(_example("model-definition.json"))
 
 
-def _recipe(slug: str) -> dict:
+def _recipe(slug: str) -> dict[str, Any]:
     raw = _example(
         "recipe-source-build.json" if slug in OPENAI_BUILTINS else "recipe-job.json"
     )
@@ -244,7 +244,7 @@ _BUILT_IMAGE = {
 def _projection(
     slug: str,
     *,
-    recipe: dict | None = None,
+    recipe: dict[str, Any] | None = None,
     model: ModelDefinition,
     package_handle: object = _BUILT_IMAGE,
     settings: dict[str, object] | None = None,

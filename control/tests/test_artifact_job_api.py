@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from http import HTTPStatus
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
@@ -427,7 +427,8 @@ def test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes(
     )
     assert uploaded.status_code == 200
     assert uploaded.json()["input_files"] == [
-        {**item, "media_type": "image/png"} for item in cast(list, body["inputs"])
+        {**item, "media_type": "image/png"}
+        for item in cast(list[dict[str, Any]], body["inputs"])
     ]
     finalized = client.post(f"/api/artifact-jobs/{draft_id}/finalize")
     assert finalized.status_code == 200

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -743,7 +743,7 @@ def _cold_compile_switch(
     lifecycle._clock = clock
     admission = lifecycle._install_admission
     inventory = InventoryRepository(sessions, clock=clock)
-    hooks: list = []
+    hooks: list[Callable[[], None]] = []
 
     def during_compile() -> None:
         # The agent keeps reporting the same authenticated capacity; only the

@@ -12,11 +12,12 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import RecipeDefinition
 
 from tests.recipe_builds_support import RecordingQueue
@@ -104,7 +105,7 @@ class _Reader:
 
 def _published_library(
     tmp_path: Path, *, build_key: str | None = None
-) -> tuple[sessionmaker, str]:
+) -> tuple[sessionmaker[Session], str]:
     """Sync a one-recipe signed library whose index pins a prebuilt image.
 
     The key comes from the CI planner run over the real package, exactly as
@@ -195,7 +196,7 @@ def _published_library(
         return sessions, revision.id
 
 
-def _services(sessions: sessionmaker, tmp_path: Path):
+def _services(sessions: sessionmaker[Session], tmp_path: Path):
     builds = RecipeBuildService(
         sessions,
         bundles=SourceBundleStore(tmp_path / "bundles"),
@@ -336,7 +337,8 @@ def test_catalog_prebuilt_image_is_pulled_instead_of_built_on_a_spark(
             build.image_bytes,
         ) == ("succeeded", REFERENCE.rsplit("@", 1)[1], ADDRESS, IMAGE_BYTES)
         assert stored.state == "succeeded"
-        assert stored.result["node_evidence"][NODE]["oci_layout_sha256"] == ADDRESS
+        result = cast(dict[str, Any], stored.result)
+        assert result["node_evidence"][NODE]["oci_layout_sha256"] == ADDRESS
 
     # The pulled image is the reusable receipt for these build inputs.
     resolution = builds.resolve(revision_id)
@@ -586,7 +588,7 @@ def test_prebuilt_key_mismatch_builds_fresh_instead_of_reusing_old_image(
         (build,) = session.scalars(select(RecipeBuild)).all()
         assert build.policy_report.get("prebuilt_image") is None
         assert (
-            build.policy_report["prebuilt_decision"]["code"]
+            cast(dict[str, Any], build.policy_report)["prebuilt_decision"]["code"]
             == PrebuiltImageCode.BUILD_KEY_MISMATCH
         )
         assert tuple(session.scalars(select(AgentOperation)))
@@ -647,10 +649,13 @@ def test_failed_prebuilt_pull_retries_the_same_pinned_content(
     )
     assert recovered.run_pending() == 1
     with sessions() as session:
-        assert any(
-            session.get(Job, job.id).state == LifecycleState.SUCCEEDED
-            for job in prebuilt_jobs
-        )
+
+        def state(job_id: str) -> str:
+            row = session.get(Job, job_id)
+            assert row is not None
+            return row.state
+
+        assert any(state(job.id) == LifecycleState.SUCCEEDED for job in prebuilt_jobs)
 
     production.close()
 

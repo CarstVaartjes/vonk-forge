@@ -5,6 +5,7 @@ import math
 import uuid
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
+from typing import Any
 
 import pytest
 from sqlalchemy import create_engine, event, func, select
@@ -478,7 +479,7 @@ def test_gpu_failure_round_trips_and_next_sample_recovers(telemetry):
     assert point.memory_total_bytes == recovered.memory_total_bytes
 
 
-def _vector() -> dict:
+def _vector() -> dict[str, Any]:
     return json.loads(
         (
             files("vonk_agent_protocol") / "vectors" / "telemetry-sample-v1.json"
@@ -518,7 +519,7 @@ def test_gpu_power_uptime_and_process_memory_are_stored_and_served(telemetry) ->
     } & set(served)
 
 
-def _vector_v2() -> dict:
+def _vector_v2() -> dict[str, Any]:
     return json.loads(
         (
             files("vonk_agent_protocol") / "vectors" / "telemetry-sample-v2.json"

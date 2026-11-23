@@ -29,7 +29,9 @@ from .recipe_operations_support import _CanonicalImageTransport
 from .run_switch_operations_support import _cold_compile_switch
 
 
-def _install_waits(switch, monkeypatch: pytest.MonkeyPatch, *, times: int) -> list:
+def _install_waits(
+    switch, monkeypatch: pytest.MonkeyPatch, *, times: int
+) -> list[InstallAdmissionBusy]:
     """The install's managed-bytes recheck finds capacity busy ``times`` times."""
 
     recheck = switch.admission.refresh_install_receipts

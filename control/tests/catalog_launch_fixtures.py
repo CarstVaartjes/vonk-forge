@@ -277,10 +277,10 @@ def _dump(document: object) -> str:
 # --- selection from a release catalog (maintenance only) --------------------
 
 
-def _features(recipe: RecipeDefinition) -> set[tuple]:
+def _features(recipe: RecipeDefinition) -> set[tuple[str, ...]]:
     engine = recipe.runtime.engine
     interface = recipe.interfaces[0]
-    features: set[tuple] = {
+    features: set[tuple[str, ...]] = {
         (engine, recipe.topology.name, interface.adapter),
         ("adapter", interface.adapter),
     }
@@ -333,7 +333,7 @@ def select_representatives(index: Mapping[str, Any]) -> list[dict[str, Any]]:
         candidates.append((size, document, _features(recipe)))
     # Smallest recipes first, keeping each one that covers a shape not yet seen.
     candidates.sort(key=lambda item: (item[0], item[1]["identity"]["slug"]))
-    covered: set[tuple] = set()
+    covered: set[tuple[str, ...]] = set()
     chosen: list[dict[str, Any]] = []
     for _size, document, features in candidates:
         if features - covered:

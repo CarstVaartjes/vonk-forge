@@ -13,6 +13,7 @@ import hashlib
 import json
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
 from vonk_agent_protocol.host_helper import ContainerRuntimeAction, HostRuntimeRequest
@@ -34,7 +35,7 @@ JOB_RUN_GRANT_REQUESTS = "job-run-host-runtime-grant-requests-v1.json"
 GRANT_SECONDS = 10
 
 
-def vector(name: str) -> dict:
+def vector(name: str) -> dict[str, Any]:
     return json.loads((VECTORS / name).read_text(encoding="utf-8"))
 
 

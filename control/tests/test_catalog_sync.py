@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Callable
 from concurrent.futures import Executor, Future
 from copy import deepcopy
 from dataclasses import replace
@@ -12,7 +13,7 @@ import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import (
     RecipeDefinition,
     document_sha256,
@@ -133,7 +134,7 @@ def _item_with_document(
 
 def _fixture(
     tmp_path: Path, *, engine: Engine | None = None
-) -> tuple[sessionmaker, CatalogService, Reader, RecipeLibraryItem]:
+) -> tuple[sessionmaker[Session], CatalogService, Reader, RecipeLibraryItem]:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     index["recipes"] = index["recipes"][:1]
     client = SignedRecipeRelease.from_library(index, ROOT).client(tmp_path / "packages")
@@ -479,6 +480,7 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
                 CatalogDocumentHead.slug == original.slug,
             )
         )
+        assert head is not None
         assert head.active_revision_id == first.identity.recipe_revision_id
         assert head.candidate_revision_id is None
         assert head.generation == 3
@@ -501,9 +503,9 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
             second.recipe_revision_id,
         }
         assert {row.id for row in revisions if row.state == "failed"} == {pending.id}
-        assert read_catalog_projection(
-            session.get(CatalogDocumentRevision, pending.id)
-        ).failure_reason == (
+        pending_row = session.get(CatalogDocumentRevision, pending.id)
+        assert pending_row is not None
+        assert read_catalog_projection(pending_row).failure_reason == (
             f"Superseded by imported recipe {original.content_sha256}."
         )
 
@@ -512,7 +514,9 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
     assert repeated.unchanged_count == 1
     assert repeated.updated_count == 0
     with sessions() as session:
-        assert session.get(CatalogDocumentHead, head.id).generation == 3
+        repeated_head = session.get(CatalogDocumentHead, head.id)
+        assert repeated_head is not None
+        assert repeated_head.generation == 3
 
 
 def test_sync_keys_local_revisions_by_publisher_and_slug(tmp_path: Path) -> None:
@@ -760,6 +764,7 @@ def test_worker_sync_runs_when_due_and_leaves_a_live_import_alone(
     )
     with sessions.begin() as session:
         run = session.get(RecipeLibrarySyncRun, latest.id)
+        assert run is not None
         run.state, run.active_slot = "running", "managed-recipes"
         run.completed_at, run.heartbeat_at = None, now[0]
     assert cadence.tick() is False  # a live import holds the slot
@@ -767,13 +772,16 @@ def test_worker_sync_runs_when_due_and_leaves_a_live_import_alone(
 
     with sessions.begin() as session:
         run = session.get(RecipeLibrarySyncRun, latest.id)
+        assert run is not None
         run.heartbeat_at = now[0] - SYNC_HEARTBEAT_WINDOW - timedelta(seconds=1)
     # A dead claim no longer holds the slot: the worker observes the library
     # and the stale run is replaced.
     assert cadence.tick() is True
     assert reads
     with sessions() as session:
-        assert session.get(RecipeLibrarySyncRun, latest.id).state != "running"
+        replaced = session.get(RecipeLibrarySyncRun, latest.id)
+        assert replaced is not None
+        assert replaced.state != "running"
 
 
 def test_a_display_note_leaves_the_sync_current_and_the_next_tick_reuses_it(
@@ -1048,7 +1056,8 @@ def test_sync_heals_an_unreadable_stored_result_by_resync(tmp_path, damage):
     assert sync.get(result.id) == result
     with sessions.begin() as session:
         row = session.get(RecipeLibrarySyncRun, result.id)
-        damaged = dict(row.result)
+        assert row is not None
+        damaged: dict[str, object] | None = dict(row.result)
         if damage == "missing-problems":
             del damaged["problems"]
         elif damage == "string-count":
@@ -1059,7 +1068,9 @@ def test_sync_heals_an_unreadable_stored_result_by_resync(tmp_path, damage):
             damaged["problems"] = [{"detail": "missing code"}]
         else:
             damaged["undeclared"] = None
-        row.result = damaged
+        # The stored record is deliberately damaged (null included): reading
+        # must treat it as unknown, never fail.
+        row.result = damaged  # pyright: ignore[reportAttributeAccessIssue]
     # Reading never fails: the record is unknown, so it reads as partial.
     assert sync.get(result.id).state == "partial"
     # The next automatic sync does not trust it, re-syncs and overwrites it.
@@ -1087,6 +1098,7 @@ def test_old_and_new_stored_results_both_read(tmp_path):
     ):
         with sessions.begin() as session:
             row = session.get(RecipeLibrarySyncRun, result.id)
+            assert row is not None
             stored = dict(row.result)
             stored["withdrawn_count"] = len(withdrawn)
             stored["withdrawn_recipes"] = withdrawn
@@ -1561,6 +1573,7 @@ def test_automatic_sync_repairs_exact_local_content_at_the_same_commit(tmp_path,
                 CatalogDocumentRevision.kind == kind, active_head_revision()
             )
         )
+        assert revision is not None
         exact_id = revision.id
         exact_digest = revision.content_digest
     with sessions.begin() as session:
@@ -1758,7 +1771,9 @@ def test_sync_retracts_every_document_kind_absent_from_the_published_library(
 class Inline(Executor):
     """Run the sync in the calling thread: the next tick collects its outcome."""
 
-    def submit(self, fn, /, *args, **kwargs):
-        done: Future = Future()
+    def submit[**P, T](
+        self, fn: Callable[P, T], /, *args: P.args, **kwargs: P.kwargs
+    ) -> Future[T]:
+        done: Future[T] = Future()
         done.set_result(fn(*args, **kwargs))
         return done

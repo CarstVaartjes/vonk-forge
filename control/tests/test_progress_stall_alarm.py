@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy import select, update
@@ -342,7 +343,7 @@ def _copying_load(tmp_path: Path):
     """A load whose Sparks need the model copied: its distribution child is
     driven by the test, reporting what an agent's copy reports."""
 
-    transfer: list = []
+    transfer: list[Any] = []
 
     class Copy(RecordingArtifactExecutor):
         def execute(self, plan, phase, **kwargs):
@@ -368,7 +369,7 @@ def _copying_load(tmp_path: Path):
         """The child's execution (``key``, by default its id) copied ``copied``."""
 
         plan, phase = transfer
-        payload: dict = {
+        payload: dict[str, Any] = {
             "progress": {"completed_bytes": copied, "total_bytes": 10**9},
             "operation": {
                 "phase": operation_phase,

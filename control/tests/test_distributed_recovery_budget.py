@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import Any
 
 import pytest
 from sqlalchemy import select
@@ -508,7 +509,7 @@ def test_one_shot_recovery_reports_why_replay_is_unsafe(tmp_path):
         assert "submit a new authorized run" in (run.route_error or "")
 
 
-def _guard_diagnostics() -> dict:
+def _guard_diagnostics() -> dict[str, Any]:
     return guard_diagnostics(NOW.isoformat()).model_dump(mode="json")
 
 

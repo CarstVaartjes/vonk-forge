@@ -14,7 +14,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from importlib import metadata
 from pathlib import Path
-from typing import Self
+from typing import Any, Self
 
 import pytest
 from sqlalchemy import Engine, event, func, inspect, select, text
@@ -72,7 +72,7 @@ class World:
             self.sessions, cursors=cursors, clock=self.clock
         )
         index, row, package = _canonical_package_fixture()
-        self.index: dict = json.loads(index)
+        self.index: dict[str, Any] = json.loads(index)
         self.packages = {row["package"]["path"]: package}  # type: ignore[index]
         self.release = SignedRecipeRelease(self.index, self.packages)
         self.cache = root / "packages"
@@ -86,7 +86,12 @@ class World:
             self.sessions, catalog=self.catalog, reader=reader, clock=self.clock
         )
 
-    def publish(self, *, recipe: dict | None = None, model: dict | None = None) -> None:
+    def publish(
+        self,
+        *,
+        recipe: dict[str, Any] | None = None,
+        model: dict[str, Any] | None = None,
+    ) -> None:
         """Republish the same documents and packages with other display."""
         index = copy.deepcopy(self.index)
         if recipe is not None:
@@ -117,7 +122,7 @@ class World:
                 ).all()
             )
 
-    def documents(self) -> dict[str, tuple[str, datetime, dict | None]]:
+    def documents(self) -> dict[str, tuple[str, datetime, dict[str, Any] | None]]:
         with self.sessions() as session:
             return {
                 row.kind: (row.title, row.updated_at, row.display)

@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 from httpx2 import Response
 from sqlalchemy import select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
@@ -120,7 +120,7 @@ class _PairedReceiptAdapter(_SwitchAdapter):
         return started
 
 
-def _add_second_recipe_revision(sessions: sessionmaker) -> str:
+def _add_second_recipe_revision(sessions: sessionmaker[Session]) -> str:
     document = _recipe_document()
     identity = document.get("identity")
     assert isinstance(identity, dict)

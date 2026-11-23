@@ -671,14 +671,14 @@ def setup_services(
 
 
 def record_exact_empty_snapshot(
-    sessions: sessionmaker, node_id: str, observed_at: datetime
+    sessions: sessionmaker[Session], node_id: str, observed_at: datetime
 ) -> None:
     with sessions.begin() as session:
         prepare_exact_recipe_run_observation_nodes(session, node_id, observed_at, set())
 
 
 def mark_current_exact_observations(
-    sessions: sessionmaker, run_id: str, observed_at: datetime
+    sessions: sessionmaker[Session], run_id: str, observed_at: datetime
 ) -> None:
     with sessions.begin() as session:
         run = session.get(RecipeRun, run_id)

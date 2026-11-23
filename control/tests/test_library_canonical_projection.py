@@ -19,7 +19,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Table, create_engine, event, select, update
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
@@ -105,7 +105,7 @@ def _model_cache_set(
 
 
 def _insert_canonical_rows(
-    sessions: sessionmaker,
+    sessions: sessionmaker[Session],
     *,
     kind: str,
     template: dict[str, object],

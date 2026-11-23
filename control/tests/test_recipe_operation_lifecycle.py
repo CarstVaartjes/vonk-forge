@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 
@@ -54,7 +55,7 @@ def test_a_parent_is_created_live_or_already_done_never_parked() -> None:
             RecipeOperationAdapter.new_job(**_fields(state))
 
 
-def _fields(state: str) -> dict:
+def _fields(state: str) -> dict[str, Any]:
     job = _job(state)
     return {
         column: getattr(job, column)

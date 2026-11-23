@@ -6,7 +6,7 @@ import json
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -252,7 +252,7 @@ def test_installed_run_declined_after_the_draft_review_changes_nothing(
 
     assert status == 2, transcript
     (preview,) = [call for call in state.calls if call[1] == "/api/profile/1/preview"]
-    draft = cast(dict, preview[2])["definition"]
+    draft = cast(dict[str, Any], preview[2])["definition"]
     assert draft["assignments"][0]["recipe_selector"] == _RUN_RECIPE
     assert not [call for call in state.calls if call[0] == "PUT"]
     assert api.get("/api/profile/1/definition", headers=headers).json() == before
@@ -301,7 +301,7 @@ def test_installed_run_asks_again_when_the_profile_moved_then_saves_and_loads(
 
     assert competing == [200], transcript
     puts = [call for call in state.calls if call[0] == "PUT"]
-    assert [cast(dict, call[2])["expected_revision"] for call in puts] == [
+    assert [cast(dict[str, Any], call[2])["expected_revision"] for call in puts] == [
         revision,
         revision + 1,
     ]
@@ -314,7 +314,7 @@ def test_installed_run_asks_again_when_the_profile_moved_then_saves_and_loads(
     (load,) = [call for call in state.calls if call[1] == "/api/profile/1/load"]
     previews = [call for call in state.calls if call[1] == "/api/profile/1/preview"]
     assert len(previews) == 2
-    assert cast(dict, load[2])["review"]["effects_digest"]
+    assert cast(dict[str, Any], load[2])["review"]["effects_digest"]
     with sessions() as session:
         assert len(list(session.scalars(select(FleetProfileApplication)))) == 1
 

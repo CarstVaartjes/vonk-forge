@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 from types import SimpleNamespace
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -357,7 +358,7 @@ def test_transfer_that_keeps_copying_outlives_the_recovery_window(tmp_path, copy
     installed_recipe(lifecycle, mapping, build, nodes, request_id=str(uuid4()))
     now = [NOW]
     copied = [0]
-    transfer: list = []
+    transfer: list[Any] = []
 
     class SlowTransfer(RecordingArtifactExecutor):
         def execute(self, plan, phase, **kwargs):

@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import event, func, insert, select, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.gpu_clock import (
     GpuClockApplyState,
@@ -38,7 +38,7 @@ BOOT_B = uuid.UUID("00000000-0000-4000-8000-000000000002")
 NOW = datetime(2026, 8, 3, 12, tzinfo=UTC)
 
 
-def _repository(engine: Engine) -> tuple[TelemetryRepository, sessionmaker]:
+def _repository(engine: Engine) -> tuple[TelemetryRepository, sessionmaker[Session]]:
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
