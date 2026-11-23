@@ -223,32 +223,35 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
         }
     }
 
-    /// Sum of the memory GPU compute processes hold. No rows is 0 bytes; a
-    /// failed command or any row that is not a number is `None`.
     fn gpu_process_memory(&self) -> Option<u64> {
-        let output = self
-            .runner
-            .run(
-                Program::NvidiaSmi,
-                &[
-                    "--query-compute-apps=used_memory".to_owned(),
-                    "--format=csv,noheader,nounits".to_owned(),
-                ],
-                Duration::from_secs(10),
-            )
-            .ok()?;
-        if !output.success || output.stdout.len() > SOURCE_TEXT_LIMIT as usize {
-            return None;
-        }
-        let mut total = 0_u64;
-        for row in std::str::from_utf8(&output.stdout).ok()?.lines() {
-            let row = row.trim();
-            if !row.is_empty() {
-                total = total.checked_add(row.parse::<u64>().ok()?.checked_mul(1024 * 1024)?)?;
-            }
-        }
-        (total <= MAX_TELEMETRY_CAPACITY_BYTES).then_some(total)
+        gpu_process_memory(&self.runner)
     }
+}
+
+/// Sum of the memory GPU compute processes hold. No rows is 0 bytes; a
+/// failed command or any row that is not a number is `None`.
+pub fn gpu_process_memory<R: ProcessRunner>(runner: &R) -> Option<u64> {
+    let output = runner
+        .run(
+            Program::NvidiaSmi,
+            &[
+                "--query-compute-apps=used_memory".to_owned(),
+                "--format=csv,noheader,nounits".to_owned(),
+            ],
+            Duration::from_secs(10),
+        )
+        .ok()?;
+    if !output.success || output.stdout.len() > SOURCE_TEXT_LIMIT as usize {
+        return None;
+    }
+    let mut total = 0_u64;
+    for row in std::str::from_utf8(&output.stdout).ok()?.lines() {
+        let row = row.trim();
+        if !row.is_empty() {
+            total = total.checked_add(row.parse::<u64>().ok()?.checked_mul(1024 * 1024)?)?;
+        }
+    }
+    (total <= MAX_TELEMETRY_CAPACITY_BYTES).then_some(total)
 }
 
 /// Whole seconds since boot: the first field of `/proc/uptime`, floored.

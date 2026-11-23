@@ -3163,6 +3163,40 @@
       "title": "EnumParameter",
       "type": "object"
     },
+    "FabricDevice": {
+      "description": "One RDMA device's traffic over the window since the agent's last report.\n\nA DGX Spark reaches one cabled port through two RDMA devices; ``port`` is\ntheir shared PCI bus:slot.function (the PCI domain differs), which pairs\nthe siblings. ``bytes`` is received plus transmitted bytes in the window.\nThe Controller compares siblings; nothing here is a verdict.",
+      "properties": {
+        "active": {
+          "title": "Active",
+          "type": "boolean"
+        },
+        "bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "port": {
+          "pattern": "^[0-9a-f]{2}:[0-9a-f]{2}\\.[0-7]$",
+          "title": "Port",
+          "type": "string"
+        },
+        "window_seconds": {
+          "maximum": 86400,
+          "minimum": 1,
+          "title": "Window Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "port",
+        "active",
+        "bytes",
+        "window_seconds"
+      ],
+      "title": "FabricDevice",
+      "type": "object"
+    },
     "FailureCode": {
       "description": "Closed codes of a definite failed outcome reported by the agent.",
       "enum": [
@@ -8255,6 +8289,15 @@
           ],
           "default": null
         },
+        "fabric_devices": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FabricDevice"
+          },
+          "maxItems": 16,
+          "title": "Fabric Devices",
+          "type": "array"
+        },
         "gpu_clock_support": {
           "anyOf": [
             {
@@ -8269,6 +8312,17 @@
         "graphical_default_target": {
           "title": "Graphical Default Target",
           "type": "boolean"
+        },
+        "memory_fragmentation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryFragmentation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "store_retention_failure": {
           "anyOf": [
@@ -10106,6 +10160,42 @@
         "phase_index"
       ],
       "title": "LifecyclePreflightCheckpoint",
+      "type": "object"
+    },
+    "MemoryFragmentation": {
+      "description": "``SecPageTables`` after workload stops that left the Spark idle.\n\nInformative only: the Controller derives a reboot recommendation, and\nnothing acts on it. Page-table pages that a process leaves behind (PyTorch\n``expandable_segments`` maps many IOMMU pages) are not freed when it exits,\ncan each pin a large free block, and only a reboot returns them. A stop is\nidle when no GPU compute process runs after it (observed, not tracked), so\nthe reading holds no workload's own tables. The readings are keyed by\n``boot_id``; the agent starts them afresh when the boot changes.",
+      "properties": {
+        "boot_id": {
+          "pattern": "^[0-9a-f-]{36}$",
+          "title": "Boot Id",
+          "type": "string"
+        },
+        "idle_stop_first_bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Idle Stop First Bytes",
+          "type": "integer"
+        },
+        "idle_stop_latest_bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Idle Stop Latest Bytes",
+          "type": "integer"
+        },
+        "page_size_bytes": {
+          "maximum": 1073741824,
+          "minimum": 1,
+          "title": "Page Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "boot_id",
+        "page_size_bytes",
+        "idle_stop_first_bytes",
+        "idle_stop_latest_bytes"
+      ],
+      "title": "MemoryFragmentation",
       "type": "object"
     },
     "MemoryUsageUncertainty": {
@@ -13270,11 +13360,13 @@
         "host.store-retention",
         "host.display-memory",
         "host.gpu-clock-uncapped",
+        "host.memory-fragmented",
         "host.swap-short",
         "model.store_layout",
         "install.partial",
         "inventory.missing",
         "inventory.stale",
+        "network.rails-underused",
         "network.nas-route-wifi-no-wired-port",
         "network.nas-route-wifi-wired-port-down",
         "network.nas-route-wifi-wired-port-unused",
