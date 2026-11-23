@@ -445,3 +445,44 @@ fn a_successful_restore_starts_nothing_extra() {
     let (phase, attempts, heals) = watch_outcome(due, Ok(()));
     assert_eq!((phase, attempts, heals), (Phase::RolledBack, 1, 0));
 }
+
+#[test]
+fn only_listed_phase_moves_are_legal() {
+    use super::recovery::can_move;
+    // A finished transaction never moves again, except Acknowledged repeating.
+    for to in [
+        Phase::Armed,
+        Phase::ActivationFailed,
+        Phase::RollingBack,
+        Phase::RolledBack,
+        Phase::RollbackFailed,
+    ] {
+        assert!(!can_move(Phase::RolledBack, to));
+        assert!(!can_move(Phase::Acknowledged, to));
+        assert!(!can_move(to, Phase::Armed));
+    }
+    assert!(can_move(Phase::Armed, Phase::Acknowledged));
+    assert!(can_move(Phase::RollbackFailed, Phase::RollingBack));
+    assert!(!can_move(Phase::ActivationFailed, Phase::Acknowledged));
+}
+
+#[test]
+fn an_illegal_move_is_refused_and_not_journaled() {
+    let temporary = tempfile::tempdir().unwrap();
+    fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o755)).unwrap();
+    let store = Store {
+        root: temporary.path().join("rollback"),
+        owner: fs::metadata(temporary.path()).unwrap().uid(),
+    };
+    let _lock = store.lock().unwrap();
+    let mut tx = transaction();
+    tx.phase = Phase::RolledBack;
+    store.write(&tx).unwrap();
+    let outcome = Outcome::ControllerConfirmedActivation;
+    assert!(
+        store
+            .advance(&mut tx, Phase::Acknowledged, outcome, 9)
+            .is_err()
+    );
+    assert_eq!(store.read().unwrap().phase, Phase::RolledBack);
+}

@@ -795,7 +795,8 @@ its `platform_ref` pin (see `docs/runbooks/supply-chain.md`).
 `rust/fuzz/` is a cargo-fuzz crate outside the Cargo workspace (its own
 `[workspace]`; the job copies the root `Cargo.lock` in, so the fuzzer tests the
 shipped dependency set), so no batch compiles it and the pinned stable
-toolchain is untouched. Its targets cover the hand-written parsers that
+toolchain is untouched. `scripts/select-ci-areas` treats a change under it as
+fast-tier only (no Rust build, carry or acceptance). Its targets cover the hand-written parsers that
 untrusted bytes reach; each states its invariant in its first comment:
 
 | Target | Parser | Invariant |

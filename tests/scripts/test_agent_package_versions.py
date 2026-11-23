@@ -121,3 +121,26 @@ def test_a_set_without_a_record_is_refused(tmp_path: Path) -> None:
     )
     assert result.returncode != 0
     assert "record is missing" in result.stderr
+
+
+def test_a_partial_rerun_leaving_two_records_still_reads(tmp_path: Path) -> None:
+    """Catches refusing a set because both attempts of one run recorded it."""
+    version = f"{_workspace()}~dev.1792000123+g" + "b" * 12
+    baseline = METADATA["acceptance_baseline_version"](_workspace(), "b" * 40)
+    environment = _fake_gh(
+        tmp_path, f"version={version}\nbaseline_version={baseline}\n"
+    )
+    (tmp_path / "listing.json").write_text(
+        json.dumps(
+            {"artifacts": [{"id": 3, "expired": False}, {"id": 7, "expired": False}]}
+        )
+    )
+    result = subprocess.run(
+        [str(SCRIPT), "read", "42", SHA],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr

@@ -466,8 +466,11 @@ jobs:
               "/repos/$GITHUB_REPOSITORY/actions/runs/$1/artifacts?per_page=100" \
               --jq '.artifacts[]' | jq -s .
           }
+          # A partial rerun (`gh run rerun --failed`) can leave the same
+          # evidence from two attempts of this run; any live copy proves it.
           require() {
-            test "$(jq --arg name "$2" '[.[] | select(.name == $name and (.expired | not))] | length' <<< "$1")" = 1
+            test "$(jq --arg name "$2" '[.[] | select(.name == $name and (.expired | not))] | length' <<< "$1")" -ge 1 ||
+              { echo "::error::evidence artifact $2 is missing or expired" >&2; return 1; }
           }
           listing=$(artifacts "$package_run_id")
           require "$listing" "$package_artifact"
