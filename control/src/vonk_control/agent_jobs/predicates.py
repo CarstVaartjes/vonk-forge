@@ -74,7 +74,9 @@ def _document(value: BaseModel) -> Any:
     return json.loads(canonical_message(value))
 
 
-def _json_flag_parts(element: FunctionElement, compiler, **kwargs) -> tuple[str, str]:
+def _json_flag_parts(
+    element: FunctionElement[Any], compiler, **kwargs
+) -> tuple[str, str]:
     column, key = list(element.clauses)
     column_sql = compiler.process(column, **kwargs)
     key_sql = compiler.process(key, **kwargs)

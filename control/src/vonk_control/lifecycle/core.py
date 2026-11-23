@@ -44,6 +44,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime
+from typing import Any
 
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, WaitReason
 
@@ -90,7 +91,7 @@ _RESUME_ACTIONS = frozenset({ActionName.RESUME, ActionName.RETRY})
 
 
 def transition(
-    row: Lifecycle, event: Event, adapter: KindAdapter, now: datetime
+    row: Lifecycle, event: Event, adapter: KindAdapter[Any], now: datetime
 ) -> Decision:
     """Decide the next row and the commands for ``event``; total and pure."""
 
@@ -184,7 +185,7 @@ def never_executed(row: Lifecycle) -> bool:
 
 
 def blind_retry_is_safe(
-    row: Lifecycle, adapter: KindAdapter, effect: Effect | None = None
+    row: Lifecycle, adapter: KindAdapter[Any], effect: Effect | None = None
 ) -> bool:
     """Rule 1: repeating ``execute`` cannot repeat a visible effect."""
 
@@ -199,7 +200,7 @@ def _due(
     row: Lifecycle,
     count: int,
     now: datetime,
-    adapter: KindAdapter | None = None,
+    adapter: KindAdapter[Any] | None = None,
     retry_after: datetime | None = None,
 ) -> datetime:
     """Stable bounded backoff, never earlier than the kind's own fence."""
@@ -221,7 +222,7 @@ def _due(
 def _retry(
     row: Lifecycle,
     now: datetime,
-    adapter: KindAdapter,
+    adapter: KindAdapter[Any],
     *,
     effect: Effect,
     reason: str | None,
@@ -273,7 +274,7 @@ def _observe(row: Lifecycle, now: datetime, reason: str | None) -> Decision:
 
 def _uncertain(
     row: Lifecycle,
-    adapter: KindAdapter,
+    adapter: KindAdapter[Any],
     now: datetime,
     *,
     effect: Effect | None = None,
@@ -352,7 +353,7 @@ def _lost(
 
 def _unknown_after_observation(
     row: Lifecycle,
-    adapter: KindAdapter,
+    adapter: KindAdapter[Any],
     now: datetime,
     reason: str | None,
     commands: tuple[Command, ...] = (),
@@ -490,7 +491,7 @@ def _heartbeat(row: Lifecycle, event: Heartbeat) -> Decision:
 
 
 def _reported(
-    row: Lifecycle, event: Reported, adapter: KindAdapter, now: datetime
+    row: Lifecycle, event: Reported, adapter: KindAdapter[Any], now: datetime
 ) -> Decision:
     # A definite report ends the row, cancelled or not: the executor says what
     # happened, and an owner that is waiting for exactly that outcome (a build
@@ -542,7 +543,7 @@ def _end(row: Lifecycle, state: State, effect: Effect, event: Reported) -> Decis
 
 def _lapsed(
     row: Lifecycle,
-    adapter: KindAdapter,
+    adapter: KindAdapter[Any],
     now: datetime,
     reason: str | None = None,
 ) -> Decision:
@@ -554,7 +555,7 @@ def _lapsed(
 
 
 def _observed(
-    row: Lifecycle, event: Observed, adapter: KindAdapter, now: datetime
+    row: Lifecycle, event: Observed, adapter: KindAdapter[Any], now: datetime
 ) -> Decision:
     if row.cancel_requested:
         return _advance_cancel(
@@ -615,7 +616,7 @@ def _observed(
 
 
 def _operator(
-    row: Lifecycle, event: OperatorAction, adapter: KindAdapter, now: datetime
+    row: Lifecycle, event: OperatorAction, adapter: KindAdapter[Any], now: datetime
 ) -> Decision:
     if event.name not in adapter.actions(row):
         return Decision(row)  # an action the row does not advertise is refused
@@ -659,7 +660,7 @@ def _operator(
 # --------------------------------------------------------------------- tick
 
 
-def _tick(row: Lifecycle, adapter: KindAdapter, now: datetime) -> Decision:
+def _tick(row: Lifecycle, adapter: KindAdapter[Any], now: datetime) -> Decision:
     if row.cancel_requested:
         if row.next_action_at is not None and row.next_action_at > now:
             return Decision(row)
@@ -696,7 +697,9 @@ def _tick(row: Lifecycle, adapter: KindAdapter, now: datetime) -> Decision:
     return Decision(row)
 
 
-def _reevaluate_parked(row: Lifecycle, adapter: KindAdapter, now: datetime) -> Decision:
+def _reevaluate_parked(
+    row: Lifecycle, adapter: KindAdapter[Any], now: datetime
+) -> Decision:
     """Rules 1 to 3 for a parked row, e.g. a legacy ``waiting-for-operator``."""
 
     if row.effect is Effect.ESTABLISHED:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import override
+from typing import Any, override
 
 from sqlalchemy import (
     Integer,
@@ -112,7 +112,7 @@ class CertificateGenerationStorage(TypeDecorator[int]):
     impl = Numeric(20, 0)
     cache_ok = True
 
-    def load_dialect_impl(self, dialect: Dialect) -> TypeEngine:
+    def load_dialect_impl(self, dialect: Dialect) -> TypeEngine[Any]:
         if dialect.name == "sqlite":
             return dialect.type_descriptor(String(20))
         return dialect.type_descriptor(Numeric(20, 0))

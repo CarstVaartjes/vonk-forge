@@ -424,7 +424,7 @@ class TelemetryMaintenance:
                 return
 
     @staticmethod
-    def _chunks(values: list, size: int = _SQL_KEY_CHUNK):
+    def _chunks[T](values: list[T], size: int = _SQL_KEY_CHUNK):
         for offset in range(0, len(values), size):
             yield values[offset : offset + size]
 
