@@ -91,7 +91,7 @@ def _observation_select_only(execution: ORMExecuteState) -> None:
 
 @event.listens_for(Session, "before_flush")
 def _observation_no_flush(
-    session: Session, _context: object, _instances: object
+    _session: Session, _context: object, _instances: object
 ) -> None:
     if _READ.get() is not None:
         raise RuntimeError("Profile observation attempted a database flush")

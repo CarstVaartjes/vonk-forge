@@ -570,7 +570,7 @@ class TransferMixin:
             )
             repaired = checkpoint.completed_objects if checkpoint is not None else []
         if (not force or spec.sha256 in repaired) and cache._object_is_stored(spec):
-            cache._mark_artifact_verified(spec, set_digest)
+            cache._mark_artifact_verified(set_digest)
             return
         if spec.parts is not None:
             cache._download_split(
@@ -578,7 +578,6 @@ class TransferMixin:
                 set_digest,
                 owner=owner,
                 operation_id=operation_id,
-                force=force,
                 interrupt_after_bytes=interrupt_after_bytes,
             )
         else:
@@ -588,7 +587,6 @@ class TransferMixin:
                 owner=owner,
                 operation_id=operation_id,
                 completed_artifacts=0,
-                force=force,
                 interrupt_after_bytes=interrupt_after_bytes,
             )
         if is_repair:

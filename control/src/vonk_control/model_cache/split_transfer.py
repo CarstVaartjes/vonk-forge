@@ -63,7 +63,6 @@ class SplitTransferMixin:
         *,
         owner: str,
         operation_id: str,
-        force: bool,
         interrupt_after_bytes: int | None,
     ) -> None:
         """Ingest a file the source hosts only as ordered parts.
@@ -123,7 +122,6 @@ class SplitTransferMixin:
                 owner=owner,
                 operation_id=operation_id,
                 completed_artifacts=0,
-                force=force,
                 interrupt_after_bytes=interrupt_after_bytes,
                 fetch_only=True,
             )
@@ -160,7 +158,7 @@ class SplitTransferMixin:
             if not cache._publication_allowed(operation_id, set_digest, spec.sha256):
                 raise OperationInterrupted("model download was removed during assembly")
             cache._place_object(spec, assembled)
-            cache._mark_artifact_verified(spec, set_digest)
+            cache._mark_artifact_verified(set_digest)
 
     @staticmethod
     def _rehash_prefix(path: Path, length: int, digest: hashlib._Hash) -> bool:
@@ -395,7 +393,6 @@ class SplitTransferMixin:
         owner: str,
         operation_id: str,
         completed_artifacts: int,
-        force: bool,
         interrupt_after_bytes: int | None,
         fetch_only: bool = False,
     ) -> None:
@@ -433,7 +430,7 @@ class SplitTransferMixin:
                         "model download was removed during verification"
                     )
                 cache._publish_object(spec, part)
-                cache._mark_artifact_verified(spec, set_digest)
+                cache._mark_artifact_verified(set_digest)
             return
         if offset == spec.expected_bytes:
             part.unlink(missing_ok=True)

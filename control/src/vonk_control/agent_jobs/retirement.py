@@ -70,7 +70,7 @@ def release_owned_reservations_in_session(
 
 
 def operator_resume_candidates_in_session(
-    session: Session, job_id: str, now: datetime
+    session: Session, job_id: str, _now: datetime
 ) -> tuple[StoredOperation, ...]:
     """Return the parked children whose current Job owner still has intent.
 
@@ -372,7 +372,7 @@ def retire_exhausted_operations_in_session(
                 ),
                 strict=True,
             ).model_dump(mode="json", exclude_none=True)
-    _release_retired_owner_in_session(session, job, job_reason, now)
+    _release_retired_owner_in_session(session, job, now)
     if isinstance(column_value(job, "result"), RecipeOperationCancellationResult):
         schedule_wait(
             job,
@@ -385,7 +385,7 @@ def retire_exhausted_operations_in_session(
 
 
 def _release_retired_owner_in_session(
-    session: Session, job: Job, reason: str, now: datetime
+    session: Session, job: Job, now: datetime
 ) -> None:
     """Retain uncertain effects for the normal exact cleanup lifecycle.
 

@@ -164,19 +164,15 @@ def test_run_switch_warns_above_default_without_requiring_supported_levels() -> 
     repository.record(observation)
     with sessions() as session:
         blockers, warnings = assess_gpu_clock(
-            session, [NODE], GpuClockRange(min_mhz=300, max_mhz=2250)
+            [NODE], GpuClockRange(min_mhz=300, max_mhz=2250)
         )
         assert not blockers
         assert [warning.code for warning in warnings] == [
             RunSwitchCode.GPU_CLOCK_ABOVE_DEFAULT
         ]
-        blockers, _ = assess_gpu_clock(
-            session, [NODE], GpuClockRange(min_mhz=200, max_mhz=1800)
-        )
+        blockers, _ = assess_gpu_clock([NODE], GpuClockRange(min_mhz=200, max_mhz=1800))
         assert not blockers
-        blockers, _ = assess_gpu_clock(
-            session, ["spk_" + "b" * 32], default_gpu_clock()
-        )
+        blockers, _ = assess_gpu_clock(["spk_" + "b" * 32], default_gpu_clock())
         assert not blockers
 
 

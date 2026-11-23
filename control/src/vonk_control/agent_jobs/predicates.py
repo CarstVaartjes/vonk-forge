@@ -466,7 +466,6 @@ def _claim_condition_facts(
     operation: StoredOperation,
     attempt: AgentOperationAttempt | None,
     node: AgentNode,
-    now: datetime,
 ) -> ClaimFacts:
     """Return the bounded facts that explain one failed named condition."""
 

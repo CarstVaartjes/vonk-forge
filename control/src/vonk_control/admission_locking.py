@@ -471,7 +471,7 @@ def acquire_admission_keys(
             with session.begin_nested():
                 acquired = session.scalar(statement, {"key": key.database_key})
         except OperationalError as error:
-            _raise_if_busy(session, error)
+            _raise_if_busy(error)
             raise
         if patient:
             continue  # the blocking form returns only once it holds the key
@@ -525,7 +525,7 @@ def lock_admission_rows(
             with session.begin_nested():
                 locked[request.name] = tuple(session.scalars(statement))
         except OperationalError as error:
-            _raise_if_busy(session, error, table=request.model.__tablename__)
+            _raise_if_busy(error, table=request.model.__tablename__)
             raise
     return locked
 
@@ -595,9 +595,7 @@ def _sqlstate(error: DBAPIError) -> str | None:
     return getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
 
 
-def _raise_if_busy(
-    session: Session, error: OperationalError, *, table: str | None = None
-) -> None:
+def _raise_if_busy(error: OperationalError, *, table: str | None = None) -> None:
     if not is_admission_contention(error):
         return
     sqlstate = _sqlstate(error)

@@ -297,7 +297,7 @@ class ObservationMixin:
             if _progress_damaged(read_row_column(job, "result")):
                 return
             progress = _read_progress(read_row_column(job, "result"))
-            wanted = bound_blockers(_wait_blockers(job, progress))
+            wanted = bound_blockers(_wait_blockers(job))
             stored = wanted
             if stored == (progress.blockers or []):
                 return

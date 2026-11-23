@@ -140,7 +140,6 @@ def _local_state_snapshot(
 
 
 def _local(
-    self: LibraryProjection,
     digest: str,
     *,
     kind: str,
@@ -462,7 +461,6 @@ def _database_local_state(
                 "failed": "failed",
             },
             set_state,
-            "persisted cache set state is invalid",
         )
         self._merge_local(cache_facts, model_digest, controller=controller)
         for recipe_digest in own_digests.get(set_id, ()):
@@ -536,7 +534,6 @@ def _database_local_state(
                 "failed": "failed",
             },
             build_state,
-            "persisted recipe build state is invalid",
         )
         self._merge_local(
             asset_facts,
@@ -560,7 +557,6 @@ def _database_local_state(
             },
             adopt_machine_state(InstallationState, installation_state)
             or installation_state,
-            "persisted installation state is invalid",
         )
         installation_revision[installation_id] = installation_revision_id
         if (
@@ -664,7 +660,6 @@ def _image_claims(
 
 
 def _apply_image_presence(
-    self: LibraryProjection,
     result: dict[str, LibraryLocalState],
     *,
     head_digests: set[str],

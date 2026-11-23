@@ -283,7 +283,7 @@ def _observed_library_page[T: BaseModel](
 
 
 def _controller_state(
-    states: Mapping[str, LibraryControllerState], value: str, detail: str
+    states: Mapping[str, LibraryControllerState], value: str
 ) -> LibraryControllerState:
     """Map a persisted state onto the projected controller vocabulary."""
 

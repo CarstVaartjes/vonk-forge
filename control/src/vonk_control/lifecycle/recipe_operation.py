@@ -137,27 +137,27 @@ class RecipeOperationAdapter:
 
     # ----------------------------------------------------- the kind's facts
 
-    def irreversible(self, row: Lifecycle) -> bool:
+    def irreversible(self, _row: Lifecycle) -> bool:
         """A composite has no effect of its own: its orders own theirs."""
 
         return False
 
-    def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
+    def retry_not_before(self, _row: Lifecycle, _now: datetime) -> datetime | None:
         return None
 
-    def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
+    def execute(self, _row: Lifecycle, _attempt: int) -> Dispatch:
         return Dispatch(issued=False)  # the Spark claims its own orders
 
-    def observe(self, row: Lifecycle) -> Observed:
+    def observe(self, _row: Lifecycle) -> Observed:
         return Observed(Effect.UNKNOWN, "the orders own the effect")
 
-    def stop(self, row: Lifecycle) -> StopResult:
+    def stop(self, _row: Lifecycle) -> StopResult:
         return StopResult.UNCONFIRMED  # the orders are stopped by their own core
 
-    def actions(self, row: Lifecycle) -> tuple[str, ...]:
+    def actions(self, _row: Lifecycle) -> tuple[str, ...]:
         return ()
 
-    def children(self, row: Lifecycle) -> tuple[Lifecycle, ...]:
+    def children(self, _row: Lifecycle) -> tuple[Lifecycle, ...]:
         return ()
 
     # ---------------------------------------------------------------- writes

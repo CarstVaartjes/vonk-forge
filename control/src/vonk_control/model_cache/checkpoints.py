@@ -239,7 +239,7 @@ class CheckpointsMixin:
                     row.state = phase
                     row.updated_at = now
 
-    def _mark_artifact_verified(self, spec: ArtifactSpec, set_digest: str) -> None:
+    def _mark_artifact_verified(self, set_digest: str) -> None:
         cache = cast("ModelCacheService", self)
         now = cache._clock()
         # Availability is a managed-storage fact: the object file at its expected

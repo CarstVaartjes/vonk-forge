@@ -218,7 +218,6 @@ def _claim_once(
         self._reconcile_agent_upgrade(
             session,
             node_id,
-            certificate.serial,
             now,
             runtime_identity,
             operation_id=upgrade_id,

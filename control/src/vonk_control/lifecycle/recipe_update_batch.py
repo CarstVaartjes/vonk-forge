@@ -195,33 +195,33 @@ class RecipeUpdateBatchAdapter:
 
     # ----------------------------------------------------- the kind's facts
 
-    def irreversible(self, row: Lifecycle) -> bool:
+    def irreversible(self, _row: Lifecycle) -> bool:
         """A composite has no effect of its own: its children own theirs."""
 
         return False
 
-    def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
+    def retry_not_before(self, _row: Lifecycle, _now: datetime) -> datetime | None:
         return None
 
-    def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
+    def execute(self, _row: Lifecycle, _attempt: int) -> Dispatch:
         """The claim and the child passes are the owner's, not the core's."""
 
         return Dispatch(issued=False)
 
-    def observe(self, row: Lifecycle) -> Observed:
+    def observe(self, _row: Lifecycle) -> Observed:
         return Observed(Effect.UNKNOWN, "the batch follows its children")
 
-    def stop(self, row: Lifecycle) -> StopResult:
+    def stop(self, _row: Lifecycle) -> StopResult:
         """The children are cancelled by the owner's pass; unconfirmed here."""
 
         return StopResult.UNCONFIRMED
 
-    def actions(self, row: Lifecycle) -> tuple[str, ...]:
+    def actions(self, _row: Lifecycle) -> tuple[str, ...]:
         """None: a batch waits for no person; its Stop is Cancel."""
 
         return ()
 
-    def children(self, row: Lifecycle) -> tuple[Lifecycle, ...]:
+    def children(self, _row: Lifecycle) -> tuple[Lifecycle, ...]:
         return ()  # read from the document, see :meth:`children_of`
 
     @staticmethod
@@ -233,12 +233,10 @@ class RecipeUpdateBatchAdapter:
     def apply(
         self,
         job: Job,
-        before: Lifecycle,
         after: Lifecycle,
         now: datetime,
         *,
         reason: str | None = KEEP,
-        partial: bool = False,
         visible: str | None = None,
     ) -> None:
         """Project a core decision onto the stored batch; the only such writer."""
@@ -284,7 +282,7 @@ class RecipeUpdateBatchAdapter:
         if unflag:
             row = replace(row, cancel_requested_at=None, cancel_request_key=None)
 
-        def save(before: Lifecycle, after: Lifecycle) -> bool:
+        def save(_before: Lifecycle, after: Lifecycle) -> bool:
             options = dict(write)
             if after.state is State.CANCELLED and after.effect is Effect.UNKNOWN:
                 base = options.get("reason", KEEP)
@@ -294,7 +292,7 @@ class RecipeUpdateBatchAdapter:
                     if text
                     else _CANCEL_EFFECT_UNKNOWN
                 )
-            self.apply(job, before, after, now, **options)
+            self.apply(job, after, now, **options)
             return True
 
         return settle_event(
@@ -350,14 +348,7 @@ class RecipeUpdateBatchAdapter:
             return None
         if state is State.SUCCEEDED:
             return self.settled(job, document, Reported(Outcome.DONE), now).row
-        partial = any(child.state is State.SUCCEEDED for child in children)
-        return self.settled(
-            job,
-            document,
-            Reported.failed(Disposition.FAIL),
-            now,
-            partial=partial,
-        ).row
+        return self.settled(job, document, Reported.failed(Disposition.FAIL), now).row
 
     def project(
         self,
@@ -375,7 +366,7 @@ class RecipeUpdateBatchAdapter:
             return before
         state = State.RUNNING if visible == "running" else State.QUEUED
         after = replace(before, state=state)
-        self.apply(job, before, after, now, visible=visible)
+        self.apply(job, after, now, visible=visible)
         return after
 
     def reject(self, job: Job, reason: str, now: datetime) -> Lifecycle:

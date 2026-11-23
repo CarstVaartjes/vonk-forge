@@ -43,7 +43,6 @@ from ..stored.rows import read_row_column
 from ..strict_json import serialize_json_value
 from .intent import _intent_is_current, _job_workload_intent, _shared_workload_intent
 from .lifecycle_contract import (
-    LifecycleNodeResult,
     RecipeOperationCancellationResult,
     RecipeOperationProgressResult,
     RecipeOperationResult,
@@ -73,7 +72,6 @@ class TerminalProjectionMixin:
         all_children: tuple[AgentOperation, ...],
         deferred_nodes: frozenset[str],
         marker_nodes: set[str],
-        node_evidence: dict[str, LifecycleNodeResult],
         now: datetime,
         recovery_error: DistributedLifecycleError | None,
         cleanup_queued: bool,

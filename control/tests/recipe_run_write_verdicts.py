@@ -12,7 +12,7 @@ from .optimistic_boundaries import scan_unwrapped_recipe_run_writes
 RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     "agent_jobs/claim_authority.py": {
         "_reconcile_agent_upgrade": (
-            "c3c07a4a2e8c4d851a72182f34deac04ba4f7a9cfa80434681f1fce129fea595",
+            "ac453280113b3a6436dd3d9969fe80c215a8c959510bb065f8e57a9dcb2eed28",
             "HTTP wait: result consumer can lose a run fence; middleware disposition owns 503",
         ),
         "_reject_recipe_build_claim": (
@@ -134,7 +134,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/stop_dispatch.py": {
         "_dispatch_stop_after_withdrawal": (
-            "fdc46fa30f3541ff9c6a5a63c3b42f7047693e2b7ae27405eadfadbd11700347",
+            "ef67f7cb908084c77f7e2b24e465f2d798e643c105229d639f13522046ae0216",
             "caller-owned: accepted Stop continuation binds exact dispatch",
         ),
         "queue_recovery_stop_in_session": (
@@ -162,7 +162,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/terminal_projection.py": {
         "_project_terminal_result": (
-            "f067db709a4c69906d40d11c627b251c241a1b9d881b52640b04c4e3a5846275",
+            "0151f68e71c245f6a31d8a081a8176fa16c633107fe5ece2f465dd2e5054e4ad",
             "caller-owned: queue result transaction owns terminal projection",
         ),
     },
@@ -172,7 +172,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
             "caller-owned: the head of end_unfinished_run; the failed-start terminal projection (queue result transaction) writes it alone and the Stop is queued after commit, with the run reaper as backstop",
         ),
         "end_unfinished_run": (
-            "b9d8748c4afd41ccc54c21ab4b966f2205f1768c794496eca1782f7d6eb83590",
+            "7d5b9edd0cca9297823ed439774efa3b6f79aa83c3626a0b41495e73102c761a",
             "caller-owned: the failed-start terminal projection (queue result transaction) and the recovery tick's run reaper (optimistic publication transaction) own the cleanup Stop or the lost verdict",
         ),
     },

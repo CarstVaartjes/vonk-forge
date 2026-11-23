@@ -107,7 +107,6 @@ def end_unfinished_run(
                 stop_nodes,
                 run_generation=run.run_generation,
                 cancel_pending_start=True,
-                allow_missing_nodes=False,
             )
         )
     except RecipeStopAuthorityError:

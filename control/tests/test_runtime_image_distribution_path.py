@@ -240,7 +240,6 @@ def test_archive_is_identified_by_content_for_any_revision(tmp_path: Path) -> No
 
     executor, _plan, receipt, _sessions = _archive_gate_service(tmp_path)
     call = {
-        "build_id": BUILD_ID,
         "image_digest": BUILT_IMAGE_DIGEST,
         "layout_digest": ARCHIVE_DIGEST,
         "image_bytes": receipt.image_bytes,
@@ -256,7 +255,6 @@ def test_archive_gate_requires_the_image_in_managed_storage(tmp_path: Path) -> N
 
     executor, _plan, receipt, _sessions = _archive_gate_service(tmp_path)
     call = {
-        "build_id": BUILD_ID,
         "image_digest": BUILT_IMAGE_DIGEST,
         "layout_digest": ARCHIVE_DIGEST,
         "image_bytes": receipt.image_bytes,

@@ -359,7 +359,6 @@ def _removal_progress_document(
 def _read_removal_result(
     self: RecipeImageAvailabilityService,
     operation: Job,
-    intent: RecipeCacheRemovalIntent,
 ) -> RecipeCacheRemovalStatus:
     """Rebuild the read projection from the authoritative plan and checkpoint."""
     owner = self._read_removal_owner(operation)
@@ -458,4 +457,4 @@ def _replay_removal(
             "request key was already used for another removal intent",
             reason=InvalidRequestReason.CONFLICT,
         )
-    return self._read_removal_result(operation, intent)
+    return self._read_removal_result(operation)

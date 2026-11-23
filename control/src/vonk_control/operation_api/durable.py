@@ -470,7 +470,7 @@ class _DurableOperationProjection:
                     for operation in operations
                 )
             }
-            waits = spark_busy_blockers(session, operations, now)
+            waits = spark_busy_blockers(operations)
         items = [
             apply_queue_wait(
                 _operation_item(operation, attempts.get(operation.id), now=now),
@@ -482,7 +482,6 @@ class _DurableOperationProjection:
                     "node_id": operation.node_id,
                     "supported_actions": self._activity_actions(
                         operation,
-                        attempts.get(operation.id),
                         resume=operation.id in resume_operation_ids,
                     ),
                 }
@@ -621,7 +620,7 @@ class _DurableOperationProjection:
                     session, parent_job_id, now
                 )
             }
-            waits = spark_busy_blockers(session, rows, now)
+            waits = spark_busy_blockers(rows)
             subjects = workload_aliases(session, rows)
         items = [
             self._activity_item(
@@ -730,7 +729,7 @@ class _DurableOperationProjection:
                     session, parent_job_id, now
                 )
             }
-            waits = spark_busy_blockers(session, rows, now)
+            waits = spark_busy_blockers(rows)
             subjects = workload_aliases(session, rows)
         return OperationListPage(
             items=[
@@ -775,7 +774,7 @@ class _DurableOperationProjection:
                 attempt,
                 request_id=None if job is None else job.request_id,
                 resume=resume,
-                wait=spark_busy_blockers(session, [operation], now).get(operation.id),
+                wait=spark_busy_blockers([operation]).get(operation.id),
                 subject=workload_aliases(session, [operation]).get(operation.id),
                 now=now,
             )
@@ -801,9 +800,7 @@ class _DurableOperationProjection:
                 "created_at": _aware(operation.created_at).isoformat(),
                 "job_id": operation.parent_job_id,
                 "subject": subject,
-                "supported_actions": cls._activity_actions(
-                    operation, attempt, resume=resume
-                ),
+                "supported_actions": cls._activity_actions(operation, resume=resume),
                 "owner": OperationOwnerReference(
                     kind="job", id=operation.parent_job_id, request_id=request_id
                 ),
@@ -813,7 +810,6 @@ class _DurableOperationProjection:
     @staticmethod
     def _activity_actions(
         operation: AgentOperation,
-        attempt: AgentOperationAttempt | None,
         *,
         resume: bool,
     ) -> list[str] | None:

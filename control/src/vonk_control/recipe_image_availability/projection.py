@@ -134,8 +134,9 @@ def get_operator_operation(
             return self._view(operation)
         if operation.kind == REMOVE_OPERATION_KIND:
             try:
-                intent = self._read_removal_intent(operation)
-                return self._read_removal_result(operation, intent)
+                # An unreadable intent makes the removal view unavailable.
+                self._read_removal_intent(operation)
+                return self._read_removal_result(operation)
             except RecipeImageAvailabilityUnknown:
                 return RecipeRemovalUnavailableView(
                     operation_id=operation.id,

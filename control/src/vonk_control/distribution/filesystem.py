@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import stat
 from pathlib import Path
+from typing import override
 
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -139,6 +140,7 @@ class RecipeBuildObjectSource(FilesystemObjectSource):
         # The runtime-image cache whose receipts prove the stored archives.
         self._runtime_storage = FilesystemRuntimeImageStorage(artifact_root)
 
+    @override
     def verify_artifact_set(
         self, artifact_set_sha256: str, objects: tuple[DistributionObject, ...]
     ) -> bool:
@@ -153,6 +155,7 @@ class RecipeBuildObjectSource(FilesystemObjectSource):
             and stored.manifest_digest == image_digest
         )
 
+    @override
     def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         raise DistributionUnknown(
             DistributionCode.OBJECT_UNAVAILABLE,

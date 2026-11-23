@@ -293,7 +293,7 @@ class CoreMixin:
         return None if isinstance(value, Residue) else value
 
     def _project_end(
-        self, operation: ModelCacheOperation, before: Lifecycle, after: Lifecycle
+        self, operation: ModelCacheOperation, _before: Lifecycle, after: Lifecycle
     ) -> None:
         """What a cancelled download leaves behind, in the transaction that ends it.
 

@@ -425,7 +425,7 @@ class AgentOperationAdapter:
             return aware(now) + timedelta(seconds=delay)
         return None
 
-    def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
+    def execute(self, _row: Lifecycle, _attempt: int) -> Dispatch:
         """The Spark claims its own work; a due retry is claimable as it is."""
 
         return Dispatch(issued=False)
@@ -498,7 +498,7 @@ class AgentOperationAdapter:
                 return OPERATOR_ACTIONS
         return ()
 
-    def children(self, row: Lifecycle) -> tuple[Lifecycle, ...]:
+    def children(self, _row: Lifecycle) -> tuple[Lifecycle, ...]:
         return ()
 
     # ----------------------------------------------------------------- apply
@@ -704,8 +704,6 @@ class AgentOperationAdapter:
         parent: Job | None,
         event: Event,
         now: datetime,
-        *,
-        reason_suffix: str | None = None,
     ) -> Lifecycle:
         """Feed ``event`` to the core and write what it decides, inline.
 
@@ -752,7 +750,7 @@ class AgentOperationAdapter:
             self.apply(operation, attempt, before, after, now)
             return True
 
-        def residue(row: Lifecycle, reason: str) -> None:
+        def residue(_row: Lifecycle, reason: str) -> None:
             operation.status_reason = reason[:_MAX_REASON]
 
         settled = settle(row, event, self, now, save=save, residue=residue)

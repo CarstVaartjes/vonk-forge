@@ -69,7 +69,7 @@ class ObjectSource(Protocol):
         """Prove that the exact model objects belong to the cache manifest."""
         ...
 
-    def verify_runtime_image(self, image_digest: str, archive_sha256: str) -> bool:
+    def verify_runtime_image(self, image_digest: str, archive_sha256: str, /) -> bool:
         """Prove the archive is the exact OCI image selected by the plan."""
         ...
 

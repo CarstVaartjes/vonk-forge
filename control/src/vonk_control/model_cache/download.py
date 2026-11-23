@@ -243,7 +243,7 @@ class DownloadMixin:
                     "model download was removed during verification"
                 )
             cache._place_object(spec, part)
-            cache._mark_artifact_verified(spec, set_digest)
+            cache._mark_artifact_verified(set_digest)
 
     def _publication_allowed(
         self, operation_id: str, set_digest: str, object_digest: str | None = None

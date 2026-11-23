@@ -522,7 +522,6 @@ def _review_assets_for_selection(
 
 
 def _sealed_recipe_removal_review(
-    self: RecipeImageAvailabilityService,
     *,
     selector: str,
     with_model: bool,

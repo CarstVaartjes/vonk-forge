@@ -332,7 +332,7 @@ class AgentJobService:
         reason: str,
     ) -> None:
         return _write_refusal_note(
-            self, session, operation=operation, job_id=job_id, reason=reason
+            session, operation=operation, job_id=job_id, reason=reason
         )
 
     def _note_malformed_cancel_flag(
@@ -417,7 +417,7 @@ class AgentJobService:
         reason: str,
         now: datetime,
     ) -> None:
-        return _settle_lapsed(self, session, operation, attempt, reason, now)
+        return _settle_lapsed(session, operation, attempt, reason, now)
 
     @staticmethod
     def _claimable_operations(node_id: str, now: datetime):
@@ -453,7 +453,6 @@ class AgentJobService:
         self,
         session: Session,
         node_id: str,
-        certificate_serial: str,
         now: datetime,
         runtime_identity: AgentRuntimeIdentity,
         *,
@@ -464,7 +463,6 @@ class AgentJobService:
             self,
             session,
             node_id,
-            certificate_serial,
             now,
             runtime_identity,
             operation_id=operation_id,

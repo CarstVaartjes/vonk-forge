@@ -309,7 +309,7 @@ def _control_error(
         else ClientCode.CONTROL_API_ERROR.value
     )
     detail = getattr(error, "detail", str(error))
-    message = _plain_language_error(code, detail)
+    message = _plain_language_error(detail)
     message = (
         "control API unavailable"
         if isinstance(error, (ControlUnavailable, ControlTransportError, OSError))
@@ -564,7 +564,7 @@ def _control_error(
     return result
 
 
-def _plain_language_error(code: object, detail: object) -> str:
+def _plain_language_error(detail: object) -> str:
     """Translate common operator refusals while retaining the wire detail."""
     return _sanitize_text(detail)
 
@@ -572,10 +572,9 @@ def _plain_language_error(code: object, detail: object) -> str:
 def _plain_language_document(value: object) -> object:
     """Preserve owner diagnostics while sanitizing terminal text."""
     if isinstance(value, Mapping):
-        code = value.get("code")
         return {
             str(key): (
-                _plain_language_error(code, item)
+                _plain_language_error(item)
                 if key == "detail" and isinstance(item, str)
                 else _plain_language_document(item)
             )
@@ -615,9 +614,8 @@ def _emit(
         print(_json_text(stamp_document(args, safe, error=error)))
         return
     if error:
-        code = safe.get("code")
         if isinstance(safe.get("detail"), str):
-            safe["detail"] = _plain_language_error(code, safe["detail"])
+            safe["detail"] = _plain_language_error(safe["detail"])
             if safe["detail"] == safe.get("error"):
                 del safe["detail"]  # never print the same sentence twice
     else:

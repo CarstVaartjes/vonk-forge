@@ -29,7 +29,6 @@ from ..auth_api import install_auth_routes
 from ..browser_auth import BrowserAuthService
 from ..capabilities import RecoveringService
 from ..catalog.api import install_catalog_routes
-from ..catalog.service import CatalogService
 from ..cli_update_contract import install_cli_update_contract_routes
 from ..failure_evidence import FailureEvidenceService
 from ..failure_evidence_api import install_failure_evidence_routes
@@ -53,7 +52,6 @@ from ..operator_acceptance import (
 )
 from ..operator_projection_api.services import FleetOperatorServices
 from ..recipe_image_availability.api import install_recipe_operator_routes
-from ..recipe_operations.service import RecipeOperationService
 from ..run_switch_operations.service import RunSwitchOperationService
 from .common import (
     JobQueue,
@@ -85,13 +83,10 @@ def create_app(
     trusted_agent_proxy_auth: bytes | Callable[[], bytes] = b"",
     enrollment_rate_limiter: EnrollmentRateLimiter | None = None,
     operations: OperationApiServices | None = None,
-    catalog: CatalogService | None = None,
     managed_catalog_sync: Any | None = None,
-    recipe_operations: RecipeOperationService | None = None,
     run_switch_operations: RunSwitchOperationService | None = None,
     artifact_jobs: ArtifactJobService | None = None,
     fleet_profiles: Any | None = None,
-    agent_upgrades: Any | None = None,
     browser_auth: BrowserAuthService | None = None,
     model_cache: Any | None = None,
     recipe_image_availability: Any | None = None,
@@ -160,7 +155,6 @@ def create_app(
     install_catalog_routes(
         app,
         actor_dependency=authenticated_actor,
-        service=catalog,
         managed_sync=managed_catalog_sync,
     )
     install_fleet_profile_routes(

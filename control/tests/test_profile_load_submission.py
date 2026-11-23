@@ -1000,7 +1000,6 @@ def test_replanned_assignment_child_cannot_add_a_stop_after_queue_creation(
             (assignment,),
             tuple(nodes),
             "admin",
-            accepted.request_key,
             1,
             accepted.progress.workload_intent_ordinal,
         )

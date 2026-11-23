@@ -911,7 +911,6 @@ def test_pending_probe_beside_a_compiling_build_shows_its_own_wait(
     adapter.apply(
         job,
         progress,
-        before,
         replace(before, state=State.OBSERVING, next_action_at=waiting.next_check_at),
         clock.now,
     )

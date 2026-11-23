@@ -64,7 +64,7 @@ def _aware(value: datetime, label: str) -> datetime:
     return value.astimezone(UTC)
 
 
-def _parse_time(value: object, label: str) -> datetime | None:
+def _parse_time(value: object) -> datetime | None:
     if not isinstance(value, str):
         return None
     try:
@@ -170,9 +170,7 @@ class FileSupervisorAcknowledger:
         ):
             return False
         try:
-            acknowledged = _parse_time(
-                acknowledgement.acknowledged_at, "acknowledgement timestamp"
-            )
+            acknowledged = _parse_time(acknowledgement.acknowledged_at)
         except RouteRuntimeError:
             return False
         return (
@@ -407,9 +405,7 @@ class AtomicRouteBundlePublisher:
                 return
         self._atomic_write(target, content, mode=0o640)
 
-    def inspect(
-        self, *, expected: ActivationMarker | None = None
-    ) -> ActivationMarker | UnknownError:
+    def inspect(self) -> ActivationMarker | UnknownError:
         marker = self._read_marker(optional=False, verify_files=True)
         assert marker is not None
         # A stale expectation is observation evidence, never a reason to refuse

@@ -1104,7 +1104,7 @@ def planner_world(
         RecordingArtifactExecutor(),
         phase_executor=SynchronousPhaseExecutor(),
     )
-    original_group = planner.preview_stop(run_id, actor="admin").spark_group
+    original_group = planner.preview_stop(run_id).spark_group
     incoming = _request(sessions, nodes[0], action="switch")
     with sessions.begin() as session:
         original = session.get(CatalogDocumentRevision, incoming.recipe_revision_id)

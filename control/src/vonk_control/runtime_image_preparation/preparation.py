@@ -308,7 +308,7 @@ def _prepare_from_build(
             "image transport observation is unavailable",
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         ) from error
-    _validate_evidence(observed, expected_architecture, expected_interface_label)
+    _validate_evidence(observed)
     if observed.archive_sha256 != archive_sha or observed.archive_bytes != image_bytes:
         raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.EVIDENCE_INVALID,

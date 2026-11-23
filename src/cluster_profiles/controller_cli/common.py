@@ -9,7 +9,7 @@ import urllib.parse
 import uuid
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, override, runtime_checkable
 
 from ..control_client.errors import (
     ControlClientError,
@@ -130,6 +130,7 @@ class _ValueList(argparse.Action):
         self._item = item
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
 
+    @override
     def __call__(self, parser, namespace, values, option_string=None):  # type: ignore[no-untyped-def]
         current = list(getattr(namespace, self.dest, None) or [])
         for raw in str(values).split(","):

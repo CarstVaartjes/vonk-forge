@@ -261,7 +261,6 @@ def test_recovery_authority_requires_succeeded_start_bound_to_current_plan(
             _accepted_start_authority(
                 session,
                 run,
-                "0" * 64 if tamper == "authority_revision" else "1" * 64,
                 nodes[0],
             ),
             Residue,

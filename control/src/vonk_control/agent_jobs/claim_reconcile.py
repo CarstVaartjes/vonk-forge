@@ -184,7 +184,6 @@ def _reconcile_dead_running_operation(
 
 
 def _settle_lapsed(
-    self: AgentJobService,
     session: Session,
     operation: StoredOperation,
     attempt: AgentOperationAttempt | None,

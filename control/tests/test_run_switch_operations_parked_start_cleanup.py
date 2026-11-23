@@ -256,7 +256,7 @@ def test_scoped_cleanup_is_allowed_without_launch_readiness(tmp_path: Path) -> N
 
     lifecycle.preview_run = unavailable  # type: ignore[method-assign]
     try:
-        cleanup = service.preview_cleanup(installation.owner_id, actor="admin")
+        cleanup = service.preview_cleanup(installation.owner_id)
     finally:
         del lifecycle.preview_run
 
@@ -286,7 +286,7 @@ def test_scoped_cleanup_is_blocked_while_a_run_is_active(tmp_path: Path) -> None
         RecordingArtifactExecutor(),
     )
 
-    cleanup = service.preview_cleanup(installation.owner_id, actor="admin")
+    cleanup = service.preview_cleanup(installation.owner_id)
 
     assert cleanup.allowed is False
 
@@ -319,8 +319,7 @@ def test_reconcile_review_binds_opaque_invalid_launch_spec_and_uninstall_rebuild
         RunSwitchCleanupPreviewRequest(
             installation_id=installation.owner_id,
             cleanup_mode="reconcile",
-        ),
-        actor="admin",
+        )
     )
 
     assert plan.allowed, [(reason.code, reason.detail) for reason in plan.blockers]
@@ -368,8 +367,7 @@ def test_reconcile_run_switch_releases_install_claims_after_group_cleanup(
         RunSwitchCleanupPreviewRequest(
             installation_id=installation.owner_id,
             cleanup_mode="reconcile",
-        ),
-        actor="admin",
+        )
     )
     assert preview.allowed, [
         (reason.code, reason.detail) for reason in preview.blockers
@@ -481,8 +479,7 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
         RunSwitchCleanupPreviewRequest(
             installation_id=installation.owner_id,
             cleanup_mode="reconcile",
-        ),
-        actor="admin",
+        )
     )
     assert first_plan.allowed, [
         (item.code, item.detail) for item in first_plan.blockers
@@ -540,8 +537,7 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
         RunSwitchCleanupPreviewRequest(
             installation_id=installation.owner_id,
             cleanup_mode="reconcile",
-        ),
-        actor="admin",
+        )
     )
     assert retry_plan.allowed, [
         (item.code, item.detail) for item in retry_plan.blockers
@@ -848,7 +844,7 @@ def test_scoped_cleanup_abandons_a_never_installed_plan(tmp_path: Path) -> None:
         sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor()
     )
 
-    preview = service.preview_cleanup(installation_id, actor="admin")
+    preview = service.preview_cleanup(installation_id)
 
     assert preview.allowed is True, [reason.code for reason in preview.blockers]
     assert preview.cleanup_disposition == "abandon"
@@ -925,7 +921,7 @@ def test_scoped_cleanup_refuses_a_planned_row_with_installed_bytes(
         sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor()
     )
 
-    preview = service.preview_cleanup(installation_id, actor="admin")
+    preview = service.preview_cleanup(installation_id)
 
     assert preview.allowed is False
     assert preview.cleanup_disposition == "uninstall"

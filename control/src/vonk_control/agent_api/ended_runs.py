@@ -114,7 +114,6 @@ def _stoppable(session: Session, run: RecipeRun) -> bool:
             tuple(session.scalars(select(RunNode).where(RunNode.run_id == run.id))),
             run_generation=run.run_generation,
             cancel_pending_start=True,
-            allow_missing_nodes=False,
         )
     except ValueError:
         # No exact authority, or stored rows that do not parse: either way no

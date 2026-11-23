@@ -353,9 +353,9 @@ class LibraryProjection:
 
     _assessed = _assessed
     _local_state_snapshot = _local_state_snapshot
-    _local = _local
+    _local = staticmethod(_local)
     _database_local_state = _database_local_state
-    _apply_image_presence = _apply_image_presence
+    _apply_image_presence = staticmethod(_apply_image_presence)
     _library_release = _library_release
     library_vocabulary = library_vocabulary
     _model_projection = _model_projection

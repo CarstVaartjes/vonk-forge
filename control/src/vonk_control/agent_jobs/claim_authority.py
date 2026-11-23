@@ -119,7 +119,6 @@ def _reconcile_agent_upgrade(
     self: AgentJobService,
     session: Session,
     node_id: str,
-    certificate_serial: str,
     now: datetime,
     runtime_identity: AgentRuntimeIdentity,
     *,

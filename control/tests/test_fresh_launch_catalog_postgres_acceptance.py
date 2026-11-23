@@ -172,7 +172,6 @@ def _app(
     install_catalog_routes(
         app,
         actor_dependency=Depends(actor),
-        service=catalog,
         managed_sync=sync,
     )
     install_library_routes(

@@ -8,7 +8,7 @@ import re
 import stat
 import sys
 from pathlib import Path
-from typing import NoReturn, TextIO
+from typing import NoReturn, TextIO, override
 
 from pydantic import ValidationError
 
@@ -20,6 +20,7 @@ from .setup import prepare
 
 
 class PrivateArgumentParser(argparse.ArgumentParser):
+    @override
     def error(self, message: str) -> NoReturn:
         # argparse otherwise echoes unknown values. An accidental secret in
         # an unsupported option must not turn the refusal into a disclosure.

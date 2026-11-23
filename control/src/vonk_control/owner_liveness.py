@@ -192,7 +192,7 @@ def owner(session: Session, ref: OwnerRef, now: datetime | None = None) -> Owner
         return arm(session, ref, now)
 
 
-def _fleet_profile(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
+def _fleet_profile(session: Session, ref: OwnerRef, _now: datetime | None) -> Owner:
     application = session.get(FleetProfileApplication, ref.id)
     if application is None:
         return Owner(ref, False, "profile application is missing", state="missing")
@@ -206,7 +206,7 @@ def _fleet_profile(session: Session, ref: OwnerRef, now: datetime | None) -> Own
     )
 
 
-def _node(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
+def _node(session: Session, ref: OwnerRef, _now: datetime | None) -> Owner:
     node = session.get(AgentNode, ref.id)
     if node is None:
         return Owner(ref, False, "Spark is not enrolled", state="missing")
@@ -239,7 +239,7 @@ def _spark_return(session: Session, ref: OwnerRef, now: datetime | None) -> Owne
     )
 
 
-def _job(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
+def _job(session: Session, ref: OwnerRef, _now: datetime | None) -> Owner:
     job = session.get(Job, ref.id)
     if job is None:
         return Owner(ref, False, "operation is missing", state="missing")
@@ -253,7 +253,7 @@ def _job(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
     )
 
 
-def _run(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
+def _run(session: Session, ref: OwnerRef, _now: datetime | None) -> Owner:
     run = session.get(RecipeRun, ref.id)
     if run is None:
         return Owner(ref, False, "run is missing", state="missing")
@@ -418,7 +418,7 @@ def _agent_attempt(session: Session, ref: OwnerRef, now: datetime | None) -> Own
     )
 
 
-def _cache_operation(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
+def _cache_operation(session: Session, ref: OwnerRef, _now: datetime | None) -> Owner:
     operation = session.get(ModelCacheOperation, ref.id)
     if operation is None:
         return Owner(ref, False, "model cache operation is missing", state="missing")

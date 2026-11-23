@@ -64,7 +64,7 @@ def test_a_start_that_is_not_the_exact_accepted_authority_is_retired_with_its_re
         original.state = "failed"
         prior_jobs = tuple(session.scalars(select(Job.id)))
         with caplog.at_level(logging.DEBUG):
-            outcome = _accepted_start_authority(session, run, "1" * 64, nodes[0])
+            outcome = _accepted_start_authority(session, run, nodes[0])
         assert isinstance(outcome, Residue)
         assert outcome.kind == "distributed-recovery.authority"
         assert outcome.subject == run.id

@@ -355,16 +355,13 @@ class ArtifactJobAdapter:
             reason=job.status_reason,
             owner_id=job.run_id,
         )
-        return _with_effect(
-            row, self._effect(job, state, attempts, attempt, row, operation)
-        )
+        return _with_effect(row, self._effect(job, state, attempts, row, operation))
 
     @staticmethod
     def _effect(
         job: ArtifactJob,
         state: State,
         attempts: int,
-        attempt: AgentOperationAttempt | None,
         row: Lifecycle,
         operation: StoredOperation | None,
     ) -> Effect:
@@ -391,15 +388,15 @@ class ArtifactJobAdapter:
 
     # ----------------------------------------------------- the kind's facts
 
-    def irreversible(self, row: Lifecycle) -> bool:
+    def irreversible(self, _row: Lifecycle) -> bool:
         """A user's job may have run: repeating it could repeat a visible effect."""
 
         return True
 
-    def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
+    def retry_not_before(self, _row: Lifecycle, _now: datetime) -> datetime | None:
         return None
 
-    def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
+    def execute(self, _row: Lifecycle, _attempt: int) -> Dispatch:
         """The Spark claims its own order; the job issues nothing itself."""
 
         return Dispatch(issued=False)
@@ -458,7 +455,7 @@ class ArtifactJobAdapter:
             return ()
         return (STOP_ACTION,)
 
-    def children(self, row: Lifecycle) -> tuple[Lifecycle, ...]:
+    def children(self, _row: Lifecycle) -> tuple[Lifecycle, ...]:
         return ()
 
     def view(
@@ -494,7 +491,6 @@ class ArtifactJobAdapter:
     def apply(
         self,
         job: ArtifactJob,
-        before: Lifecycle,
         after: Lifecycle,
         now: datetime,
         *,
@@ -705,10 +701,9 @@ class ArtifactJobAdapter:
         parent, operation, attempt = self.order_of(session, job)
         row = self.lifecycle(job, parent, operation, attempt, now)
 
-        def save(before: Lifecycle, after: Lifecycle) -> bool:
+        def save(_before: Lifecycle, after: Lifecycle) -> bool:
             self.apply(
                 job,
-                before,
                 after,
                 now,
                 reason=reason,
@@ -812,7 +807,6 @@ class ArtifactJobAdapter:
             )
             changed = self.apply(
                 job,
-                before,
                 after,
                 now,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
@@ -880,7 +874,6 @@ class ArtifactJobAdapter:
             evidence = measured if evidence is None else measured.merged(evidence)
         return self.apply(
             job,
-            before,
             after,
             now,
             reason=reason or report,

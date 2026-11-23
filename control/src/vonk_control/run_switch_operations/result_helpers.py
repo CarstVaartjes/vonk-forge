@@ -110,9 +110,7 @@ def _read_progress(value: object) -> RunSwitchOperationResult:
     return result if result is not None else RunSwitchOperationResult()
 
 
-def _wait_blockers(
-    job: Job, progress: RunSwitchOperationResult
-) -> list[OperationBlocker]:
+def _wait_blockers(job: Job) -> list[OperationBlocker]:
     wait = read_wait(job)
     return wait.blockers if wait else []
 

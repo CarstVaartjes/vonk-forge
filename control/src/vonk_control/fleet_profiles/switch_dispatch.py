@@ -76,7 +76,6 @@ class RunSwitchFleetProfileAdapter:
         assignments: tuple[FleetProfileAssignment, ...],
         scope_node_ids: tuple[str, ...],
         actor: str,
-        request_id: str,
         position: int,
         workload_intent_ordinal: int | None,
     ) -> RunSwitchOperation | Residue:
@@ -126,8 +125,7 @@ class RunSwitchFleetProfileAdapter:
                     "a cleanup item has no installation identity",
                 )
             cleanup_preview = self._run_switch.preview_cleanup(
-                RunSwitchCleanupPreviewRequest(installation_id=installation_id),
-                actor=actor,
+                RunSwitchCleanupPreviewRequest(installation_id=installation_id)
             )
             self._validate_child_effects(
                 reviewed, cleanup_preview, execution_scope=scope_node_ids
@@ -152,12 +150,10 @@ class RunSwitchFleetProfileAdapter:
             profile_stop_scope = item.profile_stop_scope
             preview = (
                 self._run_switch.preview_stop(
-                    RunSwitchStopPreviewRequest(run_id=run_id), actor=actor
+                    RunSwitchStopPreviewRequest(run_id=run_id)
                 )
                 if profile_stop_scope is None
-                else self._run_switch.preview_profile_stop(
-                    run_id, profile_stop_scope, actor=actor
-                )
+                else self._run_switch.preview_profile_stop(run_id, profile_stop_scope)
             )
             self._validate_child_effects(
                 reviewed, preview, execution_scope=scope_node_ids
@@ -166,7 +162,6 @@ class RunSwitchFleetProfileAdapter:
                 return self._run_switch.apply_profile_stop(
                     run_id,
                     profile_stop_scope,
-                    plan_digest=preview.plan_digest,
                     request_key=child_request_key,
                     actor=actor,
                     workload_intent_ordinal=workload_intent_ordinal,

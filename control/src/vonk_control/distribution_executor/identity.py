@@ -192,7 +192,6 @@ class DistributionIdentity:
     def _archive(
         self,
         *,
-        build_id: str | None,
         image_digest: str,
         layout_digest: str,
         image_bytes: int,
@@ -288,7 +287,7 @@ class DistributionIdentity:
         )
 
     @staticmethod
-    def _target_bytes(plan: RunSwitchPlan, node_id: str) -> int:
+    def _target_bytes(plan: RunSwitchPlan) -> int:
         preparation = plan.preparation
         if preparation is None:
             return 0

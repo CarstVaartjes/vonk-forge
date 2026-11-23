@@ -67,7 +67,7 @@ def _repository_catalog_source(artifact: CatalogArtifact) -> tuple[str, str | No
     return artifact.repository, artifact.revision
 
 
-def _bind_nothing(spec: ArtifactSpec) -> None:
+def _bind_nothing(_spec: ArtifactSpec) -> None:
     return None
 
 
@@ -75,7 +75,7 @@ def _bind_github_release(spec: ArtifactSpec) -> None:
     _github_release_asset_binding(spec)
 
 
-def _validate_release_download(cache: ModelCacheService, spec: ArtifactSpec) -> None:
+def _validate_release_download(_cache: ModelCacheService, spec: ArtifactSpec) -> None:
     try:
         _github_release_asset_binding(spec)
         parsed = urlsplit(spec.source)
@@ -94,7 +94,7 @@ def _bind_github_lfs(spec: ArtifactSpec) -> None:
     _github_lfs_binding(spec)
 
 
-def _validate_lfs_download(cache: ModelCacheService, spec: ArtifactSpec) -> None:
+def _validate_lfs_download(_cache: ModelCacheService, spec: ArtifactSpec) -> None:
     """The locator must be the media URL of the spec's own commit and path."""
     try:
         _github_lfs_binding(spec)

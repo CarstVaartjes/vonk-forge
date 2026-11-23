@@ -68,8 +68,7 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
                             skipped=True,
                             cached_nodes=cached,
                             cached_target_totals={
-                                node_id: self._target_bytes(plan, node_id)
-                                for node_id in cached
+                                node_id: self._target_bytes(plan) for node_id in cached
                             },
                         ),
                         phase=phase,
@@ -110,8 +109,7 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
                         verified_oci_layout_sha256=archive_digest,
                         cached_nodes=list(targets),
                         cached_target_totals={
-                            node_id: self._target_bytes(plan, node_id)
-                            for node_id in targets
+                            node_id: self._target_bytes(plan) for node_id in targets
                         },
                     ),
                     phase=phase,
@@ -126,7 +124,6 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
             plan, progress
         )
         image = self._archive(
-            build_id=build_id,
             image_digest=image_digest,
             layout_digest=layout_digest,
             image_bytes=image_bytes,

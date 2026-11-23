@@ -71,7 +71,6 @@ class RunObservationMixin:
         installation_id: str,
         *,
         request_id: str,
-        plan_digest: str | None,
         kind: str = WireAgentOperation.RECIPE_START.value,
     ) -> RecipeOperationView | None:
         service = typing_cast("RecipeOperationService", self)
@@ -128,7 +127,6 @@ class RunObservationMixin:
                 session,
                 installation_id,
                 request_id=request_id,
-                plan_digest=None,
                 kind=kind,
             )
 

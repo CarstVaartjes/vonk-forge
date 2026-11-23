@@ -8,8 +8,6 @@ import shutil
 from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 
-from sqlalchemy.orm import Session
-
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
@@ -195,7 +193,6 @@ class FailureMixin:
                         failure_code = ModelCacheCode.SOURCE_GONE
                         gone_recovery = AvailabilityRecoveryAction.DOWNLOAD_AGAIN
                         detail = cache._source_gone_detail(
-                            session,
                             manifest,
                             failed_artifact_key or operation.current_artifact_key,
                             int(source_status),
@@ -402,7 +399,6 @@ class FailureMixin:
 
     @staticmethod
     def _source_gone_detail(
-        session: Session,
         manifest: ArtifactSetManifest,
         artifact_key: str | None,
         status: int,

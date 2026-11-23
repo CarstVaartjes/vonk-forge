@@ -677,7 +677,7 @@ class FleetRemovalMixin:
         try:
             with admitting(), cache._lock, cache._session(write=True) as session:
 
-                def verify(session: Session, selected: tuple[str, ...]) -> None:
+                def verify(session: Session, _selected: tuple[str, ...]) -> None:
                     current_shared: set[str] = set()
                     current = cache._fleet_effects(
                         session, review.target_identity, shared_objects=current_shared

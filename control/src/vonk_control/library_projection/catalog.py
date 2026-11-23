@@ -257,7 +257,7 @@ def _catalog_documents[T](
 
 
 def _documents_for_snapshot(
-    self: LibraryProjection, snapshot: Mapping[str, LibraryLocalState] | None
+    self: LibraryProjection,
 ) -> tuple[
     list[tuple[CatalogDocumentRevision, ModelRevisionProjection]],
     list[tuple[CatalogDocumentRevision, RecipeRevisionProjection]],

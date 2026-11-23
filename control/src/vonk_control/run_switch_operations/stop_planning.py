@@ -53,7 +53,6 @@ class StopPlanningMixin:
         self,
         request: RunSwitchStopPreviewRequest | str,
         *,
-        actor: str,
         profile_stop_scope: RunSwitchProfileStopScope | None = None,
     ) -> RunSwitchPlan:
         service = typing_cast("RunSwitchOperationService", self)
@@ -355,30 +354,24 @@ class StopPlanningMixin:
         self,
         run_id: str,
         profile_stop_scope: RunSwitchProfileStopScope,
-        *,
-        actor: str,
     ) -> RunSwitchPlan:
         """Preview a partial Stop authorized only by a FleetProfile review."""
         service = typing_cast("RunSwitchOperationService", self)
 
         return service.preview_stop(
             run_id,
-            actor=actor,
             profile_stop_scope=profile_stop_scope,
         )
 
     def preview_cleanup(
-        self,
-        request: RunSwitchCleanupPreviewRequest | str,
-        *,
-        actor: str,
+        self, request: RunSwitchCleanupPreviewRequest | str
     ) -> RunSwitchPlan:
         """Re-observe uncertain cleanup authority from a fresh read transaction."""
         service = typing_cast("RunSwitchOperationService", self)
         refused: UnknownOutcomeError | None = None
         for _attempt in admission_attempts():
             try:
-                return service._preview_cleanup_once(request, actor=actor)
+                return service._preview_cleanup_once(request)
             except UnknownOutcomeError as error:
                 refused = error
         assert refused is not None

@@ -2,8 +2,6 @@
 
 from collections.abc import Sequence
 
-from sqlalchemy.orm import Session
-
 from vonk_agent_protocol.agent_words import (
     ProfileReasonSeverity,
     RunSwitchReasonScopeName,
@@ -15,7 +13,7 @@ from ..run_switch_contract.evidence import RunSwitchReason
 
 
 def assess_gpu_clock(
-    session: Session, node_ids: Sequence[str], requested: GpuClockRange
+    node_ids: Sequence[str], requested: GpuClockRange
 ) -> tuple[list[RunSwitchReason], list[RunSwitchReason]]:
     blockers: list[RunSwitchReason] = []
     warnings: list[RunSwitchReason] = []

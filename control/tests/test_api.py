@@ -82,7 +82,6 @@ def _client(role: str, *, agent_upgrades=None, fleet_projection=None):
         jobs=jobs,
         tokens=codec,
         now=lambda: 10,
-        agent_upgrades=agent_upgrades,
         fleet_projection=fleet_projection,
     )
     client = TestClient(app)
@@ -130,13 +129,7 @@ def _browser_client(*, agent_upgrades=None, role: str = "administrator"):
     issued = service.login("admin", ADMIN_PASSWORD)
     codec = TokenCodec(b"k" * 32)
     jobs = Jobs()
-    app = create_app(
-        jobs=jobs,
-        tokens=codec,
-        now=lambda: 10,
-        browser_auth=service,
-        agent_upgrades=agent_upgrades,
-    )
+    app = create_app(jobs=jobs, tokens=codec, now=lambda: 10, browser_auth=service)
     client = TestClient(app, base_url="https://forge.example.test")
     return client, issued, service, sessions, clock, codec, jobs
 

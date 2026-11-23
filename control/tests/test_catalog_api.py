@@ -84,7 +84,7 @@ def test_managed_catalog_sync_response_allows_catalogs_over_256_rows() -> None:
 
     app = FastAPI()
     install_catalog_routes(
-        app, actor_dependency=Depends(_administrator), service=None, managed_sync=Sync()
+        app, actor_dependency=Depends(_administrator), managed_sync=Sync()
     )
     received = TestClient(app).get("/api/catalog/managed-recipes/sync-status")
     assert received.status_code == 200

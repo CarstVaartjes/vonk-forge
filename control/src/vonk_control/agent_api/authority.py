@@ -520,7 +520,7 @@ def install_authority_routes(
                 detail="expired renewal rate limit exceeded",
                 headers={"retry-after": str(limiter.retry_after_seconds())},
             )
-        raw = await _bounded_enrollment_body(request, required)
+        raw = await _bounded_enrollment_body(request)
         try:
             body = ExpiredRenewRequest.model_validate_json(raw)
         except ValidationError:

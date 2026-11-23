@@ -218,7 +218,6 @@ class InstallPlanningService:
                         session=session,
                         revision=revision,
                         build=build,
-                        mapping=mapping,
                         mapping_nodes=mapping_nodes,
                         parameters=validate_mapping_parameters(mapping.parameters),
                         resolved_entities=resolved_entities,

@@ -87,7 +87,6 @@ class StopDispatchMixin:
         self,
         run_id: str,
         *,
-        plan_digest: str,
         actor: str,
         request_id: str,
         workload_intent_ordinal: int | None,
@@ -543,7 +542,6 @@ class StopDispatchMixin:
                 admitted.nodes,
                 run_generation=generation,
                 cancel_pending_start=True,
-                allow_missing_nodes=False,
             )
         except RecipeStopAuthorityError as error:
             # The run's stored ownership moved on or cannot be read: the Stop

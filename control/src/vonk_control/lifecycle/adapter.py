@@ -44,11 +44,11 @@ class KindAdapter[RowT](Protocol):
         """
         ...
 
-    def irreversible(self, row: Lifecycle) -> bool:
+    def irreversible(self, row: Lifecycle, /) -> bool:
         """Whether repeating ``execute`` could repeat a visible effect."""
         ...
 
-    def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
+    def retry_not_before(self, row: Lifecycle, now: datetime, /) -> datetime | None:
         """The earliest instant a retry may start, or ``None`` for backoff only.
 
         A safety fence (an install that may still be running), a dependency's
@@ -57,23 +57,23 @@ class KindAdapter[RowT](Protocol):
         """
         ...
 
-    def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
+    def execute(self, row: Lifecycle, attempt: int, /) -> Dispatch:
         """Issue the effect; safe to call again only if not irreversible."""
         ...
 
-    def observe(self, row: Lifecycle) -> Observed:
+    def observe(self, row: Lifecycle, /) -> Observed:
         """Read-only inspection: established, none or unknown, with evidence."""
         ...
 
-    def stop(self, row: Lifecycle) -> StopResult:
+    def stop(self, row: Lifecycle, /) -> StopResult:
         """Idempotent stop or cleanup: confirmed or unconfirmed."""
         ...
 
-    def actions(self, row: Lifecycle) -> tuple[str, ...]:
+    def actions(self, row: Lifecycle, /) -> tuple[str, ...]:
         """The real operator actions for this row, from the one function the
         action endpoints also call (so the UI and the mutation cannot disagree)."""
         ...
 
-    def children(self, row: Lifecycle) -> tuple[Lifecycle, ...]:
+    def children(self, row: Lifecycle, /) -> tuple[Lifecycle, ...]:
         """Composite subjects only: their state is ``aggregate(children)``."""
         ...

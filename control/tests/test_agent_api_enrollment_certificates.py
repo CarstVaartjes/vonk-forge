@@ -1036,7 +1036,7 @@ def test_oversized_enrollment_preserves_split_discovery_prefix(agent_system) -> 
     request = ChunkedEnrollmentRequest(first, second, b"must-not-be-received")
 
     with pytest.raises(Exception):  # noqa: B017 -- ending witness; bounded body and corrected grant below
-        asyncio.run(_bounded_enrollment_body(request, services))  # type: ignore[arg-type]
+        asyncio.run(_bounded_enrollment_body(request))  # type: ignore[arg-type]
 
     assert request.received == 2
     assert_corrected_enrollment_succeeds(services, token)
@@ -1056,7 +1056,7 @@ def test_one_huge_enrollment_chunk_is_only_copied_through_fixed_prefix(
     request = ChunkedEnrollmentRequest(huge, b"must-not-be-received")
 
     with pytest.raises(Exception):  # noqa: B017 -- ending witness; bounded body and corrected grant below
-        asyncio.run(_bounded_enrollment_body(request, services))  # type: ignore[arg-type]
+        asyncio.run(_bounded_enrollment_body(request))  # type: ignore[arg-type]
 
     assert request.received == 1
     assert huge.largest_slice <= 2048

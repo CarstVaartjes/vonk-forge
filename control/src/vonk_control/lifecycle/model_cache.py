@@ -330,7 +330,7 @@ class ModelCacheAdapter:
 
     # ----------------------------------------------------- the kind's facts
 
-    def irreversible(self, row: Lifecycle) -> bool:
+    def irreversible(self, _row: Lifecycle) -> bool:
         """Nothing here is: every step resumes an exact, content-addressed ledger."""
 
         return False
@@ -359,7 +359,7 @@ class ModelCacheAdapter:
             )
             return _stall_deadline(operation, cooldown)
 
-    def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
+    def retry_not_before(self, row: Lifecycle, _now: datetime) -> datetime | None:
         """A provider cooldown the operation's sources are under."""
 
         with self._scope() as session:
@@ -374,7 +374,7 @@ class ModelCacheAdapter:
         # when it ends (``recovery_deadline``).
         return None if cooldown is None else aware(cooldown)
 
-    def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
+    def execute(self, _row: Lifecycle, _attempt: int) -> Dispatch:
         """The transfer pool claims its own work; a due retry is claimable as it is."""
 
         return Dispatch(issued=False)
@@ -426,12 +426,12 @@ class ModelCacheAdapter:
             settled = False
         return StopResult.CONFIRMED if settled else StopResult.UNCONFIRMED
 
-    def actions(self, row: Lifecycle) -> tuple[str, ...]:
+    def actions(self, _row: Lifecycle) -> tuple[str, ...]:
         """None: the kind is idempotent, so the core never waits for a person."""
 
         return ()
 
-    def children(self, row: Lifecycle) -> tuple[Lifecycle, ...]:
+    def children(self, _row: Lifecycle) -> tuple[Lifecycle, ...]:
         return ()
 
     # ----------------------------------------------------------------- apply
@@ -638,7 +638,7 @@ class ModelCacheAdapter:
             )
             return True
 
-        def residue(row: Lifecycle, reason: str) -> None:
+        def residue(_row: Lifecycle, reason: str) -> None:
             operation.last_error = reason[:_MAX_REASON]
 
         return settle(row, event, self, now, save=save, residue=residue).row

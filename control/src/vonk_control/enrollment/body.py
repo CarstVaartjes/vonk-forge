@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+
+from fastapi import HTTPException, Request
 
 from ..agent_api.common import (
     _ENROLLMENT_TOKEN,
@@ -12,11 +13,6 @@ from ..agent_api.common import (
     _MAX_ENROLLMENT_TOKEN_PREFIX_BYTES,
     _EnrollmentGrantScan,
 )
-
-if TYPE_CHECKING:
-    from ..agent_api.common import AgentApiServices
-
-from fastapi import HTTPException, Request
 
 
 def _json_string_end(value: bytes | bytearray, start: int) -> int | None:
@@ -112,9 +108,7 @@ def _scan_enrollment_grants(value: bytes | bytearray) -> _EnrollmentGrantScan:
     return _EnrollmentGrantScan(tuple(tokens), top_level_keys)
 
 
-async def _bounded_enrollment_body(
-    request: Request, services: AgentApiServices
-) -> bytearray:
+async def _bounded_enrollment_body(request: Request) -> bytearray:
 
     buffered = bytearray()
     token_prefix = bytearray()

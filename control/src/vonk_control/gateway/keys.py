@@ -1252,7 +1252,7 @@ def install_gateway_key_routes(
         operation_id="listGatewayKeys",
     )
     def list_gateway_keys(
-        actor: Actor = actor_dependency,
+        _actor: Actor = actor_dependency,
     ) -> GatewayKeyList | UnknownError:
         if service is None:
             return UnknownError(

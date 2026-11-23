@@ -214,7 +214,6 @@ class ControllerExecutionPlanService:
         build: RecipeBuild | None,
         mapping_nodes: Sequence[ClusterMappingNode],
         parameters: Mapping[str, object] | None,
-        mapping: object | None = None,
         resolved_entities: ResolvedRecipe | None = None,
     ) -> dict[str, WireCompiledExecutionPlan]:
         """Compile one launch document per mapped Spark rank.

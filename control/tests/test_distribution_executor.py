@@ -556,10 +556,7 @@ def test_stored_runtime_identity_reuses_content_without_producer_history(
         sessions, operations, DistributionService(source), clock=clock
     )
     image = executor._archive(
-        image_digest=image_digest,
-        layout_digest=address,
-        image_bytes=11,
-        build_id=build_id,
+        image_digest=image_digest, layout_digest=address, image_bytes=11
     )
     assert image.image_digest == image_digest
     assert image.address == address
@@ -568,18 +565,12 @@ def test_stored_runtime_identity_reuses_content_without_producer_history(
     (storage.layout.root / "blobs" / "sha256" / address).unlink()
     with pytest.raises(Exception) as _ending:
         executor._archive(
-            image_digest=image_digest,
-            layout_digest=address,
-            image_bytes=11,
-            build_id=build_id,
+            image_digest=image_digest, layout_digest=address, image_bytes=11
         )
     place_test_image(storage, address, 11)
     assert (
         executor._archive(
-            image_digest=image_digest,
-            layout_digest=address,
-            image_bytes=11,
-            build_id=build_id,
+            image_digest=image_digest, layout_digest=address, image_bytes=11
         )
         == image
     )

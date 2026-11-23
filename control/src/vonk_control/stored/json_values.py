@@ -44,6 +44,7 @@ from typing import (
     cast,
     get_args,
     get_origin,
+    override,
 )
 
 from pydantic import BaseModel, JsonValue, RootModel, TypeAdapter
@@ -202,6 +203,7 @@ class ContractJSON[T](TypeDecorator[T | Residue]):
         self.table = table
         self.column = column
 
+    @override
     def process_bind_param(self, value: object, dialect: Dialect) -> object:
         binding = binding_for(self.table, self.column)
         outcome = _check(binding, value, None)
@@ -217,6 +219,7 @@ class ContractJSON[T](TypeDecorator[T | Residue]):
             )
         return dump_column(binding, value)
 
+    @override
     def process_result_value(self, value: object, dialect: Dialect) -> T | Residue:
         return cast(
             T | Residue, read_column(binding_for(self.table, self.column), value)

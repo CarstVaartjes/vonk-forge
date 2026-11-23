@@ -293,7 +293,6 @@ class StopMixin:
             try:
                 job = service._dispatch_stop_after_withdrawal(
                     run_id,
-                    plan_digest=plan_digest,
                     actor=actor,
                     request_id=request_id,
                     workload_intent_ordinal=workload_intent_ordinal,

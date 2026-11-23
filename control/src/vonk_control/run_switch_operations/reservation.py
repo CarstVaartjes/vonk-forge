@@ -345,13 +345,12 @@ class ReservationMixin:
                     profile_application_id=profile_application_id,
                 )
             elif isinstance(intent, RunSwitchStopIntent):
-                refreshed = service.preview_stop(intent, actor=actor)
+                refreshed = service.preview_stop(intent)
             elif isinstance(intent, RunSwitchCleanupIntent):
-                refreshed = service.preview_cleanup(intent, actor=actor)
+                refreshed = service.preview_cleanup(intent)
             elif isinstance(intent, RunSwitchProfileStopIntent):
                 refreshed = service.preview_stop(
                     intent.run_id,
-                    actor=actor,
                     profile_stop_scope=intent.profile_stop_scope,
                 )
             else:

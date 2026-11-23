@@ -169,7 +169,6 @@ def _record_claim_refusal(
 
 
 def _write_refusal_note(
-    self: AgentJobService,
     session: Session,
     *,
     operation: StoredOperation | None,
@@ -394,7 +393,7 @@ def _excluded_work_refusal(
             condition.check,
             facts.model_copy(
                 update=_claim_condition_facts(
-                    condition.check, operation, attempt, node, now
+                    condition.check, operation, attempt, node
                 ).model_dump(exclude_none=True)
             ),
         )

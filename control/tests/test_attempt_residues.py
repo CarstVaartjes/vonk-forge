@@ -624,8 +624,7 @@ def test_reconcile_discards_a_plan_that_never_reached_a_node(tmp_path: Path) -> 
     review = load.planner.preview_cleanup(
         RunSwitchCleanupPreviewRequest(
             installation_id=installation_id, cleanup_mode="reconcile"
-        ),
-        actor="admin",
+        )
     )
     assert review.allowed, [reason.code for reason in review.blockers]
     assert review.cleanup_disposition == "abandon"

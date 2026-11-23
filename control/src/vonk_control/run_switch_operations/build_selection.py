@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import (
     TYPE_CHECKING,
 )
@@ -41,7 +40,6 @@ class BuildSelectionMixin:
         candidate: RecipeBuild | None,
         group: SparkGroup,
         *,
-        now: datetime,
         inventory: PlanInventory,
         create_build: bool = True,
     ) -> _BuildSelection:
@@ -70,7 +68,7 @@ class BuildSelectionMixin:
         ):
             builder = session.get(AgentNode, candidate.builder_node_id)
             freshness, admissible = service._builder_admission(
-                session, builder, inventory=inventory
+                builder, inventory=inventory
             )
             if admissible:
                 return _BuildSelection(
@@ -116,7 +114,7 @@ class BuildSelectionMixin:
         saw_builder = False
         for node in ordered_nodes:
             freshness, admissible = service._builder_admission(
-                session, node, inventory=inventory
+                node, inventory=inventory
             )
             if not admissible:
                 continue
@@ -232,7 +230,6 @@ class BuildSelectionMixin:
 
     def _builder_admission(
         self,
-        session: Session,
         node: AgentNode | None,
         *,
         inventory: PlanInventory,

@@ -310,7 +310,7 @@ def run_artifact_job(
             return {"jobs": [_job(item, expected_run=args.run) for item in jobs]}
 
         return dict(
-            _recover(client, read, lambda timeout: None, retry_if=_transient_failure)
+            _recover(client, read, lambda _timeout: None, retry_if=_transient_failure)
         )
     if action == "contract":
         return _contract(args, client, quote)
@@ -328,7 +328,7 @@ def run_artifact_job(
                 client.request("GET", path, timeout_seconds=timeout),
                 expected_id=args.job_id,
             ),
-            lambda timeout: None,
+            lambda _timeout: None,
             retry_if=_transient_failure,
         )
         if not args.follow:
@@ -347,7 +347,7 @@ def run_artifact_job(
         return _recover(
             client,
             lambda timeout: _download(args, client, quote, timeout),
-            lambda timeout: None,
+            lambda _timeout: None,
             retry_if=_transient_failure,
         )
     raise ValueError(f"unsupported job action: {action}")
@@ -391,7 +391,7 @@ def _content_key_for_rerun(
 
         try:
             return _recover(
-                client, read, lambda timeout: None, retry_if=_transient_failure
+                client, read, lambda _timeout: None, retry_if=_transient_failure
             )
         except ControlNotFound:
             return None
@@ -435,7 +435,7 @@ def _resolve_run(client: ArtifactJobClient, selector: str | None) -> str:
     def read(timeout: float):
         return client.request("GET", "/api/fleet", timeout_seconds=timeout)
 
-    fleet = _recover(client, read, lambda timeout: None, retry_if=_transient_failure)
+    fleet = _recover(client, read, lambda _timeout: None, retry_if=_transient_failure)
     nodes = fleet.get("nodes")
     if not isinstance(nodes, list):
         raise ControlMalformedResponse("fleet membership is unavailable")
@@ -632,7 +632,7 @@ def _run_job(
     return _recover(
         client,
         lambda timeout: _download(args, client, quote, timeout),
-        lambda timeout: None,
+        lambda _timeout: None,
         retry_if=_transient_failure,
     )
 
@@ -653,8 +653,8 @@ def _create(
         binding, paths = _read_binding(args.file)
     declarations = _recover(
         client,
-        lambda timeout: _prepare_inputs(binding, paths, capabilities),
-        lambda timeout: None,
+        lambda _timeout: _prepare_inputs(binding, paths, capabilities),
+        lambda _timeout: None,
     )
     body = _canonical_create(binding, declarations, capabilities)
     key = (
@@ -684,10 +684,10 @@ def _create(
     if preparation(job) is not None:
         job = _recover(
             client,
-            lambda timeout: _deliver_inputs(
+            lambda _timeout: _deliver_inputs(
                 args, client, job, declarations, paths, quote
             ),
-            lambda timeout: None,
+            lambda _timeout: None,
         )
     return job
 
@@ -756,8 +756,8 @@ def _upload_existing(
     capabilities = _capabilities(client)
     declarations = _recover(
         client,
-        lambda timeout: _prepare_inputs(binding, paths, capabilities),
-        lambda timeout: None,
+        lambda _timeout: _prepare_inputs(binding, paths, capabilities),
+        lambda _timeout: None,
     )
     _canonical_create(binding, declarations, capabilities)
     args.artifact_job_id = args.job_id
@@ -774,7 +774,7 @@ def _upload_existing(
             ),
             expected_id=args.job_id,
         ),
-        lambda timeout: None,
+        lambda _timeout: None,
     )
     return _deliver_inputs(args, client, job, declarations, paths, quote)
 
@@ -1418,7 +1418,7 @@ def _capabilities(client: ArtifactJobClient) -> dict[str, object]:
         )
         return validate_control_document("ArtifactJobCapabilitiesResponse", value)
 
-    return _recover(client, read, lambda timeout: None, retry_if=_transient_failure)
+    return _recover(client, read, lambda _timeout: None, retry_if=_transient_failure)
 
 
 def _job(

@@ -622,7 +622,6 @@ class CatalogRevisionCollector:
         self._require_unused(
             session,
             revision,
-            installations,
             runs,
             builds,
             cutoff,
@@ -642,7 +641,6 @@ class CatalogRevisionCollector:
     def _require_unused(
         session: Session,
         revision: _Candidate,
-        installations: list[str],
         runs: list[str],
         builds: list[str],
         cutoff: datetime,

@@ -253,7 +253,6 @@ def _exact_service_stop_receipt_covers_start(
             members,
             run_generation=start.run_generation,
             cancel_pending_start=True,
-            allow_missing_nodes=False,
         )
         source_target = stop_payload_from_start(start, cancel_pending_start=True)
         source_target = source_target.model_copy(

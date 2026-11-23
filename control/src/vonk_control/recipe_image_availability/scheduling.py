@@ -451,7 +451,6 @@ def _cancel_older_preparations(
     *,
     newer_revision: CatalogDocumentRevision,
     now: datetime,
-    limit: int = 64,
     current_operation_id: str | None = None,
 ) -> tuple[str, ...]:
     """Fence prior requests; fresh intent never joins an older retry budget."""

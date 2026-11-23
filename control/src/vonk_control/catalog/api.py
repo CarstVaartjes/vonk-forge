@@ -16,7 +16,6 @@ from ..machine_states import CatalogSyncStateField
 from ..operation_api.constants import _ADMIN_OPERATION_IDS
 from ..strict_json import StrictModel
 from ..wait_contract import QueueWait
-from .service import CatalogService
 from .sync import CatalogSyncView
 from .sync_contract import (
     CatalogSyncTrigger,
@@ -135,7 +134,6 @@ def install_catalog_routes(
     app: FastAPI,
     *,
     actor_dependency: Any,
-    service: CatalogService | None,
     managed_sync: ManagedRecipeCatalogSync | None = None,
 ) -> None:
 

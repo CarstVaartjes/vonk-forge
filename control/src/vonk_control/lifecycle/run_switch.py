@@ -317,7 +317,7 @@ class RunSwitchAdapter:
             effect = Effect.UNKNOWN
         else:
             effect = Effect.ISSUED if issued else Effect.NONE
-        requested_at, request_key = self._cancel_request(progress, now)
+        requested_at, request_key = self._cancel_request(progress)
         count = _count(progress.retry_attempt)
         # The checkpoint window bounds the wait, not the core's finite retry
         # count: a hold for evidence that has not arrived (post-stop inventory,
@@ -349,7 +349,7 @@ class RunSwitchAdapter:
 
     @staticmethod
     def _cancel_request(
-        progress: RunSwitchOperationResult, now: datetime
+        progress: RunSwitchOperationResult,
     ) -> tuple[datetime | None, str | None]:
         cancellation = progress.cancellation
         if cancellation is None:
@@ -360,15 +360,15 @@ class RunSwitchAdapter:
 
     # ----------------------------------------------------- the kind's facts
 
-    def irreversible(self, row: Lifecycle) -> bool:
+    def irreversible(self, _row: Lifecycle) -> bool:
         """A composite has no effect of its own: its children own theirs."""
 
         return False
 
-    def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
+    def retry_not_before(self, _row: Lifecycle, _now: datetime) -> datetime | None:
         return None
 
-    def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
+    def execute(self, _row: Lifecycle, _attempt: int) -> Dispatch:
         """The phase executor is driven by the operation's own tick, not here."""
 
         return Dispatch(issued=False)
@@ -425,7 +425,7 @@ class RunSwitchAdapter:
                 return StopResult.CONFIRMED
         return StopResult.UNCONFIRMED
 
-    def actions(self, row: Lifecycle) -> tuple[str, ...]:
+    def actions(self, _row: Lifecycle) -> tuple[str, ...]:
         """None: a Run/Switch has no ``resume`` or ``retire``; its Stop is Cancel."""
 
         return ()
@@ -436,7 +436,6 @@ class RunSwitchAdapter:
         self,
         job: Job,
         progress: RunSwitchOperationResult | None,
-        before: Lifecycle,
         after: Lifecycle,
         now: datetime,
         *,
@@ -582,7 +581,7 @@ class RunSwitchAdapter:
             # not mistaken for one that is already being driven.
             row = replace(row, cancel_requested_at=None, cancel_request_key=None)
 
-        def save(before: Lifecycle, after: Lifecycle) -> bool:
+        def save(_before: Lifecycle, after: Lifecycle) -> bool:
             options = dict(write)
             if (
                 after.state is State.OBSERVING
@@ -602,7 +601,7 @@ class RunSwitchAdapter:
                 )
             if after.state is State.CANCELLED:
                 options["reason"] = self._cancelled_reason(progress, after, options)
-            self.apply(job, progress, before, after, now, **options)
+            self.apply(job, progress, after, now, **options)
             return True
 
         def residue(_row: Lifecycle, _reason: str) -> None:
@@ -734,7 +733,7 @@ class RunSwitchAdapter:
         return self.settled(
             job,
             progress,
-            CancelRequested(self._cancel_request(progress, self.now())[1], reason),
+            CancelRequested(self._cancel_request(progress)[1], reason),
             now,
             unflag=True,
         ).row
@@ -813,7 +812,6 @@ class RunSwitchAdapter:
         self.apply(
             job,
             progress,
-            before,
             after,
             now,
             visible=visible,

@@ -44,8 +44,6 @@ class CleanupPlanningMixin:
     def _preview_cleanup_once(
         self,
         request: RunSwitchCleanupPreviewRequest | str,
-        *,
-        actor: str,
     ) -> RunSwitchPlan:
         """Plan one scoped removal without consulting launch readiness.
 

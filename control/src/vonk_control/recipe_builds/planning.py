@@ -142,7 +142,6 @@ def _admit_spark_build(
 
 
 def _usable_prebuilt(
-    self: RecipeBuildService,
     recipe_revision_id: str,
     projected: RecipeRevisionProjection,
     *,
@@ -150,7 +149,6 @@ def _usable_prebuilt(
     source_sha256: str,
     base_images: Sequence[Mapping[str, object]],
     adapter: RuntimeAdapter,
-    now: datetime,
 ) -> tuple[PrebuiltImage | None, PrebuiltDecision]:
     """Use a signed image only when its key binds these executable inputs.
 
@@ -266,7 +264,6 @@ def _prepare_plan_once(
         source_sha256=source_sha256,
         base_images=base_images,
         adapter=adapter,
-        now=now,
     )
     if prebuilt is not None:
         builder_binary_digest = prebuilt.digest.removeprefix("sha256:")

@@ -389,7 +389,7 @@ def assemble_production_worker(
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
 
-    def agent_order(key: RowKey, kind: WaitOwnerKind) -> object:
+    def agent_order(key: RowKey, _kind: WaitOwnerKind) -> object:
         adapter = AgentOperationAdapter(
             sessions=sessions,
             clock=clock,
@@ -408,7 +408,7 @@ def assemble_production_worker(
         progressed = lifecycle.reconcile_cancelled_builds(str(key[0]))
         return prebuilt_importer.tick(str(key[0])) or progressed
 
-    def recipe(key: RowKey, kind: WaitOwnerKind) -> object:
+    def recipe(key: RowKey, _kind: WaitOwnerKind) -> object:
         progressed = lifecycle.redrive(str(key[0]))
         progressed = lifecycle.redrive_parent(str(key[0]), agent_jobs) or progressed
         # A persisted recipe build may itself own a Controller prebuilt pull.
@@ -422,7 +422,7 @@ def assemble_production_worker(
             return unavailable(kind)
         return model_cache.redrive(str(key[0]))
 
-    def cleanup(key: RowKey, kind: WaitOwnerKind) -> object:
+    def cleanup(key: RowKey, _kind: WaitOwnerKind) -> object:
         progressed = residues.tick(str(key[0]))
         return storage_collector.redrive_installation(str(key[0])) or progressed
 
@@ -431,40 +431,42 @@ def assemble_production_worker(
             return unavailable(kind)
         return enrollment.reconcile_revocations(str(key[0]))
 
-    def catalog(key: RowKey, kind: WaitOwnerKind) -> object:
+    def catalog(_key: RowKey, kind: WaitOwnerKind) -> object:
         if automatic_catalog is None:
             return unavailable(kind)
         return automatic_catalog.tick()
 
     advancers: dict[WaitOwnerKind, AdvanceWait] = {
-        WaitOwnerKind.COORDINATOR: lambda key, wait: worker.redrive_coordinator(
+        WaitOwnerKind.COORDINATOR: lambda key, _wait: worker.redrive_coordinator(
             str(key[0])
         ),
         WaitOwnerKind.AGENT_OPERATION: agent_order,
-        WaitOwnerKind.AGENT_UPGRADE: lambda key, wait: upgrades.heal_rollouts(
+        WaitOwnerKind.AGENT_UPGRADE: lambda key, _wait: upgrades.heal_rollouts(
             1, str(key[0])
         ),
-        WaitOwnerKind.ARTIFACT_JOB: lambda key, wait: ArtifactJobAdapter(
+        WaitOwnerKind.ARTIFACT_JOB: lambda key, _wait: ArtifactJobAdapter(
             sessions=sessions, clock=clock
         ).redrive(str(key[0])),
-        WaitOwnerKind.FLEET_PROFILE: lambda key, wait: fleet_profiles.tick(str(key[0])),
+        WaitOwnerKind.FLEET_PROFILE: lambda key, _wait: fleet_profiles.tick(
+            str(key[0])
+        ),
         WaitOwnerKind.IMAGE_AVAILABILITY: images,
         WaitOwnerKind.PREBUILT_IMAGE: prebuilt,
-        WaitOwnerKind.JOB: lambda key, wait: worker._run_generic(str(key[0])),
+        WaitOwnerKind.JOB: lambda key, _wait: worker._run_generic(str(key[0])),
         WaitOwnerKind.MODEL_CACHE: cache,
         WaitOwnerKind.RECIPE_OPERATION: recipe,
         WaitOwnerKind.RECIPE_UPDATE_BATCH: images,
-        WaitOwnerKind.RUN_SWITCH: lambda key, wait: run_switch_operations.redrive(
+        WaitOwnerKind.RUN_SWITCH: lambda key, _wait: run_switch_operations.redrive(
             str(key[0])
         ),
-        WaitOwnerKind.SELECTED_PROFILE: lambda key, wait: (
+        WaitOwnerKind.SELECTED_PROFILE: lambda _key, _wait: (
             fleet_profiles._reconcile_selected_roster(clock())
         ),
-        WaitOwnerKind.ROUTE_PUBLICATION: lambda key, wait: recipe_routes.maintain(),
-        WaitOwnerKind.ROUTE_RECOVERY: lambda key, wait: recipe_operations.redrive_run(
+        WaitOwnerKind.ROUTE_PUBLICATION: lambda _key, _wait: recipe_routes.maintain(),
+        WaitOwnerKind.ROUTE_RECOVERY: lambda key, _wait: recipe_operations.redrive_run(
             str(key[0])
         ),
-        WaitOwnerKind.STORAGE_RELIEF: lambda key, wait: (
+        WaitOwnerKind.STORAGE_RELIEF: lambda key, _wait: (
             storage_collector.redrive_artifact(str(key[0]), str(key[1]))
         ),
         WaitOwnerKind.CLEANUP: cleanup,

@@ -477,9 +477,7 @@ def test_retiring_bookkeeping_preserves_a_working_route(service):
         session.add(run)
         stored_owner = session.get(Job, owner.id)
         stored_owner.payload = {"owner_kind": "run", "owner_id": run_id}
-        _release_retired_owner_in_session(
-            session, stored_owner, "unobserved", clock.now
-        )
+        _release_retired_owner_in_session(session, stored_owner, clock.now)
         assert run.state == "running"
         assert run.route_state == "published"
         assert run.route_error is None

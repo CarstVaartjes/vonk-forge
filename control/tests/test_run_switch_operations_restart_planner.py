@@ -975,7 +975,7 @@ def test_planner_entrypoints_return_valid_contracts(
                 session, world.request, plan.assessment()
             )
         )
-    outputs.append(world.planner.preview_stop(world.run_id, actor="admin"))
+    outputs.append(world.planner.preview_stop(world.run_id))
     if len(world.original_group.nodes) > 1:
         scope = RunSwitchProfileStopScope(
             original_group=world.original_group,
@@ -984,10 +984,8 @@ def test_planner_entrypoints_return_valid_contracts(
             ),
             missing_node_ids=[world.original_group.nodes[-1].node_id],
         )
-        outputs.append(
-            world.planner.preview_profile_stop(world.run_id, scope, actor="admin")
-        )
-    outputs.append(world.planner.preview_cleanup(world.installation_id, actor="admin"))
+        outputs.append(world.planner.preview_profile_stop(world.run_id, scope))
+    outputs.append(world.planner.preview_cleanup(world.installation_id))
     fits = 0
     outputs.append(world.planner.inspect_request(world.request, actor="admin"))
     for output in outputs:
@@ -1019,13 +1017,13 @@ def test_profile_partial_stop_waits_with_lifecycle_scope_blocker(
         alias="old",
     )
     planner = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
-    group = planner.preview_stop(run.owner_id, actor="admin").spark_group
+    group = planner.preview_stop(run.owner_id).spark_group
     scope = RunSwitchProfileStopScope(
         original_group=group, target_node_ids=[nodes[0]], missing_node_ids=[nodes[1]]
     )
     # nodes[1] was declared missing but is enrolled (revoked_at is None): the
     # real lifecycle reports the changed rank membership as a disallowed Stop.
-    plan = planner.preview_profile_stop(run.owner_id, scope, actor="admin")
+    plan = planner.preview_profile_stop(run.owner_id, scope)
     assert not plan.allowed
     assert not plan.stops
     assert [reason.code for reason in plan.blockers] == [
@@ -1037,7 +1035,6 @@ def test_profile_partial_stop_waits_with_lifecycle_scope_blocker(
     child = planner.apply_profile_stop(
         run.owner_id,
         scope,
-        plan_digest=plan.plan_digest,
         request_key=str(uuid.uuid4()),
         actor="admin",
         workload_intent_ordinal=1,

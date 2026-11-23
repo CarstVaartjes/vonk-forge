@@ -197,10 +197,8 @@ class RecipeImageAvailabilityService:
     ) -> OperationProgress:
         return persistence._removal_progress_document(operation, owner)
 
-    def _read_removal_result(
-        self, operation: Job, intent: RecipeCacheRemovalIntent
-    ) -> RecipeCacheRemovalStatus:
-        return persistence._read_removal_result(self, operation, intent)
+    def _read_removal_result(self, operation: Job) -> RecipeCacheRemovalStatus:
+        return persistence._read_removal_result(self, operation)
 
     @staticmethod
     def _stored_removal_result(
@@ -284,7 +282,6 @@ class RecipeImageAvailabilityService:
         now: datetime,
     ) -> CacheRemovalReview:
         return removal_review._sealed_recipe_removal_review(
-            self,
             selector=selector,
             with_model=with_model,
             selection=selection,
@@ -329,11 +326,10 @@ class RecipeImageAvailabilityService:
         operation_id: str,
         observed_owner: RecipeCacheRemovalOwner,
         *,
-        now: datetime,
         deadline: float | None,
     ) -> bool:
         return removal_execution._advance_recipe_image_removal(
-            self, operation_id, observed_owner, now=now, deadline=deadline
+            self, operation_id, observed_owner, deadline=deadline
         )
 
     def _complete_recipe_image_removal(
@@ -716,7 +712,6 @@ class RecipeImageAvailabilityService:
         *,
         newer_revision: CatalogDocumentRevision,
         now: datetime,
-        limit: int = 64,
         current_operation_id: str | None = None,
     ) -> tuple[str, ...]:
         return scheduling._cancel_older_preparations(
@@ -724,7 +719,6 @@ class RecipeImageAvailabilityService:
             session,
             newer_revision=newer_revision,
             now=now,
-            limit=limit,
             current_operation_id=current_operation_id,
         )
 
@@ -843,7 +837,6 @@ class RecipeImageAvailabilityService:
         completed_bytes: int = 0,
         bytes_per_second: float | None = None,
         eta_seconds: float | None = None,
-        detail: OperationProgress | None = None,
     ) -> None:
         return image_preparation._set_progress(
             self,
@@ -853,7 +846,6 @@ class RecipeImageAvailabilityService:
             completed_bytes=completed_bytes,
             bytes_per_second=bytes_per_second,
             eta_seconds=eta_seconds,
-            detail=detail,
         )
 
     def _update_progress(

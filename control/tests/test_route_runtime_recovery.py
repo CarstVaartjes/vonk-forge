@@ -115,7 +115,7 @@ def test_missing_bundle_is_observed_and_request_led_publication_recovers(tmp_pat
     publisher = AtomicRouteBundlePublisher(tmp_path)
     marker = _activate(publisher)
     assert isinstance(marker, ActivationMarker)
-    assert publisher.inspect(expected=marker) == marker
+    assert publisher.inspect() == marker
 
 
 def test_absent_ack_ends_at_deadline_without_changing_working_activation(tmp_path):
@@ -139,5 +139,5 @@ def test_absent_ack_ends_at_deadline_without_changing_working_activation(tmp_pat
     observed = acknowledge(marker, SupervisorPhase.READY)
     assert isinstance(observed, UnknownError)
     assert elapsed[0] == 1
-    assert publisher.inspect(expected=marker) == marker
+    assert publisher.inspect() == marker
     assert isinstance(_activate(publisher, generation=2), ActivationMarker)

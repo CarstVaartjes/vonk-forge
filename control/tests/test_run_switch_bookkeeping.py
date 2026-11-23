@@ -127,7 +127,7 @@ def test_a_stop_preview_rebuilds_a_damaged_run_plan_from_its_installation(
         run.plan = {"not": "a run plan"}
     service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
 
-    stop = service.preview_stop(run_id, actor="admin")
+    stop = service.preview_stop(run_id)
 
     assert stop.action == "stop"
 

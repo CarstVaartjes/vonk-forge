@@ -260,25 +260,25 @@ class ImageAvailabilityAdapter:
 
     # ------------------------------------------------------- kind questions
 
-    def irreversible(self, row: Lifecycle) -> bool:
+    def irreversible(self, _row: Lifecycle) -> bool:
         return False  # receipts and fenced steps make every repeat safe
 
-    def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
+    def retry_not_before(self, _row: Lifecycle, _now: datetime) -> datetime | None:
         return None
 
-    def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
+    def execute(self, _row: Lifecycle, _attempt: int) -> Dispatch:
         return Dispatch()  # the owner's worker claims its own work
 
-    def observe(self, row: Lifecycle) -> Observed:
+    def observe(self, _row: Lifecycle) -> Observed:
         return Observed(Effect.UNKNOWN)  # the owner's cancel pass is the inspection
 
-    def stop(self, row: Lifecycle) -> StopResult:
+    def stop(self, _row: Lifecycle) -> StopResult:
         return StopResult.UNCONFIRMED  # likewise: the owner stops its children
 
-    def actions(self, row: Lifecycle) -> tuple[str, ...]:
+    def actions(self, _row: Lifecycle) -> tuple[str, ...]:
         return ()  # nothing here waits for a person
 
-    def children(self, row: Lifecycle) -> tuple[Lifecycle, ...]:
+    def children(self, _row: Lifecycle) -> tuple[Lifecycle, ...]:
         return ()
 
     # ---------------------------------------------------------------- apply
@@ -607,25 +607,25 @@ class PrebuiltImageAdapter:
         job.updated_at = now
         return decision.row
 
-    def irreversible(self, row: Lifecycle) -> bool:
+    def irreversible(self, _row: Lifecycle) -> bool:
         return False
 
-    def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
+    def retry_not_before(self, _row: Lifecycle, _now: datetime) -> datetime | None:
         return None
 
-    def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
+    def execute(self, _row: Lifecycle, _attempt: int) -> Dispatch:
         return Dispatch()
 
-    def observe(self, row: Lifecycle) -> Observed:
+    def observe(self, _row: Lifecycle) -> Observed:
         return Observed(Effect.UNKNOWN)
 
-    def stop(self, row: Lifecycle) -> StopResult:
+    def stop(self, _row: Lifecycle) -> StopResult:
         return StopResult.UNCONFIRMED
 
-    def actions(self, row: Lifecycle) -> tuple[str, ...]:
+    def actions(self, _row: Lifecycle) -> tuple[str, ...]:
         return ()
 
-    def children(self, row: Lifecycle) -> tuple[Lifecycle, ...]:
+    def children(self, _row: Lifecycle) -> tuple[Lifecycle, ...]:
         return ()
 
 

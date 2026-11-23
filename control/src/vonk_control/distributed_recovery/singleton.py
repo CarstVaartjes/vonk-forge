@@ -190,9 +190,7 @@ def _singleton_recovery_authority(
             "singleton recovery waits for a fresh Controller-observed Spark presence report",
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
-    accepted = _accepted_start_authority(
-        session, run, revision.content_digest, run_node.node_id
-    )
+    accepted = _accepted_start_authority(session, run, run_node.node_id)
     if isinstance(accepted, Residue):
         return accepted
     start_job, start_ordinal = accepted
@@ -302,7 +300,6 @@ def _singleton_recovery_authority(
 def _accepted_start_authority(
     session: Session,
     run: RecipeRun,
-    recipe_digest: str,
     node_id: str,
 ) -> tuple[Job, int] | Residue:
     starts = tuple(
@@ -369,7 +366,6 @@ def _accepted_start_authority(
             session,
             start,
             run=run,
-            recipe_digest=recipe_digest,
             targets=targets,
             workload_intent_ordinal=ordinal,
         )
@@ -415,7 +411,6 @@ def _validate_singleton_recovery_start_origin(
     start: Job,
     *,
     run: RecipeRun,
-    recipe_digest: str,
     targets: list[str],
     workload_intent_ordinal: int,
 ) -> Residue | None:

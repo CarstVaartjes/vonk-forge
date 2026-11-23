@@ -71,7 +71,7 @@ def models(
         raise RequestFault("model library limit is invalid")
     if sort not in {"updated", "name"}:
         raise RequestFault("model library sort is invalid")
-    model_rows, recipe_rows = self._documents_for_snapshot(None)
+    model_rows, recipe_rows = self._documents_for_snapshot()
     snapshot = (
         self._local_state_snapshot(
             [row.content_digest for row, _ in (*model_rows, *recipe_rows)]
@@ -262,7 +262,7 @@ def model_detail(self: LibraryProjection, selector: str) -> ModelDetailResponse:
         raise KeyError(selector)
     row, model = max(rows, key=lambda pair: pair[0].created_at)
     # Alignment comes from the derived catalog index, never a catalog read.
-    _, recipes = self._documents_for_snapshot(None)
+    _, recipes = self._documents_for_snapshot()
     texts = self._document_texts([row, *(recipe_row for recipe_row, _ in recipes)])
     alignment = self._alignment_by_model(recipes, texts).get(
         (model.identity.publisher, model.identity.slug), ()
@@ -309,7 +309,7 @@ def recipe_library(
     if sort not in {"updated", "name"}:
         raise RequestFault("recipe library sort is invalid")
     deadline = time.monotonic() + self._request_budget
-    model_rows, recipe_rows = self._documents_for_snapshot(None)
+    model_rows, recipe_rows = self._documents_for_snapshot()
     snapshot = (
         self._local_state_snapshot(
             [row.content_digest for row, _ in (*model_rows, *recipe_rows)]
@@ -578,7 +578,7 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
         digests=model_digests,
         reader=_canonical_model,
     )
-    _, indexed_recipes = self._documents_for_snapshot(None)
+    _, indexed_recipes = self._documents_for_snapshot()
     recipe_rows = [
         (exact[0], exact_recipe),
         *[

@@ -135,7 +135,7 @@ class DistributionChildren(DistributionVerification):
             target_totals = {
                 node_id: target_bytes
                 if target_bytes is not None
-                else self._target_bytes(plan, node_id)
+                else self._target_bytes(plan)
                 for node_id in (*cached, *assignments)
             }
             total_bytes = sum(value for value in target_totals.values())

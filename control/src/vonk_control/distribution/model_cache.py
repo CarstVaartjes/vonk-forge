@@ -83,7 +83,7 @@ class ModelCacheObjectSource:
             return self._open_cache_object(digest, expected_bytes)
         return self._open_object(digest, expected_bytes)
 
-    def verify_runtime_image(self, image_digest: str, archive_sha256: str) -> bool:
+    def verify_runtime_image(self, _image_digest: str, _archive_sha256: str) -> bool:
         return False
 
     @classmethod

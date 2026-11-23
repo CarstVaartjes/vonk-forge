@@ -355,7 +355,6 @@ def _set_progress(
     completed_bytes: int = 0,
     bytes_per_second: float | None = None,
     eta_seconds: float | None = None,
-    detail: OperationProgress | None = None,
 ) -> None:
     progress = _progress(
         phase,

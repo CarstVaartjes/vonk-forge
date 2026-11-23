@@ -96,7 +96,7 @@ def install_enrollment_routes(
                 detail="enrollment rate limit exceeded",
                 headers={"retry-after": str(limiter.retry_after_seconds())},
             )
-        raw = await _bounded_enrollment_body(request, required)
+        raw = await _bounded_enrollment_body(request)
         scan = _scan_enrollment_grants(raw)
         content_type = request.headers.get("content-type", "")
         if (

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import override
 
 from sqlalchemy import (
     Integer,
@@ -123,6 +124,7 @@ class CertificateGenerationStorage(TypeDecorator[int]):
             return None
         return f"{value:020d}" if dialect.name == "sqlite" else Decimal(value)
 
+    @override
     def process_result_value(
         self, value: str | Decimal | None, dialect: Dialect
     ) -> int | None:

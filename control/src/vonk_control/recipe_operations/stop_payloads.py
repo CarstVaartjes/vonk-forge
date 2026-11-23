@@ -141,7 +141,6 @@ def durable_run_stop_payloads(
     *,
     run_generation: int,
     cancel_pending_start: bool,
-    allow_missing_nodes: bool,
 ) -> dict[str, RecipeStopPayload]:
     """Authorize exact Stop from current durable run and rank ownership.
 

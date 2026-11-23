@@ -125,8 +125,7 @@ def install_installation_reconciliation_routes(
             plan = service().preview_cleanup(
                 RunSwitchCleanupPreviewRequest(
                     installation_id=installation_id, cleanup_mode="reconcile"
-                ),
-                actor=actor.subject,
+                )
             )
             return validate_plan(plan, installation_id)
         except HTTPException:

@@ -256,7 +256,6 @@ class RunSwitchFleetProfileAdapter:
                 assignments,
                 nodes,
                 state.actor,
-                state.request_id,
                 index,
                 progress.workload_intent_ordinal,
             )

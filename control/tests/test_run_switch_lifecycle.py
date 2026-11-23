@@ -843,12 +843,11 @@ def test_preflight_checkpoint_cannot_hide_retry_or_cancellation_wait(cancelling)
     adapter.apply(
         job,
         progress,
-        before,
         replace(after, cancel_requested_at=None, cancel_request_key=None),
         NOW,
     )
     if cancelling:
-        adapter.apply(job, progress, before, after, NOW)
+        adapter.apply(job, progress, after, NOW)
     else:
         adapter.retry(job, progress, RunSwitchCode.PHASE_RETRY, NOW)
     waiting = read_wait(job)

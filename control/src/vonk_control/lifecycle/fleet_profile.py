@@ -310,20 +310,20 @@ class FleetProfileAdapter:
 
     # ----------------------------------------------------- the kind's facts
 
-    def irreversible(self, row: Lifecycle) -> bool:
+    def irreversible(self, _row: Lifecycle) -> bool:
         """A composite has no effect of its own: its children own theirs."""
 
         return False
 
-    def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
+    def retry_not_before(self, _row: Lifecycle, _now: datetime) -> datetime | None:
         return None
 
-    def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
+    def execute(self, _row: Lifecycle, _attempt: int) -> Dispatch:
         """The step queue is driven by the application's own tick, not here."""
 
         return Dispatch(issued=False)
 
-    def actions(self, row: Lifecycle) -> tuple[str, ...]:
+    def actions(self, _row: Lifecycle) -> tuple[str, ...]:
         """None: a load waits for no person.  (``retry`` is offered on a failed
         load, which is an ended state, not a wait.)"""
 
@@ -424,7 +424,6 @@ class FleetProfileAdapter:
     def apply(
         self,
         application: FleetProfileApplication,
-        before: Lifecycle,
         after: Lifecycle,
         now: datetime,
         *,
@@ -548,8 +547,8 @@ class FleetProfileAdapter:
             # monotonic flag from the event.
             row = replace(row, cancel_requested_at=None, cancel_request_key=None)
 
-        def save(before: Lifecycle, after: Lifecycle) -> bool:
-            self.apply(application, before, after, now, session=session, **write)
+        def save(_before: Lifecycle, after: Lifecycle) -> bool:
+            self.apply(application, after, now, session=session, **write)
             return True
 
         pending = (
@@ -604,7 +603,7 @@ class FleetProfileAdapter:
 
         before = self.lifecycle(application, _progress(application), now)
         after = replace(before, state=State.QUEUED if steps else State.SUCCEEDED)
-        self.apply(application, before, after, now, reason=None, session=session)
+        self.apply(application, after, now, reason=None, session=session)
 
     def reopen(
         self,
@@ -624,7 +623,7 @@ class FleetProfileAdapter:
         now = aware(now)
         before = self.lifecycle(application, _progress(application), now)
         after = replace(before, state=State.RUNNING, effect=Effect.ISSUED)
-        self.apply(application, before, after, now, reason=reason, session=session)
+        self.apply(application, after, now, reason=reason, session=session)
         return after
 
     def project(
@@ -643,7 +642,7 @@ class FleetProfileAdapter:
         if before.terminal:
             return before
         after = replace(before, state=state)
-        self.apply(application, before, after, now, reason=reason, session=session)
+        self.apply(application, after, now, reason=reason, session=session)
         return after
 
     def succeed(
@@ -692,7 +691,6 @@ class FleetProfileAdapter:
                 after = replace(before, state=State.BACKOFF, next_action_at=due)
                 self.apply(
                     application,
-                    before,
                     after,
                     now,
                     reason=reason,
@@ -799,7 +797,7 @@ class FleetProfileAdapter:
             # The first stop belongs to the worker's next pass, which is due now
             # (no stored clock: an instant spelled two ways compares as later).
             row = replace(row, next_action_at=None)
-        self.apply(application, before, row, now, reason=reason, session=session)
+        self.apply(application, row, now, reason=reason, session=session)
         return row
 
     def tick_cancel(

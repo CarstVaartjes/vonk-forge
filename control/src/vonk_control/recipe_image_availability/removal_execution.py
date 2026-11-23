@@ -270,7 +270,7 @@ def _advance_recipe_removal(
         )
     if owner.checkpoint.image_index < len(owner.plan.image_archives):
         return self._advance_recipe_image_removal(
-            operation_id, owner, now=now, deadline=deadline
+            operation_id, owner, deadline=deadline
         )
     if owner.checkpoint.model_index < len(owner.plan.model_children):
         return self._advance_recipe_model_child(
@@ -287,7 +287,6 @@ def _advance_recipe_image_removal(
     operation_id: str,
     observed_owner: RecipeCacheRemovalOwner,
     *,
-    now: datetime,
     deadline: float | None,
 ) -> bool:
     """Retire the remaining image receipts in a time-bounded batch.

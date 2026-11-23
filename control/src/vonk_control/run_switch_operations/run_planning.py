@@ -267,7 +267,6 @@ class RunPlanningMixin:
                     build,
                     build_candidate,
                     group,
-                    now=now,
                     inventory=inventory,
                     create_build=create_build,
                 )
@@ -579,7 +578,7 @@ class RunPlanningMixin:
                 )
             if request.gpu_clock is not None:
                 clock_blockers, clock_warnings = assess_gpu_clock(
-                    session, node_ids, request.gpu_clock
+                    node_ids, request.gpu_clock
                 )
                 blockers.extend(clock_blockers)
                 warnings.extend(clock_warnings)

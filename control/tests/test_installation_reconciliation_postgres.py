@@ -202,8 +202,7 @@ def test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank(
         RunSwitchCleanupPreviewRequest(
             installation_id=installation.owner_id,
             cleanup_mode="reconcile",
-        ),
-        actor="admin",
+        )
     )
     assert first_plan.allowed, [
         (item.code, item.detail) for item in first_plan.blockers
@@ -318,8 +317,7 @@ def test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank(
         RunSwitchCleanupPreviewRequest(
             installation_id=installation.owner_id,
             cleanup_mode="reconcile",
-        ),
-        actor="admin",
+        )
     )
     assert retry_plan.allowed, [
         (item.code, item.detail) for item in retry_plan.blockers

@@ -364,7 +364,6 @@ def _recovery_authority(
             nodes,
             run_generation=stop_run_generation,
             cancel_pending_start=True,
-            allow_missing_nodes=False,
         )
     except RecipeStopAuthorityError as error:
         return _unproven(

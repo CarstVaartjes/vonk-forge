@@ -817,7 +817,6 @@ class ProjectionMixin:
                 all_children=all_children,
                 deferred_nodes=deferred_nodes,
                 marker_nodes=marker_nodes,
-                node_evidence=node_evidence,
                 now=now,
                 recovery_error=recovery_error,
                 cleanup_queued=cleanup_queued,

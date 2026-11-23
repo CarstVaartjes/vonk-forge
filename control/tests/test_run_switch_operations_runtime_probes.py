@@ -307,7 +307,7 @@ def test_a_failed_run_switch_ends_its_unclaimed_probe_and_transfer(tmp_path, fie
         setattr(progress, field, transfer.id)
         adapter = RunSwitchAdapter(session)
         before = adapter.lifecycle(job, progress, NOW)
-        adapter.apply(job, progress, before, replace(before, state=State.FAILED), NOW)
+        adapter.apply(job, progress, replace(before, state=State.FAILED), NOW)
     cancelled = LifecycleState.CANCELLED.value
     assert _probe_states(switch, probe) == (cancelled, cancelled)
     assert _probe_states(switch, (transfer.id, transfer_order)) == (

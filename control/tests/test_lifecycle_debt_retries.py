@@ -211,7 +211,7 @@ def test_cleanup_preview_reobserves_unknown_authority(monkeypatch):
         lambda: iter(range(3)),
     )
     monkeypatch.setattr(service, "_preview_cleanup_once", once, raising=False)
-    assert service.preview_cleanup("installation", actor="operator") == "exact-cleanup"
+    assert service.preview_cleanup("installation") == "exact-cleanup"
     assert calls == [("installation", "operator")] * 3
 
 
@@ -323,10 +323,10 @@ def test_unknown_builder_evidence_is_waiting_and_reobserved(monkeypatch):
         None,
         SimpleNamespace(nodes=[]),
     )
-    waiting = service._select_build(*args, now=datetime.now(UTC), inventory=object())
+    waiting = service._select_build(*args, inventory=object())
     assert waiting.build is None
     assert waiting.candidate is None
-    recovered = service._select_build(*args, now=datetime.now(UTC), inventory=object())
+    recovered = service._select_build(*args, inventory=object())
     assert recovered.build is selected
     assert recovered.candidate is selected
     assert calls == [("revision", "builder")] * 2

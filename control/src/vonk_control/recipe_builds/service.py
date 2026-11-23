@@ -92,7 +92,7 @@ class RecipeBuildService:
     resolve = resolve
     _resolve_once = _resolve_once
     _admit_spark_build = _admit_spark_build
-    _usable_prebuilt = _usable_prebuilt
+    _usable_prebuilt = staticmethod(_usable_prebuilt)
     prepare_plan = prepare_plan
     _prepare_plan_once = _prepare_plan_once
     plan = plan
