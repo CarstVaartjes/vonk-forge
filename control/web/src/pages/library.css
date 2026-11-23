@@ -630,21 +630,6 @@
   margin: 0;
 }
 
-.library-profile-application-progress {
-  background: var(--recess);
-  border-radius: var(--r-pill);
-  height: 0.4rem;
-  overflow: hidden;
-}
-
-.library-profile-application-progress span {
-  background: var(--green);
-  display: block;
-  height: 100%;
-  transform-origin: left;
-  transition: transform 180ms ease;
-}
-
 @media (max-width: 1000px) {
   .library-model-row {
     grid-template-columns: minmax(0, 1fr) auto;
@@ -693,43 +678,6 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .library-profile-application-progress span {
-    transition: none;
-  }
-}
-.library-profile-application-progress.is-indeterminate {
-  position: relative;
-  height: 0.45rem;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--line-strong) 85%, transparent);
-  border-radius: var(--r-pill);
-  background: color-mix(in srgb, var(--line-strong) 45%, transparent);
-}
-.library-profile-application-progress.is-indeterminate span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--green);
-}
-.library-profile-application-progress.is-indeterminate span {
-  width: 38%;
-  animation: library-progress-scan 1.25s ease-in-out infinite;
-}
-@keyframes library-progress-scan {
-  0% {
-    transform: translateX(-125%);
-  }
-  100% {
-    transform: translateX(285%);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .library-profile-application-progress.is-indeterminate span {
-    animation: none;
-    width: 100%;
-  }
-}
 .library-workcell-toolbar {
   display: flex;
   justify-content: flex-end;

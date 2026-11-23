@@ -1,6 +1,7 @@
 import { compareWire, displayRatio } from "../../api/contract-numeric";
 import type { ControlApi, LibraryViewModel } from "../../api/types";
 import { formatBytes } from "../../lib/fleet";
+import { phaseWords } from "../../lib/phase-words";
 import { CancelOperation } from "../ui/cancel-operation";
 import { WaitingFor } from "../ui/waiting-for";
 
@@ -8,7 +9,7 @@ type Preparation = NonNullable<LibraryViewModel["local"]["preparation"]>;
 
 /** The one line a live preparation reads as: phase, then how much of it is done. */
 export function preparationLabel(preparation: Preparation): string {
-  const phase = preparation.phase ?? preparation.state;
+  const phase = phaseWords(preparation.phase ?? preparation.state);
   const total = preparation.total_bytes;
   if (total == null || compareWire(total, 0) <= 0) return phase;
   const completed = preparation.completed_bytes ?? 0;
@@ -35,7 +36,11 @@ export function LibraryPreparation({
   return (
     <div className="library-preparation">
       <span role="status">{preparationLabel(preparation)}</span>
-      <WaitingFor blockers={preparation.blockers} nextAttemptAt={preparation.next_attempt_at} />
+      <WaitingFor
+        blockers={preparation.blockers}
+        nextAttemptAt={preparation.next_attempt_at}
+        phase={preparation.phase ?? undefined}
+      />
       {operationId && (
         <CancelOperation
           what={what}

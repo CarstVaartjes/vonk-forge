@@ -52,6 +52,7 @@ def cli_words() -> str:
         StopOutcome,
         WaitReason,
     )
+    from vonk_agent_protocol.phase_words import PHASE_WORDS, WAIT_WORDS
     from vonk_agent_protocol.reason_codes.profiles import (
         PROFILE_REFUSAL_CODES,
         ProfileReasonCode,
@@ -175,6 +176,17 @@ def cli_words() -> str:
             ),
             "    }",
             ")",
+        ]
+    for name, table in (("PHASE_WORDS", PHASE_WORDS), ("WAIT_WORDS", WAIT_WORDS)):
+        lines += [
+            "",
+            f"# Plain words for a {name.split('_')[0].lower()}, one table for every client.",
+            f"{name}: dict[str, str] = {{",
+            *(
+                f"    {json.dumps(key)}: {json.dumps(text)},"
+                for key, text in table.items()
+            ),
+            "}",
         ]
     lines += [
         "",

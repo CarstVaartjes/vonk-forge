@@ -4,7 +4,6 @@ import type { MouseEvent, ReactNode } from "react";
 import {
   addWire,
   compareWire,
-  displayRatio,
   formatWire,
   isWireNumber,
   materialize,
@@ -31,12 +30,14 @@ import type {
   FleetProfilePreview,
   VisualFleetSnapshot,
 } from "../../api/types";
-import { formatBytes, nodeDisplayName } from "../../lib/fleet";
+import { nodeDisplayName } from "../../lib/fleet";
 import type { LibraryRecipeRecord } from "./library-workcell";
 import { CancelOperation } from "../ui/cancel-operation";
 import { ConfirmDialog } from "../ui/confirm-dialog";
 import { StatusPill } from "../ui/status-pill";
 import { WaitingFor } from "../ui/waiting-for";
+import { useLibraryNodeName } from "./library-node-names";
+import { availabilityProgress, LibraryAvailabilityProgress } from "./library-availability-progress";
 import { ObservationNotice } from "../ui/observation-notice";
 import { useOperationObserver } from "../../hooks/use-operation-observer";
 import { EmptyState } from "../ui/empty-state";
@@ -284,9 +285,6 @@ const loadable = (preview: FleetProfilePreview | undefined) =>
 const nothingToChange = (preview: FleetProfilePreview | undefined) =>
   preview?.next_action === ProfileLoadAction.NOTHING_TO_CHANGE;
 
-const bytes = (value: unknown) =>
-  isWireNumber(value) && compareWire(value, 0) >= 0 ? formatBytes(value) : undefined;
-
 function ProfileProgress({
   application,
   cancel,
@@ -297,16 +295,10 @@ function ProfileProgress({
   notice?: ReactNode;
 }) {
   const progress = applicationProgressRecord(application);
-  const completed = bytes(progress.bytes);
-  const total = bytes(progress.total_bytes);
-  const value =
-    isWireNumber(progress.bytes) &&
-    isWireNumber(progress.total_bytes) &&
-    compareWire(progress.total_bytes, 0) > 0
-      ? Math.min(100, Math.max(0, displayRatio(progress.bytes, progress.total_bytes) * 100))
-      : undefined;
-  const phase =
-    typeof progress.phase === "string" ? progress.phase.replaceAll("-", " ") : "Profile load";
+  // The child's measured operation carries bytes, rate, ETA and a bar per Spark. The child's
+  // own byte counts are the whole-load budget, a different quantity, so they are not shown here.
+  const measured = availabilityProgress(progress.operation ?? { phase: progress.phase });
+  const nodeName = useLibraryNodeName();
   const nodeIds = Array.isArray(progress.node_ids)
     ? progress.node_ids.filter((id): id is string => typeof id === "string")
     : [];
@@ -317,34 +309,14 @@ function ProfileProgress({
       aria-label="Profile load progress"
     >
       <div className="library-profile-application-heading">
-        <div>
-          <strong>{phase}</strong>
-          <span>{application.state.replaceAll("-", " ")}</span>
-        </div>
-        {completed && (
-          <span>
-            {completed}
-            {total ? ` of ${total}` : ""}
-          </span>
-        )}
+        <span>{application.state.replaceAll("-", " ")}</span>
       </div>
-      <div
-        className={`library-profile-application-progress${value === undefined ? " is-indeterminate" : ""}`}
-        role="progressbar"
-        aria-label="Profile load progress"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        {...(value === undefined
-          ? { "aria-valuetext": "Progress total unavailable" }
-          : { "aria-valuenow": value })}
-      >
-        <span style={value === undefined ? undefined : { transform: `scaleX(${value / 100})` }} />
-      </div>
-      {nodeIds.length > 0 && (
+      <LibraryAvailabilityProgress progress={measured} />
+      {nodeIds.length > 0 && measured.members.length <= 1 && (
         <ul className="library-profile-application-members" aria-label="Profile load targets">
           {nodeIds.map((nodeId) => (
             <li key={nodeId}>
-              <span>{nodeId}</span>
+              <span>{nodeName(nodeId)}</span>
               <small>Participating</small>
             </li>
           ))}
@@ -363,7 +335,11 @@ function ProfileProgress({
           )}
         </p>
       )}
-      <WaitingFor blockers={application.blockers} nextAttemptAt={application.next_attempt_at} />
+      <WaitingFor
+        blockers={application.blockers}
+        nextAttemptAt={application.next_attempt_at}
+        phase={measured.phase}
+      />
       {notice}
       {cancel && (
         <CancelOperation

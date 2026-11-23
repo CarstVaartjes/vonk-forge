@@ -2211,14 +2211,6 @@ progress {
   justify-content: space-between;
   gap: 0.8rem;
 }
-.library-profile-application-heading > div {
-  display: grid;
-  gap: 0.12rem;
-  min-width: 0;
-}
-.library-profile-application-heading strong {
-  color: var(--ink);
-}
 .library-profile-application-heading > span {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
