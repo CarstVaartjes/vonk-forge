@@ -171,7 +171,7 @@ def test_failed_end_checks_typed_child_evidence_through_service_callback():
         end=lambda op: ended,
         fresh=lambda world: admitted,
         assert_released=lambda: None,
-        assert_reason=lambda op: checked.append(op),
+        assert_reason=checked.append,
     )
     assert checked == [ended]
 

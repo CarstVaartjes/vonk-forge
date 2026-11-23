@@ -120,7 +120,7 @@ def _fleet_snapshot(
 
 def test_metrics_use_typed_fleet_evidence_without_health_or_probe_fields() -> None:
     metrics = MetricsRegistry()
-    metrics.set_fleet_source(lambda: _fleet_snapshot())
+    metrics.set_fleet_source(_fleet_snapshot)
     text = metrics.render()
     assert f'vonk_node_connection_state{{node_id="{NODE}",state="online"}} 1' in text
     assert f'vonk_node_certificate_state{{node_id="{NODE}",state="valid"}} 1' in text
@@ -427,7 +427,7 @@ def test_metrics_export_host_and_engine_readings_and_omit_what_is_not_reported()
 
     # An older agent reports none of them; no engine source reports no engines.
     older = MetricsRegistry()
-    older.set_fleet_source(lambda: _fleet_snapshot())
+    older.set_fleet_source(_fleet_snapshot)
     older_text = older.render()
     assert "vonk_node_fan_rpm" not in older_text
     assert "vonk_engine_" not in older_text

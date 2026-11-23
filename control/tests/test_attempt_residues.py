@@ -670,7 +670,7 @@ def test_an_unexpected_advance_failure_is_shown_and_backed_off(
     assert view.next_attempt_at is not None
     # Backed off: the next tick does not retry it straight away.
     calls: list[str] = []
-    monkeypatch.setattr(load.planner, "_advance", lambda job_id: calls.append(job_id))
+    monkeypatch.setattr(load.planner, "_advance", calls.append)
     load.planner.tick()
     assert calls == []
     monkeypatch.setattr(load.planner, "_advance", advance)

@@ -200,8 +200,8 @@ def test_dual_node_reconcile_passes_share_the_claim_lock_order(queue, postgres_e
     _concurrent_node_lock_calls(
         postgres_engine,
         [
-            lambda: services[0].reconcile_orders(),
-            lambda: services[1].reconcile_orders(),
+            services[0].reconcile_orders,
+            services[1].reconcile_orders,
         ],
     )
 
@@ -228,7 +228,7 @@ def test_a_reconcile_pass_and_a_claim_on_the_other_node_do_not_deadlock(
 
     results = _concurrent_node_lock_calls(
         postgres_engine,
-        [lambda: services[0].reconcile_orders(), lambda: _claim(services[1], 1)],
+        [services[0].reconcile_orders, lambda: _claim(services[1], 1)],
     )
 
     # The claim on the other node still succeeds. A claim no longer waits on
