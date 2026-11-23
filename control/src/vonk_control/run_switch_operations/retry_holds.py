@@ -8,12 +8,10 @@ from typing import (
 )
 from typing import cast as typing_cast
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.run_switch_operations.results import _persisted_result
 
@@ -25,7 +23,6 @@ from ..lifecycle.run_switch import (
 from ..lifecycle.types import (
     State as _LifecycleState,
 )
-from ..models.fleet import AgentNode
 from ..models.jobs import Job
 from ..recipe_operations.errors import RecipeOperationConflict
 from ..run_switch_contract.operations import (
@@ -41,7 +38,7 @@ from .constants import (
 )
 from .errors import RunSwitchIssuedWorkloadPending
 from .ownership import _checkpoint_matches, _complete_cancellation
-from .planning_helpers import _aware, _now, _run_switch_payload, _start_parent
+from .planning_helpers import _aware, _now, _start_parent
 from .provider import _ADAPTER
 from .result_helpers import _observe_progress, _read_progress
 
@@ -61,28 +58,6 @@ class RetryHoldsMixin:
         except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError):
             return False
         return assessment.allowed and assessment.disposition == "abandon"
-
-    @staticmethod
-    def _scope_intent_status(session: Session, job: Job) -> str:
-        """Distinguish malformed authority from a later authorized node head."""
-
-        parent = _run_switch_payload(job)
-        ordinal = parent.workload_intent_ordinal if parent is not None else None
-        if type(ordinal) is not int or ordinal < 1:
-            return "invalid"
-        nodes = session.scalars(
-            select(AgentNode).where(AgentNode.node_id.in_(job.targets))
-        )
-        current = list(nodes)
-        if any(node.revoked_at is not None for node in current):
-            return "invalid"
-        if len(current) != len(job.targets):
-            return "missing-target"
-        if any(node.state != NodeIdentityState.ACTIVE for node in current):
-            return "waiting"
-        if any(node.workload_intent_ordinal != ordinal for node in current):
-            return "superseded"
-        return "current"
 
     def _hold_start_observation(
         self,

@@ -56,13 +56,13 @@ from .errors import (
 )
 from .intent import _bound_workload_intent
 from .interfaces import RecipeOperationView, new_recipe_job
-from .observation_helpers import _active_recipe_revision
+from .observation_helpers import _active_recipe_revision, _run_is_one_shot
 from .profile_job_run_stop import _exact_jobrun_sources, _jobrun_effect_may_remain
 from .progress import (
     _parent_execution_mode,
     _parent_identity,
 )
-from .rank_authority import _profile_jobrun_parent, _run_is_one_shot
+from .rank_authority import _profile_jobrun_parent
 from .results import _validated_result
 from .stop_payloads import (
     stop_payload_from_job_run,

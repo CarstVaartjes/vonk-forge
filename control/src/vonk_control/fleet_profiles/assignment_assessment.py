@@ -38,7 +38,7 @@ from ..recipe_operations.execution_contract import (
     installation_matches_runtime_image,
     installation_serves_authorised_ports,
 )
-from ..recipe_operations.rank_authority import _run_is_one_shot
+from ..recipe_operations.observation_helpers import _run_is_one_shot
 from ..run_readiness import run_not_ready_for_profile
 from ..stored.states import ClusterMappingState, RecipeBuildState
 from .contracts import _AssignmentState

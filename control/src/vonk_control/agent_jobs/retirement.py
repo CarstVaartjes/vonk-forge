@@ -48,7 +48,7 @@ from ..recipe_operations.lifecycle_contract import (
 )
 from .contracts import _WORKLOAD_INTENT_OPERATIONS, OperatorRetirementRefused
 from .retry import _retry_authorized_for_current_attempt
-from .scope import _target_scope
+from .scope import _lock_target_scopes, _target_scope
 from .stored import column_field, column_is_document, column_value
 
 
@@ -246,9 +246,7 @@ def retire_exhausted_operations_in_session(
     if job is None:
         raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
     scope = _target_scope(column_value(job, "targets"))
-    from .service import AgentJobService
-
-    if not scope or not AgentJobService._lock_target_scopes(
+    if not scope or not _lock_target_scopes(
         session, {"retire": (job_id, scope)}, scope[0]
     ):
         raise OperatorRetirementRefused(job_id, "its target scope changed")

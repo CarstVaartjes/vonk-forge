@@ -44,6 +44,7 @@ from ..jobs.documents import (
 from ..lifecycle.evidence import (
     BookkeepingReason,
     Residue,
+    read_or_rebuild,
     retire_as_unknown,
 )
 from ..models.cache import RecipeBuild
@@ -66,6 +67,7 @@ from .execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_plan,
     parse_stored_build_policy,
+    parse_stored_run_plan,
 )
 from .lifecycle_contract import JOB_ACTIVATION
 from .results import _RANK_FAILED
@@ -328,8 +330,6 @@ def prepare_exact_recipe_run_observation_nodes(
     """
 
     # Imported here: rank authority reads this module's revision helper.
-    from .rank_authority import _run_is_one_shot
-
     assigned = tuple(
         session.execute(
             select(RunNode, RecipeRun)
@@ -370,3 +370,36 @@ def prepare_exact_recipe_run_observation_nodes(
                 node.observation_process_running = False
                 node.observation_observed_at = observed_at
     return tuple(node for node, _ in assigned)
+
+
+def _run_is_one_shot(session: Session, run: RecipeRun) -> bool:
+    """Whether the run only hosts one-shot jobs (no service container).
+
+    The stored plan says so; when it does not parse, the evidence is the
+    activation operation that created the run, which nothing else produces.
+    """
+
+    def read() -> bool:
+        return (
+            parse_stored_run_plan(read_row_column(run, "plan")).execution_mode
+            == "one-shot-jobs"
+        )
+
+    def rebuild() -> bool:
+        return (
+            session.scalar(
+                select(Job.id)
+                .where(
+                    Job.kind == JOB_ACTIVATION,
+                    Job.owner_kind == "run",
+                    Job.owner_id == run.id,
+                )
+                .limit(1)
+            )
+            is not None
+        )
+
+    loaded = read_or_rebuild(
+        kind="recipe.run-plan", subject=run.id, read=read, rebuild=rebuild
+    )
+    return loaded is True

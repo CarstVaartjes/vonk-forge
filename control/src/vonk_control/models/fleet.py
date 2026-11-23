@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
-from pydantic import JsonValue
+from pydantic import JsonValue, TypeAdapter
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -19,7 +20,9 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    delete,
     event,
+    insert,
     inspect,
 )
 from sqlalchemy.engine import Connection
@@ -27,6 +30,7 @@ from sqlalchemy.orm import Mapped, Mapper, mapped_column, relationship
 
 if TYPE_CHECKING:
     from .telemetry import NodeInventoryItemsSnapshot
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
 from vonk_agent_protocol.state_machines import (
     CertificateRecordState,
@@ -36,6 +40,7 @@ from vonk_agent_protocol.state_machines import (
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.wait_contract import WaitEvidence
 
+from ..fleet_profile_contract.vocabulary import RecipeSelector
 from ..model_primitives import (
     Base,
     CertificateGenerationStorage,
@@ -257,8 +262,6 @@ def _profile_recipes_written(
 ) -> None:
     if not inspect(target).attrs.assignments.history.has_changes():
         return
-    from ..reference_facts import write_profile_recipes
-
     write_profile_recipes(connection, target.id, target.assignments)
 
 
@@ -576,3 +579,42 @@ class LocalCertificateRevocation(Base):
     revoked_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+
+
+def profile_recipes(assignments: object) -> frozenset[tuple[str, str]]:
+    """The (publisher, slug) of every recipe these saved assignments name.
+
+    Assignments are validated where a profile is saved; a value that is not a
+    list of assignments with a valid recipe selector is refused here too.
+    """
+
+    if not isinstance(assignments, list):
+        raise TypeError("saved profile assignments must be a list")
+    selector = TypeAdapter(RecipeSelector)
+    found: set[tuple[str, str]] = set()
+    for assignment in assignments:
+        if not isinstance(assignment, Mapping):
+            raise TypeError("saved profile assignment must be an object")
+        publisher, _, slug = selector.validate_python(
+            assignment.get("recipe_selector"), strict=True
+        ).partition("/")
+        found.add((publisher, slug))
+    return frozenset(found)
+
+
+def write_profile_recipes(
+    connection: Connection, profile_id: str, assignments: object
+) -> None:
+    """Replace one profile's projection with what its assignments name."""
+    recipes = profile_recipes(assignments)
+    connection.execute(
+        delete(FleetProfileRecipe).where(FleetProfileRecipe.profile_id == profile_id)
+    )
+    if recipes:
+        connection.execute(
+            insert(FleetProfileRecipe),
+            [
+                {"profile_id": profile_id, "publisher": publisher, "slug": slug}
+                for publisher, slug in sorted(recipes)
+            ],
+        )

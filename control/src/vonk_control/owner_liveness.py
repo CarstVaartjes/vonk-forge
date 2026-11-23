@@ -46,6 +46,7 @@ from vonk_agent_protocol.wire_model import canonical_message
 
 from . import agent_operation_states
 from .agent_contacts import last_seen
+from .agent_jobs.contracts import fencing_intent
 from .agent_operation_facts import attempt_holds_order
 from .fleet_profile_contract.applications import FleetProfileApplicationProgress
 from .fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
@@ -392,7 +393,6 @@ def _agent_attempt(session: Session, ref: OwnerRef, now: datetime | None) -> Own
     if now is None:
         return Owner(ref, True, "attempt is not judged", state=operation.state)
     node = session.get(AgentNode, operation.node_id)
-    from .agent_jobs.contracts import fencing_intent
 
     intent = fencing_intent(operation)
     superseded = (

@@ -47,6 +47,9 @@ from ..run_switch_contract.operations import (
 )
 from ..run_switch_contract.requests import RunSwitchStopApplyRequest
 from ..run_switch_journal_repair.discovery import is_zero_transfer_journal_fault
+from ..run_switch_journal_repair.observation import (
+    try_repair_zero_transfer_journal,
+)
 from ..run_switch_journal_repair.pending import record_repair_cancellation
 from ..stored.json_values import read_row_column
 from ..strict_json import (
@@ -101,9 +104,6 @@ class CancellationRetryMixin:
     ) -> RunSwitchOperation:
         """Stop at the next safe phase boundary, keeping shared immutable work."""
         service = typing_cast("RunSwitchOperationService", self)
-        from ..run_switch_journal_repair.observation import (
-            try_repair_zero_transfer_journal,
-        )
 
         stop_run_id: str | None = None
         profile_application_id: str | None = None

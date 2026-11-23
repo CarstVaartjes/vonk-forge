@@ -27,6 +27,7 @@ from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 from vonk_agent_protocol.wire_model import canonical_message
 
+from .agent_jobs.retry import abandon_idempotent_job_in_session
 from .failure_classification import is_security_failure
 from .inventory.items import inventory_items
 from .inventory.items_contract import PreflightInventoryItem
@@ -112,7 +113,6 @@ def end_unclaimed_probes(
     hold the Spark's claim lane for nobody. A claimed probe reports its own end.
     """
     # agent_jobs builds on the lifecycle core; import its writer at use.
-    from .agent_jobs.retry import abandon_idempotent_job_in_session
 
     for child_id in checkpoint.pending_jobs.values():
         abandon_idempotent_job_in_session(

@@ -75,7 +75,6 @@ def _lock_operation_scopes(
 
 
 def _lock_target_scopes(
-    cls: type[AgentJobService],
     session: Session,
     scopes: dict[str, tuple[str, tuple[str, ...]]],
     node_id: str,
@@ -151,6 +150,6 @@ def _lock_target_scopes(
     )
     return not any(
         parent_id not in parents
-        or cls._target_scope(column_value(parents[parent_id], "targets")) != scope
+        or _target_scope(column_value(parents[parent_id], "targets")) != scope
         for parent_id, scope in scopes.values()
     )

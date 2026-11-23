@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 import re
@@ -8,13 +7,10 @@ import threading
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select, text, update
 
-from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_control import build_identity
 
 from ..identity_insert import insert_identity
@@ -179,23 +175,6 @@ def _publisher(
         recorded[0] = serial
 
     return publish
-
-
-def current_worker_instance_id(proc_root: Path = Path("/proc"), pid: int = 1) -> str:
-    """Identify one Linux process lifetime without persistent mutable state."""
-    boot_id = (proc_root / "sys/kernel/random/boot_id").read_text().strip()
-    process_stat = (proc_root / str(pid) / "stat").read_text().strip()
-    closing_parenthesis = process_stat.rfind(")")
-    fields_after_name = process_stat[closing_parenthesis + 2 :].split()
-    if closing_parenthesis < 1 or len(fields_after_name) < 20:
-        raise UnknownOutcomeError(
-            "worker process identity is unavailable",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
-        )
-    start_ticks = fields_after_name[19]
-    pid_namespace = (proc_root / str(pid) / "ns/pid").stat().st_ino
-    material = f"{boot_id}\n{pid}\n{pid_namespace}\n{start_ticks}\n".encode()
-    return hashlib.sha256(material).hexdigest()
 
 
 class WorkerHeartbeatRecorder:

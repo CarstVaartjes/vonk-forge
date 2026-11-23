@@ -531,7 +531,7 @@ class AgentJobService:
         lock_nodes: bool = True,
     ) -> bool:
         return _lock_target_scopes(
-            cls, session, scopes, node_id, nowait=nowait, lock_nodes=lock_nodes
+            session, scopes, node_id, nowait=nowait, lock_nodes=lock_nodes
         )
 
     def heartbeat(

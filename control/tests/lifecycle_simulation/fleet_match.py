@@ -25,7 +25,7 @@ from vonk_control.fleet_profile_contract.review import FleetProfilePreview
 from vonk_control.models.execution import ACTIVE_RUN_STATES, RecipeRun, RunNode
 from vonk_control.models.fleet import FleetProfileApplication, FleetProfileSelection
 from vonk_control.models.jobs import Job
-from vonk_control.recipe_operations.rank_authority import _run_is_one_shot
+from vonk_control.recipe_operations.observation_helpers import _run_is_one_shot
 from vonk_control.run_readiness import run_not_ready_for_profile
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.phase_results import RunSwitchStartResult
