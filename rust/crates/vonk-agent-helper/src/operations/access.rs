@@ -184,7 +184,6 @@ pub(super) fn runtime_read_tree_acl_ready(
     Ok(ready)
 }
 
-#[expect(clippy::unwrap_used, reason = "the slice is exactly four bytes")]
 pub(super) fn exact_runtime_read_acl(
     path: &Path,
     metadata: &fs::Metadata,
@@ -193,7 +192,11 @@ pub(super) fn exact_runtime_read_acl(
     let Some(value) = xattr::get(path, "system.posix_acl_access")? else {
         return Ok(false);
     };
-    if value.len() != 44 || u32::from_le_bytes(value[..4].try_into().unwrap()) != 2 {
+    if value.len() != 44
+        || value
+            .first_chunk::<4>()
+            .is_none_or(|head| u32::from_le_bytes(*head) != 2)
+    {
         return Err(OperationError::InvalidArtifact);
     }
     let mut user_object = None;
@@ -235,7 +238,6 @@ pub(super) fn exact_runtime_read_acl(
     Ok(true)
 }
 
-#[expect(clippy::unwrap_used, reason = "the slice is exactly four bytes")]
 pub(super) fn exact_runtime_acl(path: &Path, runtime_uid: u32) -> bool {
     const ACL_VERSION: u32 = 0x0002;
     const USER_OBJ: u16 = 0x0001;
@@ -246,7 +248,10 @@ pub(super) fn exact_runtime_acl(path: &Path, runtime_uid: u32) -> bool {
     let Ok(Some(value)) = xattr::get(path, "system.posix_acl_access") else {
         return false;
     };
-    if value.len() < 4 || u32::from_le_bytes(value[..4].try_into().unwrap()) != ACL_VERSION {
+    if value
+        .first_chunk::<4>()
+        .is_none_or(|head| u32::from_le_bytes(*head) != ACL_VERSION)
+    {
         return false;
     }
     let entries = &value[4..];

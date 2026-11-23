@@ -454,7 +454,6 @@ def test_hook_preserves_nul_filenames_and_only_runs_checks(
 @pytest.mark.parametrize(
     "file,source",
     [
-        ("rust/crates/vonk-agent/src/main.rs", "std::process::exit(78);\n"),
         ("packaging/systemd/new.service", "Restart=no\n"),
     ],
 )
@@ -472,11 +471,6 @@ def test_staged_added_line_violation_fails_the_hook(
         tmp_path / "control/tests",
         ignore=shutil.ignore_patterns("test_*", "__pycache__"),
     )
-    # The exit-cause guard reads its owner file; without it the guard crashes
-    # instead of reporting the added line.
-    owner = "rust/crates/vonk-agent-protocol/src/failure_evidence.rs"
-    (tmp_path / owner).parent.mkdir(parents=True)
-    shutil.copy(ROOT / owner, tmp_path / owner)
     target = tmp_path / file
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(source)

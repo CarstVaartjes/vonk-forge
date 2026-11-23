@@ -173,7 +173,6 @@ pub(super) fn trusted_model_file(
     }
 }
 
-#[expect(clippy::unwrap_used, reason = "the slice is exactly four bytes")]
 pub(crate) fn exact_runtime_file_acl(file: &impl std::os::fd::AsFd) -> bool {
     const ACL_VERSION: u32 = 0x0002;
     const USER_OBJ: u16 = 0x0001;
@@ -185,7 +184,11 @@ pub(crate) fn exact_runtime_file_acl(file: &impl std::os::fd::AsFd) -> bool {
     let Ok(length) = rustix::fs::fgetxattr(file, "system.posix_acl_access", &mut value) else {
         return false;
     };
-    if length != value.len() || u32::from_le_bytes(value[..4].try_into().unwrap()) != ACL_VERSION {
+    if length != value.len()
+        || value
+            .first_chunk::<4>()
+            .is_none_or(|head| u32::from_le_bytes(*head) != ACL_VERSION)
+    {
         return false;
     }
     let mut user_object = false;
