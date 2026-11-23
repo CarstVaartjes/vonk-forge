@@ -87,7 +87,7 @@ from ..models.operations import AgentOperationAttempt
 from ..persisted_waits import lifecycle_wait
 from ..settings import DATABASE_WAIT_BUDGETS
 from ..stall_window import stall_deadline
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .adapter import Dispatch
 from .agent_operation import (
     JOB_RUN_OPERATION,

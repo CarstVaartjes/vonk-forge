@@ -37,7 +37,7 @@ from ..recipe_operations.start_payloads import (
     validate_distributed_start_timeout_seconds,
 )
 from ..stall_window import stall_deadline
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..stored.states import ClusterMappingState
 from ..strict_json import read_stored_model
 from .authority import (

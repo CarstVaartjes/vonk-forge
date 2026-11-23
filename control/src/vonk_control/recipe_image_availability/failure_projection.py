@@ -36,7 +36,7 @@ from ..operations.contract import (
 )
 from ..operations.progress import aggregate_progress
 from ..persisted_waits import read_wait, schedule_wait
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import serialize_json_value
 from .contracts import (
     _INTEGRITY_FAILURE_CODES,

@@ -50,7 +50,7 @@ from ..run_switch_operations.planning_helpers import (
     _run_switch_payload,
     _scope_intent_status,
 )
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 
 
 def _prove(

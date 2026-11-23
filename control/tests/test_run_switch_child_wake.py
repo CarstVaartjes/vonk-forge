@@ -30,7 +30,7 @@ from vonk_control.run_switch_operations.child_wake import CHILD_ROWS, ChildEndWa
 from vonk_control.run_switch_operations.planning_helpers import _aware
 from vonk_control.run_switch_operations.result_helpers import _read_progress
 from vonk_control.run_switch_operations.results import _persisted_result
-from vonk_control.stored.json_values import read_row_column
+from vonk_control.stored.rows import read_row_column
 
 from .recipe_operations_support import NOW, setup_services
 from .run_switch_operations_support import (

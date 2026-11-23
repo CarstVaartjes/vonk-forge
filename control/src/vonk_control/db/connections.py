@@ -25,7 +25,7 @@ from ..fleet_events import FleetEventRecorder
 from ..logging import redact_text
 from ..model_primitives import Base
 from ..settings import DATABASE_WAIT_BUDGETS
-from ..stored.json_values import install_write_guard
+from ..stored.rows import install_write_guard
 from .constants import (
     _ALEMBIC_CONFIG,
     _DATABASE_RETRYABLE_ERRORS,

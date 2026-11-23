@@ -53,7 +53,7 @@ from ..models.operations import AgentOperation
 from ..offline_stops import deferred_stop_nodes
 from ..persisted_waits import schedule_wait
 from ..recipe_builds.cancellation import build_cancellation
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..stored.states import RecipeBuildState
 from ..strict_json import read_stored_model, serialize_json_value
 from .constants import _INITIAL_OBSERVATION_GRACE_SECONDS, _WORKLOAD_INTENT_KINDS

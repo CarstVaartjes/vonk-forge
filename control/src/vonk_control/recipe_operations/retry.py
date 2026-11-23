@@ -34,7 +34,7 @@ from ..models.jobs import Job
 from ..models.operations import AgentOperation
 from ..recipe_builds.cancellation import build_cancellation
 from ..recipe_builds.common import RecipeBuildPlan
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import serialize_json_value
 from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .execution_contract import (

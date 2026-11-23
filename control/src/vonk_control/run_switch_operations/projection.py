@@ -22,7 +22,7 @@ from ..run_switch_journal_repair.discovery import (
     REPAIR_WAIT,
     is_zero_transfer_journal_fault,
 )
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .constants import _OPERATION_KIND_ADAPTER
 from .plan_persistence import _view_identity
 from .planning_helpers import _stored_job_plan

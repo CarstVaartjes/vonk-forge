@@ -59,7 +59,7 @@ from ..models.execution import (
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
 from ..owner_liveness import OwnerKind
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..stored.states import CatalogRevisionState, RecipeBuildState
 from ..strict_json import read_stored_model
 from .errors import RecipeRetryLater

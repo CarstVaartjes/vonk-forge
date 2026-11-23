@@ -53,7 +53,7 @@ from ..fleet_profile_contract.vocabulary import MAX_PROFILE_WARNINGS
 from ..lifecycle.evidence import Residue
 from ..models.execution import InstallationNode
 from ..models.fleet import FleetProfile, FleetProfileApplication, FleetProfileSelection
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .contracts import (
     FleetProfileReviewStale,
     FleetProfileStalePlanConflict,

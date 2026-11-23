@@ -65,7 +65,7 @@ from ..run_switch_contract.progress_view import (
 )
 from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
 from ..stall_window import Verdict, stall_deadline
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .artifact_validation import _validate_artifact_execution
 from .constants import (
     _ARTIFACT_WAIT_CODES,

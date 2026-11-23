@@ -48,7 +48,7 @@ from ..run_switch_operations.observation_helpers import (
     _phase_request_key,
     _stop_child_request_key,
 )
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import read_stored_model
 from .continuing_effects import (
     _adopted_application_scope,

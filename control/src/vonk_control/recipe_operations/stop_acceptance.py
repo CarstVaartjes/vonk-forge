@@ -44,7 +44,7 @@ from ..run_switch_operations.observation_helpers import (
     _phase_request_key,
     _stop_child_request_key,
 )
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .impact_plans import (
     StopPlan,

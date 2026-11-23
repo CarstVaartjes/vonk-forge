@@ -51,7 +51,7 @@ from ..run_switch_journal_repair.observation import (
     try_repair_zero_transfer_journal,
 )
 from ..run_switch_journal_repair.pending import record_repair_cancellation
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import (
     read_stored_model,
     serialize_json_value,

@@ -71,7 +71,7 @@ from ..lifecycle.evidence import (
 from ..models.catalog import CatalogDocument, CatalogDocumentRevision
 from ..models.execution import ArtifactJob, RunNode
 from ..models.jobs import Job
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..stored.states import CatalogRevisionState
 from ..strict_json import StrictJSONModel, read_stored_model
 from .blob_store import ArtifactBlobStoreError, BlobReconciliation

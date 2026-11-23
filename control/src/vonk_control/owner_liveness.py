@@ -77,7 +77,7 @@ from .models.jobs import Job
 from .models.operations import AgentOperation, AgentOperationAttempt
 from .models.operations import AgentOperation as StoredOperation
 from .stall_window import progress_deadline
-from .stored.json_values import read_row_column
+from .stored.rows import read_row_column
 from .stored.states import LibrarySyncRunState, RecipeBuildState
 from .strict_json import read_stored_model
 

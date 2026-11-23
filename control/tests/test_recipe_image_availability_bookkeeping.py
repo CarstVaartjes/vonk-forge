@@ -50,7 +50,7 @@ from vonk_control.recipe_image_availability.view_contract import (
 )
 from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_control.stored.json_values import read_row_column
+from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import serialize_json_value
 
 from .non_blocking import assert_ended_without_blocking

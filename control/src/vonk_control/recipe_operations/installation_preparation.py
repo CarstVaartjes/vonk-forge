@@ -45,7 +45,7 @@ from ..lifecycle.evidence import (
 )
 from ..models.execution import InstallationNode, RecipeInstallation
 from ..models.jobs import Job
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import serialize_json_value
 from .errors import RecipeRetryLater, retry_later_unless_deterministic
 from .execution_contract import (

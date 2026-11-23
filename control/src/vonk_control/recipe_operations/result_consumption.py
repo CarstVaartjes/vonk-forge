@@ -49,7 +49,7 @@ from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun, 
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
 from ..recipe_builds.cancellation import build_cancellation
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .constants import _WORKLOAD_INTENT_KINDS
 from .errors import RecipeRequestInvalid, RecipeRetryLater

@@ -63,7 +63,7 @@ from ..own_cleanup import CLEANUP_KINDS
 from ..run_admission import (
     RunAdmissionBusy,
 )
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import read_stored_model
 from ..workload_intent import allocate_workload_intent
 from .constants import _MANIFEST_BOUND_KINDS, _WORKLOAD_INTENT_KINDS

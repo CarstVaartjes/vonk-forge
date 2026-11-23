@@ -32,7 +32,7 @@ from ..models.cache import ArtifactLifecycleGate, ModelCacheOperation
 from ..models.catalog import CatalogDocumentRevision
 from ..models.jobs import Job
 from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import serialize_json_value
 from .contracts import (
     OPERATION_KIND,

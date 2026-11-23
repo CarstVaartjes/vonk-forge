@@ -52,7 +52,7 @@ from ..models.execution import RecipeRun, RunNode
 from ..models.jobs import Job
 from ..recipe_routes.shared import route_publication_transaction
 from ..run_admission import RunAdmissionBusy
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .contracts import RecipeOperationContext
 from .errors import (

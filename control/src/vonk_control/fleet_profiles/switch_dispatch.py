@@ -41,7 +41,7 @@ from ..run_switch_contract.requests import (
     RunSwitchStopApplyRequest,
     RunSwitchStopPreviewRequest,
 )
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .assessment_support import (
     _disk_shortfalls,
     _require_recovery_preparation,

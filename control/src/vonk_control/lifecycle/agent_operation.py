@@ -101,7 +101,7 @@ from ..operations.progress import progress_document
 from ..owner_liveness import order_recovery_deadline
 from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait
 from ..stall_window import stall_deadline
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .adapter import Dispatch
 from .core import transition
 from .evidence import keep_recorded_outcome

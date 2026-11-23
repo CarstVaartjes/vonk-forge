@@ -30,7 +30,7 @@ from ..run_switch_contract.operations import (
     RunSwitchOperationResult,
 )
 from ..run_switch_contract.progress_view import _observe_progress
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .constants import (
     _INSTALL_PREFLIGHT_REFRESH_REASON,
     _LOGGER,

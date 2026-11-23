@@ -21,7 +21,7 @@ from ..models.jobs import Job
 from ..recipe_builds.common import RecipeBuildAdmissionBusy
 from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_contract.plans import RunSwitchPlan
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .contracts import ScopeIntentStatus
 from .errors import RunSwitchRetryLater, _RunSwitchBuildParentChanged
 from .observation_helpers import _phase_request_key

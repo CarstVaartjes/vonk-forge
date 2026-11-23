@@ -29,7 +29,7 @@ from vonk_control.recipe_operations.observation_helpers import _run_is_one_shot
 from vonk_control.run_readiness import run_not_ready_for_profile
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.phase_results import RunSwitchStartResult
-from vonk_control.stored.json_values import read_row_column
+from vonk_control.stored.rows import read_row_column
 
 from .world import World
 

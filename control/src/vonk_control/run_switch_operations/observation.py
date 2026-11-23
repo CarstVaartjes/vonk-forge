@@ -27,7 +27,7 @@ from ..model_cache.service import ModelCacheService
 from ..models.jobs import Job
 from ..operations.blockers import bound_blockers
 from ..run_switch_journal_repair.discovery import is_zero_transfer_journal_fault
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .child_wake import ChildEndWake
 from .constants import _LOGGER, _OPERATION_KINDS
 from .errors import RunSwitchOperationConflict

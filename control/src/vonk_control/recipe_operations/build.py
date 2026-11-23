@@ -53,7 +53,7 @@ from ..prebuilt_images import policy_prebuilt_reference
 from ..recipe_builds.cancellation import build_cancellation, read_build_intent
 from ..recipe_builds.common import RecipeBuildAdmissionBusy, RecipeBuildPlan
 from ..source_policy import SourcePolicyReport
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..stored.states import RecipeBuildState
 from ..strict_json import serialize_json_value
 from .errors import RecipeRequestInvalid, RecipeRetryLater

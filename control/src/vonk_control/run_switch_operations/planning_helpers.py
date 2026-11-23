@@ -54,7 +54,7 @@ from ..run_switch_contract.vocabulary import (
     RunSwitchReasonScope,
     RunSwitchReasonSeverity,
 )
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .constants import (
     _CHANGE_EFFECTS_ADAPTER,
     _KNOBS_ADAPTER,

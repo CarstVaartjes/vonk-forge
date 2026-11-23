@@ -40,7 +40,7 @@ from ..runtime_image_preparation.contracts import RuntimeImagePreparationUnknown
 from ..runtime_image_preparation.contracts import (
     RuntimeImageReceipt as RuntimeImageReceiptDocument,
 )
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import (
     read_stored_model,
 )

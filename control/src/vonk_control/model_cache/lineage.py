@@ -33,7 +33,7 @@ from ..catalog.revision_contract import read_catalog_document
 from ..lifecycle.evidence import Residue, read_or_rebuild
 from ..models.cache import ModelCacheSet, ModelCacheSetArtifact
 from ..models.catalog import CatalogDocumentRevision
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .contract import CacheManifest
 
 

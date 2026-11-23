@@ -433,7 +433,7 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
     from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
     from vonk_control.run_switch_operations.result_helpers import _read_progress
     from vonk_control.run_switch_operations.results import _persisted_result
-    from vonk_control.stored.json_values import read_row_column
+    from vonk_control.stored.rows import read_row_column
 
     # A transient receipt fault leaves a retry checkpoint on the reusable Stop.
     # The generic parent observer must not retire its accepted effect merely

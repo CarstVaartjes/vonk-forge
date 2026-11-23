@@ -26,7 +26,8 @@ from vonk_control.bounded_json import require_mapping
 from vonk_control.catalog import revision_contract as contract
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
-from vonk_control.stored.json_values import install_write_guard, write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
+from vonk_control.stored.rows import install_write_guard
 
 from . import metadata_type_snapshot
 from .agent_api_support import (  # noqa: F401 - pytest fixtures

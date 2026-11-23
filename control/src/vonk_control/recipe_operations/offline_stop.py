@@ -42,7 +42,7 @@ from ..models.operations import AgentOperation
 from ..offline_stops import deferred_stop_nodes
 from ..owner_liveness import OwnerKind
 from ..persisted_waits import schedule_wait
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import serialize_json_value
 from .intent import _bound_workload_intent
 from .interfaces import _TERMINAL_JOB_STATES, UndispatchedStopView
