@@ -42,6 +42,7 @@ export function MemoryIngot({
   const level = warn ? memoryLevel(memory.freeBytes) : "ok";
   return (
     <div className="memory-ingot">
+      {/* biome-ignore lint/a11y/useSemanticElements: a styled bar; a native meter element cannot take this styling */}
       <div
         className={`ingot ingot-${size}`}
         role="meter"

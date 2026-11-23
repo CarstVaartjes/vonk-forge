@@ -48,6 +48,7 @@ export function validateControlBody(
   return validator.normalize(value);
 }
 export function validateComponent(name: string, text: string): unknown {
+  // biome-ignore lint/performance/noDynamicNamespaceImportAccess: the validator is looked up by the schema name the response names
   const validator = generated[`component${name}` as keyof typeof generated];
   const value = parseContractJson(text);
   if (typeof validator !== "function" || !validator(value))

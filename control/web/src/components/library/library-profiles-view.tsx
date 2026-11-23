@@ -456,6 +456,7 @@ function ProfileReview({ preview }: { preview: FleetProfilePreview }) {
         </dl>
         <ul>
           {(preview.resolved_assignments ?? []).map((assignment, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: a read-only preview list without ids
             <li key={index}>
               <strong>{assignment.recipe_title}</strong> ·{" "}
               <code>
@@ -1096,8 +1097,10 @@ export function LibraryProfilesView({
                 </div>
                 <span>{availableFleet.length} Sparks</span>
               </div>
+              {/* biome-ignore lint/a11y/useSemanticElements: a div list keeps the profile scope layout; ul would need a style reset */}
               <div className="library-profile-scope-list" role="list" aria-label="Enrolled Sparks">
                 {availableFleet.map((item) => (
+                  // biome-ignore lint/a11y/useSemanticElements: a div list keeps the profile scope layout; li would need a style reset
                   <div key={item.id} role="listitem">
                     <strong>{item.name}</strong>
                     <small>{item.state}</small>

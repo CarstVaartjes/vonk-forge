@@ -113,6 +113,7 @@ export function AreaChart({
           viewBox={`0 0 ${W} ${H}`}
           role="img"
           aria-label={label}
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users step the cursor along the chart with the arrow keys
           tabIndex={0}
           onPointerMove={move}
           onPointerLeave={() => setCursorTime(null)}

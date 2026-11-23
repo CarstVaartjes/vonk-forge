@@ -122,6 +122,7 @@ export function LibraryModelsView({
         onFiltersChange={(next) => updateFilters(next)}
         onQueryChange={onQueryChange}
       />
+      {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: the label is the handle the tests and e2e find this block by */}
       <div className="library-model-list" aria-label="Model library">
         {[...groups].slice(0, limit).map(([key, revisions]) => (
           <ModelRevisionsRow

@@ -122,6 +122,7 @@ export function AdminMenu({
         </span>
       </button>
       {menuOpen && (
+        // biome-ignore lint/a11y/useSemanticElements: role=group names a styled wrapper; fieldset would need a user-agent style reset
         <div
           ref={menu}
           id={menuId}

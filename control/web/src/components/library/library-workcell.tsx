@@ -599,7 +599,7 @@ export function LibraryWorkcell({
       <div className="library-workcell-toolbar">
         <LibraryRecipeUpdateAction api={api} onUpdated={refresh} />
       </div>
-      <div className="library-paired-list" aria-label="Model and recipe list">
+      <div className="library-paired-list">
         <div className="library-paired-heading">
           <span>
             Models · {models.length} of {totalModels}
@@ -607,6 +607,7 @@ export function LibraryWorkcell({
           <span>Recipes for selected Model · {selectedRecipes.length}</span>
         </div>
         <div className="library-paired-panes">
+          {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: the label is the handle the tests and e2e find this block by */}
           <div className="library-model-pane" aria-label="Models">
             <ul>
               {models.slice(0, limit).map((model) => (
@@ -649,6 +650,7 @@ export function LibraryWorkcell({
               />
             )}
           </div>
+          {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: the label is the handle the tests and e2e find this block by */}
           <div
             className="library-recipe-pane"
             aria-label="Recipes matching selected Model"

@@ -125,6 +125,7 @@ export function CacheRemovalProgress({
   }
 
   return (
+    // biome-ignore lint/a11y/useAriaPropsSupportedByRole: the label is the handle the tests and e2e find this block by
     <div className="library-cache-action" aria-label="Cache removal progress">
       <CacheRemovalReviewDetails review={intent.review} />
       {receipt ? (

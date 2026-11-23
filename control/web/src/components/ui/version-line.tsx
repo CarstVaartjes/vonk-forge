@@ -40,6 +40,7 @@ export function VersionLine({
   const syncedAt = sync && lastSyncAt(sync);
   const stamp = syncedAt ? utcTime(syncedAt) : null;
   return (
+    // biome-ignore lint/a11y/useAriaPropsSupportedByRole: the label is the handle the tests and e2e find this block by
     <footer className="version-line" aria-label="Versions">
       <span>Controller build: {build ? <code>{build.slice(0, 12)}</code> : NOT_REPORTED_TEXT}</span>
       <span>Library version: {sync?.library_version ?? NOT_REPORTED_TEXT}</span>

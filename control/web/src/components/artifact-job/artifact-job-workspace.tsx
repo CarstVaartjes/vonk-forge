@@ -279,9 +279,11 @@ function OutputPreview({
         <img src={url} alt={`Generated output ${file.name}`} loading="lazy" />
       )}
       {file.media_type.startsWith("audio/") && (
+        // biome-ignore lint/a11y/useMediaCaption: a produced file has no caption track to offer
         <audio controls preload="metadata" aria-label={`Listen to ${label}`} src={url} />
       )}
       {file.media_type.startsWith("video/") && (
+        // biome-ignore lint/a11y/useMediaCaption: a produced file has no caption track to offer
         <video controls preload="metadata" aria-label={`Watch ${label}`} src={url} />
       )}
       {(file.media_type === "model/gltf-binary" || file.name.toLowerCase().endsWith(".glb")) && (
@@ -1251,6 +1253,7 @@ export function ArtifactJobWorkspace({
                 onChange={(event) => setInterfaceIndex(Number(event.target.value))}
               >
                 {jobInterfaces.map((item, index) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: interfaces are keyed by position: the select value is the index
                   <option value={index} key={`${item.adapter}:${index}`}>
                     {humanizeIdentifier(item.adapter)} · {item.input?.slots?.length ?? 0} bounded
                     slot{item.input?.slots?.length === 1 ? "" : "s"}

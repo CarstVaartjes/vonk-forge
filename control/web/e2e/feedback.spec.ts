@@ -12,6 +12,7 @@ const key = {
 async function openKeys(page: Page) {
   let revoked = false;
   await page.addInitScript(() => {
+    // biome-ignore lint/suspicious/noDocumentCookie: the page's own CSRF cookie is set before any script runs; the async cookie store is not there yet
     document.cookie = "vonk_csrf=e2e-csrf; Path=/; SameSite=Strict";
   });
   await page.route("**/api/auth/session", (route) =>

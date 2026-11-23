@@ -159,6 +159,7 @@ export function LibraryAvailabilityFeedback({
       {failure.recovery.length > 0 && (
         <ul aria-label="Recovery steps">
           {failure.recovery.map((step, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: the same step text can repeat; the position tells the copies apart
             <li key={`${index}-${step}`}>
               {step}
               {failure.recoveryCodes[index] === "open_model_access" && modelAccessUrl && (
