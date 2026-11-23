@@ -188,8 +188,11 @@ class LibraryRecipeSummary(LibraryRecipeIdentity):
     reasons: list[LibraryProjectionReason] = Field(max_length=16)
 
 
-ModelCacheOperatorAction = Literal[
-    CacheOperationKind.DOWNLOAD, CacheOperationKind.REMOVE
+LibraryCacheAction = Literal[
+    CacheOperationKind.DOWNLOAD,
+    CacheOperationKind.REMOVE,
+    CacheOperationKind.CANCEL,
+    CacheOperationKind.FOLLOW,
 ]
 
 
@@ -243,33 +246,54 @@ class LibraryResourceProjection(StrictModel):
     image_bytes: int | None = Field(default=None, ge=0)
 
 
-def model_actions(
-    local: LibraryLocalState, usage: ModelCacheUsage | None
-) -> list[ModelCacheOperatorAction]:
-    """What can apply to a model now, from its exact cache state and held files.
+def cache_actions(local: LibraryLocalState, *, held: bool) -> list[LibraryCacheAction]:
+    """What an operator can do with a cache entry now: the one rule for models
+    and recipes, shared by the web UI and vonkctl.
 
-    Nothing while a preparation runs or the state is unknown. Otherwise the
-    model is cached (remove), absent (download) or partial or stale (both).
+    Nothing while the state is unknown. While a preparation is live it can be
+    followed and cancelled. Otherwise the entry is cached (remove), absent
+    (download) or partial or stale (both).
     """
     progress = local.preparation
-    if (
-        local.controller == LibraryCacheState.UNKNOWN
-        or progress is not None
-        and progress.state in model_cache_states.LIVE
-    ):
+    if local.controller == LibraryCacheState.UNKNOWN:
         return []
-    held = (
-        local.controller == LibraryCacheState.CACHED
-        or bool(local.running_on)
-        or local.installed_on_sparks
-        or (usage is not None and usage.unique_bytes + usage.shared_bytes > 0)
-    )
-    actions: list[ModelCacheOperatorAction] = []
+    if progress is not None and progress.state in model_cache_states.LIVE:
+        if progress.operation_id is None:
+            return []
+        return [CacheOperationKind.CANCEL, CacheOperationKind.FOLLOW]
+    actions: list[LibraryCacheAction] = []
     if local.controller != LibraryCacheState.CACHED:
         actions.append(CacheOperationKind.DOWNLOAD)
     if held:
         actions.append(CacheOperationKind.REMOVE)
     return actions
+
+
+def model_actions(
+    local: LibraryLocalState, usage: ModelCacheUsage | None
+) -> list[LibraryCacheAction]:
+    """A model's files are held when cached, served, installed or counted in use."""
+    return cache_actions(
+        local,
+        held=(
+            local.controller == LibraryCacheState.CACHED
+            or bool(local.running_on)
+            or local.installed_on_sparks
+            or (usage is not None and usage.unique_bytes + usage.shared_bytes > 0)
+        ),
+    )
+
+
+def recipe_actions(local: LibraryLocalState) -> list[LibraryCacheAction]:
+    """A recipe's files are held when cached or partial, served or installed."""
+    return cache_actions(
+        local,
+        held=(
+            local.controller in (LibraryCacheState.CACHED, LibraryCacheState.FAILED)
+            or bool(local.running_on)
+            or local.installed_on_sparks
+        ),
+    )
 
 
 class LibraryModelProjection(StrictModel):
@@ -294,9 +318,9 @@ class LibraryModelProjection(StrictModel):
     local: LibraryLocalState
     #: The one rule for what an operator can do with this model's files, shared
     #: by the web UI and vonkctl: download when the exact revision is not fully
-    #: cached, remove when any of the lineage's files are held. Empty while a
-    #: preparation is in progress or the cache state is unknown.
-    actions: list[ModelCacheOperatorAction] = Field(max_length=2)
+    #: cached, remove when any of the lineage's files are held, and follow or
+    #: cancel while a preparation is live. Empty while the cache state is unknown.
+    actions: list[LibraryCacheAction] = Field(max_length=4)
     updated_at: datetime
     # Alignment is declared by the recipes that serve this model, so a model
     # used by both a standard and an abliterated recipe reports both.
@@ -397,6 +421,8 @@ class LibraryRecipeProjection(StrictModel):
     usage: list[Text64] = Field(max_length=64)
     resources: LibraryResourceProjection
     local: LibraryLocalState
+    #: The same rule as a model's, from the recipe's own cache state.
+    actions: list[LibraryCacheAction] = Field(max_length=4)
     updated_at: datetime
     alignment: Text64 | None = None
     node_count: int = Field(ge=1)

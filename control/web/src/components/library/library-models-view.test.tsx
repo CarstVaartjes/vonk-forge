@@ -143,6 +143,50 @@ test("prepares the Controller cache for an uncached model", async () => {
   expect(requestKey).toMatch(/^[0-9a-f-]{36}$/);
 });
 
+test("a model the Controller reports as preparing shows real progress and Cancel after a reload", async () => {
+  const cancelModelOperation = vi.fn().mockResolvedValue({ state: "cancelled" });
+  const operation = "11111111-1111-4111-8111-111111111111";
+  const [first] = libraryViewSnapshot.models;
+  const preparing = {
+    ...first!,
+    local: {
+      controller: "preparing" as const,
+      running_on: [],
+      preparation: {
+        operation_id: operation,
+        state: "running" as const,
+        phase: "downloading",
+        completed_bytes: 256,
+        total_bytes: 1024,
+        blockers: [],
+      },
+    },
+    actions: [CacheOperationKind.CANCEL, CacheOperationKind.FOLLOW],
+  };
+  render(
+    <LibraryModelsView
+      api={{ cancelModelOperation } as unknown as ControlApi}
+      entries={[]}
+      modelInventory={[preparing]}
+      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+      onFiltersChange={() => undefined}
+      onNavigate={() => undefined}
+      onQueryChange={() => undefined}
+      onRefresh={async () => undefined}
+      path="/library?view=models"
+      query=""
+    />,
+  );
+  // Bytes and a percentage from the Controller, never a bare "queued".
+  expect(screen.getByRole("status")).toHaveTextContent("25%");
+  expect(screen.queryByText("queued")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel model download" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Confirm cancel model download/ }));
+  await waitFor(() =>
+    expect(cancelModelOperation).toHaveBeenCalledWith(operation, expect.any(String)),
+  );
+});
+
 test("offers the same model filters as vonkctl model library", () => {
   renderModels();
   fireEvent.click(screen.getByText("Filters"));

@@ -9,10 +9,10 @@ from typing import Any
 from urllib.parse import quote
 
 from ..cli_states_generated import (
+    ACTION_CANCEL,
     ACTION_DOWNLOAD,
+    ACTION_FOLLOW,
     ACTION_REMOVE,
-    CACHE_FAILED,
-    CACHE_NOT_CACHED,
     LIVE_LIFECYCLE_STATES,
     UNKNOWN,
     QualificationOutcome,
@@ -175,26 +175,26 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
         _field("Preparation", preparation.get("state"))
         _field("Progress", progress_line({"progress": preparation}))
         _waiting(preparation)
-        if preparation.get("operation_id"):
+    # The Controller decides which actions apply; the web UI reads the same field.
+    # A preparation is a model-cache operation for a model and for a recipe alike.
+    actions = item.get("actions")
+    if not isinstance(actions, list):
+        raise ControlMalformedResponse("actions observation is unavailable")
+    operation = preparation.get("operation_id")
+    if operation:
+        if ACTION_FOLLOW in actions:
             _field(
-                "Next",
-                f"vonkctl {noun} progress {shlex.quote(str(preparation['operation_id']))} --follow",
+                "Next", f"vonkctl model progress {shlex.quote(str(operation))} --follow"
             )
-    if noun == LibraryNoun.MODEL and isinstance(selector, str):
-        # The Controller decides which actions apply; the web UI reads the same field.
-        actions = item.get("actions")
-        if not isinstance(actions, list):
-            raise ControlMalformedResponse("actions observation is unavailable")
+        if ACTION_CANCEL in actions:
+            _field(
+                "Cancel", f"vonkctl model cancel {shlex.quote(str(operation))} --yes"
+            )
+    if isinstance(selector, str):
         if ACTION_DOWNLOAD in actions:
-            _field("Next", f"vonkctl model download {shlex.quote(selector)}")
+            _field("Next", f"vonkctl {noun} download {shlex.quote(selector)}")
         if ACTION_REMOVE in actions:
-            _field("Remove", f"vonkctl model remove {shlex.quote(selector)} --fleet")
-    elif (
-        not preparation
-        and local.get("controller") in {CACHE_NOT_CACHED, CACHE_FAILED}
-        and isinstance(selector, str)
-    ):
-        _field("Next", f"vonkctl {noun} download {shlex.quote(selector)}")
+            _field("Remove", _remove_command(noun, selector))
     if local.get("controller") == UNKNOWN:
         print(
             "Cache availability is unknown; inspect the Controller before preparing assets."
@@ -213,6 +213,13 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
         else:
             _field("Variant", item.get("variant"))
             _field("Quantization", item.get("quantization"))
+
+
+def _remove_command(noun: str, selector: str) -> str:
+    quoted = shlex.quote(selector)
+    if noun == LibraryNoun.MODEL:
+        return f"vonkctl model remove {quoted} --fleet"
+    return f"vonkctl recipe remove {quoted} --review"
 
 
 def _cache_word(value: object) -> str:
@@ -507,10 +514,13 @@ def _library(
                 _object(item.get("local"), "local").get("preparation"), "preparation"
             )
             operation = preparation.get("operation_id")
-            if preparation.get("state") in LIVE_LIFECYCLE_STATES and operation:
+            actions = item.get("actions")
+            if not isinstance(actions, list):
+                raise ControlMalformedResponse("actions observation is unavailable")
+            if operation and ACTION_FOLLOW in actions:
                 _field(
                     "Follow",
-                    f"vonkctl {noun} progress {shlex.quote(str(operation))} --follow",
+                    f"vonkctl model progress {shlex.quote(str(operation))} --follow",
                 )
     print()
     if isinstance(cursor, str):

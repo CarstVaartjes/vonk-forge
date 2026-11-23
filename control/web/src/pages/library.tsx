@@ -69,6 +69,8 @@ function viewRecipe(recipe: RecipeLibrary["recipes"][number]): LibraryViewRecipe
     model_selectors: recipe.model_selectors,
     assessment: recipe.assessment,
     qualification: recipe.qualification,
+    local: recipe.local,
+    actions: recipe.actions,
   };
 }
 
@@ -181,6 +183,8 @@ function viewRecipeDetail(detail: RecipeDetail): LibraryViewRecipeDetail {
     creator: detail.creator,
     assessment: detail.assessment,
     qualification: detail.qualification,
+    local: detail.local,
+    actions: detail.actions,
   };
   return {
     generated_at: detail.updated_at,

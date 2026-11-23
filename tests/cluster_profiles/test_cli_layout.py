@@ -456,3 +456,29 @@ def test_a_cached_model_with_a_succeeded_preparation_still_hints_remove(printed)
     )
     assert any("vonkctl model remove p/m" in line for line in lines)
     assert not any("vonkctl model download" in line for line in lines)
+
+
+@pytest.mark.parametrize("noun", ["model", "recipe"])
+def test_a_live_preparation_is_followed_and_cancelled_through_the_model_operation(
+    printed, noun
+):
+    """A recipe's preparation is a model-cache operation too, so both nouns name it."""
+
+    operation = "11111111-1111-4111-8111-111111111111"
+    live = {"state": "running", "phase": "downloading", "operation_id": operation}
+    item = _model_item("preparing", ["cancel", "follow"], live)
+    lines = printed(_library_item, item, noun, detail=False)
+    assert any(f"vonkctl model progress {operation} --follow" in l for l in lines)
+    assert any(f"vonkctl model cancel {operation} --yes" in l for l in lines)
+    assert not any(f"vonkctl {noun} download" in line for line in lines)
+
+
+def test_a_recipe_offers_the_actions_the_controller_lists(printed):
+    lines = printed(
+        _library_item, _model_item("cached", ["remove"]), "recipe", detail=False
+    )
+    assert any("vonkctl recipe remove p/m" in line for line in lines)
+    lines = printed(
+        _library_item, _model_item("not_cached", ["download"]), "recipe", detail=False
+    )
+    assert any("vonkctl recipe download p/m" in line for line in lines)

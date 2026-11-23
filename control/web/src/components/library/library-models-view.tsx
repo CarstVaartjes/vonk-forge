@@ -193,6 +193,8 @@ function ModelRevisionsRow({
   // One rule, decided by the Controller: download or remove, never a button that cannot apply.
   const actions = model.actions;
   const downloadable = actions.includes(CacheOperationKind.DOWNLOAD);
+  // A live preparation the Controller reports: its progress and Cancel come from here, not from this page's memory.
+  const cancellable = actions.includes(CacheOperationKind.CANCEL);
   // An idle partial set reads as preparing but can be resumed; only a live preparation cannot.
   const downloadState =
     downloadable && model.local.controller === LibraryCacheState.PREPARING
@@ -255,7 +257,9 @@ function ModelRevisionsRow({
           </label>
         )}
         <div className="library-model-actions">
-          {(downloadable || model.local.controller === LibraryCacheState.PREPARING) && (
+          {(downloadable ||
+            cancellable ||
+            model.local.controller === LibraryCacheState.PREPARING) && (
             <LibraryCacheAction
               key={key}
               api={api}
@@ -263,6 +267,7 @@ function ModelRevisionsRow({
               selector={`${model.model.publisher}/${model.model.slug}`}
               modelContentSha256={model.model.content_sha256}
               state={downloadState}
+              preparation={cancellable ? preparation : undefined}
             />
           )}
           {actions.includes(CacheOperationKind.REMOVE) && (
@@ -277,9 +282,6 @@ function ModelRevisionsRow({
             />
           )}
         </div>
-        {model.local.controller === "preparing" && preparation && (
-          <span role="status">{preparation.phase ?? preparation.state}</span>
-        )}
       </div>
       <dl>
         <div>

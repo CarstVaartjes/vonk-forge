@@ -93,6 +93,9 @@ export type LibraryViewRecipe = {
   assessment?: components["schemas"]["RecipeReadiness"] | null;
   // Informative only: null means not yet verified, and nothing gates on it.
   qualification?: RecipeQualification | null;
+  // The recipe's own cache state and what the Controller says can be done with it.
+  local: components["schemas"]["LibraryLocalState"];
+  actions: components["schemas"]["LibraryRecipeProjection"]["actions"];
   installations?: unknown[];
   runs?: unknown[];
   installation_returned_count?: WireNumber;
