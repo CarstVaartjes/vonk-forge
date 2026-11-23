@@ -10,6 +10,7 @@ import {
   type CacheRemovalReceipt,
 } from "./cache-removal-operations";
 import { failureNotice } from "../../lib/error-display";
+import { phaseWords } from "../../lib/phase-words";
 import { useToast } from "../ui/toast";
 import { CacheRemovalReviewDetails } from "./cache-removal-review";
 
@@ -142,7 +143,7 @@ export function CacheRemovalProgress({
       {receipt && "fleet" in receipt && receipt.fleet && (
         <p>Fleet removal deadline: {receipt.fleet.deadline_at}</p>
       )}
-      {receipt?.progress?.phase && <p>{receipt.progress.phase}</p>}
+      {receipt?.progress?.phase && <p>{phaseWords(receipt.progress.phase)}</p>}
       {receipt?.failure && (
         <p role="alert">
           {receipt.failure.code}: {receipt.failure.detail}

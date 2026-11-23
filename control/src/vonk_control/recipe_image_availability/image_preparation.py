@@ -354,6 +354,7 @@ def _set_progress(
     total_bytes: int | None = None,
     completed_bytes: int = 0,
     bytes_per_second: float | None = None,
+    smoothed_bytes_per_second: float | None = None,
     eta_seconds: float | None = None,
     detail: OperationProgress | None = None,
 ) -> None:
@@ -362,6 +363,7 @@ def _set_progress(
         total_bytes=total_bytes,
         completed_bytes=completed_bytes,
         bytes_per_second=bytes_per_second,
+        smoothed_bytes_per_second=smoothed_bytes_per_second,
         eta_seconds=eta_seconds,
     )
     payload = self._payload(operation)
@@ -405,6 +407,9 @@ def _update_progress(
             total_bytes=total_bytes,
             completed_bytes=max(previous.completed_bytes, completed_bytes),
             bytes_per_second=detail.bytes_per_second if detail else None,
+            smoothed_bytes_per_second=(
+                detail.smoothed_bytes_per_second if detail else None
+            ),
             eta_seconds=detail.eta_seconds if detail else None,
         )
         operation.updated_at = now

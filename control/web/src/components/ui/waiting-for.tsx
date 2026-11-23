@@ -1,5 +1,6 @@
 import type { OperationBlocker } from "../../api/types";
 import { swapShortfallText } from "../../lib/fleet";
+import { waitWords } from "../../lib/phase-words";
 import { Time } from "./time";
 
 type Blocker = Pick<OperationBlocker, "code" | "detail"> &
@@ -9,11 +10,14 @@ type Blocker = Pick<OperationBlocker, "code" | "detail"> &
 export function WaitingFor({
   blockers,
   nextAttemptAt,
+  phase,
   dependencyDeadline,
   resumeCondition,
 }: {
   blockers?: readonly Blocker[] | null | undefined;
   nextAttemptAt?: string | null | undefined;
+  /** The step the work is at: a pending dependency reads as this step. */
+  phase?: string | undefined;
   /** `dependency_deadline` of the wait contract, shown as received. */
   dependencyDeadline?: string | null | undefined;
   /** `resume_condition` of the wait contract, shown as received. */
@@ -24,7 +28,7 @@ export function WaitingFor({
     <ul className="waiting-for" aria-label="Waiting for">
       {(blockers ?? []).map((item) => (
         <li key={`${item.code}:${(item.node_ids ?? []).join(",")}`}>
-          <strong>{item.code}</strong> {item.detail}
+          <strong>{waitWords(item.code, phase)}</strong> {item.detail}
           {item.node_ids?.length ? <small> · {item.node_ids.join(", ")}</small> : null}
           {item.swap ? (
             <small className="waiting-for-swap"> {swapShortfallText(item.swap)}</small>

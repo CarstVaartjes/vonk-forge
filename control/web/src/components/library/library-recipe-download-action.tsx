@@ -3,6 +3,7 @@ import { ContractViolation } from "../../api/errors";
 import { LifecycleState, TERMINAL_LIFECYCLE_STATES } from "../../api/vocabulary.generated";
 import type { ControlApi, RecipeImageAvailabilityResponse } from "../../api/types";
 import { failureNotice } from "../../lib/error-display";
+import { phaseWords } from "../../lib/phase-words";
 import { CancelOperation } from "../ui/cancel-operation";
 import { useOperationObserver } from "../../hooks/use-operation-observer";
 import { ObservationNotice } from "../ui/observation-notice";
@@ -21,8 +22,8 @@ function progressLabel(response: RecipeImageAvailabilityResponse): string {
     (child) => child.state !== LifecycleState.SUCCEEDED,
   ).length;
   if (pending > 0)
-    return `${response.progress.phase} · ${pending} model cache child${pending === 1 ? "" : "ren"}`;
-  return response.progress.phase;
+    return `${phaseWords(response.progress.phase)} · ${pending} model cache child${pending === 1 ? "" : "ren"}`;
+  return phaseWords(response.progress.phase);
 }
 
 /**
@@ -138,7 +139,11 @@ export function LibraryRecipeDownloadAction({
         />
       )}
       {running && operation && (
-        <WaitingFor blockers={operation.blockers} nextAttemptAt={operation.next_attempt_at} />
+        <WaitingFor
+          blockers={operation.blockers}
+          nextAttemptAt={operation.next_attempt_at}
+          phase={operation.progress?.phase}
+        />
       )}
       {running && operation && (
         <CancelOperation

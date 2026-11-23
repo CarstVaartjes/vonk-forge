@@ -52,3 +52,16 @@
 .activity-job-steps li > div > strong {
   overflow-wrap: anywhere;
 }
+.library-availability-progress-members {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0 0 0 0.75rem;
+  list-style: none;
+  border-left: 2px solid var(--line-control);
+}
+.library-availability-progress-member {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}

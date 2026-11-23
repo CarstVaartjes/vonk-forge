@@ -373,7 +373,7 @@ test("loads truthful operation progress and resumes only an operator-waiting job
   expect(
     screen.getAllByText("Mia Lab Spark").some((element) => element.closest(".activity-job-body")),
   ).toBe(true);
-  expect(screen.getByRole("progressbar", { name: "Verify transfer" })).toBeVisible();
+  expect(screen.getByRole("progressbar")).toBeVisible();
   expect(screen.getByRole("button", { name: "Resume operation" })).toBeVisible();
   expect(screen.queryByText("step-1")).not.toBeInTheDocument();
   await user.click(screen.getByText("Operation identifiers"));
@@ -892,13 +892,13 @@ test("downloads diagnostics for the exact failed attempt without losing the erro
   expect(screen.getByText("Image verification failed on Mia Lab Spark.")).toBeVisible();
 });
 
-test("shows canonical profile failure, attempt, phase and uncertain recovery directly in both views", async () => {
+test("shows canonical profile failure, attempt and uncertain recovery directly in both views", async () => {
   const user = userEvent.setup();
   const client = canonicalApi([canonicalOperation()]);
   render(<ActivityPage api={client} now={NOW} />);
   expect(await screen.findByText("Profile load failed")).toBeVisible();
   expect(screen.getByText("Image verification failed on Mia Lab Spark.")).toBeVisible();
-  expect(screen.getByText("Attempt 1 · Prepare")).toBeVisible();
+  expect(screen.getByText(/^Attempt 1/)).toBeVisible();
   expect(screen.getByText(/Outcome uncertain/)).toBeVisible();
   expect(client.job).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "Table" }));

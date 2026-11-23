@@ -1,7 +1,7 @@
 """The one place that turns a phase or a wait into plain words for a person.
 
-The follow view, the one-shot view and every progress line use these; nothing
-else spells a phase.
+The follow view, the one-shot view and every progress line use these; the words
+themselves come from the generated vocabulary, shared with the web.
 """
 
 from __future__ import annotations
@@ -10,64 +10,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from ..cli_states_generated import (
+    PHASE_WORDS,
     WAIT_DEPENDENCY_PENDING,
     WAIT_SPARK_BUSY,
-    ProfileChildPhase,
-    ProfileReportedPhase,
-    ProgressPhase,
+    WAIT_WORDS,
 )
-
-_COPYING = "Copying model files to the Sparks"
-_DOWNLOADING = "Downloading the model"
-_IMAGE = "Downloading the container image"
-_BUILDING = "Building the container image"
-_INSTALLING = "Installing the runtime"
-_STARTING = "Starting on the Sparks"
-_VERIFYING = "Checking the result"
-_PREPARING = "Preparing the load"
-_STOPPING = "Stopping the running workload"
-_CLEANING = "Cleaning up"
-_QUEUED = "Waiting in the queue"
-_REMOVING = "Removing the old install"
-
-#: One word table for every client view; keyed by the contract's phase words.
-PHASE_WORDS: dict[str, str] = {
-    ProgressPhase.TRANSFER: _COPYING,
-    ProgressPhase.COPYING: _COPYING,
-    ProfileChildPhase.TARGET_COPY: _COPYING,
-    ProgressPhase.UPLOADING: "Uploading files",
-    ProgressPhase.DOWNLOADING: _DOWNLOADING,
-    ProgressPhase.MODEL_DOWNLOAD: _DOWNLOADING,
-    ProfileChildPhase.CONTAINER_DOWNLOAD: _IMAGE,
-    ProgressPhase.PULLING: _IMAGE,
-    ProfileChildPhase.CONTAINER_BUILD: _BUILDING,
-    ProgressPhase.BUILDING: _BUILDING,
-    ProfileChildPhase.RUNTIME_INSTALL: _INSTALLING,
-    ProgressPhase.INSTALLING: _INSTALLING,
-    ProgressPhase.RECONCILING_INSTALLATION: "Checking the installation",
-    ProfileChildPhase.START: _STARTING,
-    ProgressPhase.STARTING: _STARTING,
-    ProfileChildPhase.FINAL_VERIFY: _VERIFYING,
-    ProfileReportedPhase.FINAL_VERIFY: _VERIFYING,
-    ProfileChildPhase.VERIFY: _VERIFYING,
-    ProgressPhase.VERIFYING: _VERIFYING,
-    ProfileChildPhase.PREPARE: _PREPARING,
-    ProgressPhase.PREPARING: _PREPARING,
-    ProgressPhase.FINALIZING: "Finishing up",
-    ProfileChildPhase.STOP: _STOPPING,
-    ProgressPhase.STOPPING: _STOPPING,
-    ProfileChildPhase.UNINSTALL: _REMOVING,
-    ProgressPhase.UNINSTALLING: _REMOVING,
-    ProfileChildPhase.CLEANUP: _CLEANING,
-    ProgressPhase.RECLAIMING: _CLEANING,
-    ProgressPhase.QUEUED: _QUEUED,
-    ProgressPhase.PENDING: _QUEUED,
-    ProgressPhase.WAITING: _QUEUED,
-    ProgressPhase.UPDATING: "Updating",
-    ProgressPhase.EXECUTING: "Working",
-    ProgressPhase.COMPLETED: "Finished",
-    ProgressPhase.FAILED: "Failed",
-}
 
 
 def phase_words(phase: str) -> str:
@@ -166,7 +113,7 @@ def wait_words(observed: object, blocker: object) -> str:
         text = phase_words(phase)
         return text[0].lower() + text[1:]
     if code == WAIT_SPARK_BUSY:
-        return "the Spark's current operation to finish"
+        return WAIT_WORDS[WAIT_SPARK_BUSY]
     return str(code)
 
 
