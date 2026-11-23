@@ -17,7 +17,9 @@ from vonk_control.catalog.revision_contract import (
     read_catalog_projection,
 )
 from vonk_control.catalog.service import CatalogService
+from vonk_control.library.contract import LibraryCacheState
 from vonk_control.library_projection.service import LibraryProjection
+from vonk_control.model_cache.contract import CacheOperationKind
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.operation_api.contracts import OperationListPage, OperationProvider
@@ -185,6 +187,31 @@ def test_public_library_read_reobserves_and_ends_with_no_retained_gate(clears):
     assert len(fresh.models) == 1
     assert fresh.models[0].identity == read.models[0].identity
     assert fresh.models[0].local.controller != AssetAvailability.UNKNOWN.value
+
+
+def test_model_actions_follow_the_state_observed_on_the_list_read():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    document = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text()
+    )
+    CatalogService(
+        sessions, clock=lambda: datetime.now(UTC), cursors=CursorCodec(b"c" * 32)
+    ).import_catalog_models("test", [document])
+    observed: dict[str, dict[str, object]] = {}
+    projection = LibraryProjection(
+        sessions, local_state=lambda: observed, cursors=CursorCodec(b"c" * 32)
+    )
+    (absent,) = projection.models().models
+    assert absent.actions == [CacheOperationKind.DOWNLOAD]
+    observed[absent.identity.content_sha256] = {
+        "controller": LibraryCacheState.CACHED.value
+    }
+    (cached,) = projection.models().models
+    assert cached.actions == [CacheOperationKind.REMOVE]
 
 
 @pytest.mark.parametrize("clears", [False, True])

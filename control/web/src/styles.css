@@ -467,6 +467,14 @@ button:disabled {
   background: var(--raised);
   color: var(--ink);
 }
+/* Compact row actions: desktop pointers only; touch keeps the 44px target. */
+@media (pointer: fine) and (min-width: 54rem) {
+  .button.compact {
+    min-height: 1.75rem;
+    padding: 0.2rem 0.65rem;
+    font-size: 0.78rem;
+  }
+}
 a:focus-visible,
 button:focus-visible,
 input:focus-visible,
