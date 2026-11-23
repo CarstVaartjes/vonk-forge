@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import os
 import uuid
-from collections import namedtuple
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import NamedTuple
 
 import pytest
 from sqlalchemy import Engine, create_engine, event, select
@@ -608,8 +608,12 @@ class _Volume:
 
     def usage(self, _path: object = None):
 
-        usage = namedtuple("usage", "total used free")
-        return usage(self.total, self.total - self.free, self.free)
+        class DiskUsage(NamedTuple):
+            total: int
+            used: int
+            free: int
+
+        return DiskUsage(self.total, self.total - self.free, self.free)
 
     def pair(self, _path: Path) -> tuple[int, int]:
         return self.total, self.free

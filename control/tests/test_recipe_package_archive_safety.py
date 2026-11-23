@@ -98,9 +98,9 @@ def _rewrite_manifest(
             manifest: dict[str, Any] = json.loads(body)
             mutate(manifest)
             encoded = _canonical(manifest)
-            member = copy.deepcopy(member)
-            member.size = len(encoded)
-            result.append((member, encoded))
+            resized = copy.deepcopy(member)
+            resized.size = len(encoded)
+            result.append((resized, encoded))
         else:
             result.append((member, body))
     return result

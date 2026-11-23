@@ -46,6 +46,12 @@ from .test_artifact_job_recovery import _issued_job
 
 @pytest.mark.parametrize("damaged_evidence", [False, True, "omitted"])
 def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
+    tmp_path, damaged_evidence
+):
+    retain_run_claims_until_exact_stop_receipt(tmp_path, damaged_evidence)
+
+
+def retain_run_claims_until_exact_stop_receipt(
     tmp_path,
     damaged_evidence,
     grant_observer: Callable[[SignedHostHelperGrant, datetime], None] | None = None,

@@ -226,7 +226,7 @@ def test_never_executed_or_idempotent_work_is_always_retried() -> None:
         for attempt, effect, irreversible in itertools.product(
             (0, 1, 3), Effect, (False, True)
         ):
-            adapter = replace(adapter, is_irreversible=irreversible)
+            variant = replace(adapter, is_irreversible=irreversible)
             row = _row(
                 state=State.RUNNING,
                 attempt=attempt,
@@ -237,8 +237,8 @@ def test_never_executed_or_idempotent_work_is_always_retried() -> None:
             if not (attempt == 0 or effect is Effect.NONE or not irreversible):
                 continue
             for event in uncertain:
-                decision = transition(row, event, adapter, NOW)
-                where = _describe(row, event, adapter)
+                decision = transition(row, event, variant, NOW)
+                where = _describe(row, event, variant)
                 assert decision.row.state is State.BACKOFF, where
                 assert decision.row.next_action_at is not None, where
                 assert decision.row.next_action_at > NOW, where

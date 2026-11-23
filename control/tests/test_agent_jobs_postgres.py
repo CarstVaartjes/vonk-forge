@@ -131,7 +131,7 @@ def agent_queue_world(postgres_engine):
     clock = Clock()
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     with sessions.begin() as session:
-        for node_id, serial in ((NODE_A, "serial-a"), (NODE_B, "serial-b")):
+        for node_id, _serial in ((NODE_A, "serial-a"), (NODE_B, "serial-b")):
             session.add(
                 AgentNode(
                     node_id=node_id,

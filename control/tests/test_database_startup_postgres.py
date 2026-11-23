@@ -8,7 +8,6 @@ import pytest
 from alembic.config import Config
 from alembic.operations import Operations
 from alembic.script import ScriptDirectory
-from pytest import MonkeyPatch
 from sqlalchemy import event, insert, inspect, select, text, update
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import OperationalError
@@ -97,7 +96,7 @@ def _contact_evidence(at: str) -> str:
 
 
 def test_contact_move_rolls_back_on_interruption_and_restarts(
-    postgres_engine: Engine, monkeypatch: MonkeyPatch
+    postgres_engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Catches dropping the old owner before a durable copy, skipping replay,
     losing any of the nine facts, or losing a rolled-back Controller's newer
@@ -218,7 +217,7 @@ def test_contact_move_rolls_back_on_interruption_and_restarts(
 
 
 def test_runtime_items_migration_is_atomic_and_does_not_invent_capacity(
-    postgres_engine: Engine, monkeypatch: MonkeyPatch
+    postgres_engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Catches a lost identity/hostname on restart, or a fabricated capacity row."""
 
@@ -464,7 +463,7 @@ def test_damaged_optional_inventory_keeps_capacity_and_fresh_report_recovers(
 
 def test_unaddable_column_aborts_startup_instead_of_booting_without_it(
     postgres_engine: Engine,
-    monkeypatch: MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Catches a Controller that reports ready after a column add failed."""
 
@@ -487,7 +486,7 @@ def test_unaddable_column_aborts_startup_instead_of_booting_without_it(
 
 def test_column_add_blocked_by_a_lock_heals_when_the_lock_clears(
     postgres_engine: Engine,
-    monkeypatch: MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Catches a lock-blocked column add that is skipped or never retried."""
 

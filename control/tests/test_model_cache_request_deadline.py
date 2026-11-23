@@ -1,9 +1,9 @@
 """Request deadlines survive restart and never poison exact fresh admission."""
 
 import fcntl
-from collections import namedtuple
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 from uuid import uuid4
 
 import httpx2
@@ -140,10 +140,15 @@ def test_dependency_wait_ends_and_fresh_exact_request_has_its_own_budget(
     digest = str(artifact["sha256"])
     lock_path = service.root / "locks" / digest
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    usage = namedtuple("usage", "total used free")
+
+    class DiskUsage(NamedTuple):
+        total: int
+        used: int
+        free: int
+
     real_disk_usage = __import__("shutil").disk_usage
     if dependency == "capacity":
-        monkeypatch.setattr("shutil.disk_usage", lambda _: usage(100, 100, 0))
+        monkeypatch.setattr("shutil.disk_usage", lambda _: DiskUsage(100, 100, 0))
     with lock_path.open("a+b") as holder:
         if dependency == "writer":
             fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)

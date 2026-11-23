@@ -148,7 +148,7 @@ def _held_set_and_alias(tmp_path, now):
     for spec in _unique_artifacts(manifest.artifacts).values():
         path = service._object_path(spec.sha256)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "wb") as handle:
+        with path.open("wb") as handle:
             handle.truncate(spec.expected_bytes)
     service.adopt_verified_set(manifest)
     return engine, sessions, service, catalog, held, alias, manifest.digest

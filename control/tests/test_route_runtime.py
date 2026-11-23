@@ -83,8 +83,10 @@ def _publish(
             litellm=render_empty_config(),
         )
         marker = ActivationMarker.model_validate_json(marker.model_dump_json())
-        uncertainty = publisher._require_supervisor_ack(marker, SupervisorPhase.READY)
-        assert uncertainty is None
+        acknowledgement = publisher._require_supervisor_ack(
+            marker, SupervisorPhase.READY
+        )
+        assert acknowledgement is None
         return marker
 
 

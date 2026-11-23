@@ -242,7 +242,7 @@ def installed_vonkctl(tmp_path_factory: pytest.TempPathFactory) -> Path:
         root = root.parent
     workspace = root / "installed-profile-cli"
     complete = workspace / "complete"
-    with open(root / "installed-profile-cli.lock", "a") as lock:
+    with (root / "installed-profile-cli.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if not complete.is_file():
             shutil.rmtree(workspace, ignore_errors=True)

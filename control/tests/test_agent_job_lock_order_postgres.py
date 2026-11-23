@@ -35,7 +35,7 @@ def queue(postgres_engine):
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     with sessions.begin() as session:
-        for index, node in enumerate(NODES):
+        for node in NODES:
             session.add(
                 AgentNode(
                     node_id=node,

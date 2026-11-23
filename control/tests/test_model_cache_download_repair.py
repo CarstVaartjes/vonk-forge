@@ -6,9 +6,9 @@ import errno
 import hashlib
 import os
 import uuid
-from collections import namedtuple
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NamedTuple
 
 import httpx2
 import pytest
@@ -962,8 +962,13 @@ def test_repair_capacity_admission_preserves_verified_object(
         request_key="00000000-0000-4000-8000-000000001006",
     )
     digest = downloaded.artifact_set_sha256
-    usage = namedtuple("usage", "total used free")
-    monkeypatch.setattr("shutil.disk_usage", lambda _: usage(100, 100, 0))
+
+    class DiskUsage(NamedTuple):
+        total: int
+        used: int
+        free: int
+
+    monkeypatch.setattr("shutil.disk_usage", lambda _: DiskUsage(100, 100, 0))
     # No capacity is a wait, not a refusal (top-10 #8): the repair is queued
     # behind a retryable blocker and nothing is touched until the space exists.
     queued = service.start_repair(
@@ -983,7 +988,7 @@ def test_repair_capacity_admission_preserves_verified_object(
     assert service._claim_operations(limit=1, respect_backoff=False) == []
     monkeypatch.setattr(
         "shutil.disk_usage",
-        lambda _: usage(10**12, 0, 10**12),
+        lambda _: DiskUsage(10**12, 0, 10**12),
     )
     assert service._claim_operations(limit=1, respect_backoff=False) == [
         (queued.id, "repair")

@@ -10,11 +10,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections import namedtuple
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
+from typing import NamedTuple
 
 import httpx2
 import pytest
@@ -319,8 +319,12 @@ def test_a_cached_whole_file_skips_every_part_download(service, hub) -> None:
 
 
 def _free_disk(monkeypatch: pytest.MonkeyPatch, free: int) -> None:
-    usage = namedtuple("usage", "total used free")
-    monkeypatch.setattr("shutil.disk_usage", lambda _path: usage(10**12, 0, free))
+    class DiskUsage(NamedTuple):
+        total: int
+        used: int
+        free: int
+
+    monkeypatch.setattr("shutil.disk_usage", lambda _path: DiskUsage(10**12, 0, free))
 
 
 def test_preview_counts_the_largest_part_as_transient_disk(

@@ -280,7 +280,7 @@ class _PostgresServer:
             return
         owner = _session_owner_pid()
         state = _session_state(owner)
-        with open(state.with_suffix(".lock"), "a") as lock:
+        with state.with_suffix(".lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             _stop_stale_servers()
             port = cls._running_port(state)
