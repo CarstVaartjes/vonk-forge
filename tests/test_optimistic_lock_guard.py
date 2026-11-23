@@ -234,6 +234,14 @@ def test_guard_allows_claims_and_other_owners(statement: str, owner: str) -> Non
     assert not _locks(statement.replace("Job", owner))
 
 
+def test_guard_resolves_an_owner_imported_from_a_models_submodule() -> None:
+    source = (
+        "from vonk_control.models.execution import RecipeRun as Owner\n"
+        "select(Owner).with_for_update()\n"
+    )
+    assert _locks(source)
+
+
 def test_unconverted_job_owners_are_named_for_follow_up() -> None:
     unlisted = [
         str(path.relative_to(ROOT))

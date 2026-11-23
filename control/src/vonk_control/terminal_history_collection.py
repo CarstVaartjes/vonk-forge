@@ -241,7 +241,7 @@ RETAINED: dict[str, tuple[Retained, str]] = {
     ),
     "artifact_lifecycle_gates": (
         Retained.OWNED_ELSEWHERE,
-        "artifact_lifecycle: an open gate is deleted where it is released",
+        "artifact_jobs.lifecycle: an open gate is deleted where it is released",
     ),
     "node_telemetry_samples": (
         Retained.OWNED_ELSEWHERE,

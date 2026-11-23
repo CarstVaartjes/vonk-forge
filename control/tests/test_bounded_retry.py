@@ -13,9 +13,9 @@ from vonk_control.lifecycle.evidence import (
     Residue,
     read_or_rebuild,
 )
-from vonk_control.recipe_builds.cancellation import build_cancellation
 from vonk_control.recipe_operations import (
     build,
+    build_cancellation,
     install,
     job_activation,
     result_consumption,

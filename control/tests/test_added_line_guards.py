@@ -1862,6 +1862,13 @@ def test_nas_coverage_is_required_only_where_nas_bytes_are_read() -> None:
         {2},
         modes=("model-sets",),
     )
+    # The modules that moved in from flat model_cache_*.py stay scanned.
+    assert check_source(
+        "control/src/vonk_control/model_cache/api.py",
+        source,
+        {2},
+        modes=("model-sets",),
+    )
     gate = "def plan(cache, manifest):\n    cache._require_managed_cache_coverage(manifest)\n"
     assert check_source(
         "control/src/vonk_control/run_switch_operations/run_planning.py",
