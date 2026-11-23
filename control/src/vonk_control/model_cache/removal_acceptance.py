@@ -49,6 +49,7 @@ from .errors import (
     _ArtifactWriterBusy,
     _reference_error_type,
 )
+from .fleet_removal import _model_objects
 from .lineage import lineage_contents, model_sets
 from .persistence import (
     _model_removal_intent_digest,
@@ -203,8 +204,6 @@ class RemovalAcceptanceMixin:
             fence = removal_fence or str(uuid.uuid4())
             now = cache._clock()
             if fleet is not None:
-                from .fleet_removal import _model_objects
-
                 _, shared, _files = _model_objects(session, model_content_sha256 or "")
             identities = (
                 *(

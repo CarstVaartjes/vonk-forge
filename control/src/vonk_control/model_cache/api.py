@@ -23,6 +23,10 @@ from ..api_availability import AVAILABILITY_ERRORS
 from ..auth import MUTATION_ROLES, Actor, CursorCodec
 from ..bounded_json import require_integer, require_sequence
 from ..cache_removal_review import CacheRemovalReview
+from ..library_projection.common import (
+    LibrarySelectorAmbiguous,
+    SelectorAmbiguityHTTPError,
+)
 from ..operation_api.constants import _ADMIN_OPERATION_IDS
 from ..operation_api.contracts import (
     OperationApiServices,
@@ -128,9 +132,6 @@ def model_cache_http_error(error: BaseException) -> HTTPException:
         # answer (503, Retry-After, error code) says to ask again.
         raise error
     if isinstance(error, ModelCacheSelectorAmbiguous):
-        from ..library.api import SelectorAmbiguityHTTPError
-        from ..library_projection.common import LibrarySelectorAmbiguous
-
         return SelectorAmbiguityHTTPError(
             LibrarySelectorAmbiguous("model", error.candidates),
             status_code=409,

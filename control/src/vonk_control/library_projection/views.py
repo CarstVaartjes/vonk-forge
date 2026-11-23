@@ -36,6 +36,7 @@ from ..request_fault import RequestFault
 from ..stored.states import CatalogRevisionState
 from .common import (
     _LIBRARY_ORDER,
+    LibrarySelectorAmbiguous,
     _canonical_model,
     _canonical_recipe,
     _canonical_recipe_summary,
@@ -564,8 +565,6 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
     if not exact:
         raise KeyError(selector)
     if len(exact) > 1:
-        from .common import LibrarySelectorAmbiguous
-
         raise LibrarySelectorAmbiguous(
             selector, [f"{row.publisher}/{row.slug}" for row in exact]
         )

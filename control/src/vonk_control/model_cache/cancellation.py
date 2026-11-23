@@ -140,7 +140,7 @@ class CancellationMixin:
 
         with cache._session() as session:
             candidates = [
-                (operation.id, cache._payload_of(operation))
+                (operation.id, _payload_of(operation))
                 for operation in session.scalars(
                     select(ModelCacheOperation)
                     .where(
@@ -173,13 +173,6 @@ class CancellationMixin:
             enabled=True,
         )
         return settled + reconciler.reconcile().changed
-
-    @staticmethod
-    def _payload_of(
-        operation: ModelCacheOperation,
-    ) -> ModelCacheOperationPayload | None:
-        value = _operation_payload(operation)
-        return None if isinstance(value, Residue) else value  # no readable intent
 
     def _cancellation_intent(
         self, *, actor: str, request_key: str, reason: str
@@ -334,3 +327,10 @@ class CancellationMixin:
         # only a prompt to workers already sampling or reading a source.
         cache.signal_cancelled_operation(operation_id)
         return cache.get_operation(operation_id)
+
+
+def _payload_of(
+    operation: ModelCacheOperation,
+) -> ModelCacheOperationPayload | None:
+    value = _operation_payload(operation)
+    return None if isinstance(value, Residue) else value  # no readable intent

@@ -24,7 +24,7 @@ from vonk_agent_protocol.wire_model import canonical_message
 from ..capabilities import CapabilityUnavailableError
 from ..catalog.api import CatalogProblem
 from ..http_errors import TemporaryHTTPError
-from ..library.api import SelectorAmbiguityHTTPError
+from ..library_projection.common import SelectorAmbiguityHTTPError
 from ..logging import redact_text
 from .common import (
     _LOGIN_PATH,

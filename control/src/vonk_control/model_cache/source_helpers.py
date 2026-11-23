@@ -127,3 +127,36 @@ def _fsync_directory(path: Path) -> None:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
+
+
+def _validate_source(source: str) -> None:
+    try:
+        parsed = urlsplit(source)
+        hostname = parsed.hostname
+        port = parsed.port
+    except (TypeError, ValueError) as error:
+        raise ModelCacheResolutionInvalid(
+            ModelCacheCode.SOURCE_INVALID, "cache source URL is invalid"
+        ) from error
+    if parsed.scheme in {"http", "https"}:
+        if (
+            not hostname
+            or parsed.username
+            or parsed.password
+            or parsed.fragment
+            or parsed.query
+            or port is not None
+        ):
+            raise ModelCacheResolutionInvalid(
+                ModelCacheCode.SOURCE_INVALID, "cache source URL is invalid"
+            )
+        return
+    if parsed.scheme == "file":
+        if parsed.netloc not in {"", "localhost"} or not parsed.path.startswith("/"):
+            raise ModelCacheResolutionInvalid(
+                ModelCacheCode.SOURCE_INVALID, "cache file source is invalid"
+            )
+        return
+    raise ModelCacheResolutionInvalid(
+        ModelCacheCode.SOURCE_INVALID, "cache source must use HTTPS, HTTP or file"
+    )
