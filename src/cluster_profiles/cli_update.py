@@ -355,7 +355,9 @@ def run_update(
             sleeper(0.25 * 2**attempt)
             wheel = download(f"{base}/{path}", size)
             if len(wheel) != size or hashlib.sha256(wheel).hexdigest() != digest:
-                raise CliUpdateIngressError("CLI wheel digest or size is invalid")
+                raise CliUpdateIngressError(
+                    "CLI wheel digest or size is invalid"
+                ) from None
     installed_content = installed_content_identity()
     equal_content = (
         target_content is not None

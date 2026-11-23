@@ -320,7 +320,7 @@ class ControlClient(HTTPControlClient):
                 if len(content) > MAX_CONTROL_DOCUMENT_BYTES:
                     raise ControlResponseTooLarge(
                         "control API response exceeds safety limit"
-                    )
+                    ) from None
                 error_media_type = error.headers.get("content-type", "").split(";", 1)[
                     0
                 ]
@@ -347,7 +347,7 @@ class ControlClient(HTTPControlClient):
                     if not isinstance(problem, dict):
                         raise ControlMalformedResponse(
                             "control API error does not match the OpenAPI schema"
-                        )
+                        ) from None
                     _response_contract(path, "GET", error.code, problem)
                 detail = problem.get("detail") if isinstance(problem, dict) else None
                 error_type = _STATUS_ERRORS.get(error.code, ControlHTTPError)
