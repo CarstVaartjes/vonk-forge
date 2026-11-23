@@ -7,11 +7,23 @@ import {
 } from "../../api/contract-numeric";
 import "./library-availability-progress.css";
 import { useMemo } from "react";
+import { BYTE_PHASES } from "../../api/vocabulary.generated";
 import { formatBytes } from "../../lib/fleet";
+import { phaseWords } from "../../lib/phase-words";
 import { Time } from "../ui/time";
+
+export type AvailabilityMember = {
+  memberId: string;
+  phase: string;
+  completedBytes?: WireNumber | undefined;
+  totalBytes?: WireNumber | undefined;
+  bytesPerSecond?: number | undefined;
+  etaSeconds?: number | undefined;
+};
 
 export type AvailabilityProgress = {
   phase: string;
+  members: AvailabilityMember[];
   completedBytes?: WireNumber | undefined;
   totalBytes?: WireNumber | undefined;
   bytesPerSecond?: number | undefined;
@@ -33,6 +45,41 @@ function nonnegativeWire(value: unknown): WireNumber | undefined {
   return isWireNumber(value) && compareWire(value, 0) >= 0 ? value : undefined;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function meter(raw: Record<string, unknown>) {
+  const totalBytes =
+    raw.total_bytes_known === false
+      ? undefined
+      : nonnegativeWire(raw.total_bytes ?? raw.expected_bytes);
+  return {
+    completedBytes: nonnegativeWire(raw.completed_bytes ?? raw.downloaded_bytes),
+    totalBytes,
+    // Rate and ETA are the Controller's own figures; nothing is derived here.
+    bytesPerSecond: finiteNumber(raw.smoothed_bytes_per_second),
+    etaSeconds: totalBytes === undefined ? undefined : finiteNumber(raw.eta_seconds),
+  };
+}
+
+function memberProgress(value: unknown, phase: string): AvailabilityMember[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const raw = asRecord(item);
+    if (!raw || typeof raw.member_id !== "string") return [];
+    return [
+      {
+        memberId: raw.member_id,
+        phase: typeof raw.phase === "string" && raw.phase ? raw.phase : phase,
+        ...meter(raw),
+      },
+    ];
+  });
+}
+
 export function availabilityProgress(value: unknown): AvailabilityProgress {
   const outer =
     typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
@@ -40,15 +87,6 @@ export function availabilityProgress(value: unknown): AvailabilityProgress {
     typeof outer.operation === "object" && outer.operation !== null
       ? (outer.operation as Record<string, unknown>)
       : outer;
-  const completedBytes = nonnegativeWire(raw.completed_bytes ?? raw.downloaded_bytes);
-  const totalBytes =
-    raw.total_bytes_known === false
-      ? undefined
-      : nonnegativeWire(raw.total_bytes ?? raw.expected_bytes);
-  const bytesPerSecond = finiteNumber(
-    raw.smoothed_bytes_per_second ?? raw.bytes_per_second ?? raw.rate,
-  );
-  const etaSeconds = totalBytes === undefined ? undefined : finiteNumber(raw.eta_seconds);
   const phase = typeof raw.phase === "string" && raw.phase ? raw.phase : "preparing";
   const step =
     typeof raw.step === "string"
@@ -64,10 +102,8 @@ export function availabilityProgress(value: unknown): AvailabilityProgress {
         : undefined;
   return {
     phase,
-    completedBytes,
-    totalBytes,
-    bytesPerSecond,
-    etaSeconds,
+    members: memberProgress(raw.members, phase),
+    ...meter(raw),
     step,
     logExcerpt,
     completedItems: nonnegativeWire(raw.completed_items),
@@ -78,10 +114,6 @@ export function availabilityProgress(value: unknown): AvailabilityProgress {
   };
 }
 
-function phaseLabel(phase: string): string {
-  return phase.replace(/[-_]+/g, " ").replace(/\b\w/g, (value) => value.toUpperCase());
-}
-
 function eta(value: number): string {
   if (value < 60) return `${Math.round(value)}s left`;
   const minutes = Math.floor(value / 60);
@@ -89,10 +121,47 @@ function eta(value: number): string {
   return seconds ? `${minutes}m ${seconds}s left` : `${minutes}m left`;
 }
 
-export function LibraryAvailabilityProgress({ progress }: { progress: AvailabilityProgress }) {
-  const transferring = /^(download(ing)?|transfer(ring)?|copying|upload(ing)?|distribution)$/.test(
-    progress.phase,
+/** One Spark's own bar: bytes, percent, and the Controller's rate and ETA when given. */
+function MemberBar({ member }: { member: AvailabilityMember }) {
+  const percent =
+    member.completedBytes !== undefined &&
+    member.totalBytes !== undefined &&
+    compareWire(member.totalBytes, 0) > 0
+      ? Math.min(100, displayRatio(member.completedBytes, member.totalBytes) * 100)
+      : undefined;
+  const sizes =
+    member.completedBytes === undefined
+      ? undefined
+      : member.totalBytes === undefined
+        ? `${formatBytes(member.completedBytes)} received`
+        : `${formatBytes(member.completedBytes)} / ${formatBytes(member.totalBytes)}`;
+  return (
+    <li className="library-availability-progress-member">
+      <div className="library-availability-progress-heading">
+        <strong>{member.memberId}</strong>
+        <span>
+          {sizes}
+          {percent !== undefined && ` · ${Math.floor(percent)}%`}
+          {member.bytesPerSecond !== undefined && ` · ${formatBytes(member.bytesPerSecond)}/s`}
+          {member.etaSeconds !== undefined && ` · ${eta(member.etaSeconds)}`}
+        </span>
+      </div>
+      <div
+        className={`library-availability-progress-track${percent === undefined ? " is-indeterminate" : ""}`}
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={percent === undefined ? undefined : 100}
+        aria-valuenow={percent}
+        aria-label={`${member.memberId} ${phaseWords(member.phase)}`}
+      >
+        {percent !== undefined && <span style={{ width: `${percent}%` }} />}
+      </div>
+    </li>
   );
+}
+
+export function LibraryAvailabilityProgress({ progress }: { progress: AvailabilityProgress }) {
+  const transferring = BYTE_PHASES.has(progress.phase);
   const percentage = useMemo(
     () =>
       transferring &&
@@ -113,12 +182,13 @@ export function LibraryAvailabilityProgress({ progress }: { progress: Availabili
   return (
     <section
       className="library-availability-progress"
-      aria-label={`${phaseLabel(progress.phase)} progress`}
+      aria-label={`${phaseWords(progress.phase)} progress`}
     >
       <div className="library-availability-progress-heading">
-        <strong>{phaseLabel(progress.phase)}</strong>
+        <strong>{phaseWords(progress.phase)}</strong>
         <span>
           {transfer}
+          {percentage !== undefined && ` · ${Math.floor(percentage)}%`}
           {measured &&
             progress.bytesPerSecond !== undefined &&
             ` · ${formatBytes(progress.bytesPerSecond)}/s`}
@@ -132,10 +202,17 @@ export function LibraryAvailabilityProgress({ progress }: { progress: Availabili
         aria-valuemax={percentage === undefined ? undefined : 100}
         aria-valuenow={percentage}
         aria-valuetext={transfer}
-        aria-label={`${phaseLabel(progress.phase)} transfer`}
+        aria-label={`${phaseWords(progress.phase)} transfer`}
       >
         {percentage !== undefined && <span style={{ width: `${percentage}%` }} />}
       </div>
+      {progress.members.length > 1 && (
+        <ul className="library-availability-progress-members" aria-label="Progress per Spark">
+          {progress.members.map((member) => (
+            <MemberBar key={member.memberId} member={member} />
+          ))}
+        </ul>
+      )}
       {(progress.completedItems !== undefined ||
         progress.activity ||
         progress.elapsedSeconds !== undefined ||

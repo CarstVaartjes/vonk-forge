@@ -13,6 +13,7 @@ import type {
 } from "../../api/types";
 
 import { failureNotice } from "../../lib/error-display";
+import { phaseWords } from "../../lib/phase-words";
 import { CancelOperation } from "../ui/cancel-operation";
 import { WaitingFor } from "../ui/waiting-for";
 import { LibraryPreparation } from "./library-preparation";
@@ -36,9 +37,9 @@ function progressLabel(response: ModelCacheOperatorResponse): string {
   const transferred = response.transferred_bytes ?? 0;
   if (compareWire(total, 0) > 0 && compareWire(transferred, 0) > 0) {
     const percent = Math.min(100, Math.round(displayRatio(transferred, total) * 100));
-    return `${response.phase} · ${percent}%`;
+    return `${phaseWords(response.phase)} · ${percent}%`;
   }
-  return response.phase;
+  return phaseWords(response.phase);
 }
 
 function failureText(response: ModelCacheOperatorResponse): string {
@@ -83,7 +84,7 @@ export function LibraryCacheAction({
   const [phase, setPhase] = useState("");
   const [operationId, setOperationId] = useState("");
   const [waiting, setWaiting] = useState<
-    Pick<ModelCacheOperatorResponse, "blockers" | "next_attempt_at">
+    Partial<Pick<ModelCacheOperatorResponse, "blockers" | "next_attempt_at" | "phase">>
   >({});
   const [error, setError] = useState("");
   const abort = useRef<AbortController | undefined>(undefined);
@@ -303,7 +304,11 @@ export function LibraryCacheAction({
         <span role="status">{phase || LifecycleState.QUEUED}</span>
       )}
       {(busy || (state === CacheWord.PREPARING && !preparation)) && (
-        <WaitingFor blockers={waiting.blockers} nextAttemptAt={waiting.next_attempt_at} />
+        <WaitingFor
+          blockers={waiting.blockers}
+          nextAttemptAt={waiting.next_attempt_at}
+          phase={waiting.phase}
+        />
       )}
       {busy && operationId && (
         <CancelOperation

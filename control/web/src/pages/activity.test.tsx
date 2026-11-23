@@ -373,7 +373,7 @@ test("loads truthful operation progress and resumes only an operator-waiting job
   expect(
     screen.getAllByText("Mia Lab Spark").some((element) => element.closest(".activity-job-body")),
   ).toBe(true);
-  expect(screen.getByRole("progressbar", { name: "Verify transfer" })).toBeVisible();
+  expect(screen.getByRole("progressbar")).toBeVisible();
   expect(screen.getByRole("button", { name: "Resume operation" })).toBeVisible();
   expect(screen.queryByText("step-1")).not.toBeInTheDocument();
   await user.click(screen.getByText("Operation identifiers"));

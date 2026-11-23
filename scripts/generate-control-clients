@@ -154,6 +154,20 @@ def typescript_vocabulary() -> str:
             f"export const {name}: ReadonlySet<string> = new Set([{members}]);"
         )
     lines.append("")
+    from vonk_agent_protocol.phase_words import BYTE_PHASES, PHASE_WORDS, WAIT_WORDS
+
+    for name, table in (("PHASE_WORDS", PHASE_WORDS), ("WAIT_WORDS", WAIT_WORDS)):
+        lines.append(f"export const {name}: Readonly<Record<string, string>> = {{")
+        lines.extend(
+            f"  {json.dumps(key)}: {json.dumps(text)}," for key, text in table.items()
+        )
+        lines.append("};")
+        lines.append("")
+    members = ", ".join(json.dumps(phase) for phase in BYTE_PHASES)
+    lines.append(
+        f"export const BYTE_PHASES: ReadonlySet<string> = new Set([{members}]);"
+    )
+    lines.append("")
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
