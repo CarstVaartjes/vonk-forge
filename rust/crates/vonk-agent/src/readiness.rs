@@ -72,13 +72,16 @@ impl WriteSecure for ReadinessReceipt {
             Ok(())
         })();
         if result.is_err() {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = fs::remove_file(&temporary);
         }
         result
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn verify_readiness_at(
     path: &Path,
     expected_identity: &AgentRuntimeIdentity,

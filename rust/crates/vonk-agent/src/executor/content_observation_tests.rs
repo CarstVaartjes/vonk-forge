@@ -116,9 +116,17 @@ async fn process_death_at_four_boundaries_recovers_on_an_idle_tick_without_execu
             let found = BufReader::new(stdout)
                 .lines()
                 .any(|line| line.is_ok_and(|text| text.contains("content-ready")));
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the receiving side may already be gone; nobody is waiting for the value"
+            )]
             let _ = ready.send(found);
         });
         let reached = observed.recv_timeout(deadline.saturating_duration_since(Instant::now()));
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = child.kill();
         while child.try_wait().unwrap().is_none() {
             assert!(Instant::now() < deadline, "child must exit after kill");

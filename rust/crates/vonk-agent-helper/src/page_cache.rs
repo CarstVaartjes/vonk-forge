@@ -96,6 +96,10 @@ static COMPACTION: CompactionLane = CompactionLane::new(crate::compaction::write
 
 /// Sync within `bound`, drop, and read `Cached` around it. Never fails: a drop
 /// that could not happen is the report's problem.
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "every other case takes the same fallback by design"
+)]
 pub fn drop_page_cache(
     root: &Path,
     sync: &SyncLane,

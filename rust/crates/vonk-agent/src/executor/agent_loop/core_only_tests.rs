@@ -16,7 +16,19 @@ fn is_core(result: &AgentResult) -> bool {
     match &result.result {
         AgentResultResult::OutcomeFailed(failed) => failed.reason == CORE_ONLY_REASON,
         AgentResultResult::OutcomeUnknown(unknown) => unknown.reason == CORE_ONLY_REASON,
-        _ => false,
+        AgentResultResult::RuntimePreflightResult(_)
+        | AgentResultResult::AgentInstallResult(_)
+        | AgentResultResult::RecipeStartResult(_)
+        | AgentResultResult::RecipeStopResult(_)
+        | AgentResultResult::RecipeReconcileResult(_)
+        | AgentResultResult::RecipeUninstallResult(_)
+        | AgentResultResult::RecipeBuildEvidence(_)
+        | AgentResultResult::RecipeBuildCleanupEvidence(_)
+        | AgentResultResult::RecipeJobRunResult(_)
+        | AgentResultResult::ArtifactDistributionResult(_)
+        | AgentResultResult::AgentFailureResult(_)
+        | AgentResultResult::AgentUpgradeResult(_)
+        | AgentResultResult::OutcomeDone(_) => false,
     }
 }
 

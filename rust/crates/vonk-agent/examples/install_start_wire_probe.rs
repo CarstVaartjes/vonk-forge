@@ -121,7 +121,11 @@ fn result_for(claim: &AgentClaim, timings: &mut StageTimings) -> Result<AgentRes
         RecipeOperationRequest::Uninstall(_request) => {
             ExecutionResult::done(vonk_agent_protocol::generated::RecipeUninstallResult::default())
         }
-        _ => return Err(
+        RecipeOperationRequest::RuntimePreflight(_)
+        | RecipeOperationRequest::Build(_)
+        | RecipeOperationRequest::BuildCleanup(_)
+        | RecipeOperationRequest::JobRun(_)
+        | RecipeOperationRequest::Reconcile(_) => return Err(
             "probe only accepts recipe.install, recipe.start, recipe.stop, and recipe.uninstall"
                 .to_owned(),
         ),

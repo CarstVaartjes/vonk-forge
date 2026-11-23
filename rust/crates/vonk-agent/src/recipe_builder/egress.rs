@@ -58,6 +58,10 @@ impl<'a, R: ProcessRunner + ?Sized> BuildEgress<'a, R> {
         clippy::needless_pass_by_value,
         reason = "the call takes ownership at this boundary; the caller's value is consumed"
     )]
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the service argv was built with the podman path"
+    )]
     pub(super) fn start(
         runner: &'a R,
         context: BuildEgressStart<'a>,
@@ -248,6 +252,10 @@ impl<'a, R: ProcessRunner + ?Sized> BuildEgress<'a, R> {
         // `podman exec --probe` can only report as "container is not running".
         // Read only a bounded tail of this operation-private diagnostic file.
         if let Ok(mut file) = File::open(self.staging.join("build-egress.stderr")) {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort cleanup: the next reconciliation pass repeats it"
+            )]
             let _ = file
                 .seek(SeekFrom::End(-4096))
                 .or_else(|_| file.seek(SeekFrom::Start(0)));
@@ -341,6 +349,10 @@ impl<R: ProcessRunner + ?Sized> Drop for BuildEgress<'_, R> {
         let deadline = Instant::now() + Duration::from_secs(10);
         // Let Podman stop the container before stopping its owning service;
         // otherwise systemd waits its full stop timeout for conmon first.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort cleanup: the next reconciliation pass repeats it"
+        )]
         let _ = self.run(
             &[
                 "stop".to_owned(),
@@ -351,6 +363,10 @@ impl<R: ProcessRunner + ?Sized> Drop for BuildEgress<'_, R> {
                 .saturating_duration_since(Instant::now())
                 .min(Duration::from_secs(2)),
         );
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort cleanup: the next reconciliation pass repeats it"
+        )]
         let _ = self.runner.run(
             Program::Systemctl,
             &[
@@ -392,6 +408,10 @@ impl<R: ProcessRunner + ?Sized> Drop for BuildEgress<'_, R> {
             if remaining.is_zero() {
                 break;
             }
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort cleanup: the next reconciliation pass repeats it"
+            )]
             let _ = self.run(&arguments, remaining.min(Duration::from_secs(2)));
         }
     }

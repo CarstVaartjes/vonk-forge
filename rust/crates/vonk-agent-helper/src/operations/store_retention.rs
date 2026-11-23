@@ -185,7 +185,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     }
                 }
                 // Existing image/custody/memory-guard owners collect their stores.
-                _ => {}
+                Collector::ControllerOrder
+                | Collector::Claim
+                | Collector::Bookkeeping
+                | Collector::ModelObjects
+                | Collector::BaseImages
+                | Collector::BuildStaging
+                | Collector::Untracked
+                | Collector::UntrackedRuns => {}
             }
         }
     }

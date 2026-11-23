@@ -402,7 +402,11 @@ impl StateStore {
                     | rusqlite::ErrorCode::NotADatabase
                     | rusqlite::ErrorCode::Unknown
             ),
-            _ => false,
+            StateError::Database(_)
+            | StateError::Io(_)
+            | StateError::Expired
+            | StateError::Stale
+            | StateError::Busy => false,
         };
         if !repairable {
             return Err(error);
@@ -411,7 +415,11 @@ impl StateStore {
             StateError::Identity => "stored-node-identity-mismatch",
             StateError::ResultState => "stored-operation-unreadable",
             StateError::Protocol(_) => "stored-receipt-invalid",
-            _ => "sqlite-file-corrupt",
+            StateError::Database(_)
+            | StateError::Io(_)
+            | StateError::Expired
+            | StateError::Stale
+            | StateError::Busy => "sqlite-file-corrupt",
         };
         // open() refuses links and non-files. Do not turn an unsafe path or
         // an I/O failure into permission to replace somebody else's file.

@@ -77,6 +77,10 @@ fn range_server(hold: usize, refuse: Option<usize>) -> (String, Arc<(Mutex<Serve
                     hex_sha256(BODY)
                 };
                 let body = &BODY[usize::try_from(start).unwrap()..=usize::try_from(end).unwrap()];
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "the peer may have closed the connection; the assertions are on the other side"
+                )]
                 let _ = write!(
                     stream,
                     "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\n\
@@ -85,6 +89,10 @@ fn range_server(hold: usize, refuse: Option<usize>) -> (String, Arc<(Mutex<Serve
                     body.len(),
                     BODY.len(),
                 );
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "the peer may have closed the connection; the assertions are on the other side"
+                )]
                 let _ = stream.write_all(body).and_then(|()| stream.flush());
                 lock.lock().unwrap().in_flight -= 1;
             });

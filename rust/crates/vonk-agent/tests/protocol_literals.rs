@@ -26,6 +26,13 @@
 //! The vocabulary is read from the exported wire schema, so a word added to the
 //! contract is guarded without editing this test: besides the lifecycle enums
 //! named below it includes every enum `ReasonCodeVocabulary` publishes.
+#![expect(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::string_slice,
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 
 use std::{
     collections::BTreeSet,
@@ -181,7 +188,6 @@ fn brace_delta(line: &str) -> (i64, bool) {
         !quoted && delta == 0 && line.trim_end().ends_with(';'),
     )
 }
-
 fn strip_comment(line: &str) -> &str {
     let mut quoted = false;
     let mut escaped = false;

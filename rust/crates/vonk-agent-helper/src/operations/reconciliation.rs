@@ -84,6 +84,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
 
 impl<R: CommandRunner> OperationExecutor<R> {
     #[cfg(test)]
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "every other error passes through unchanged"
+    )]
     pub(super) fn runtime_reconcile_installation(
         &self,
         identity: &RecipeReconciliationIdentity,
@@ -267,6 +271,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // stale-effect rejection. Retire the old checkpoint without gating it.
         let root = self.roots.data.join(INSTALLATION_RECONCILIATION_DIRECTORY);
         let path = root.join(format!("{installation_id}.json"));
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+        )]
         let _ = fs::remove_file(path);
         Ok(())
     }

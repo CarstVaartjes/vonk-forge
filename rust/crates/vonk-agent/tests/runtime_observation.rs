@@ -1,3 +1,8 @@
+#![expect(
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 use serde_json::{Value, json};
 use std::{
     fs,

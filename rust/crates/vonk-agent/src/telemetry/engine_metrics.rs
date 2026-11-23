@@ -53,6 +53,10 @@ pub fn write_target(
 
 /// A run that is not ready (or not running) has no target.
 pub fn remove_target(directory: &Path, run_id: Uuid) {
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+    )]
     let _ = std::fs::remove_file(directory.join(format!("{run_id}.json")));
 }
 

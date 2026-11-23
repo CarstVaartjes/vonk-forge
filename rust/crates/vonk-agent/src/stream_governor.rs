@@ -181,6 +181,10 @@ impl StreamGovernor {
                     self.changed.notify_waiters();
                 }
             }
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "waits for a task to end; its outcome is observed elsewhere"
+            )]
             let _ = tokio::time::timeout(WAIT_SLICE, notified).await;
         }
     }

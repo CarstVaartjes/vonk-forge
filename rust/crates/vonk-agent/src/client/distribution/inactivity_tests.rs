@@ -32,6 +32,10 @@ fn dripping_server(body: &'static [u8], chunks: usize, sent: usize, pause: Durat
                     head.push(byte[0]);
                 }
                 let length = body.len();
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "the peer may have closed the connection; the assertions are on the other side"
+                )]
                 let _ = write!(
                     stream,
                     "HTTP/1.1 206 Partial Content\r\nContent-Length: {length}\r\n\
@@ -50,6 +54,10 @@ fn dripping_server(body: &'static [u8], chunks: usize, sent: usize, pause: Durat
                     }
                 }
                 // Silence: the connection stays open until the client leaves.
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "the peer may have closed the connection; the assertions are on the other side"
+                )]
                 let _ = stream.read(&mut [0_u8; 1]);
             });
         }

@@ -86,6 +86,10 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     /// resuming across a process restart, replay the preceding entry and verify
     /// its exact name, inode and next cookie. Mutation invalidates coverage but
     /// does not rewind a verified position and starve the history tail.
+    #[expect(
+        clippy::expect_used,
+        reason = "the run id was validated as a UUID before this point"
+    )]
     pub fn recipe_run_inspection_page(
         &self,
         checkpoint: Option<&RecipeRunObservationCheckpoint>,

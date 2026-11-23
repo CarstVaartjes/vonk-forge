@@ -288,6 +288,10 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
     .unwrap();
     for task in first {
         task.abort();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "waits for a task to end; its outcome is observed elsewhere"
+        )]
         let _ = task.await;
     }
     for _ in 0..3 {
@@ -297,6 +301,10 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
         tokio::time::sleep(Duration::from_millis(20)).await;
         for task in page {
             task.abort();
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "waits for a task to end; its outcome is observed elsewhere"
+            )]
             let _ = task.await;
         }
         assert_eq!(

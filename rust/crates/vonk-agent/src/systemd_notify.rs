@@ -18,6 +18,10 @@ pub fn notify(message: &str) {
     let Ok(datagram) = UnixDatagram::unbound() else {
         return;
     };
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the peer may have closed the connection; the assertions are on the other side"
+    )]
     let _ = datagram.send_to(message.as_bytes(), socket);
 }
 

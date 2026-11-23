@@ -325,6 +325,10 @@ impl ProcessRunner for OpaqueFailureRunner {
 }
 
 #[test]
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "any other value is the failure this code reports"
+)]
 fn every_failed_podman_build_command_keeps_opaque_stderr_and_exit_status() {
     use vonk_agent::recipe_builder::RecipeBuildError;
     for command in [

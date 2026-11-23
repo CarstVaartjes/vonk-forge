@@ -27,6 +27,10 @@ pub(super) fn range_end(index: u64, range_bytes: u64, total: u64) -> u64 {
 #[cfg(target_os = "linux")]
 pub(super) fn preallocate(file: &tokio::fs::File, offset: u64, total: u64) {
     if total > offset {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+        )]
         let _ = rustix::fs::fallocate(
             file,
             rustix::fs::FallocateFlags::KEEP_SIZE,
@@ -250,6 +254,10 @@ async fn blocking<T: Send + 'static>(
 
 #[cfg(target_os = "linux")]
 pub(super) fn release_pages(file: &fs::File, offset: u64, length: u64) {
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+    )]
     let _ = rustix::fs::fadvise(
         file,
         offset,
@@ -267,6 +275,10 @@ pub(super) fn release_pages(_file: &fs::File, _offset: u64, _length: u64) {}
 /// keeps the pages is the behaviour that shipped before this call.
 pub(super) fn release_distribution_page_cache(path: &Path) {
     if let Ok(file) = fs::File::open(path) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+        )]
         let _ = rustix::fs::fadvise(&file, 0, None, rustix::fs::Advice::DontNeed);
     }
 }

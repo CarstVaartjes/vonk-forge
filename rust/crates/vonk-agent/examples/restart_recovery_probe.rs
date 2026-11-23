@@ -2,6 +2,11 @@
 //! client in separate processes for Controller restart recovery acceptance.
 //! `execute-build` runs the production build executor and result normalizer
 //! against a real HTTPS source response; it must never launch a build process.
+#![expect(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "example program: a failed unwrap ends the demonstration"
+)]
 
 use std::{
     io::{self, Read},

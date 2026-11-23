@@ -18,6 +18,10 @@ pub(super) struct Observed {
 }
 
 impl Store {
+    #[expect(
+        clippy::string_slice,
+        reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+    )]
     pub fn prepare(
         &self,
         node: &str,

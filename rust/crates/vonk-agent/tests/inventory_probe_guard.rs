@@ -12,6 +12,10 @@ const CAPACITY_CRITICAL_PROBES: [&str; 2] = [
 ];
 
 #[test]
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn only_capacity_critical_probes_may_abort_the_inventory() {
     let source =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/inventory.rs")).unwrap();

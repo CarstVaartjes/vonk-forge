@@ -416,6 +416,10 @@ fn watch_outcome(tx: &Transaction, restore: &Result<(), String>) -> (Phase, u32,
     store.write(tx).unwrap();
     let (attempts, heals) = (Cell::new(0), Cell::new(0));
     // A failed restore is also the watchdog's own error; the journal carries it.
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "a failed restore is also the watchdog's own error; the journal carries it"
+    )]
     let _ = store.watch_with(
         |_, _| {
             attempts.set(attempts.get() + 1);

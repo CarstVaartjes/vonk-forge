@@ -8,6 +8,10 @@
 //! It prints nothing when the helper closed the connection without a reply:
 //! an upgrade restarts the helper that is serving the request, and the lane
 //! then observes the outcome on the host instead.
+#![expect(
+    clippy::unwrap_used,
+    reason = "example program: a failed unwrap ends the demonstration"
+)]
 use std::io::Read;
 use std::os::unix::net::UnixStream;
 use std::time::{SystemTime, UNIX_EPOCH};

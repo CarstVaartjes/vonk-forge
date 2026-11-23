@@ -21,6 +21,10 @@ pub fn hex_sha256(value: &[u8]) -> String {
         .collect()
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 pub(super) fn valid_node_id(value: &str) -> bool {
     value.len() == 36
         && value.starts_with("spk_")

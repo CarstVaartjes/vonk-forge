@@ -99,7 +99,16 @@ impl AgentUpgradeError {
     pub fn diagnostic(&self) -> Option<&str> {
         match self {
             Self::HelperRejectedWithCode { diagnostic, .. } => diagnostic.as_deref(),
-            _ => None,
+            Self::InvalidClaim
+            | Self::DownloadIdentityInvalid
+            | Self::HelperRejected
+            | Self::HelperResponseInvalid
+            | Self::HelperUnavailable(_)
+            | Self::Transport(_)
+            | Self::Stalled(_)
+            | Self::Io(_)
+            | Self::Controller(_)
+            | Self::PackageStatus(_) => None,
         }
     }
 
@@ -108,7 +117,16 @@ impl AgentUpgradeError {
             Self::HelperRejectedWithCode {
                 code, exit_code, ..
             } => Some((*code, *exit_code)),
-            _ => None,
+            Self::InvalidClaim
+            | Self::DownloadIdentityInvalid
+            | Self::HelperRejected
+            | Self::HelperResponseInvalid
+            | Self::HelperUnavailable(_)
+            | Self::Transport(_)
+            | Self::Stalled(_)
+            | Self::Io(_)
+            | Self::Controller(_)
+            | Self::PackageStatus(_) => None,
         }
     }
 }
@@ -279,6 +297,10 @@ impl AgentUpgradeExecutor<'_> {
         }
         .await;
         if matches!(result, Err(AgentUpgradeError::DownloadIdentityInvalid)) {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort cleanup: the next reconciliation pass repeats it"
+            )]
             let _ = isolate_file(&temporary);
         }
         result

@@ -70,6 +70,10 @@ pub(super) fn write_request(
             return Ok(destination);
         }
         Err(error) => {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = fs::remove_file(&temporary);
             return Err(error.into());
         }

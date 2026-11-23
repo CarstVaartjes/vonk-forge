@@ -73,6 +73,18 @@ large_stack_arrays = "allow"
 struct_excessive_bools = "allow"
 similar_names = "allow"
 struct_field_names = "allow"
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+exit = "warn"
+todo = "warn"
+unimplemented = "warn"
+dbg_macro = "warn"
+string_slice = "warn"
+wildcard_enum_match_arm = "warn"
+let_underscore_must_use = "warn"
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
 
 [profile.release]
 codegen-units = 1

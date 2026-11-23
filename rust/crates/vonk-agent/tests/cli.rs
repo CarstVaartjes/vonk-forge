@@ -1,3 +1,7 @@
+#![expect(
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 use std::process::{Command, Output, Stdio};
 
 fn run(arguments: &[&str]) -> Output {

@@ -158,7 +158,17 @@ impl ClientError {
     pub fn retry_after_seconds(&self) -> Option<u32> {
         match self {
             Self::Controller(error) => error.retry_after_seconds,
-            _ => None,
+            Self::CredentialRead(_)
+            | Self::Local(_)
+            | Self::Identity
+            | Self::Transport(_)
+            | Self::Stalled(_)
+            | Self::Retryable
+            | Self::Unsettled(_)
+            | Self::Protocol
+            | Self::ResultSuperseded
+            | Self::ResultRejected(_)
+            | Self::Pin => None,
         }
     }
 
@@ -196,14 +206,32 @@ impl ClientError {
     pub fn status(&self) -> Option<u16> {
         match self {
             Self::Controller(error) | Self::ResultRejected(error) => Some(error.status),
-            _ => None,
+            Self::CredentialRead(_)
+            | Self::Local(_)
+            | Self::Identity
+            | Self::Transport(_)
+            | Self::Stalled(_)
+            | Self::Retryable
+            | Self::Unsettled(_)
+            | Self::Protocol
+            | Self::ResultSuperseded
+            | Self::Pin => None,
         }
     }
 
     pub fn code(&self) -> Option<&str> {
         match self {
             Self::Controller(error) | Self::ResultRejected(error) => Some(&error.code),
-            _ => None,
+            Self::CredentialRead(_)
+            | Self::Local(_)
+            | Self::Identity
+            | Self::Transport(_)
+            | Self::Stalled(_)
+            | Self::Retryable
+            | Self::Unsettled(_)
+            | Self::Protocol
+            | Self::ResultSuperseded
+            | Self::Pin => None,
         }
     }
 
@@ -221,7 +249,16 @@ impl ClientError {
     pub fn request_id(&self) -> Option<&str> {
         match self {
             Self::Controller(error) | Self::ResultRejected(error) => error.request_id.as_deref(),
-            _ => None,
+            Self::CredentialRead(_)
+            | Self::Local(_)
+            | Self::Identity
+            | Self::Transport(_)
+            | Self::Stalled(_)
+            | Self::Retryable
+            | Self::Unsettled(_)
+            | Self::Protocol
+            | Self::ResultSuperseded
+            | Self::Pin => None,
         }
     }
 
@@ -229,7 +266,17 @@ impl ClientError {
     pub fn stalled(&self) -> Option<&crate::stall_window::Stalled> {
         match self {
             Self::Stalled(stalled) => Some(stalled),
-            _ => None,
+            Self::CredentialRead(_)
+            | Self::Local(_)
+            | Self::Identity
+            | Self::Transport(_)
+            | Self::Controller(_)
+            | Self::Retryable
+            | Self::Unsettled(_)
+            | Self::Protocol
+            | Self::ResultSuperseded
+            | Self::ResultRejected(_)
+            | Self::Pin => None,
         }
     }
 
@@ -255,7 +302,16 @@ impl ClientError {
             Self::Transport(_) => {
                 Some(vonk_agent_protocol::generated::AgentTransportKind::Unknown.as_str())
             }
-            _ => None,
+            Self::CredentialRead(_)
+            | Self::Local(_)
+            | Self::Identity
+            | Self::Controller(_)
+            | Self::Retryable
+            | Self::Unsettled(_)
+            | Self::Protocol
+            | Self::ResultSuperseded
+            | Self::ResultRejected(_)
+            | Self::Pin => None,
         }
     }
 
@@ -264,14 +320,33 @@ impl ClientError {
     pub fn endpoint(&self) -> Option<&str> {
         match self {
             Self::Controller(error) | Self::ResultRejected(error) => Some(&error.endpoint),
-            _ => None,
+            Self::CredentialRead(_)
+            | Self::Local(_)
+            | Self::Identity
+            | Self::Transport(_)
+            | Self::Stalled(_)
+            | Self::Retryable
+            | Self::Unsettled(_)
+            | Self::Protocol
+            | Self::ResultSuperseded
+            | Self::Pin => None,
         }
     }
 
     pub fn transport_endpoint(&self) -> Option<String> {
         match self {
             Self::Transport(error) => error.url().map(|url| url.path().to_owned()),
-            _ => None,
+            Self::CredentialRead(_)
+            | Self::Local(_)
+            | Self::Identity
+            | Self::Controller(_)
+            | Self::Stalled(_)
+            | Self::Retryable
+            | Self::Unsettled(_)
+            | Self::Protocol
+            | Self::ResultSuperseded
+            | Self::ResultRejected(_)
+            | Self::Pin => None,
         }
     }
 
@@ -400,6 +475,10 @@ pub fn http_status_disposition(status: u16) -> Disposition {
 /// condition that clears by itself (a busy or briefly unavailable device, a
 /// file another step is replacing). Only a refusal the same input meets again
 /// (permission, a read-only filesystem, an invalid path or bytes) is definite.
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "every other case takes the same fallback by design"
+)]
 pub fn local_disposition(error: &std::io::Error) -> Disposition {
     use std::io::ErrorKind;
     match error.kind() {

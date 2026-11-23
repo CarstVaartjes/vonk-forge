@@ -66,12 +66,20 @@ fn maintain_state_database_reserve(
         for _ in 0..(STATE_DATABASE_DISK_RESERVE_BYTES / block.len() as u64) {
             if let Err(error) = file.write_all(&block) {
                 drop(file);
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+                )]
                 let _ = fs::remove_file(&reserve);
                 return Err(error);
             }
         }
         if let Err(error) = file.sync_all() {
             drop(file);
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = fs::remove_file(&reserve);
             return Err(error);
         }
@@ -232,6 +240,10 @@ async fn collect_process_with_budget(
         let exited = child.try_wait()?.is_some();
         if !exited || !process_group_gone(*group) {
             if exited || tokio::time::Instant::now() >= *deadline {
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort stop of a process that may already have ended"
+                )]
                 let _ = rustix::process::kill_process_group(*group, rustix::process::Signal::KILL);
             }
             return Err(unavailable());
@@ -283,10 +295,18 @@ async fn collect_process_with_budget(
         if child.try_wait()?.is_some() && process_group_gone(*group) {
             *slot = None;
         } else {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort stop of a process that may already have ended"
+            )]
             let _ = rustix::process::kill_process_group(*group, rustix::process::Signal::KILL);
         }
         result
     } else {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = rustix::process::kill_process_group(*group, rustix::process::Signal::KILL);
         Err(unavailable())
     }
@@ -306,6 +326,10 @@ pub async fn stop_process() {
     if let Ok(mut slot) = INVENTORY_PROCESS.try_lock()
         && let Some((child, _, group)) = slot.as_mut()
     {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = rustix::process::kill_process_group(*group, rustix::process::Signal::KILL);
         if tokio::time::timeout(Duration::from_secs(1), child.wait())
             .await
@@ -564,6 +588,10 @@ fn host_settings<R: ProcessRunner>(
     })
 }
 
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "every other error passes through unchanged"
+)]
 fn startup_probe<R: ProcessRunner>(
     runner: &R,
     program: Program,

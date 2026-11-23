@@ -40,7 +40,9 @@ impl ProcessRunner for FakeRunner {
             // A Spark with the desktop: what the helper switches to headless.
             Program::Systemctl if arguments == ["get-default"] => b"graphical.target\n".to_vec(),
             Program::Systemctl => b"active\n".to_vec(),
-            _ => unreachable!(),
+            Program::Curl | Program::Getent | Program::Ip | Program::Oras | Program::SystemdRun => {
+                unreachable!()
+            }
         };
         Ok(ProcessOutput {
             exit_code: None,

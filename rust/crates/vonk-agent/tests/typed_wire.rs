@@ -12,6 +12,11 @@
 //!
 //! Passthrough modules name the external boundary and its reason. Every other
 //! module must use declared types. `json!` is never allowed in non-test code.
+#![expect(
+    clippy::string_slice,
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 
 use std::{
     collections::BTreeMap,
@@ -204,7 +209,6 @@ fn strip_test_items(source: &str) -> String {
     output.push_str(rest);
     output
 }
-
 fn identifiers(code: &str) -> Vec<(&str, bool)> {
     let bytes = code.as_bytes();
     let mut found = Vec::new();

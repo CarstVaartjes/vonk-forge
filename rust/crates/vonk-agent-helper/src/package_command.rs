@@ -162,7 +162,15 @@ fn run_inner(command: &mut Command, timeout: Duration) -> Result<Output, String>
     let cleanup_deadline = settlement_deadline.min(Instant::now() + Duration::from_secs(1));
     let stopped = stop_group(group);
     if result.is_err() {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = child.kill();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = child.wait_timeout(cleanup_deadline.saturating_duration_since(Instant::now()));
     }
     stopped?;

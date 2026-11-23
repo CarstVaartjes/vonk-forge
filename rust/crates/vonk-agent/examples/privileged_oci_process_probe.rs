@@ -1,3 +1,10 @@
+#![expect(
+    clippy::exit,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "example program: a failed unwrap ends the demonstration"
+)]
 use std::env;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -130,7 +137,11 @@ fn main() {
                 HostRuntimeAction::Start => {
                     vonk_agent_helper::protocol::ContainerRuntimeAction::Start
                 }
-                _ => unreachable!(),
+                HostRuntimeAction::RuntimePreflight
+                | HostRuntimeAction::ImageInspect
+                | HostRuntimeAction::RunInspect
+                | HostRuntimeAction::Stop
+                | HostRuntimeAction::InstallationCleanup => panic!("unexpected action"),
             },
             fence,
             request_sha256: request_sha.clone(),
@@ -237,6 +248,10 @@ fn observe() {
     let mut stream = UnixStream::connect(socket_path()).unwrap();
     write_frame(&mut stream, &frame).unwrap();
     let response = read_frame(&mut stream).unwrap();
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+    )]
     let _ = fs::remove_file(&request_path);
     println!("response={}", String::from_utf8_lossy(&response));
     let value: Value = serde_json::from_slice(&response).unwrap();

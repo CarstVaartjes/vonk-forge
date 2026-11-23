@@ -190,7 +190,11 @@ fn safe_path(path: &Path) -> Result<String, BuildSourceError> {
     for component in path.components() {
         match component {
             Component::Normal(value) if !value.is_empty() => normalized.push(value),
-            _ => return Err(BuildSourceError::Path),
+            Component::Prefix(_)
+            | Component::RootDir
+            | Component::CurDir
+            | Component::ParentDir
+            | Component::Normal(_) => return Err(BuildSourceError::Path),
         }
     }
     let value = normalized.to_str().ok_or(BuildSourceError::Path)?;

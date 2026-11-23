@@ -119,6 +119,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             sync_directory(&root)
         })();
         if result.is_err() {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = fs::remove_file(&temporary);
         }
         result
@@ -183,6 +187,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             Ok(()) => {
                 // Never traverse an unsafe stored object. Ordinary files and
                 // symlinks can be unlinked; directories remain inert.
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+                )]
                 let _ = fs::remove_file(&isolated);
                 sync_directory(&root)
                     .map_err(|_| OperationError::InstallationReconciliationStorageUnavailable)

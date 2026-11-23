@@ -5,7 +5,10 @@ use super::*;
 impl<R> RecipeExecutor<'_, R> {
     // The error is the finished result the caller returns as it is; it is moved
     // once, never copied, so its size does not matter here.
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "the error carries the full failure evidence by design"
+    )]
     pub(super) async fn stop_start_run(
         &self,
         claim: &AgentClaim,
@@ -29,7 +32,10 @@ impl<R> RecipeExecutor<'_, R> {
     /// generation or an older one. Any other container (foreign, unmanaged or
     /// of a newer generation) is refused, never touched, and that refusal is
     /// reported as `identity_refused`.
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "the error carries the full failure evidence by design"
+    )]
     pub(super) async fn stop_run_exact(
         &self,
         claim: &AgentClaim,
@@ -81,7 +87,10 @@ impl<R> RecipeExecutor<'_, R> {
     /// order's own, including an older generation of this run left over from a
     /// recovery. A container that is not (another party's, unmanaged, or of a
     /// newer generation) is left untouched.
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "the error carries the full failure evidence by design"
+    )]
     pub(super) async fn heal_retained_run(
         &self,
         claim: &AgentClaim,

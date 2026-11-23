@@ -234,7 +234,14 @@ pub(super) mod recipe_start_tests {
     fn parsed_start(payload: Value) -> Result<RecipeStartRequest, ProtocolError> {
         match RecipeOperationRequest::parse(&claim(payload)?)? {
             RecipeOperationRequest::Start(request) => Ok(request),
-            _ => unreachable!(),
+            RecipeOperationRequest::RuntimePreflight(_)
+            | RecipeOperationRequest::Build(_)
+            | RecipeOperationRequest::BuildCleanup(_)
+            | RecipeOperationRequest::JobRun(_)
+            | RecipeOperationRequest::Install(_)
+            | RecipeOperationRequest::Stop(_)
+            | RecipeOperationRequest::Uninstall(_)
+            | RecipeOperationRequest::Reconcile(_) => unreachable!(),
         }
     }
 
@@ -264,7 +271,14 @@ pub(super) mod recipe_start_tests {
         let claim = claim_for(generated::AgentOperation::RecipeStop, payload)?;
         match RecipeOperationRequest::parse(&claim)? {
             RecipeOperationRequest::Stop(request) => Ok(request),
-            _ => unreachable!(),
+            RecipeOperationRequest::RuntimePreflight(_)
+            | RecipeOperationRequest::Build(_)
+            | RecipeOperationRequest::BuildCleanup(_)
+            | RecipeOperationRequest::JobRun(_)
+            | RecipeOperationRequest::Install(_)
+            | RecipeOperationRequest::Start(_)
+            | RecipeOperationRequest::Uninstall(_)
+            | RecipeOperationRequest::Reconcile(_) => unreachable!(),
         }
     }
 

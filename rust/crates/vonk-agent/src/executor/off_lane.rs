@@ -71,7 +71,16 @@ impl OffLaneClaim {
                     request.build_id,
                 ))
             }
-            _ => None,
+            vonk_agent_protocol::generated::AgentClaimPayload::RuntimePreflightRequest(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::AgentUpgradePayload(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::ArtifactDistributionPayload(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::RecipeBuildCleanupRequest(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::RecipeJobRunRequest(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::RecipeInstallPayload(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::RecipeStartPayload(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::RecipeStopPayload(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::RecipeReconcilePayload(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::RecipeUninstallPayload(_) => None,
         };
         Self {
             claim,

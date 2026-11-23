@@ -243,6 +243,10 @@ async fn streaming_response(
         let (mut socket, _) = listener.accept().await.unwrap();
         read_request_headers(&mut socket).await;
         socket.write_all(headers.as_bytes()).await.unwrap();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "waits for a task to end; its outcome is observed elsewhere"
+        )]
         let _ = socket.write_all(&body).await;
         std::future::pending::<()>().await;
     });
@@ -328,6 +332,10 @@ async fn pairing_reader_cancellation_releases_incomplete_response() {
             .unwrap();
         let mut byte = [0];
         let result = socket.read(&mut byte).await;
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the receiving side may already be gone; nobody is waiting for the value"
+        )]
         let _ = closed.send(matches!(result, Ok(0)) || result.is_err());
     });
     let response = Client::new()

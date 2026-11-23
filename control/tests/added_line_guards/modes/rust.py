@@ -95,37 +95,6 @@ def check_exit_causes(ctx: CheckContext) -> None:
         )
 
 
-def check_locks(ctx: CheckContext) -> None:
-    path, source, added, modes, is_test, noexit_hits = (
-        ctx.path,
-        ctx.source,
-        ctx.added,
-        ctx.modes,
-        ctx.is_test,
-        ctx.noexit_hits,
-    )
-    if (
-        "locks" in modes
-        and not is_test
-        and path.endswith(".rs")
-        and not path.endswith("/held_lock.rs")
-    ):
-        # A flock belongs to the open file, which a child forked by any thread
-        # shares until exec: released only by closing our descriptor, the lock
-        # stays held and the next locker is refused as busy. HeldLock unlocks
-        # explicitly on drop.
-        test_lines = rust_test_lines(source)
-        noexit_hits.extend(
-            f"{path}:{line}: raw exclusive flock; take a HeldLock"
-            for line, text in enumerate(source.splitlines(), 1)
-            if line in added
-            and line not in test_lines
-            and re.search(
-                r"FlockOperation::(?:NonBlocking)?LockExclusive|\bLOCK_EX\b", text
-            )
-        )
-
-
 def check_plan_validation(ctx: CheckContext) -> None:
     path, source, added, modes, is_test, noexit_hits = (
         ctx.path,

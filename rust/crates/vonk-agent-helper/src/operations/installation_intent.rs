@@ -102,6 +102,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             sync_directory(&self.roots.data)
         })();
         if publish.is_err() {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = fs::remove_file(&staging);
         }
         publish.map_err(|_| OperationError::InstallationReconciliationStorageUnavailable)?;

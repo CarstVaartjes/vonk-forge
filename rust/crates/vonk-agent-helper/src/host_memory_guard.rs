@@ -131,6 +131,10 @@ pub fn load_evidence(data_root: &Path, id: &str) -> Option<FailureDiagnostics> {
     Some(value)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the evidence path is always built beneath a directory"
+)]
 fn publish(data_root: &Path, id: &str, value: &FailureDiagnostics) -> std::io::Result<()> {
     let path = evidence_path(data_root, id)
         .ok_or_else(|| std::io::Error::other("invalid container identity"))?;
@@ -210,6 +214,10 @@ fn collect_absent_receipts(runner: &impl CommandRunner, data_root: &Path) {
                 && valid_id(id)
                 && !ids.iter().any(|existing| existing == id)
             {
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+                )]
                 let _ = fs::remove_file(path);
             }
         }
@@ -422,6 +430,10 @@ fn kernel_events() -> Receiver<Instant> {
                         "host_memory_guard: waiting for kernel follower pid={} deadline=1s resume=child-exited next_attempt=2s",
                         child.id()
                     );
+                    #[expect(
+                        clippy::let_underscore_must_use,
+                        reason = "best-effort stop of a process that may already have ended"
+                    )]
                     let _ = child.kill();
                     previous = Some(child);
                     thread::sleep(JOURNAL_RETRY);
@@ -447,12 +459,20 @@ fn kernel_events() -> Receiver<Instant> {
                         {
                             Ok(0) | Err(_) => break,
                             Ok(_) if nvidia_allocation_failure(&String::from_utf8_lossy(&line)) => {
+                                #[expect(
+                                    clippy::let_underscore_must_use,
+                                    reason = "the receiving side may already be gone; nobody is waiting for the value"
+                                )]
                                 let _ = send.try_send(Instant::now());
                             }
                             Ok(_) => {}
                         }
                     }
                 }
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort stop of a process that may already have ended"
+                )]
                 let _ = child.kill();
                 previous = Some(child);
             }
@@ -534,6 +554,10 @@ pub fn spawn(data_root: PathBuf) {
                     chrono::Utc::now(),
                 );
                 kill_now(&known, &targets, &value, &mut reported);
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "the receiving side may already be gone; nobody is waiting for the value"
+                )]
                 let _ = send.try_send((targets, value));
             }
             thread::sleep(SAMPLE_INTERVAL);

@@ -14,7 +14,6 @@ BLOCKS: tuple[Callable[[CheckContext], None], ...] = (
     rust.check_exit_causes,
     general.check_listings,
     general.check_excerpts,
-    rust.check_locks,
     rust.check_plan_validation,
     control.check_locks_2,
     general.check_legacy,

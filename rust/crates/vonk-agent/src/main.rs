@@ -301,6 +301,10 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     )
     .await;
     inventory.abort();
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "waits for a task to end; its outcome is observed elsewhere"
+    )]
     let _ = inventory.await;
     vonk_agent::inventory::stop_process().await;
     match outcome {
@@ -737,7 +741,9 @@ async fn claim_lane<'a>(
                         Duration::from_secs(POLL_MIN_SECONDS),
                         Duration::from_secs(POLL_MAX_SECONDS),
                     ),
-                    _ => jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS),
+                    LoopError::State(_) | LoopError::HeartbeatTask | LoopError::Readiness(_) => {
+                        jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS)
+                    }
                 };
                 eprintln!(
                     "vonk-agent: control loop degraded ({error}); retrying in {} seconds",
@@ -1063,6 +1069,10 @@ where
     };
     if !matches!(outcome, LaneExitWithRotation::Rotation(_)) {
         rotation.abort();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "waits for a task to end; its outcome is observed elsewhere"
+        )]
         let _ = rotation.await;
     }
     outcome

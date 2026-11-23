@@ -46,6 +46,10 @@ pub(super) fn podman_import_diagnostic(
 /// line, or a goroutine dump line (`goroutine 61 [running]:`), with no closing
 /// `Error: building at STEP` line. That line means the crash lines belong to the
 /// RUN's own program, which is an ordinary failed step. `stderr` is lowercase.
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn podman_crashed(stderr: &str) -> bool {
     !stderr.contains("error: building at step ")
         && stderr.lines().any(|line| {

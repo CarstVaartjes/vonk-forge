@@ -18,6 +18,10 @@ impl AgentResult {
     /// Validate the terminal result against the operation carried by its
     /// authoritative claim. The wire envelope intentionally has no duplicate
     /// operation discriminator, so callers must supply the stored operation.
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "every other error passes through unchanged"
+    )]
     pub fn validate_for_operation(
         &self,
         operation: &generated::AgentOperation,
@@ -156,7 +160,18 @@ impl generated::AgentResultResult {
                 })
             }
             AgentResultResult::OutcomeUnknown(_) => Some(AgentResultState::Observing),
-            _ => None,
+            AgentResultResult::RuntimePreflightResult(_)
+            | AgentResultResult::AgentInstallResult(_)
+            | AgentResultResult::RecipeStartResult(_)
+            | AgentResultResult::RecipeStopResult(_)
+            | AgentResultResult::RecipeReconcileResult(_)
+            | AgentResultResult::RecipeUninstallResult(_)
+            | AgentResultResult::RecipeBuildEvidence(_)
+            | AgentResultResult::RecipeBuildCleanupEvidence(_)
+            | AgentResultResult::RecipeJobRunResult(_)
+            | AgentResultResult::ArtifactDistributionResult(_)
+            | AgentResultResult::AgentFailureResult(_)
+            | AgentResultResult::AgentUpgradeResult(_) => None,
         }
     }
 
@@ -168,7 +183,17 @@ impl generated::AgentResultResult {
             Self::RecipeStopResult(_)
             | Self::RecipeUninstallResult(_)
             | Self::RecipeReconcileResult(_) => true,
-            _ => false,
+            Self::RuntimePreflightResult(_)
+            | Self::AgentInstallResult(_)
+            | Self::RecipeBuildEvidence(_)
+            | Self::RecipeBuildCleanupEvidence(_)
+            | Self::RecipeJobRunResult(_)
+            | Self::ArtifactDistributionResult(_)
+            | Self::AgentFailureResult(_)
+            | Self::AgentUpgradeResult(_)
+            | Self::OutcomeDone(_)
+            | Self::OutcomeFailed(_)
+            | Self::OutcomeUnknown(_) => false,
         }
     }
 }

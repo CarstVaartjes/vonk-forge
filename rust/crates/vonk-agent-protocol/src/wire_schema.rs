@@ -69,7 +69,12 @@ pub(crate) fn deserialize_integer_number<'de, D: Deserializer<'de>>(
                 number
             })
         }
-        _ => Err(D::Error::custom("expected an integer token")),
+        Value::Null
+        | Value::Bool(_)
+        | Value::Number(_)
+        | Value::String(_)
+        | Value::Array(_)
+        | Value::Object(_) => Err(D::Error::custom("expected an integer token")),
     }
 }
 
@@ -121,11 +126,19 @@ impl<'de> Visitor<'de> for OriginalObject {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the generated wire schema is valid JSON or the build is broken"
+)]
 static SCHEMA: LazyLock<Value> = LazyLock::new(|| {
     serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/wire.json")))
         .expect("generated wire schema must be valid JSON")
 });
 const SCHEMA_URI: &str = "urn:vonk:agent-wire";
+#[expect(
+    clippy::expect_used,
+    reason = "the generated wire schema registers or the build is broken"
+)]
 static REGISTRY: LazyLock<jsonschema::Registry<'static>> = LazyLock::new(|| {
     jsonschema::Registry::new()
         .add(SCHEMA_URI, SCHEMA.clone())
@@ -177,6 +190,10 @@ pub(crate) fn may_match_wire_model_shape(name: &str, object_keys: Option<&[&str]
     may_match_object_shape(&format!("#/$defs/{name}"), object_keys)
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "required keys are strings by the generated schema"
+)]
 fn may_match_object_shape(pointer: &str, object_keys: Option<&[&str]>) -> bool {
     let Some(keys) = object_keys else {
         return true;

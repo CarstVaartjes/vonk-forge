@@ -217,7 +217,6 @@ pub struct Unconfirmed {
 
 /// What an executor produced for one operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(clippy::large_enum_variant)]
 pub enum ExecutionResult {
     Done(OutcomeDoneResult),
     Failed(Failure),
@@ -276,7 +275,7 @@ impl ExecutionResult {
     pub fn failure(&self) -> Option<&Failure> {
         match self {
             Self::Failed(failure) => Some(failure),
-            _ => None,
+            Self::Done(_) | Self::Unknown(_) => None,
         }
     }
 
@@ -345,7 +344,19 @@ pub fn core_only(result: &AgentResult) -> Option<AgentResult> {
                 ..unknown.clone()
             })
         }
-        _ => return None,
+        AgentResultResult::RuntimePreflightResult(_)
+        | AgentResultResult::AgentInstallResult(_)
+        | AgentResultResult::RecipeStartResult(_)
+        | AgentResultResult::RecipeStopResult(_)
+        | AgentResultResult::RecipeReconcileResult(_)
+        | AgentResultResult::RecipeUninstallResult(_)
+        | AgentResultResult::RecipeBuildEvidence(_)
+        | AgentResultResult::RecipeBuildCleanupEvidence(_)
+        | AgentResultResult::RecipeJobRunResult(_)
+        | AgentResultResult::ArtifactDistributionResult(_)
+        | AgentResultResult::AgentFailureResult(_)
+        | AgentResultResult::AgentUpgradeResult(_)
+        | AgentResultResult::OutcomeDone(_) => return None,
     };
     let core = AgentResult {
         fence: result.fence,
@@ -484,6 +495,12 @@ fn helper_error_code_allowed(operation: &AgentOperation, code: HelperErrorCode) 
         AgentOperation::RecipeStart | AgentOperation::RecipeJobRunV1 => {
             code == HelperErrorCode::RuntimeImageMissing
         }
-        _ => false,
+        AgentOperation::RuntimePreflightV1
+        | AgentOperation::RecipeBuildV1
+        | AgentOperation::RecipeBuildCleanupV1
+        | AgentOperation::RecipeInstall
+        | AgentOperation::RecipeStop
+        | AgentOperation::RecipeUninstall
+        | AgentOperation::RecipeReconcile => false,
     }
 }

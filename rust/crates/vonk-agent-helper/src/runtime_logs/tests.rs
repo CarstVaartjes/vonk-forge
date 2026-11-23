@@ -257,6 +257,10 @@ fn a_cause_line_the_window_opens_inside_is_kept_whole() {
 }
 
 #[test]
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn a_terminate_without_an_exception_is_one_line() {
     // Wrong implementation this catches: every line after any `terminate
     // called` was read as its message, so a report with no message took

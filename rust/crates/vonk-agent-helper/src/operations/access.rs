@@ -184,6 +184,7 @@ pub(super) fn runtime_read_tree_acl_ready(
     Ok(ready)
 }
 
+#[expect(clippy::unwrap_used, reason = "the slice is exactly four bytes")]
 pub(super) fn exact_runtime_read_acl(
     path: &Path,
     metadata: &fs::Metadata,
@@ -234,6 +235,7 @@ pub(super) fn exact_runtime_read_acl(
     Ok(true)
 }
 
+#[expect(clippy::unwrap_used, reason = "the slice is exactly four bytes")]
 pub(super) fn exact_runtime_acl(path: &Path, runtime_uid: u32) -> bool {
     const ACL_VERSION: u32 = 0x0002;
     const USER_OBJ: u16 = 0x0001;

@@ -65,7 +65,12 @@ fn completion(accepted: &AgentClaim) -> ExecutionResult {
             empty_job_output_manifest(),
             None,
         )),
-        _ => unreachable!(),
+        RecipeOperationRequest::RuntimePreflight(_)
+        | RecipeOperationRequest::Build(_)
+        | RecipeOperationRequest::BuildCleanup(_)
+        | RecipeOperationRequest::Install(_)
+        | RecipeOperationRequest::Uninstall(_)
+        | RecipeOperationRequest::Reconcile(_) => unreachable!(),
     }
 }
 

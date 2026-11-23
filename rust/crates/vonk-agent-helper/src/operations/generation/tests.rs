@@ -563,6 +563,10 @@ fn poisoned_cancellation_bookkeeping_releases_the_owner_and_admits_fresh_work() 
     let fence = JobCancellationFence::default();
     let identity = runtime_effect_identity(1);
     let active = fence.begin(identity).unwrap();
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the panic is the behaviour under test"
+    )]
     let _ = std::panic::catch_unwind(|| {
         let _guard = fence.state.lock().unwrap();
         panic!("interrupted bookkeeping");

@@ -107,6 +107,10 @@ impl HelperRejection {
         clippy::needless_pass_by_value,
         reason = "the call takes ownership at this boundary; the caller's value is consumed"
     )]
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "every other error passes through unchanged"
+    )]
     fn for_error(
         request_id: impl Into<String>,
         package_install: bool,
@@ -114,7 +118,29 @@ impl HelperRejection {
     ) -> Self {
         let installation_intent_nonce = match &error {
             OperationError::InstallationIntentObservationRequired { nonce } => Some(nonce.clone()),
-            _ => None,
+            OperationError::InvalidOperation
+            | OperationError::UnsafePath
+            | OperationError::InvalidArtifact
+            | OperationError::PackagePreparationUnavailable
+            | OperationError::PackageMetadataInvalid
+            | OperationError::PackagePreflightFailed
+            | OperationError::PackageInstallFailed { .. }
+            | OperationError::CommandFailed { .. }
+            | OperationError::RuntimeJobWaitFailed { .. }
+            | OperationError::RuntimeInvocationLimitExceeded { .. }
+            | OperationError::RuntimeInvocationLimitsUnavailable
+            | OperationError::RuntimeImageLoadFailed
+            | OperationError::RuntimeImageInspectFailed
+            | OperationError::RuntimeImageMissing
+            | OperationError::RuntimeImageIdentityInvalid
+            | OperationError::RuntimeImageReceiptFailed
+            | OperationError::RuntimeProcessExited { .. }
+            | OperationError::RuntimeRunMissing
+            | OperationError::RuntimeFabricUnavailable
+            | OperationError::StopUncertain
+            | OperationError::InstallationReconciliationBusy
+            | OperationError::InstallationReconciliationStorageUnavailable
+            | OperationError::Io(_) => None,
         };
         let (diagnostic, process_logs) = match &error {
             OperationError::CommandFailed { cause } => {
@@ -159,13 +185,55 @@ impl HelperRejection {
                 ),
                 evidence.as_ref().and_then(|evidence| evidence.logs.clone()),
             ),
-            _ => (None, None),
+            OperationError::InvalidOperation
+            | OperationError::UnsafePath
+            | OperationError::InvalidArtifact
+            | OperationError::InstallationIntentObservationRequired { .. }
+            | OperationError::PackagePreparationUnavailable
+            | OperationError::PackageMetadataInvalid
+            | OperationError::PackagePreflightFailed
+            | OperationError::PackageInstallFailed { .. }
+            | OperationError::RuntimeInvocationLimitExceeded { .. }
+            | OperationError::RuntimeInvocationLimitsUnavailable
+            | OperationError::RuntimeImageLoadFailed
+            | OperationError::RuntimeImageInspectFailed
+            | OperationError::RuntimeImageMissing
+            | OperationError::RuntimeImageIdentityInvalid
+            | OperationError::RuntimeImageReceiptFailed
+            | OperationError::RuntimeRunMissing
+            | OperationError::RuntimeFabricUnavailable
+            | OperationError::StopUncertain
+            | OperationError::InstallationReconciliationBusy
+            | OperationError::InstallationReconciliationStorageUnavailable
+            | OperationError::Io(_) => (None, None),
         };
         // The journal line names a failed command's cause; `detail` reaches
         // the wire only for a package install failure, never for this code.
         let detail = match &error {
             OperationError::CommandFailed { .. } => error.to_string(),
-            _ => error.safe_detail().to_owned(),
+            OperationError::InvalidOperation
+            | OperationError::UnsafePath
+            | OperationError::InvalidArtifact
+            | OperationError::InstallationIntentObservationRequired { .. }
+            | OperationError::PackagePreparationUnavailable
+            | OperationError::PackageMetadataInvalid
+            | OperationError::PackagePreflightFailed
+            | OperationError::PackageInstallFailed { .. }
+            | OperationError::RuntimeJobWaitFailed { .. }
+            | OperationError::RuntimeInvocationLimitExceeded { .. }
+            | OperationError::RuntimeInvocationLimitsUnavailable
+            | OperationError::RuntimeImageLoadFailed
+            | OperationError::RuntimeImageInspectFailed
+            | OperationError::RuntimeImageMissing
+            | OperationError::RuntimeImageIdentityInvalid
+            | OperationError::RuntimeImageReceiptFailed
+            | OperationError::RuntimeProcessExited { .. }
+            | OperationError::RuntimeRunMissing
+            | OperationError::RuntimeFabricUnavailable
+            | OperationError::StopUncertain
+            | OperationError::InstallationReconciliationBusy
+            | OperationError::InstallationReconciliationStorageUnavailable
+            | OperationError::Io(_) => error.safe_detail().to_owned(),
         };
         let (error_code, exit_code) = match error {
             OperationError::InstallationIntentObservationRequired { .. } => {
@@ -223,7 +291,14 @@ impl HelperRejection {
             OperationError::CommandFailed { .. } => (HelperErrorCode::OperationCommandFailed, None),
             OperationError::StopUncertain => (HelperErrorCode::OperationStopUncertain, None),
             OperationError::Io(_) => (HelperErrorCode::OperationIo, None),
-            _ => (HelperErrorCode::OperationFailed, None),
+            OperationError::PackageMetadataInvalid
+            | OperationError::PackagePreflightFailed
+            | OperationError::PackageInstallFailed { .. }
+            | OperationError::RuntimeJobWaitFailed { .. }
+            | OperationError::RuntimeInvocationLimitExceeded { .. }
+            | OperationError::RuntimeInvocationLimitsUnavailable => {
+                (HelperErrorCode::OperationFailed, None)
+            }
         };
         Self {
             request_id: Some(request_id.into()),
@@ -244,6 +319,10 @@ fn main() {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the length was checked on the line above"
+)]
 fn run() -> Result<(), String> {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     if let Some(("--package-hook", hook)) = arguments.split_first().map(|(a, r)| (a.as_str(), r)) {
@@ -409,6 +488,10 @@ fn reject(stream: &mut UnixStream, error: &HelperRejection) {
         installation_intent_nonce: error.installation_intent_nonce.clone(),
     };
     if let Ok(body) = vonk_agent_protocol::canonical_generated_json(&response) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the reply is best effort: the peer that sent a bad frame may already be gone"
+        )]
         let _ = write_frame(stream, &body);
     }
     eprintln!("vonk-agent-helper: request rejected: {}", error.detail);
@@ -491,7 +574,31 @@ fn handle(
         let failure = executor.remove_agent_store(&removal).err().map(|error| {
             let diagnostic = match &error {
                 OperationError::Io(cause) => cause.to_string(),
-                _ => error.safe_detail().to_owned(),
+                OperationError::InvalidOperation
+                | OperationError::UnsafePath
+                | OperationError::InvalidArtifact
+                | OperationError::InstallationIntentObservationRequired { .. }
+                | OperationError::PackagePreparationUnavailable
+                | OperationError::PackageMetadataInvalid
+                | OperationError::PackagePreflightFailed
+                | OperationError::PackageInstallFailed { .. }
+                | OperationError::CommandFailed { .. }
+                | OperationError::RuntimeJobWaitFailed { .. }
+                | OperationError::RuntimeInvocationLimitExceeded { .. }
+                | OperationError::RuntimeInvocationLimitsUnavailable
+                | OperationError::RuntimeImageLoadFailed
+                | OperationError::RuntimeImageInspectFailed
+                | OperationError::RuntimeImageMissing
+                | OperationError::RuntimeImageIdentityInvalid
+                | OperationError::RuntimeImageReceiptFailed
+                | OperationError::RuntimeProcessExited { .. }
+                | OperationError::RuntimeRunMissing
+                | OperationError::RuntimeFabricUnavailable
+                | OperationError::StopUncertain
+                | OperationError::InstallationReconciliationBusy
+                | OperationError::InstallationReconciliationStorageUnavailable => {
+                    error.safe_detail().to_owned()
+                }
             };
             (
                 HelperRejection::for_error(&request_id, false, error).error_code,
@@ -830,6 +937,10 @@ fn user_uid(path: &Path, name: &str) -> Result<u32, String> {
     Err(format!("required user {name} does not exist"))
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn node_id_from_config(config: &str) -> Result<String, String> {
     let mut node_id = None;
     for line in config.lines() {
@@ -865,15 +976,6 @@ fn display(_error: impl std::fmt::Display) -> String {
     // Startup and local I/O errors can carry credential paths or command
     // arguments. Keep the service boundary useful without serializing them.
     "helper local operation failed".to_owned()
-}
-
-#[allow(dead_code)]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "the call takes ownership at this boundary; the caller's value is consumed"
-)]
-fn _classify_protocol_error(error: HelperError) -> String {
-    error.to_string()
 }
 
 #[cfg(test)]

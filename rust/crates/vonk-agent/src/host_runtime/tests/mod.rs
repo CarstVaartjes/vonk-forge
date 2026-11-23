@@ -148,6 +148,10 @@ fn request_root_publication_has_no_permissive_intermediate_state() {
     let writer_root = old_root.clone();
     let writer = std::thread::spawn(move || {
         let result = write_request(&writer_root, &"a".repeat(64), b"{}");
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the receiving side may already be gone; nobody is waiting for the value"
+        )]
         let _ = result_sender.send(result);
     });
     let result = match result_receiver

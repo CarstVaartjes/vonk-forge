@@ -15,6 +15,10 @@ impl CommandRunner for SystemCommandRunner {
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "the settlement is carved out of the deadline when it is set"
+)]
 pub(super) fn run_process(command: Command, timeout: Duration) -> Result<CommandOutput, String> {
     let deadline = Instant::now() + timeout;
     let program = command.program.clone();
@@ -216,14 +220,30 @@ fn terminate_process_group_until(child: &mut std::process::Child, deadline: Inst
         .ok()
         .and_then(rustix::process::Pid::from_raw);
     if let Some(process_group) = process_group {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = rustix::process::kill_process_group(process_group, rustix::process::Signal::TERM);
     }
     // The leader may already have exited while descendants still hold pipes.
     // Always escalate the owned group; never use an unbounded final wait.
     if let Some(process_group) = process_group {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = rustix::process::kill_process_group(process_group, rustix::process::Signal::KILL);
     }
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "best-effort stop of a process that may already have ended"
+    )]
     let _ = child.kill();
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "best-effort stop of a process that may already have ended"
+    )]
     let _ = child
         .wait_timeout(TERMINATION_GRACE.min(deadline.saturating_duration_since(Instant::now())));
 }

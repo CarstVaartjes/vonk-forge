@@ -229,6 +229,10 @@ async fn malformed_range_observation_ends_boundedly_and_same_digest_is_admitted_
             write!(socket, "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nETag: \"sha256:{}\"\r\nContent-Range: {}\r\nConnection: close\r\n\r\n",
                 model.len(), response_digest, range).unwrap();
             // Framing loss never accepts these bytes into the final namespace.
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the peer may have closed the connection; the assertions are on the other side"
+            )]
             let _ = socket.write_all(model);
             if repair_visible {
                 break;

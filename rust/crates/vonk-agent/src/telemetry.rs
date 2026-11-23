@@ -122,7 +122,7 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             .map_err(|error| match error {
                 ProcessError::Timeout => GpuUnavailableReason::GpuCommandTimeout,
                 ProcessError::OutputLimit => GpuUnavailableReason::GpuInvalidOutput,
-                _ => GpuUnavailableReason::GpuCommandFailed,
+                ProcessError::Io(_) | ProcessError::StorageLimit | ProcessError::Cancelled => GpuUnavailableReason::GpuCommandFailed,
             })
             .and_then(|output| {
                 if !output.success {

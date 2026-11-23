@@ -123,6 +123,10 @@ pub fn parse_request(header: &[u8], hosts: &BTreeSet<String>) -> Result<Request,
     })
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn absolute_http(value: &str) -> Result<(String, u16, String), u16> {
     let rest = value.strip_prefix("http://").ok_or(403_u16)?;
     if rest.contains('@') || rest.contains('#') {

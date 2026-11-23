@@ -129,6 +129,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 diagnostic,
             })?;
         if !result.success {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the activation failure is already the reported result; telling the runner is best effort"
+            )]
             let _ = self.runner.package_activation_failed();
             return Err(OperationError::PackageInstallFailed {
                 exit_code: result.exit_code,
@@ -309,6 +313,10 @@ impl CustodiedPackage {
 impl Drop for CustodiedPackage {
     fn drop(&mut self) {
         if !self.cleaned {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort cleanup: the next reconciliation pass repeats it"
+            )]
             let _ = self.cleanup_inner();
         }
     }

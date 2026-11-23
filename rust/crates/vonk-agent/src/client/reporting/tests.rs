@@ -370,6 +370,10 @@ fn the_inventory_core_keeps_the_capacity_report_and_no_optional_evidence() {
 
 /// Two exchanges on one listener: answer each request with its status and
 /// return the request bodies.
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 async fn two_answers(
     statuses: [u16; 2],
 ) -> (AgentHttpClient, tokio::task::JoinHandle<Vec<String>>) {

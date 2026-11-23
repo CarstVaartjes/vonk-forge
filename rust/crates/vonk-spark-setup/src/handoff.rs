@@ -31,7 +31,15 @@ pub(super) fn authenticate_sudo_foreground(sudo: &Path) -> Result<(), SetupError
     let Ok(Some(status)) = child.wait_timeout(DEFAULT_COMMAND_TIMEOUT) else {
         // This child shares our foreground group: terminate only the child,
         // never the caller or the other processes attached to its terminal.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = child.kill();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = child.wait_timeout(TERMINATION_GRACE);
         return Err(SetupError::ObservationUnavailable(
             vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,

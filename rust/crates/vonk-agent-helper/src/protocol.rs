@@ -42,7 +42,12 @@ impl HelperError {
         use vonk_agent_protocol::generated::HelperErrorCode;
         match self {
             Self::GrantTimeWindow => HelperErrorCode::GrantTimeWindow,
-            _ => HelperErrorCode::GrantUnauthorized,
+            Self::InvalidMessage
+            | Self::InvalidOperation
+            | Self::InvalidAuthorization
+            | Self::InvalidPeer
+            | Self::InvalidFrame
+            | Self::Io(_) => HelperErrorCode::GrantUnauthorized,
         }
     }
 

@@ -49,7 +49,14 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             vonk_agent_protocol::generated::AgentClaimPayload::RecipeJobRunRequest(request) => {
                 &request.plan_digest
             }
-            _ => {
+            vonk_agent_protocol::generated::AgentClaimPayload::RuntimePreflightRequest(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::AgentUpgradePayload(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::ArtifactDistributionPayload(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::RecipeBuildRequest(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::RecipeBuildCleanupRequest(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::RecipeStopPayload(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::RecipeReconcilePayload(_)
+            | vonk_agent_protocol::generated::AgentClaimPayload::RecipeUninstallPayload(_) => {
                 return Err(Box::new(failed(
                     "installation preparation request is invalid",
                 )));
@@ -459,7 +466,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                             | HelperErrorCode::RequestReplayed
                     )
                 }
-                _ => false,
+                crate::host_runtime::HostRuntimeError::Io(_)
+                | crate::host_runtime::HostRuntimeError::HelperProtocol(_)
+                | crate::host_runtime::HostRuntimeError::HelperProtocolBound { .. }
+                | crate::host_runtime::HostRuntimeError::StopUncertain => false,
             };
             if authority_denied {
                 return failed_stage_owned(

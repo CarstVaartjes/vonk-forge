@@ -7,6 +7,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
         clippy::trivially_copy_pass_by_ref,
         reason = "borrowed to match the sibling signatures that take the operation by reference"
     )]
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "every other error passes through unchanged"
+    )]
     pub(super) fn execute_runtime_request(
         &self,
         action: &ContainerRuntimeAction,
@@ -282,7 +286,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     cancel_pending_start: plan.cancel_pending_start,
                 }))
             }
-            _ => {
+            HostRuntimeAction::RuntimePreflight
+            | HostRuntimeAction::ImagePull
+            | HostRuntimeAction::ImageInspect
+            | HostRuntimeAction::RunInspect
+            | HostRuntimeAction::InstallationCleanup => {
                 if request.start_plan.is_some()
                     || request.job_plan.is_some()
                     || request.stop_plan.is_some()

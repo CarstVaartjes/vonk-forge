@@ -115,6 +115,10 @@ pub(crate) const HEARTBEAT_LEASE_MARGIN: Duration = Duration::from_secs(1);
 pub const AGENT_PROTOCOL_VERSION: u32 = 4;
 
 /// Serialize the current claim contract used by the HTTP transport.
+#[expect(
+    clippy::expect_used,
+    reason = "the wait is clamped to 60 seconds, which fits u32"
+)]
 pub fn claim_request_document(
     preflight_fingerprint: Option<&str>,
     hostname: Option<&str>,

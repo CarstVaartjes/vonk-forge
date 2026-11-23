@@ -1,3 +1,7 @@
+#![expect(
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 use chrono::{DateTime, FixedOffset, Utc};
 use serde_json::Value;
 use tempfile::tempdir;

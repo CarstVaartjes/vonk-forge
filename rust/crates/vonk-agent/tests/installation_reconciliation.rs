@@ -1,3 +1,8 @@
+#![expect(
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 use std::{
     env, fs,
     io::{BufRead, BufReader, Write},
@@ -204,6 +209,10 @@ fn prepared_checkpoint_survives_process_exit_and_resumes_in_a_new_process() {
     }
     // Kill only after the child reports that prepare returned from its synced
     // checkpoint write. This injects process death at a deterministic boundary.
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "best-effort stop of a process that may already have ended"
+    )]
     let _ = child.kill();
     let status = child.wait().unwrap();
     assert!(

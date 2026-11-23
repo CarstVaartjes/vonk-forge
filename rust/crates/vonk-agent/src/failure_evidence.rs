@@ -64,6 +64,10 @@ fn carries_value(rest: &str) -> bool {
 }
 
 /// True when the line carries a credential value rather than the topic's name.
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 pub fn names_credential_value(line: &str) -> bool {
     let lower = line.to_lowercase();
     if lower.contains("-----begin") || lower.contains("-----end") {
@@ -95,6 +99,10 @@ pub fn names_credential_value(line: &str) -> bool {
     })
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 pub fn sanitize_text(text: &str) -> String {
     let text: String = text
         .chars()
@@ -126,7 +134,15 @@ fn redact_word(word: &str) -> String {
     if let Ok(mut url) = url::Url::parse(word)
         && matches!(url.scheme(), "http" | "https")
     {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "clearing credentials from a URL that cannot carry them reports nothing to act on"
+        )]
         let _ = url.set_username("");
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "clearing credentials from a URL that cannot carry them reports nothing to act on"
+        )]
         let _ = url.set_password(None);
         url.set_query(None);
         url.set_fragment(None);
@@ -249,6 +265,10 @@ pub fn sanitize_exit_summary(text: &str) -> String {
 ///
 /// The bound is applied from the front because the end is what happened last.
 /// Cutting the end instead would keep stale lines and discard the failure.
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn clamp_tail(text: String, limit: usize) -> (String, usize) {
     if text.len() <= limit {
         return (text, 0);
@@ -267,6 +287,10 @@ fn clamp_tail(text: String, limit: usize) -> (String, usize) {
 
 /// Keep the front of `text` within `limit` bytes, ending on a line boundary
 /// when one fits.
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn keep_front(text: &str, limit: usize) -> &str {
     if text.len() <= limit {
         return text;
@@ -281,6 +305,10 @@ fn keep_front(text: &str, limit: usize) -> &str {
 /// Bound a helper's retained text without losing its shape: the failure lines
 /// it kept from above its window, the omission marker, and the end of the
 /// window.  Text with no marker is one tail and keeps its end.
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn clamp_retained(text: String, limit: usize) -> (String, usize) {
     if text.len() <= limit {
         return (text, 0);
@@ -464,6 +492,10 @@ pub fn podman_stderr_tail(stream: &[u8]) -> FailureLogTail {
 
 /// The first line of a Go runtime crash (`panic: ` or `fatal error: `), redacted
 /// and bounded.
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn go_crash_header(stream: &[u8]) -> Option<String> {
     let line = stream
         .split(|&byte| byte == b'\n')
@@ -663,7 +695,15 @@ fn bounded_command(program: &str, args: &[&str], deadline: Instant) -> std::io::
         }
     })();
     if result.is_err() {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = child.kill();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = child.wait();
     }
     result
@@ -846,6 +886,10 @@ pub fn from_failure(operation: &AgentOperation, failure: &Failure) -> FailureDia
 /// code and cause the helper reported for a container, and the failing step and
 /// exit status of an image build (read from the build's own retained output).
 /// Names and values are fixed tokens or bounded integers, never free text.
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn exit_properties(failure: &Failure) -> Vec<FailureProperty> {
     let mut found = Vec::new();
     let mut push = |name: &str, value: String| {

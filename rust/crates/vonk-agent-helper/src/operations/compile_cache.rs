@@ -255,6 +255,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             let path = entry.path();
             if mounts.iter().any(|mount| mount.starts_with(&path)) {
                 // Last use means the end of use, not the time population began.
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+                )]
                 let _ = File::open(&path).and_then(|dir| dir.set_modified(now));
                 continue;
             }

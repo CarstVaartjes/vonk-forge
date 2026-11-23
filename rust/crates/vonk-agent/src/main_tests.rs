@@ -486,6 +486,10 @@ async fn failed_inventory_round_keeps_control_available_and_later_recovers() {
     let attempted = Cell::new(false);
     let mut failures = 0;
     let inventory = async {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the outcome of this step is not what the test asserts"
+        )]
         let _ = collect_inventory_until_ready(
             || async {
                 attempted.set(true);

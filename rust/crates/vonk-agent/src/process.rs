@@ -822,6 +822,10 @@ fn run_process(
         .ok()
         .and_then(rustix::process::Pid::from_raw)
     {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
     }
     if options.cancellation.is_some_and(|cancelled| cancelled()) {
@@ -964,8 +968,16 @@ fn terminate_process(
         .ok()
         .and_then(rustix::process::Pid::from_raw)
     {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
     }
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "best-effort stop of a process that may already have ended"
+    )]
     let _ = child.kill();
     if let Some(unit) = transient_user_service_unit(program, arguments) {
         let environment =
@@ -987,7 +999,15 @@ fn terminate_process(
         if let Ok(mut stop) = stop {
             let observation_deadline = deadline.min(Instant::now() + Duration::from_millis(500));
             if reap_until(&mut stop, observation_deadline).is_err() {
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort stop of a process that may already have ended"
+                )]
                 let _ = stop.kill();
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort stop of a process that may already have ended"
+                )]
                 let _ = reap_until(&mut stop, deadline);
             }
         }
@@ -1001,6 +1021,10 @@ fn reap_until(child: &mut Child, deadline: Instant) -> Result<(), std::io::Error
             return Ok(());
         }
         if Instant::now() >= deadline {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort stop of a process that may already have ended"
+            )]
             let _ = child.kill();
             return Err(std::io::ErrorKind::TimedOut.into());
         }
@@ -1131,6 +1155,10 @@ fn run_process_to_file(
         .ok()
         .and_then(rustix::process::Pid::from_raw)
     {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
     }
     sink.flush()?;

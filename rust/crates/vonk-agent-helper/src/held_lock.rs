@@ -23,6 +23,10 @@ impl HeldLock {
 impl Drop for HeldLock {
     fn drop(&mut self) {
         // Unlocking acts on the open file itself, whoever else still shares it.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the lock is released when the descriptor closes anyway"
+        )]
         let _ = rustix::fs::flock(&self.0, rustix::fs::FlockOperation::Unlock);
     }
 }

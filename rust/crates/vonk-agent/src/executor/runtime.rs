@@ -25,7 +25,10 @@ impl<R> RecipeExecutor<'_, R> {
                 HostRuntimeAction::ImagePull => ProgressPhase::Pulling,
                 HostRuntimeAction::Start => ProgressPhase::Starting,
                 HostRuntimeAction::Stop => ProgressPhase::Stopping,
-                _ => ProgressPhase::Verifying,
+                HostRuntimeAction::RuntimePreflight
+                | HostRuntimeAction::ImageInspect
+                | HostRuntimeAction::RunInspect
+                | HostRuntimeAction::InstallationCleanup => ProgressPhase::Verifying,
             },
         )
         .await;

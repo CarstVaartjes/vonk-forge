@@ -21,7 +21,7 @@ fn signed_endpoint_placement_is_not_vetoed_by_stale_firewall_observation() {
                 return match self.0 {
                     Answer::Missing => Err("compiled command could not start".to_owned()),
                     Answer::ApplyFailed => Ok(docker_output(false, "", 1)),
-                    _ => Ok(docker_output(true, "", 0)),
+                    Answer::Policy | Answer::Unapplied => Ok(docker_output(true, "", 0)),
                 };
             }
             assert_eq!(arguments[2], "check-endpoint-port");

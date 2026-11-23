@@ -253,6 +253,10 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         // Retirement is bookkeeping: failure cannot veto current admission.
         // Preserve non-file records without following them when possible.
         if fs::rename(path, retired).is_ok() {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = File::open(root).and_then(|directory| directory.sync_all());
         }
         Ok(())
@@ -392,6 +396,10 @@ pub(super) fn write_reconciliation_checkpoint(
     })();
     drop(file);
     if result.is_err() {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+        )]
         let _ = fs::remove_file(&temporary);
     }
     result

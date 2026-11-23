@@ -174,6 +174,10 @@ pub(super) fn atomic_write(root: &Path, name: &str, value: &[u8]) -> Result<(), 
     // Only this invocation's exclusive temporary file may be unlinked. A stale
     // partial never owns the next invocation's publication path.
     if written.is_err() {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+        )]
         let _ = fs::remove_file(&temporary);
     }
     written

@@ -2,6 +2,10 @@ use quote::{ToTokens, quote};
 use std::collections::BTreeMap;
 use syn::{Item, parse_quote};
 
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "syn::Item and syn::Type are non_exhaustive: a new syntax kind is not the generator's concern"
+)]
 pub(super) fn strip_docs(item: &mut Item) {
     let attrs = match item {
         Item::Struct(item) => &mut item.attrs,
@@ -113,6 +117,10 @@ pub(super) fn derive_trivial_defaults(items: &mut Vec<Item>) {
     }
 }
 
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "syn::Item and syn::Type are non_exhaustive: a new syntax kind is not the generator's concern"
+)]
 pub(super) fn equality_types(items: &[Item]) -> std::collections::BTreeSet<String> {
     let fields: BTreeMap<String, std::collections::BTreeSet<String>> = items
         .iter()

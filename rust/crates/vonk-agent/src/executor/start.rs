@@ -527,6 +527,10 @@ impl<R> RecipeExecutor<'_, R> {
 /// `result` with the page-cache drops of its load, on a failure's diagnostics.
 /// A started workload and an unconfirmed start report none; their drops stay in
 /// the journal.
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "every other error passes through unchanged"
+)]
 fn with_page_cache(
     result: ExecutionResult,
     evidence: Option<vonk_agent_protocol::generated::PageCacheDropEvidence>,

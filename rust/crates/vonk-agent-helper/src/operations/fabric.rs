@@ -34,6 +34,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 );
             }
             // Re-observe without turning generated configuration into authority.
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "waits for a task to end; its outcome is observed elsewhere"
+            )]
             let _ = self.runner.run_with_timeout(
                 Path::new(DOCKER_FIREWALL),
                 &arguments,

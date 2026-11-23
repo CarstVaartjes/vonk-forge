@@ -49,7 +49,15 @@ pub(super) fn command(path: &str, arguments: &[&str], offline: bool) -> Result<S
         .wait_timeout(Duration::from_secs(180))
         .map_err(|e| e.to_string())?
     else {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = child.kill();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = child.wait_timeout(Duration::from_secs(5));
         return Err("package command timed out".into());
     };

@@ -240,6 +240,10 @@ async fn serve_connection(
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error);
     }
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "the receiving side may already be gone; nobody is waiting for the value"
+    )]
     let _ = stream.shutdown().await;
 }
 

@@ -107,6 +107,10 @@ impl AgentHttpClient {
         }
         .await;
         if result.is_err() {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = tokio::fs::remove_file(&temporary).await;
         }
         result

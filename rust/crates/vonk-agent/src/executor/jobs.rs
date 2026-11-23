@@ -96,6 +96,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
 
     /// What the helper answered for the dispatched job, settled into the
     /// job's exit account or the result that ends this request.
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "every other error passes through unchanged"
+    )]
     pub(super) async fn settle_job_dispatch(
         &self,
         job: &DispatchedJob<'_>,
@@ -115,6 +119,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     && let Some(refused) = refused_job_start(error)
                 {
                     // Nothing started, so no stop: release the scope.
+                    #[expect(
+                        clippy::let_underscore_must_use,
+                        reason = "best-effort cleanup: the next reconciliation pass repeats it"
+                    )]
                     let _ = JobScopeCleanup::new(&self.runtime, job.job_scope).finish();
                     return Err(Box::new(refused));
                 }
@@ -692,6 +700,10 @@ pub(super) fn job_run_stop_plan(
 pub(super) async fn wait_for_cancellation(cancellation: &mut tokio::sync::watch::Receiver<bool>) {
     // The enclosing operation owns the deadline and drops this observer at
     // completion. Losing its cancellation owner ends observation promptly.
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "waits for a task to end; its outcome is observed elsewhere"
+    )]
     let _ = cancellation.wait_for(|cancelled| *cancelled).await;
 }
 
@@ -727,6 +739,7 @@ where
         () = wait_for_cancellation(cancellation) => {
             let stopped = stop().await.is_ok();
             if stopped {
+                #[expect(clippy::let_underscore_must_use, reason = "waits for a task to end; its outcome is observed elsewhere")]
                 let _ = tokio::time::timeout(JOB_CANCEL_DRAIN_TIMEOUT, &mut job).await;
             }
             InterruptibleJob::Cancelled { stopped }
@@ -862,7 +875,12 @@ pub(super) fn refused_job_start(
                 "job start was refused by the Controller",
             ))
         }
-        _ => None,
+        crate::host_runtime::HostRuntimeError::Io(_)
+        | crate::host_runtime::HostRuntimeError::Controller(_)
+        | crate::host_runtime::HostRuntimeError::HelperProtocol(_)
+        | crate::host_runtime::HostRuntimeError::HelperProtocolBound { .. }
+        | crate::host_runtime::HostRuntimeError::StopUncertain
+        | crate::host_runtime::HostRuntimeError::HelperRejected { .. } => None,
     }
 }
 
@@ -894,6 +912,10 @@ pub(super) fn output_manifest_with_digest(
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the empty manifest is a constant that always canonicalises"
+)]
 pub(super) fn empty_job_output_manifest() -> RecipeJobOutputManifest {
     output_manifest_with_digest(
         vonk_agent_protocol::generated::RecipeJobOutputManifestContent {

@@ -89,6 +89,10 @@ pub(super) fn verify_sustained_readiness(
     // or an invalid self-test) to repair the host.  These final diagnostics do
     // not include any credentials and inherit stderr from the setup command.
     if let Some(current_pid) = pid {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort cleanup: the next reconciliation pass repeats it"
+        )]
         let _ = runner.run(readiness_probe(paths, &current_pid, false));
     } else {
         emit_diagnostic_stdout(runner.run(Command::new(

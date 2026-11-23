@@ -33,6 +33,10 @@ impl PackageRollbackAuthority {
 }
 
 impl PackageActivationReceipt {
+    #[expect(
+        clippy::string_slice,
+        reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+    )]
     pub fn validate(&self) -> Result<(), String> {
         let hex = |value: &str| {
             value.len() == 64

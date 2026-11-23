@@ -19,6 +19,10 @@ fn image_collection_ticks_without_requests_and_stops_with_its_owner() {
     let (observed, ticks) = channel();
     let lifetime = super::spawn_image_collection(
         move || {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the receiving side may already be gone; nobody is waiting for the value"
+            )]
             let _ = observed.send(());
         },
         Duration::from_millis(20),

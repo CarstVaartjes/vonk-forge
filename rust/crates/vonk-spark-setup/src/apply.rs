@@ -288,6 +288,10 @@ fn reconcile_generated_parent(path: &Path, owner: u32) -> Result<(), SetupError>
                         && !metadata.file_type().is_symlink()
                         && metadata.uid() == owner =>
                 {
+                    #[expect(
+                        clippy::let_underscore_must_use,
+                        reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+                    )]
                     let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o755));
                 }
                 Ok(_) => {
@@ -295,11 +299,19 @@ fn reconcile_generated_parent(path: &Path, owner: u32) -> Result<(), SetupError>
                         let retired = container
                             .join(format!(".vonk-spark-retired-{}", Uuid::new_v4().simple()));
                         if fs::rename(parent, retired).is_ok() {
+                            #[expect(
+                                clippy::let_underscore_must_use,
+                                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+                            )]
                             let _ = fs::create_dir(parent);
                         }
                     }
                 }
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    #[expect(
+                        clippy::let_underscore_must_use,
+                        reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+                    )]
                     let _ = fs::create_dir(parent);
                 }
                 Err(_) => {}

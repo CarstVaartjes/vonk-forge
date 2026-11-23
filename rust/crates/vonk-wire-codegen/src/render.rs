@@ -10,6 +10,10 @@ use crate::deserialize::{deserialize_impl, untagged_deserialize_impl};
 use crate::schema::{exclusive_empty_unions, prepare, typed_tags};
 
 /// The formatted Rust wire types for one exported Pydantic wire schema.
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "syn::Item and syn::Type are non_exhaustive: a new syntax kind is not the generator's concern"
+)]
 pub fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
     use std::io::Write;
     let mut schema: Value = serde_json::from_slice(&fs::read(schema_path)?)?;

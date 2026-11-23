@@ -161,6 +161,10 @@ pub(super) async fn request_capture_client(
             }
             // Nonblocking acknowledgement of an accepted, incomplete
             // request; the next read owns the same absolute deadline.
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the receiving side may already be gone; nobody is waiting for the value"
+            )]
             let _ = stage_observer.try_send(CaptureStage::Headers);
         };
         let headers = std::str::from_utf8(&request[..header_end]).unwrap();
@@ -173,6 +177,10 @@ pub(super) async fn request_capture_client(
             })
             .unwrap_or(0);
         while request.len() - header_end < content_length {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "the receiving side may already be gone; nobody is waiting for the value"
+            )]
             let _ = stage_observer.try_send(CaptureStage::Body);
             let size = tokio::time::timeout_at(deadline, stream.read(&mut buffer))
                 .await
@@ -230,6 +238,10 @@ pub(super) async fn finish_capture_peer(mut server: CapturePeer) -> Vec<u8> {
         Ok(result) => result.expect("capture peer failed"),
         Err(error) => {
             server.task.abort();
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "waits for a task to end; its outcome is observed elsewhere"
+            )]
             let _ = tokio::time::timeout(PEER_BUDGET, &mut server.task).await;
             panic!("capture peer completion deadline: {error}");
         }
@@ -688,6 +700,10 @@ pub(super) fn spawn_peer<T: Send + 'static>(
     let (sender, result) = std::sync::mpsc::sync_channel(1);
     thread::spawn(move || {
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work));
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the receiving side may already be gone; nobody is waiting for the value"
+        )]
         let _ = sender.send(outcome);
     });
     ThreadPeer { result }

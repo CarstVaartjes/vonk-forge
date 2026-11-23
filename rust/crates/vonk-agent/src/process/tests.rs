@@ -268,6 +268,10 @@ fn curl_enforces_the_download_body_limit() {
         stream
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1048576\r\n\r\n")
             .unwrap();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "the peer may have closed the connection; the assertions are on the other side"
+        )]
         let _ = stream.write_all(&[b'x'; 1024]);
     });
     let directory = tempdir().unwrap();

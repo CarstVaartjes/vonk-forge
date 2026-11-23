@@ -202,7 +202,38 @@ pub(super) fn helper_finding_code(code: HelperErrorCode) -> RuntimePreflightFind
         HelperErrorCode::InspectionOutcomeInvalid => {
             Finding::PreflightFindingHelperInspectionOutcomeInvalid
         }
-        _ => Finding::PreflightFindingHelperProtocolInvalid,
+        HelperErrorCode::ConcurrencyLimit
+        | HelperErrorCode::InstallationIntentObservationRequired
+        | HelperErrorCode::PackageCustodyFailed
+        | HelperErrorCode::PackageInstallFailed
+        | HelperErrorCode::PackageMetadataFailed
+        | HelperErrorCode::PackagePreparationUnavailable
+        | HelperErrorCode::PackagePreflightFailed
+        | HelperErrorCode::PackageVerificationFailed
+        | HelperErrorCode::RuntimeAuthorityUnavailable
+        | HelperErrorCode::RuntimeHelperCallJoinFailed
+        | HelperErrorCode::RuntimeHelperInspectionOutcomeInvalid
+        | HelperErrorCode::RuntimeHelperMessageFramingInvalid
+        | HelperErrorCode::RuntimeHelperOutcomeMalformed
+        | HelperErrorCode::RuntimeHelperProtocolInvalid
+        | HelperErrorCode::RuntimeHelperRejectionMalformed
+        | HelperErrorCode::RuntimeHelperRequestArgumentsPresenceInvalid
+        | HelperErrorCode::RuntimeHelperRequestArgumentNulByte
+        | HelperErrorCode::RuntimeHelperRequestAttemptInvalid
+        | HelperErrorCode::RuntimeHelperRequestBytesInvalid
+        | HelperErrorCode::RuntimeHelperRequestDocumentInvalid
+        | HelperErrorCode::RuntimeHelperRequestEncodingInvalid
+        | HelperErrorCode::RuntimeHelperRequestInstallationIdentityInvalid
+        | HelperErrorCode::RuntimeHelperRequestPlanBindingInvalid
+        | HelperErrorCode::RuntimeHelperRequestPlanBytesInvalid
+        | HelperErrorCode::RuntimeHelperRequestSchemaVersionInvalid
+        | HelperErrorCode::RuntimeHelperRequestStorageInvalid
+        | HelperErrorCode::RuntimeHelperResponseUnbound
+        | HelperErrorCode::RuntimeHelperStopUncertain
+        | HelperErrorCode::RuntimeHelperSystemClockInvalid
+        | HelperErrorCode::RuntimeHelperUnavailable => {
+            Finding::PreflightFindingHelperProtocolInvalid
+        }
     }
 }
 

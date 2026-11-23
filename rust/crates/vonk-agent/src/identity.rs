@@ -647,6 +647,10 @@ pub(crate) fn atomic_private_write(
         fs::rename(&temporary, root.join(name))?;
         Ok::<(), std::io::Error>(())
     })() {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+        )]
         let _ = fs::remove_file(&temporary);
         return Err(error);
     }
@@ -669,6 +673,10 @@ fn temporary_path(root: &Path, name: &str) -> PathBuf {
     root.join(format!(".{name}.{}.tmp", std::process::id()))
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn valid_node_id(value: &str) -> bool {
     value.len() == 36
         && value.starts_with("spk_")

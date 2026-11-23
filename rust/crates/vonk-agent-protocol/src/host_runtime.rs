@@ -186,7 +186,10 @@ impl HostRuntimeRequestRule {
                 Some((Some(limit), observed))
             }
             Self::ArgumentNulByte { observed } => Some((None, observed)),
-            _ => None,
+            Self::ArgumentsPresence
+            | Self::PlanBinding
+            | Self::InstallationIdentity
+            | Self::Encoding => None,
         }
     }
 }
@@ -269,7 +272,11 @@ impl HostRuntimeRequest {
             {
                 return Err(HostRuntimeRequestRule::PlanBinding);
             }
-            _ => {}
+            HostRuntimeAction::RuntimePreflight
+            | HostRuntimeAction::ImagePull
+            | HostRuntimeAction::ImageInspect
+            | HostRuntimeAction::RunInspect
+            | HostRuntimeAction::InstallationCleanup => {}
         }
         let encoded = canonical_json(self).map_err(|_| HostRuntimeRequestRule::Encoding)?;
         if encoded.len() > MAX_HOST_RUNTIME_REQUEST_BYTES {

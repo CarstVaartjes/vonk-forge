@@ -173,6 +173,7 @@ pub(super) fn trusted_model_file(
     }
 }
 
+#[expect(clippy::unwrap_used, reason = "the slice is exactly four bytes")]
 pub(crate) fn exact_runtime_file_acl(file: &impl std::os::fd::AsFd) -> bool {
     const ACL_VERSION: u32 = 0x0002;
     const USER_OBJ: u16 = 0x0001;

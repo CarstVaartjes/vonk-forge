@@ -37,7 +37,7 @@ fn without_volatile(value: &mut Value) {
             }
             members.values_mut().for_each(without_volatile);
         }
-        _ => {}
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
     }
 }
 

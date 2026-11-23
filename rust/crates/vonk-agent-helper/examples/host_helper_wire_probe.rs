@@ -1,3 +1,8 @@
+#![expect(
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "example program: a failed unwrap ends the demonstration"
+)]
 use std::io::{self, Read};
 
 use vonk_agent_helper::protocol::{
@@ -84,6 +89,11 @@ fn main() {
                 String::from_utf8(canonical_json(&grant).unwrap()).unwrap()
             );
         }
-        _ => panic!("probe input is not a bound run inspection, Stop or reconciliation grant"),
+        vonk_agent_protocol::HostHelperOperation::ApplyGpuClockOperation(_)
+        | vonk_agent_protocol::HostHelperOperation::ApplySwapOperation(_)
+        | vonk_agent_protocol::HostHelperOperation::InstallVonkDebOperation(_)
+        | vonk_agent_protocol::HostHelperOperation::ExecuteContainerRuntimeRequestOperation(_) => {
+            panic!("probe input is not a bound run inspection, Stop or reconciliation grant")
+        }
     }
 }

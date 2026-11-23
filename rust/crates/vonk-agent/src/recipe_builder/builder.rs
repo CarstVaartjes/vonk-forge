@@ -59,6 +59,10 @@ impl Drop for PodmanBuildStaging {
         // graphroot. Restore owner traversal/removal before TempDir runs. Do
         // not follow symlinks created in container-image metadata.
         if self._temporary.is_some() {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort cleanup: the next reconciliation pass repeats it"
+            )]
             let _ = make_owned_directories_removable(self.path());
         }
     }
@@ -465,6 +469,10 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
         for reference in [final_tag, tag] {
             let mut remove_arguments = podman_storage_arguments(&storage, runroot.as_path());
             remove_arguments.extend(["image".to_owned(), "rm".to_owned(), reference]);
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort cleanup: the next reconciliation pass repeats it"
+            )]
             let _ = self.runner.run_cancellable(
                 Program::Podman,
                 &remove_arguments,
@@ -584,7 +592,10 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
     /// it builds from the recipe image through an argument, installs the
     /// platform contract, and carries the adapter identity as labels so the
     /// exported image can be checked against the plan.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the arguments are one operation's fixed inputs"
+    )]
     pub(super) fn build_adaptation(
         &self,
         request: &RecipeBuildRequest,

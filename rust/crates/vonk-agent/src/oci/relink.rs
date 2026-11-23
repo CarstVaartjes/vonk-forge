@@ -189,6 +189,10 @@ fn link_store_object(
             sync_parent(parent)
         });
     if replaced.is_err() {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+        )]
         let _ = fs::remove_file(&temporary);
     }
     replaced.map(|()| true)

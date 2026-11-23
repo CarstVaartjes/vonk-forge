@@ -1,3 +1,10 @@
+#![expect(
+    clippy::exit,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 mod common;
 
 use std::{

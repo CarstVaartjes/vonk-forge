@@ -319,6 +319,10 @@ fn run_line_command(
     Ok(output)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the pipe was requested when the child was spawned"
+)]
 fn drive_command(
     command: &mut Command,
     timeout: Duration,
@@ -406,11 +410,23 @@ fn drive_command(
             .ok()
             .and_then(rustix::process::Pid::from_raw)
         {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort stop of a process that may already have ended"
+            )]
             let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
         }
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = child.kill();
         // Even uninterruptible kernel IO cannot turn cleanup into an infinite
         // wait. A new helper request is admitted after this cleanup allowance.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort stop of a process that may already have ended"
+        )]
         let _ = child.wait_timeout(Duration::from_secs(1));
     }
     result

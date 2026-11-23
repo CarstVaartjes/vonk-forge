@@ -345,7 +345,10 @@ pub fn sweep(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the arguments are one operation's fixed inputs"
+)]
 fn sweep_with(
     data_root: &Path,
     now: SystemTime,
@@ -502,6 +505,10 @@ fn sweep_with(
             fs::rename(&temporary, &path)
         };
         if let Err(error) = publish() {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = fs::remove_file(&temporary);
             eprintln!("vonk-agent: store retention references unavailable: {error}");
         }

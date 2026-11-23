@@ -432,7 +432,15 @@ impl<R: CommandRunner> OperationExecutor<R> {
             )
         })();
         if let Err(wait) = created {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = fs::remove_file(&temporary);
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = fs::remove_file(&target);
             return Err(wait);
         }

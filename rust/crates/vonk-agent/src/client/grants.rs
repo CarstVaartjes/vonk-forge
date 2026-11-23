@@ -290,7 +290,10 @@ pub(super) fn host_runtime_plan_binding(
             run_generation: request.run_generation,
             ..HostRuntimePlanBinding::default()
         }),
-        _ => Ok(HostRuntimePlanBinding::default()),
+        HostRuntimeAction::RuntimePreflight
+        | HostRuntimeAction::ImagePull
+        | HostRuntimeAction::ImageInspect
+        | HostRuntimeAction::InstallationCleanup => Ok(HostRuntimePlanBinding::default()),
     }
 }
 

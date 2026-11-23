@@ -1,3 +1,9 @@
+#![expect(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 use chrono::DateTime;
 use serde::Deserialize;
 use serde_json::json;
@@ -94,7 +100,10 @@ fn apply_change(payload: &mut serde_json::Value, change: &SharedVectorChange) {
                     value.get_mut(usize::try_from(index.as_u64().expect("array index")).unwrap())
                 })
                 .expect("array vector path"),
-            _ => panic!("invalid vector path component"),
+            serde_json::Value::Null
+            | serde_json::Value::Bool(_)
+            | serde_json::Value::Array(_)
+            | serde_json::Value::Object(_) => panic!("invalid vector path component"),
         };
     }
     match (change.op.as_str(), last) {

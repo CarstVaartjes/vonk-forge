@@ -77,6 +77,7 @@ pub fn same_installed_workload(
 
 /// A signed job invocation may bind different settings and a shorter timeout,
 /// while retaining every installed filesystem, image and process authority.
+#[expect(clippy::unwrap_used, reason = "a job plan always carries its job")]
 pub fn same_job_workload(
     installed: &CompiledExecutionPlan,
     invocation: &CompiledExecutionPlan,
@@ -582,6 +583,7 @@ fn lower_hex(value: &str, length: usize) -> bool {
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
+#[expect(clippy::string_slice, reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary")]
 fn valid_sha256_prefixed(value: &str) -> bool {
     value.starts_with("sha256:") && lower_hex(&value[7..], 64)
 }

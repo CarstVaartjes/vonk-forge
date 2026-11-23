@@ -37,7 +37,13 @@ fn completed_podman_import_failure_retains_evidence_and_only_retries_transient_c
                 Some(AgentFailureKind::ResourcePrerequisite)
             }
             PodmanImportDiagnostic::DeadlineExceeded => Some(AgentFailureKind::TemporaryDependency),
-            _ => None,
+            PodmanImportDiagnostic::SubordinateIdMappingUnavailable
+            | PodmanImportDiagnostic::ArchiveFormatRejected
+            | PodmanImportDiagnostic::PermissionDenied
+            | PodmanImportDiagnostic::DiagnosticOutputLimitExceeded
+            | PodmanImportDiagnostic::SubprocessUnavailable
+            | PodmanImportDiagnostic::NonzeroWithoutOutput
+            | PodmanImportDiagnostic::Unknown => None,
         };
         assert_eq!(failure.failure_kind, kind);
         assert_eq!(failure.retry_after_seconds, kind.map(|_| 30));

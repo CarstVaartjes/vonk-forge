@@ -299,7 +299,14 @@ impl ProcessRunner for DnsRouteRunner {
             Program::Getent => "192.168.1.20 STREAM nas\n2001:db8::20 STREAM nas\n",
             Program::Ip if arguments[3].contains(':') => self.ipv6_route,
             Program::Ip => "192.168.1.20 dev wlP9s9",
-            _ => panic!("unexpected probe"),
+            Program::Curl
+            | Program::Docker
+            | Program::NvidiaCtk
+            | Program::NvidiaSmi
+            | Program::Oras
+            | Program::Podman
+            | Program::SystemdRun
+            | Program::Systemctl => panic!("unexpected probe"),
         };
         Ok(crate::process::ProcessOutput {
             exit_code: None,

@@ -51,6 +51,10 @@ const DATA_DIR: &str = "/var/lib/vonk-forge-agent";
 const SITE_PORTS: &str =
     include_str!("../../../../control/src/vonk_control/resources/site-ports.json");
 
+#[expect(
+    clippy::expect_used,
+    reason = "the packaged site ports are checked by a unit test"
+)]
 fn site_ports() -> vonk_agent_protocol::generated::SitePorts {
     serde_json::from_str(SITE_PORTS).expect("packaged site ports are valid")
 }

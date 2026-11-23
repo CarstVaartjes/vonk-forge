@@ -316,7 +316,11 @@ pub(super) fn build_error_outcome(
             | PodmanImportDiagnostic::PermissionDenied => platform_build_blocked(failure),
             // Unknown output is evidence to inspect, not evidence of a
             // transient fault. Retrying the same verified bytes hides it.
-            _ => failure,
+            PodmanImportDiagnostic::ArchiveFormatRejected
+            | PodmanImportDiagnostic::DiagnosticOutputLimitExceeded
+            | PodmanImportDiagnostic::SubprocessUnavailable
+            | PodmanImportDiagnostic::NonzeroWithoutOutput
+            | PodmanImportDiagnostic::Unknown => failure,
         });
     }
     // A returned nonzero command is a definite failure. Do not replace its
@@ -335,7 +339,13 @@ pub(super) fn build_error_outcome(
             | PodmanBuildDiagnostic::UserNamespaceDenied
             | PodmanBuildDiagnostic::ProcMountDenied
             | PodmanBuildDiagnostic::PermissionDenied => platform_build_blocked(failure),
-            _ => failure,
+            PodmanBuildDiagnostic::MemoryLimitExceeded
+            | PodmanBuildDiagnostic::StorageDriverFailure
+            | PodmanBuildDiagnostic::SystemdScopeFailure
+            | PodmanBuildDiagnostic::PatchRejected
+            | PodmanBuildDiagnostic::BuildStepFailed
+            | PodmanBuildDiagnostic::NonzeroWithoutOutput
+            | PodmanBuildDiagnostic::Unknown => failure,
         });
     }
     // Actual source/adapter digest ingress still refuses substitution.

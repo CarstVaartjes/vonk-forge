@@ -134,6 +134,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
 
     /// Discover images from Docker itself, including leftovers with no receipt.
     /// Keep aliases of any protected content, and every image a container names.
+    #[expect(
+        clippy::string_slice,
+        reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+    )]
     fn collect_unreceipted_images(
         &self,
         named: &HashSet<String>,
@@ -210,6 +214,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     .filter(|config| lower_hex(config, 64))
                     && !configs.contains(format!("sha256:{config}").as_str())
                 {
+                    #[expect(
+                        clippy::let_underscore_must_use,
+                        reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+                    )]
                     let _ = fs::remove_file(entry.path());
                 }
             }
@@ -241,12 +249,20 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 .runtime_image_receipts
                 .join(format!(".untracked-{}", &id[7..]));
             if kept.contains(id) {
+                #[expect(
+                    clippy::let_underscore_must_use,
+                    reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+                )]
                 let _ = fs::remove_file(&marker);
                 continue;
             }
             match self.image_has_no_containers(id) {
                 Some(true) => {}
                 Some(false) => {
+                    #[expect(
+                        clippy::let_underscore_must_use,
+                        reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+                    )]
                     let _ = fs::remove_file(&marker);
                     continue;
                 }
@@ -416,6 +432,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             );
             return;
         }
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+        )]
         let _ = fs::remove_file(&receipt);
         if let (Some(before), Some(after)) = (before, disk())
             && after > before
@@ -470,6 +490,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             return;
         };
         for address in plan_image_addresses(&plan) {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort cleanup: the next reconciliation pass repeats it"
+            )]
             let _ = OpenOptions::new()
                 .write(true)
                 .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())

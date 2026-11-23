@@ -51,6 +51,10 @@ pub(super) fn verify_reenroll_controller_ca(
     Ok(())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the controller address was validated as an IPv4 address"
+)]
 pub(super) fn discover_enrollment(
     expected_enrollment: &Url,
     expected_ca_sha256: &str,
@@ -104,6 +108,10 @@ pub(super) fn discover_enrollment(
     Ok(verified)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the bootstrap origin was validated as HTTPS with a host"
+)]
 pub(super) fn bootstrap_curl(
     bootstrap_url: &Url,
     controller_address: Option<Ipv4Addr>,

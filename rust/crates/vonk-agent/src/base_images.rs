@@ -104,7 +104,10 @@ impl BaseImageStore {
         })
     }
 
-    #[allow(clippy::too_many_arguments)] // One immutable transfer budget and its cancellation travel together.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one immutable transfer budget and its cancellation travel together"
+    )]
     pub(crate) fn materialize_cancellable<R: ProcessRunner + ?Sized>(
         &self,
         runner: &R,
@@ -370,6 +373,10 @@ impl<'a> TemporaryAt<'a> {
 impl Drop for TemporaryAt<'_> {
     fn drop(&mut self) {
         if !self.retained {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+            )]
             let _ = unlinkat(self.parent, self.name.as_str(), AtFlags::empty());
         }
     }
@@ -383,6 +390,10 @@ struct RegistrySource {
     resolve: String,
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn registry_source<R: ProcessRunner + ?Sized>(
     runner: &R,
     image: &RecipeBuildBaseImage,
@@ -740,7 +751,13 @@ fn manifest_evidence_error(error: BaseImageError) -> BaseImageError {
     match error {
         BaseImageError::Limit => BaseImageError::Limit,
         BaseImageError::Io(error) => BaseImageError::Io(error),
-        _ => BaseImageError::ManifestEvidence,
+        BaseImageError::Invalid
+        | BaseImageError::ManifestTransfer
+        | BaseImageError::ManifestProcess(_)
+        | BaseImageError::ManifestEvidence
+        | BaseImageError::BlobTransfer
+        | BaseImageError::BlobEvidence
+        | BaseImageError::ArchiveEvidence => BaseImageError::ManifestEvidence,
     }
 }
 
@@ -748,7 +765,13 @@ fn blob_evidence_error(error: BaseImageError) -> BaseImageError {
     match error {
         BaseImageError::Limit => BaseImageError::Limit,
         BaseImageError::Io(error) => BaseImageError::Io(error),
-        _ => BaseImageError::BlobEvidence,
+        BaseImageError::Invalid
+        | BaseImageError::ManifestTransfer
+        | BaseImageError::ManifestProcess(_)
+        | BaseImageError::ManifestEvidence
+        | BaseImageError::BlobTransfer
+        | BaseImageError::BlobEvidence
+        | BaseImageError::ArchiveEvidence => BaseImageError::BlobEvidence,
     }
 }
 
@@ -756,7 +779,13 @@ fn base_archive_error(error: BaseImageError) -> BaseImageError {
     match error {
         BaseImageError::Limit => BaseImageError::Limit,
         BaseImageError::Io(error) => BaseImageError::Io(error),
-        _ => BaseImageError::ArchiveEvidence,
+        BaseImageError::Invalid
+        | BaseImageError::ManifestTransfer
+        | BaseImageError::ManifestProcess(_)
+        | BaseImageError::ManifestEvidence
+        | BaseImageError::BlobTransfer
+        | BaseImageError::BlobEvidence
+        | BaseImageError::ArchiveEvidence => BaseImageError::ArchiveEvidence,
     }
 }
 

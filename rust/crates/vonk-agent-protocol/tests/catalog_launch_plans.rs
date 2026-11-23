@@ -7,6 +7,11 @@
 //! test deserialises and validates the very same documents with the production
 //! Rust types, so a value the Controller can emit and the agent cannot read
 //! fails here rather than on a Spark.
+#![expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 
 use std::{fs, path::PathBuf};
 

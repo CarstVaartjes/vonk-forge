@@ -120,6 +120,10 @@ pub(super) fn untagged_deserialize_impl(
     implementation
 }
 
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "syn::Item and syn::Type are non_exhaustive: a new syntax kind is not the generator's concern"
+)]
 pub(super) fn deserialize_impl(item: &mut Item, schema_name: &str) -> Option<Item> {
     let (ident, uses_raw, attrs, raw, construction) = match item {
         Item::Struct(item) if matches!(item.fields, syn::Fields::Named(_)) => {

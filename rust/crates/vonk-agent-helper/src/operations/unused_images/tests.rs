@@ -358,6 +358,10 @@ fn orphan_image_grace_records_disappear_when_docker_no_longer_has_the_content() 
 }
 
 #[test]
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn an_orphan_image_is_collected_however_many_managed_images_the_listing_holds() {
     // The listing grows with the images the helper must remove. A total
     // output bound wedged it for good: the orphan was never seen, so the

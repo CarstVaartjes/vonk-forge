@@ -1,3 +1,4 @@
+#![expect(clippy::unwrap_used, reason = "build script: a panic fails the build")]
 use std::{env, fs, path::PathBuf, process::Command};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

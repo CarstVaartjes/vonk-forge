@@ -28,6 +28,10 @@ pub fn cleanup_build_until<R: ProcessRunner + ?Sized>(
             pending.push(format!("unit \"{unit}\" {observed}"));
             // A failed/malformed observation is unknown. Submit the exact stop
             // and observe again; never infer absence from a failed query.
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "best-effort cleanup: the next reconciliation pass repeats it"
+            )]
             let _ = runner.run(
                 Program::Systemctl,
                 &[
@@ -365,7 +369,27 @@ impl RecipeBuildError {
                     .iter()
                     .any(|errno| errno.raw_os_error() == code)
             }),
-            _ => false,
+            Self::Source(_)
+            | Self::Process(_)
+            | Self::Evidence
+            | Self::BaseImageContent
+            | Self::BaseImageManifest
+            | Self::BaseImageBlob
+            | Self::BaseImageArchive
+            | Self::BaseImageImport { .. }
+            | Self::BaseImageImportProcess { .. }
+            | Self::BaseImageInspect
+            | Self::ImageBuild { .. }
+            | Self::ImageInspect
+            | Self::AdapterInvalid
+            | Self::AdapterBuild { .. }
+            | Self::AdapterInspect
+            | Self::Command { .. }
+            | Self::OutputLimit
+            | Self::NetworkPolicy
+            | Self::NetworkBoundary { .. }
+            | Self::Io(_)
+            | Self::CleanupPending { .. } => false,
         }
     }
 
@@ -379,7 +403,27 @@ impl RecipeBuildError {
             ),
             Self::CleanupBlocked(_) => "build-cleanup-precondition".into(),
             Self::Process(error) => process_error_diagnostic(error).into(),
-            _ => "bounded unit reconciliation ended without a complete observation".into(),
+            Self::Source(_)
+            | Self::Evidence
+            | Self::BaseImageContent
+            | Self::BaseImageManifest
+            | Self::BaseImageBlob
+            | Self::BaseImageArchive
+            | Self::BaseImageImport { .. }
+            | Self::BaseImageImportProcess { .. }
+            | Self::BaseImageInspect
+            | Self::ImageBuild { .. }
+            | Self::ImageInspect
+            | Self::AdapterInvalid
+            | Self::AdapterBuild { .. }
+            | Self::AdapterInspect
+            | Self::Command { .. }
+            | Self::OutputLimit
+            | Self::NetworkPolicy
+            | Self::NetworkBoundary { .. }
+            | Self::Io(_) => {
+                "bounded unit reconciliation ended without a complete observation".into()
+            }
         }
     }
 
@@ -393,7 +437,25 @@ impl RecipeBuildError {
             Self::CleanupPending { .. } | Self::CleanupPath { .. } | Self::CleanupBlocked(_) => {
                 self.to_string()
             }
-            _ => format!("build effects are not yet confirmed quiescent: {self}"),
+            Self::Source(_)
+            | Self::Evidence
+            | Self::BaseImageContent
+            | Self::BaseImageManifest
+            | Self::BaseImageBlob
+            | Self::BaseImageArchive
+            | Self::BaseImageImport { .. }
+            | Self::BaseImageImportProcess { .. }
+            | Self::BaseImageInspect
+            | Self::ImageBuild { .. }
+            | Self::ImageInspect
+            | Self::AdapterInvalid
+            | Self::AdapterBuild { .. }
+            | Self::AdapterInspect
+            | Self::Command { .. }
+            | Self::OutputLimit
+            | Self::NetworkPolicy
+            | Self::NetworkBoundary { .. }
+            | Self::Io(_) => format!("build effects are not yet confirmed quiescent: {self}"),
         }
     }
 }
@@ -529,6 +591,10 @@ pub fn stop_orphaned_build_effects<R: ProcessRunner + ?Sized>(
         ];
         arguments.extend(stop.iter().cloned());
         // Submitted, not awaited: the next pass observes what remains.
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort cleanup: the next reconciliation pass repeats it"
+        )]
         let _ = runner.run(
             Program::Systemctl,
             &arguments,

@@ -108,7 +108,11 @@ async fn settle(
 async fn settle_failed(seen: Seen, failed: Failed) -> Settled {
     let grant_status = match failed {
         Failed::RankInspection(status) => status,
-        _ => "503 Unavailable",
+        Failed::Start(_)
+        | Failed::Retained(_)
+        | Failed::Collective(_)
+        | Failed::Loading
+        | Failed::Evidence => "503 Unavailable",
     };
     let grants: Arc<Mutex<Vec<Value>>> = Arc::default();
     let log: Log = Arc::default();
@@ -262,6 +266,10 @@ async fn settle_failed(seen: Seen, failed: Failed) -> Settled {
                 .await,
         )),
         Failed::Loading => {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "waits for a task to end; its outcome is observed elsewhere"
+            )]
             let _ = executor.loading_tail(&arguments, GENERATION).await;
             Ok(())
         }

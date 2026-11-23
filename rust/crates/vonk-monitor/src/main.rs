@@ -155,6 +155,10 @@ fn collector_for(
     clippy::cast_possible_truncation,
     reason = "the remainder is below the interval, which fits u64 nanoseconds"
 )]
+#[expect(
+    clippy::unwrap_used,
+    reason = "the remainder is below the interval, so the subtraction cannot underflow"
+)]
 fn next_tick_after(
     started: tokio::time::Instant,
     finished: tokio::time::Instant,

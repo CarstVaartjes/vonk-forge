@@ -205,11 +205,13 @@ async fn active_job_cancellation_runs_the_stop_path_promptly() {
         Duration::from_secs(1),
         run_interruptible_job(
             async move {
+                #[expect(clippy::let_underscore_must_use, reason = "waits for a task to end; its outcome is observed elsewhere")]
                 let _ = job_drained.await;
             },
             &mut cancellation,
             move || async move {
                 observed.store(true, Ordering::Release);
+                #[expect(clippy::let_underscore_must_use, reason = "the receiving side may already be gone; nobody is waiting for the value")]
                 let _ = job_stopped.send(());
                 Ok::<(), ()>(())
             },
@@ -262,11 +264,13 @@ async fn lost_cancellation_owner_stops_the_job_and_admits_a_fresh_operation() {
         Duration::from_secs(1),
         run_interruptible_job(
             async {
+                #[expect(clippy::let_underscore_must_use, reason = "waits for a task to end; its outcome is observed elsewhere")]
                 let _ = finished.await;
             },
             &mut cancellation,
             move || async move {
                 observed.store(true, Ordering::SeqCst);
+                #[expect(clippy::let_underscore_must_use, reason = "the receiving side may already be gone; nobody is waiting for the value")]
                 let _ = finish.send(());
                 Ok::<(), ()>(())
             },

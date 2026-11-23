@@ -373,6 +373,10 @@ struct RequestFileCleanup(PathBuf);
 
 impl Drop for RequestFileCleanup {
     fn drop(&mut self) {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "best-effort filesystem step: a failure leaves state the next pass reconciles"
+        )]
         let _ = fs::remove_file(&self.0);
     }
 }
@@ -802,7 +806,7 @@ impl HostRuntimeBoundary<'_> {
                         .job
                         .as_ref()
                         .map(|job| u64::from(job.timeout_seconds)),
-                    _ => None,
+                    HostRuntimePlan::Start(_) | HostRuntimePlan::Stop(_) => None,
                 })
                 .filter(|value| (1..=3600).contains(value))
                 .map_or(Duration::from_secs(610), |value| {
@@ -814,13 +818,16 @@ impl HostRuntimeBoundary<'_> {
                 .as_ref()
                 .and_then(|plan| match plan {
                     HostRuntimePlan::Stop(stop) => Some(u64::from(stop.stop_timeout_seconds)),
-                    _ => None,
+                    HostRuntimePlan::Start(_) | HostRuntimePlan::JobRun(_) => None,
                 })
                 .filter(|value| (1..=600).contains(value))
                 .map_or(Duration::from_secs(45), |value| {
                     Duration::from_secs(value + 45)
                 }),
-            _ => Duration::from_secs(610),
+            HostRuntimeAction::ImagePull
+            | HostRuntimeAction::ImageInspect
+            | HostRuntimeAction::RunInspect
+            | HostRuntimeAction::InstallationCleanup => Duration::from_secs(610),
         };
         let mut request = runtime_request_for_fence(
             authority.fence(),

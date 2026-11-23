@@ -197,6 +197,10 @@ fn last_failure_line(stream: &[u8]) -> Option<(usize, usize, usize, Option<usize
 
 /// The text of a log line without the prefix a supervised process adds
 /// (`(APIServer pid=54) `) or the engine's `ERROR 10-06 05:05:21 [file:1] `.
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn line_content(line: &[u8]) -> String {
     let text = String::from_utf8_lossy(line);
     let mut rest: &str = text.trim_end_matches(['\r', '\n']);
@@ -612,6 +616,10 @@ const BYTE_UNITS: [&str; 4] = ["GiB", "GB", "MiB", "MB"];
 /// quantity.  A download's size (`Downloading apache-tvm-ffi (2.4 MB)`) names
 /// no memory, and a setting (`gpu_memory_utilization=0.9`) carries no byte
 /// quantity.
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn reports_memory(line: &[u8]) -> bool {
     let text = String::from_utf8_lossy(line);
     let names_memory = text
@@ -902,6 +910,10 @@ pub fn python_exception(logs: &HostHelperProcessLogs) -> Option<String> {
 }
 
 /// What `line_content` strips from a line: the process and log-record prefix.
+#[expect(
+    clippy::string_slice,
+    reason = "the index comes from a search or prefix check on this same string, so it sits on a character boundary"
+)]
 fn line_prefix(line: &[u8]) -> String {
     let text = String::from_utf8_lossy(line);
     let text = text.trim_end_matches(['\r', '\n']);

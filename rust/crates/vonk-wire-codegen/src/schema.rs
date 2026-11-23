@@ -192,7 +192,7 @@ pub(super) fn prepare(value: &mut Value) {
                 prepare(child);
             }
         }
-        _ => {}
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
     }
 }
 
@@ -223,7 +223,7 @@ pub(super) fn typed_tags(value: &mut Value) {
                 typed_tags(child);
             }
         }
-        _ => {}
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
     }
 }
 
@@ -260,7 +260,7 @@ pub(super) fn exclusive_empty_unions(schema: &mut Value) {
                     visit(child, empty);
                 }
             }
-            _ => {}
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
         }
     }
     let empty: Vec<String> = schema

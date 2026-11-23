@@ -223,7 +223,29 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         OperationError::RuntimeProcessExited {
                             logs, exit_summary, ..
                         } => (logs, Some(exit_summary)),
-                        _ => (None, None),
+                        OperationError::InvalidOperation
+                        | OperationError::UnsafePath
+                        | OperationError::InvalidArtifact
+                        | OperationError::InstallationIntentObservationRequired { .. }
+                        | OperationError::PackagePreparationUnavailable
+                        | OperationError::PackageMetadataInvalid
+                        | OperationError::PackagePreflightFailed
+                        | OperationError::PackageInstallFailed { .. }
+                        | OperationError::CommandFailed { .. }
+                        | OperationError::RuntimeJobWaitFailed { .. }
+                        | OperationError::RuntimeInvocationLimitExceeded { .. }
+                        | OperationError::RuntimeInvocationLimitsUnavailable
+                        | OperationError::RuntimeImageLoadFailed
+                        | OperationError::RuntimeImageInspectFailed
+                        | OperationError::RuntimeImageMissing
+                        | OperationError::RuntimeImageIdentityInvalid
+                        | OperationError::RuntimeImageReceiptFailed
+                        | OperationError::RuntimeRunMissing
+                        | OperationError::RuntimeFabricUnavailable
+                        | OperationError::StopUncertain
+                        | OperationError::InstallationReconciliationBusy
+                        | OperationError::InstallationReconciliationStorageUnavailable
+                        | OperationError::Io(_) => (None, None),
                     }
                 } else {
                     (None, None)
@@ -693,7 +715,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 }
             }
             // Never dispatch a mutator through the observation frame.
-            _ => Err(OperationError::InvalidOperation),
+            HostRuntimeAction::RuntimePreflight
+            | HostRuntimeAction::ImageInspect
+            | HostRuntimeAction::RunInspect
+            | HostRuntimeAction::Start
+            | HostRuntimeAction::Stop => Err(OperationError::InvalidOperation),
         }
     }
 }

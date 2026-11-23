@@ -1,3 +1,7 @@
+#![expect(
+    clippy::unwrap_used,
+    reason = "test crate: a failed unwrap is the test failure"
+)]
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt, symlink};
@@ -576,7 +580,11 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
                 (None, None, request.run_generation, None, None, None)
             }
         }
-        _ => (None, None, None, None, None, None),
+        HostRuntimeAction::RuntimePreflight
+        | HostRuntimeAction::ImagePull
+        | HostRuntimeAction::ImageInspect
+        | HostRuntimeAction::RunInspect
+        | HostRuntimeAction::InstallationCleanup => (None, None, None, None, None, None),
     };
     HostOperation::ExecuteContainerRuntimeRequestOperation(
         ExecuteContainerRuntimeRequestOperation {

@@ -37,7 +37,16 @@ impl ProcessRunner for Spark {
                 .clone()
                 .map(|name| format!("{name}\n"))
                 .unwrap_or_default(),
-            _ => String::new(),
+            Program::Curl
+            | Program::Getent
+            | Program::Ip
+            | Program::Docker
+            | Program::NvidiaCtk
+            | Program::NvidiaSmi
+            | Program::Oras
+            | Program::Podman
+            | Program::SystemdRun
+            | Program::Systemctl => String::new(),
         };
         Ok(ProcessOutput {
             exit_code: None,
