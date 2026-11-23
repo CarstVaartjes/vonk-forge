@@ -25,12 +25,16 @@ from vonkctl_schemas import validator
 
 from cluster_profiles import cli
 from cluster_profiles.cli_json_contract import DocumentKind
+from cluster_profiles.cli_states_generated import SUCCEEDED
 from cluster_profiles.control_client import client as client_module
 from cluster_profiles.control_client.errors import (
     ControlContractMismatch,
     ControlSchemaRejected,
 )
 from cluster_profiles.control_client.transfers import ControlClient
+from cluster_profiles.generated_control.models.job_detail_response import (
+    JobDetailResponse,
+)
 from cluster_profiles.runtime_identity import RuntimeBuildIdentity
 from control.tests.observation_transfer_peer import ObservationHTTPPeer
 from vonk_control.cli_update_contract import CliUpdateContract
@@ -352,10 +356,6 @@ def test_a_generated_schema_rejection_on_the_same_contract_stays_re_readable(
 def test_a_refusal_with_an_unknown_reason_keeps_waiting_and_heals(
     tmp_path: Path,
 ) -> None:
-    from cluster_profiles.cli_states_generated import SUCCEEDED
-    from cluster_profiles.generated_control.models.job_detail_response import (
-        JobDetailResponse,
-    )
 
     job_id = "12345678-1234-4123-8123-123456789abc"
     job = f"/api/jobs/{job_id}"

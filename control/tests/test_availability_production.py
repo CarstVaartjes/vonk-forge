@@ -22,7 +22,8 @@ from vonk_agent_protocol.agent_words import FailureStage
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentFailureResult, canonical_message
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.availability_production import (
     build_observation as availability_production_obs,
@@ -43,12 +44,13 @@ from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.models.operations import AgentOperation as AgentOperationRow
-from vonk_control.models.operations import AgentOperationAttempt
 from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_builds.common import (
     RecipeBuildPlan,
     RecipeBuildResolution,
+    RecipeBuildUnknown,
     RecipeSourcePolicyError,
 )
 from vonk_control.recipe_builds.service import RecipeBuildService
@@ -2498,7 +2500,6 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
 
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_build_progress_reads_current_attempt_upload_from_persisted_json() -> None:
-    from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
     engine = create_engine("sqlite://")
     AgentOperation.metadata.tables[AgentOperation.__tablename__].create(engine)
@@ -2565,9 +2566,6 @@ def test_build_progress_reads_current_attempt_upload_from_persisted_json() -> No
 
 def test_unknown_build_planning_preserves_typed_reason_and_retry_policy() -> None:
     """A stale plan must re-enter observation rather than become terminal debt."""
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
-    from vonk_control.recipe_builds.common import RecipeBuildUnknown
 
     failure = availability_production._planning_failure(
         RecipeBuildUnknown(

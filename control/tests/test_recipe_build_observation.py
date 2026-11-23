@@ -9,6 +9,9 @@ from sqlalchemy import update
 
 from vonk_agent_protocol.outcome import SecurityRefusalError
 from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.recipe_builds.common import RecipeBuildUnknown
 from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.source_bundles import SourceBundleRefused, SourceBundleUnknown
 
@@ -101,7 +104,6 @@ def test_security_refusal_is_not_retried(tmp_path, monkeypatch, action):
 @pytest.mark.usefixtures("damaged_json_rows")
 @pytest.mark.parametrize("action", ["check_source", "resolve", "prepare_plan"])
 def test_damaged_projection_is_reobserved_from_its_typed_column(tmp_path, action):
-    from vonk_control.models.catalog import CatalogDocumentRevision
 
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     with sessions.begin() as session:
@@ -162,7 +164,6 @@ def test_builder_inventory_recovers_before_plan_is_returned(tmp_path, monkeypatc
 def test_missing_stored_dependency_reobserves_exact_authority_and_admits_fresh(
     tmp_path, field, repairs
 ):
-    from vonk_control.models.catalog import CatalogDocumentRevision
 
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     original = revision.projected
@@ -209,7 +210,6 @@ def test_missing_stored_dependency_reobserves_exact_authority_and_admits_fresh(
 def test_damaged_completion_index_is_observed_then_fresh_completion_is_admitted(
     tmp_path,
 ):
-    from vonk_control.models.cache import RecipeBuild
 
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     delays = []
@@ -245,7 +245,6 @@ def test_damaged_completion_index_is_observed_then_fresh_completion_is_admitted(
 
 def test_damaged_stored_source_is_a_miss_until_background_ingress(tmp_path):
     """Catches a request hashing or repairing a changed local copy itself."""
-    from vonk_control.recipe_builds.common import RecipeBuildUnknown
 
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     digest = str(revision.source_bundle_sha256)

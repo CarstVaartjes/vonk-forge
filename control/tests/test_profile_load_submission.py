@@ -21,6 +21,9 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from cluster_profiles import cli
 from cluster_profiles.control_client.transfers import ControlClient
+from cluster_profiles.controller_cli.profile_load import (
+    _review_and_submit_profile_load,
+)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.admission_locking import acquire_admission_keys, node_admission_key
@@ -1169,9 +1172,6 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
 def test_unreadable_review_binding_reobserves_changed_owner_plan_without_unreviewed_effect(
     postgres_engine, tmp_path, fault_count
 ):
-    from cluster_profiles.controller_cli.profile_load import (
-        _review_and_submit_profile_load,
-    )
 
     sessions, api, _codec, headers, original = _profile_api(postgres_engine)
     token = tmp_path / "token"
@@ -1262,9 +1262,6 @@ def test_unreadable_review_binding_reobserves_changed_owner_plan_without_unrevie
 def test_conflict_observes_original_owner_receipt_without_effect_replay(
     postgres_engine, tmp_path, monkeypatch, lookup_outage, review
 ):
-    from cluster_profiles.controller_cli.profile_load import (
-        _review_and_submit_profile_load,
-    )
 
     sessions, api, _codec, headers, _preview = _profile_api(postgres_engine)
     token = tmp_path / "token"

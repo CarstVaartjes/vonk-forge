@@ -8,12 +8,14 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from vonk_agent_protocol.route_activation import (
     ROUTE_ACK_TIMEOUT_SECONDS,
     ActivationMarker,
+    SupervisorAcknowledgement,
     SupervisorPhase,
 )
 from vonk_control.gateway.litellm import render_empty_config
@@ -351,7 +353,6 @@ def test_a_drained_ack_completes_a_withdrawal_but_never_a_publication(
 def test_delayed_supervisor_ack_uses_the_shared_activation_budget(
     tmp_path, monkeypatch, ack_after
 ):
-    from types import SimpleNamespace
 
     marker = _publish(_publisher(tmp_path))
     supervisor = _supervisor(monkeypatch, tmp_path / "runtime")
@@ -380,7 +381,6 @@ def test_delayed_supervisor_ack_uses_the_shared_activation_budget(
 
 @pytest.mark.parametrize("failure", ["generation", "stale", "unknown"])
 def test_longer_ack_budget_still_rejects_invalid_authority(tmp_path, failure):
-    from vonk_agent_protocol.route_activation import SupervisorAcknowledgement
 
     marker = _publish(_publisher(tmp_path))
     path = tmp_path / "ack.json"

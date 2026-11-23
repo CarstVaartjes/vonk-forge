@@ -4,10 +4,15 @@ from datetime import timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, insert, select, update
 from sqlalchemy import inspect as sa_inspect
+from vonk_forge_contracts.qualification_status import (
+    PublishedMeasuredMemory,
+    PublishedRoleMemory,
+)
 
 from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics, FailureLogTail
 from vonk_agent_protocol.lifecycle_vocabulary import (
     ResourceBlockerCode,
     RunAdmissionCode,
@@ -15,6 +20,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.state_machines import RunState
 from vonk_agent_protocol.swap import GIB
 from vonk_agent_protocol.telemetry import TelemetrySample
+from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import (
     InstallationNode,
@@ -23,6 +29,12 @@ from vonk_control.models.execution import (
     RecipeRun,
     ResourceReservation,
     RunNode,
+)
+from vonk_control.models.jobs import Job
+from vonk_control.models.telemetry import (
+    FleetEventCursor,
+    FleetStreamEvent,
+    NodeTelemetrySample,
 )
 from vonk_control.observed_run_memory import observed_role_peaks
 from vonk_control.run_admission import RunAdmissionService
@@ -296,7 +308,6 @@ def test_a_running_run_without_a_row_gets_it_from_its_next_sample(tmp_path) -> N
 
 
 def _run_node_events(sessions) -> list[int]:
-    from vonk_control.models.telemetry import FleetStreamEvent
 
     with sessions() as session:
         return [
@@ -336,17 +347,10 @@ def test_an_unrenderable_run_node_event_is_a_cursor_hole_not_a_refusal(
     tmp_path,
 ) -> None:
     """Catches a rank whose stored diagnostics break the payload refusing telemetry."""
-    from vonk_agent_protocol.failure_evidence import FailureLogTail
-    from vonk_control.models.telemetry import (
-        FleetEventCursor,
-        FleetStreamEvent,
-        NodeTelemetrySample,
-    )
 
     sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
     run_id = _admit_run(sessions, now, node, installation)
     empty = FailureLogTail(text="", truncated=False, dropped_bytes=0, dropped_lines=0)
-    from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 
     diagnostics = FailureDiagnostics(
         collected_at=now.isoformat(),
@@ -406,7 +410,6 @@ def _batch(sessions, node, start, availables):
 
 
 def _stored_samples(sessions) -> int:
-    from vonk_control.models.telemetry import NodeTelemetrySample
 
     with sessions() as session:
         return len(session.scalars(select(NodeTelemetrySample)).all())
@@ -436,7 +439,6 @@ def test_a_failing_attribution_never_refuses_the_samples(
     HTTP 500 until the Spark dropped the batch. Whatever the attribution
     raises, the samples commit and only the attribution is lost.
     """
-    from sqlalchemy import insert
 
     def violating_peak(session, _run, role, _peak):
         # The real write order: the rank's peak was raised (and its event
@@ -489,13 +491,6 @@ def _publish_measured(
     sessions, installation, now, peak, *, exceeds=False, declared=225
 ):
     """The signed catalog's measured steady peak for the installation's one role."""
-    from vonk_forge_contracts.qualification_status import (
-        PublishedMeasuredMemory,
-        PublishedRoleMemory,
-    )
-
-    from vonk_control.catalog.entities import CatalogEntityService
-    from vonk_control.models.catalog import CatalogDocumentRevision
 
     with sessions() as session:
         revision = session.scalars(
@@ -587,7 +582,6 @@ def test_a_delivered_measurement_leaves_a_running_run_untouched(tmp_path) -> Non
     (the path that reads it); the running run's rows, reservations and Jobs are
     exactly as admitted.
     """
-    from vonk_control.models.jobs import Job
 
     sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
     _admit_run(sessions, now, node, installation)

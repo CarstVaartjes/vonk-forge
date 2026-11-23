@@ -39,7 +39,7 @@ from .recipe_operations_support import (
     started_recipe,
 )
 from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service
-from .test_profile_continuity_postgres import (
+from .test_profile_claim_restore import (
     _assessment_with_promises,
     _SQLCancellationAdapter,
 )

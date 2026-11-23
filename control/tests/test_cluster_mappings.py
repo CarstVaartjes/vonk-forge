@@ -14,7 +14,11 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
-from vonk_control.cluster_mappings import ClusterMappingError, ClusterMappingService
+from vonk_control.cluster_mappings import (
+    ClusterMappingError,
+    ClusterMappingService,
+    mapping_option_choices,
+)
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
@@ -302,7 +306,6 @@ def test_mapping_plan_binds_effective_parameters(tmp_path: Path) -> None:
 def test_recipe_option_choices_make_a_distinct_mapping_and_default_when_unset(
     tmp_path: Path,
 ) -> None:
-    from vonk_control.cluster_mappings import mapping_option_choices
 
     sessions, now, node_ids, revision = setup(tmp_path, options=True)
     service = ClusterMappingService(sessions)

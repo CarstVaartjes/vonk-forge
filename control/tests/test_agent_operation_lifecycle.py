@@ -16,15 +16,28 @@ import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     ObservationCause,
     WaitReason,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    RecipeJobFile,
+    RecipeJobRunResult,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_document as recipe_job_manifest_document,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_sha256 as recipe_job_manifest_sha256,
 )
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control import agent_operation_states as aos
@@ -41,10 +54,18 @@ from vonk_control.lifecycle.core import (
     STOP_BUDGET,
     transition,
 )
-from vonk_control.lifecycle.types import Effect, State, Tick
+from vonk_control.lifecycle.types import (
+    Claimed,
+    Effect,
+    Lifecycle,
+    Observed,
+    State,
+    Tick,
+)
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.recovery_policy import RECOVERY, WAIT_STEP
 
 from .agent_jobs_support import (
     COMMIT,
@@ -57,6 +78,7 @@ from .agent_jobs_support import (
     parent,
 )
 from .agent_jobs_support import service as agent_service  # noqa: F401 - the fixture
+from .non_blocking import assert_ended_without_blocking
 from .runtime_identity_support import claim_agent
 
 KIND_STOP = ProtocolAgentOperation.RECIPE_STOP.value
@@ -155,9 +177,6 @@ def test_unknown_effect_is_lost_or_retried_without_blindly_repeating_user_jobs(
     kind,
 ) -> None:
     """Catches repeating or failing an unobserved user effect, and parking rebuildable work."""
-    from sqlalchemy.orm import Session
-
-    from vonk_control.lifecycle.types import Lifecycle, Observed
 
     now = datetime(2026, 10, 6, tzinfo=UTC)
     with Session() as session:
@@ -186,18 +205,6 @@ def test_unknown_effect_is_lost_or_retried_without_blindly_repeating_user_jobs(
 
 def _exit_receipt(code: int) -> dict[str, object]:
     """The stored document of a job's measured exit (its ``RecipeJobRunResult``)."""
-
-    from vonk_agent_protocol.contracts import canonical_message
-    from vonk_agent_protocol.recipe_jobs import (
-        RecipeJobFile,
-        RecipeJobRunResult,
-    )
-    from vonk_agent_protocol.recipe_jobs import (
-        manifest_document as recipe_job_manifest_document,
-    )
-    from vonk_agent_protocol.recipe_jobs import (
-        manifest_sha256 as recipe_job_manifest_sha256,
-    )
 
     _kind, payload = _job_run_payload()
     empty: tuple[RecipeJobFile, ...] = ()
@@ -332,7 +339,6 @@ def test_a_lost_job_order_is_observed_at_its_own_cadence_never_ended(
     assert lost.next_action_at is not None
     # Its next look is at the bounded backoff's ceiling: later than a short
     # wait re-check, since each look rewrites the row under its node locks.
-    from vonk_control.recovery_policy import RECOVERY, WAIT_STEP
 
     wait = RECOVERY.next_attempt(
         operation.id, WAIT_STEP, clock.now, ongoing_intent=True
@@ -719,9 +725,6 @@ def test_nodes_never_polled_are_still_reconciled(agent_service) -> None:
         node.state = NodeIdentityState.RETIRED
         node.revoked_at = clock.now
     clock.advance(seconds=45)
-    from types import SimpleNamespace
-
-    from .non_blocking import assert_ended_without_blocking
 
     def end(_):
         assert jobs.reconcile_orders()
@@ -833,9 +836,6 @@ def test_the_agent_word_for_unknown_is_mapped_at_ingress_to_an_observed_attempt(
 )
 def test_unknown_build_effect_retries_after_the_observation_budget(kind) -> None:
     """Rebuildable work must not inherit the irreversible user-job observation loop."""
-    from sqlalchemy.orm import Session
-
-    from vonk_control.lifecycle.types import Claimed, Lifecycle, Observed
 
     now = datetime(2026, 10, 6, tzinfo=UTC)
     with Session() as session:

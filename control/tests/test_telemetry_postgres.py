@@ -12,7 +12,16 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
 from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.gpu_clock import (
+    GpuClockApplyState,
+    GpuClockMetric,
+    GpuClockObservation,
+    GpuClockUnavailable,
+    GpuClockUnavailableReason,
+    default_gpu_clock,
+)
 from vonk_agent_protocol.telemetry import HostResourceSample, TelemetrySample
+from vonk_control.db.schema import reconcile_schema
 from vonk_control.inventory.items_contract import InventorySnapshotKind
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentNode
@@ -142,15 +151,6 @@ def test_gpu_clock_observation_roundtrips_postgres_and_old_rows_remain_null(
 ) -> None:
     """Catches untyped JSON, missing observation writes and upgrade row rewrites."""
 
-    from vonk_agent_protocol.gpu_clock import (
-        GpuClockApplyState,
-        GpuClockMetric,
-        GpuClockObservation,
-        GpuClockUnavailable,
-        GpuClockUnavailableReason,
-        default_gpu_clock,
-    )
-
     repository, sessions = _repository(postgres_engine)
     first = _sample(boot_id=BOOT_A, sequence=1, observed_at=NOW - timedelta(seconds=2))
     repository.record_batch(NODE_A, (first,))
@@ -204,9 +204,6 @@ def test_gpu_clock_nullable_column_is_added_in_place_without_rewriting_old_sampl
     postgres_engine: Engine,
 ) -> None:
     """The approved upgrade preserves old samples and the existing latest pointer."""
-    from sqlalchemy import text
-
-    from vonk_control.db.schema import reconcile_schema
 
     repository, _sessions = _repository(postgres_engine)
     value = _sample(boot_id=BOOT_A, sequence=1, observed_at=NOW - timedelta(seconds=1))

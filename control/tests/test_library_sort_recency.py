@@ -19,7 +19,8 @@ import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Literal
+from types import SimpleNamespace
+from typing import Any, Literal
 
 import pytest
 from sqlalchemy import create_engine
@@ -328,10 +329,6 @@ def test_unknown_sort_is_rejected_by_the_projection(
 
 
 def test_fits_fleet_sort_key_puts_working_recipes_first_then_newest():
-    from types import SimpleNamespace
-    from typing import Any
-
-    from vonk_control.library_projection.service import LibraryProjection
 
     def item(name: str, minute: int, status: str) -> Any:
         return SimpleNamespace(

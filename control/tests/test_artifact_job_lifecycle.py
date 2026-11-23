@@ -11,7 +11,9 @@ middle of a cancel is harmless.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
+from threading import Event, Thread
 
 import pytest
 from sqlalchemy import select
@@ -36,7 +38,6 @@ from vonk_control.recipe_operations.interfaces import RecipeOperationView
 
 from .agent_fences import fenced_operation
 from .artifact_jobs_support import (
-    MutableClock,
     artifact_create_request,
     cancellation_result,
     create_artifact_job,
@@ -46,31 +47,13 @@ from .artifact_jobs_support import (
 from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
 from .recipe_operations_support import NOW
 from .runtime_identity_support import claim_agent
+from .test_artifact_job_recovery import (
+    _issued_job,
+    recover_unknown_job_under_new_intent,
+)
 
 CANCEL_KEY = "00000000-0000-4000-8000-000000000301"
 OTHER_KEY = "00000000-0000-4000-8000-000000000302"
-
-
-def _issued_job(tmp_path, suffix: int):
-    """A submitted job whose order a Spark claimed (so its effect may exist)."""
-
-    sessions, operations, _queue, service, run_id, node_id = running_artifact_service(
-        tmp_path
-    )
-    clock = MutableClock(NOW)
-    agent_jobs = AgentJobService(sessions, clock=clock)
-
-    def consume(session, operation, attempt, message) -> None:
-        service.consume_agent_result(session, operation, attempt, message)
-        operations.consume_agent_result(session, operation, attempt, message)
-
-    agent_jobs.set_result_consumer(consume)
-    operations._agent_jobs = agent_jobs
-    assert claim_agent(agent_jobs, node_id, "serial-0") is None
-    submitted = submitted_artifact_job(service, run_id, request_suffix=suffix)
-    claim = claim_agent(agent_jobs, node_id, "serial-0")
-    assert claim is not None
-    return sessions, operations, service, agent_jobs, clock, submitted, claim, run_id
 
 
 def _cancelling(view) -> bool:
@@ -162,7 +145,6 @@ def test_stored_jobs_map_onto_the_core(tmp_path) -> None:
 
 def test_unsubmitted_jobs_have_nothing_to_stop(tmp_path) -> None:
     sessions, _ops, _queue, service, run_id, _node = running_artifact_service(tmp_path)
-    from .artifact_jobs_support import artifact_create_request
 
     draft = create_artifact_job(
         service,
@@ -211,13 +193,11 @@ def test_unknown_projection_reads_without_an_operator_action_gate(tmp_path):
 
 
 def test_a_lapsed_job_ends_and_new_intent_drives_exact_reconciliation(tmp_path):
-    from .test_artifact_job_recovery import recover_unknown_job_under_new_intent
 
     recover_unknown_job_under_new_intent(tmp_path, malformed=False)
 
 
 def test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim(tmp_path):
-    from .test_artifact_job_recovery import recover_unknown_job_under_new_intent
 
     recover_unknown_job_under_new_intent(tmp_path, malformed=True)
 
@@ -496,8 +476,6 @@ def test_no_stored_job_state_waits_without_an_action(state, attempt, cancelled) 
     advertises ``stop``, and every other row projects onto a state that needs
     nobody (it completes by itself)."""
 
-    from dataclasses import replace
-
     row = Lifecycle(id="job", kind="artifact-job", state=state, attempt=attempt)
     if cancelled:
         row = replace(row, cancel_requested_at=NOW)
@@ -640,7 +618,6 @@ def test_busy_job_projection_does_not_hold_up_other_jobs_or_fresh_admission(
     tmp_path, postgres_engine
 ) -> None:
     """A blocking FOR UPDATE would stall this pass at the first occupied job."""
-    from threading import Event, Thread
 
     sessions, _, _, service, run_id, _ = running_artifact_service(
         tmp_path, engine=postgres_engine

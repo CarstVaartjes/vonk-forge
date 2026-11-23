@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 
+from cluster_profiles.generated_control.models.telemetry_point import TelemetryPoint
+from vonk_control.fleet_projection.common import TelemetryPoint as PointProducer
+
 
 def test_generated_telemetry_models_consume_current_pydantic_documents() -> None:
-    from cluster_profiles.generated_control.models.telemetry_point import TelemetryPoint
-    from vonk_control.fleet_projection.common import TelemetryPoint as PointProducer
 
     producer = PointProducer.model_validate_json(
         json.dumps(

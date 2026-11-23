@@ -16,12 +16,18 @@ from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.fleet_stream import FleetStream
 from vonk_control.fleet_stream_contract import FleetRefreshEvent
+from vonk_control.inventory.items import inventory_items
+from vonk_control.inventory.repository import (
+    InventoryRepository,
+    NodeInventoryReport,
+)
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.telemetry import (
     FleetEventCursor,
     FleetStreamEvent,
     NodeInventoryResourceSnapshot,
+    NodeInventorySnapshot,
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
@@ -30,6 +36,7 @@ from vonk_control.telemetry.samples import (
     TelemetryRepository,
 )
 
+from .runtime_identity_support import inventory_items_fixture
 from .telemetry_support import telemetry_with_resources
 
 NODE_A = "spk_" + "a" * 32
@@ -335,11 +342,6 @@ def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
 def test_inventory_history_keeps_a_day_and_always_each_nodes_newest_row(
     sessions,
 ) -> None:
-    from vonk_control.inventory.repository import (
-        InventoryRepository,
-        NodeInventoryReport,
-    )
-    from vonk_control.models.telemetry import NodeInventorySnapshot
 
     def record(node_id: str, observed_at: datetime) -> None:
         InventoryRepository(sessions, clock=lambda: observed_at).record(
@@ -368,10 +370,6 @@ def test_inventory_history_keeps_a_day_and_always_each_nodes_newest_row(
                 )
             )
         )
-
-    from vonk_control.inventory.items import inventory_items
-
-    from .runtime_identity_support import inventory_items_fixture
 
     node_b = "spk_" + "b" * 32
     with sessions.begin() as session:

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import shutil
+import threading
 import uuid
+from concurrent.futures import Future, wait
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,6 +23,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.auth import Actor
 from vonk_control.catalog.entities import CatalogEntityService
+from vonk_control.model_cache import removal_execution as _removal_execution
 from vonk_control.model_cache.api import (
     install_model_operator_routes,
 )
@@ -75,7 +79,6 @@ def test_model_removal_waits_for_in_use_sets_then_completes(
     assert downloaded.state == "succeeded"
     set_digest = str(downloaded.artifact_set_sha256)
     owners = {set_digest: ("installation 1",)}
-    from vonk_control.model_cache import removal_execution as _removal_execution
 
     real_reasons = _removal_execution._reason_projection
 
@@ -157,7 +160,6 @@ def test_removal_waiting_past_the_old_lifetime_cap_still_succeeds(
         service, tmp_path, "f" * 64, "00000000-0000-4000-8000-000000001050"
     )
     owners = {set_digest: ("installation 1",)}
-    from vonk_control.model_cache import removal_execution as _removal_execution
 
     real_reasons = _removal_execution._reason_projection
     monkeypatch.setattr(
@@ -393,7 +395,6 @@ def test_model_removal_resolves_the_selector_at_acceptance_and_replays_by_key(
 def test_model_cache_parallel_ranges_publish_or_fall_back(
     cache, tmp_path, monkeypatch, range_supported
 ):
-    import threading
 
     _existing, sessions = cache
     payload = bytes(range(256)) * 256
@@ -491,7 +492,6 @@ def test_cancel_during_verification_does_not_publish(cache, tmp_path, monkeypatc
 def test_range_disk_reservation_falls_back_without_source_io(
     cache, tmp_path, monkeypatch
 ):
-    import shutil
 
     service, _sessions = cache
     spec = ArtifactSpec.from_manifest(
@@ -760,7 +760,6 @@ def test_missing_source_observations_follow_exact_file_and_survive_restart(
 def test_a_lost_background_failure_ack_counts_one_missing_file_observation(
     threaded_cache, tmp_path, monkeypatch
 ):
-    from concurrent.futures import Future, wait
 
     _existing, sessions = threaded_cache
     handler, payload, served = _gone_handler([404] * 5)

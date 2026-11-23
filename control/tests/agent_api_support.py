@@ -44,6 +44,7 @@ from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.source_bundles import SourceBundleStore
 
 from .ca_test_authority import FixtureCertificateAuthority
+from .package_upgrade_fixtures import source_transport
 
 NODE_A = "spk_" + "a" * 32
 
@@ -96,7 +97,6 @@ STOP_PAYLOAD = RecipeStopPayload(
 
 
 def upgrade_payload(digest: str, package_bytes: int) -> dict[str, object]:
-    from .package_upgrade_fixtures import source_transport
 
     return {
         "schema_version": 1,

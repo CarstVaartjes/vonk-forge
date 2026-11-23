@@ -7,6 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from vonk_agent_protocol.state_machines import CertificateRecordState
+from vonk_control import presence
 from vonk_control.agent_contacts import record_contact
 from vonk_control.auth import AgentIdentity, AgentSource
 from vonk_control.model_primitives import Base
@@ -244,7 +245,6 @@ def test_latest_observation_fault_cannot_supply_address_and_contact_repairs(
     presence_system, monkeypatch, fault
 ):
     """Catches malformed stored time or storage failure escaping a presence read."""
-    from vonk_control import presence
 
     sessions, service, source, current = presence_system
     recorded = _contact(sessions, source, current[0])

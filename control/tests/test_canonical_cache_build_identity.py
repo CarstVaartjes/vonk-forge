@@ -13,12 +13,17 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from vonk_control import execution_plan_service
 from vonk_control.catalog.entities import (
     model_document_projection,
     recipe_document_projection,
 )
 from vonk_control.catalog.revision_contract import write_catalog_projection
 from vonk_control.compiled_execution_plan import VerifiedModelObject
+from vonk_control.distribution.sources import verified_model_receipts
+from vonk_control.execution_plan_service import (
+    ControllerExecutionPlanService,
+)
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
@@ -370,11 +375,6 @@ def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
     no download and no re-hash.
     """
 
-    from vonk_control.distribution.sources import verified_model_receipts
-    from vonk_control.execution_plan_service import (
-        ControllerExecutionPlanService,
-    )
-
     sessions = _sessions()
     data = b"model bytes!"
     file_digest = hashlib.sha256(data).hexdigest()
@@ -460,7 +460,6 @@ def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
     assert "model-not-cached" not in status.blockers
 
     # Compilation asks for exactly that: capture what it binds.
-    from vonk_control import execution_plan_service
 
     bound: list[tuple[VerifiedModelObject, ...]] = []
     original = execution_plan_service.verified_model_receipts

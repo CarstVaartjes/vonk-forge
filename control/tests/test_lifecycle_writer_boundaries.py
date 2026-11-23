@@ -7,12 +7,13 @@ that must stay quiet (a non-lifecycle table, a comparison, the core itself).
 
 from __future__ import annotations
 
-from textwrap import dedent
+from textwrap import dedent, indent
 
 import pytest
 
 from .lifecycle_writer_boundaries import (
     ATTRIBUTE,
+    CONTROL_SOURCE_ROOT,
     CORE_PREFIX,
     DICT_STATE_OWNERS,
     NON_LIFECYCLE_STATE_VARIABLES,
@@ -23,6 +24,7 @@ from .lifecycle_writer_boundaries import (
     scan_source,
     scan_unresolved,
 )
+from .parsed_sources import parsed_tree
 
 #: The repository parse is shared setup, not the first test's own time.
 pytestmark = pytest.mark.usefixtures("parsed_repository")
@@ -56,7 +58,6 @@ def test_an_attribute_write_on_a_typed_parameter_is_a_write() -> None:
     ],
 )
 def test_a_row_read_from_the_session_is_resolved(body: str) -> None:
-    from textwrap import indent
 
     source = "from .models import Job, ArtifactJob\ndef update(session):\n" + indent(
         body, "    "
@@ -176,8 +177,6 @@ def test_no_unresolved_state_write_hides_in_a_lifecycle_module() -> None:
     """A ``.state`` write the resolver could not type must be a known non-lifecycle row."""
 
     unexplained: list[str] = []
-    from .lifecycle_writer_boundaries import CONTROL_SOURCE_ROOT
-    from .parsed_sources import parsed_tree
 
     for module, parsed in parsed_tree(CONTROL_SOURCE_ROOT):
         relative = module.relative_to(REPO_ROOT).as_posix()

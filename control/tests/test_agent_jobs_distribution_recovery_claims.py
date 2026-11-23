@@ -20,6 +20,7 @@ from vonk_agent_protocol.contracts import (
     AgentResult,
     ArtifactDistributionResult,
     canonical_message,
+    canonical_payload,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_control import agent_operation_states as aos
@@ -224,7 +225,6 @@ def test_successful_distribution_receipt_preserves_observed_order_wide_bytes(
 def test_queue_stores_and_claims_the_canonical_payload_hash(
     service, explicit_null: bool
 ) -> None:
-    from vonk_agent_protocol.contracts import canonical_payload
 
     jobs, sessions, clock = service
     vector = json.loads(

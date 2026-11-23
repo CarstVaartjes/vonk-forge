@@ -8,15 +8,30 @@ import uuid
 from dataclasses import replace
 from datetime import UTC, timedelta
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select, update
 
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReasonSeverity
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_control.categorized_errors import BookkeepingUnknown
+from vonk_control.distribution_executor.preparation import (
+    CompositeDistributionPhaseExecutor,
+)
+from vonk_control.fleet_profile_contract.definitions import (
+    FleetProfileAssignmentInput,
+    FleetProfileInput,
+)
+from vonk_control.fleet_profiles.read_observation import profile_read
+from vonk_control.fleet_profiles.run_switch_adapter import (
+    RunSwitchFleetProfileAdapter,
+)
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.fleet import AgentNode
@@ -37,6 +52,7 @@ from vonk_control.run_switch_contract.requests import (
 from vonk_control.run_switch_operations.result_helpers import _phase_result
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+from .non_blocking import assert_ended_without_blocking
 from .recipe_operations_support import NOW, setup_services
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
@@ -330,8 +346,6 @@ def test_run_switch_missing_target_has_retryable_dependency_recovery_bound(
         job = session.get(Job, operation.operation_id)
         assert job is not None
         job.targets = ["spk_ffffffffffffffffffffffffffffffff"]
-
-    from .non_blocking import assert_ended_without_blocking
 
     def end(_operation):
         assert service._advance(operation.operation_id) is True
@@ -879,23 +893,6 @@ def test_model_cache_manifest_allows_planned_nas_download(tmp_path: Path) -> Non
 @pytest.mark.parametrize("missing", [False, True])
 def test_profile_admits_unpublished_cache_observation(tmp_path, monkeypatch, missing):
     """A paused first receipt must wait in preparation, never refuse a load."""
-    from threading import Event
-
-    from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReasonSeverity
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_control.categorized_errors import BookkeepingUnknown
-    from vonk_control.distribution_executor.preparation import (
-        CompositeDistributionPhaseExecutor,
-    )
-    from vonk_control.fleet_profile_contract.definitions import (
-        FleetProfileAssignmentInput,
-        FleetProfileInput,
-    )
-    from vonk_control.fleet_profiles.read_observation import profile_read
-    from vonk_control.fleet_profiles.run_switch_adapter import (
-        RunSwitchFleetProfileAdapter,
-    )
-    from vonk_control.fleet_profiles.service import FleetProfileService
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(tmp_path)
     request = _request(sessions, nodes[0])

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import fcntl
 import hashlib
 import json
@@ -1074,7 +1075,6 @@ def test_temporary_unreadable_receipt_does_not_block_verified_reuse(
     tmp_path: Path, monkeypatch, lookup: str
 ) -> None:
     """A transient sibling I/O fault must not rebuild or wedge an eligible image."""
-    import errno
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     transport = TinyTransport()

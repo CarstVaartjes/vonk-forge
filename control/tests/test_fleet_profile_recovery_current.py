@@ -2,30 +2,51 @@
 
 from __future__ import annotations
 
+import copy
 import uuid
 from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode, SupersedeCode
+from vonk_control import admission_locking
+from vonk_control.categorized_errors import InvalidValue
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
-from vonk_control.fleet_profiles.contracts import FleetProfileConflict
+from vonk_control.fleet_profiles.contracts import (
+    FleetProfileAdmissionBusy,
+    FleetProfileAdmissionEffectBusy,
+    FleetProfileConflict,
+    FleetProfileReviewStale,
+    FleetProfileSelectionLost,
+)
 from vonk_control.fleet_profiles.dependencies import PROFILE_REPEATED_FAILURE_CODE
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.fleet_profiles.persistence import _persisted_profile_progress
+from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import ResourceReservation
-from vonk_control.models.fleet import AgentNode, FleetProfile, FleetProfileApplication
+from vonk_control.models.fleet import (
+    AgentNode,
+    FleetProfile,
+    FleetProfileApplication,
+    FleetProfileSelection,
+)
 from vonk_control.models.jobs import Job
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.operations.blockers import make_blocker
+from vonk_control.recipe_builds.common import RecipeBuildPlan
+from vonk_control.recovery_policy import RECOVERY
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .display_fixtures import reword
@@ -35,6 +56,7 @@ from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )
+from .test_fleet_profile_lifecycle import _World
 
 
 def _failed_profile(
@@ -412,8 +434,6 @@ def test_retry_of_a_backing_off_order_with_a_live_child_resumes_it(
     active" and the new run was never started.
     """
 
-    from vonk_control.models.fleet import FleetProfileApplication
-
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
         tmp_path, nodes=2
     )
@@ -484,11 +504,6 @@ def test_retry_of_a_backing_off_order_with_a_live_child_resumes_it(
 def test_a_retrying_application_reports_waiting_with_its_blockers(
     tmp_path: Path,
 ) -> None:
-    from datetime import timedelta
-
-    from sqlalchemy import delete
-
-    from vonk_control.models.telemetry import NodeInventorySnapshot
 
     sessions, lifecycle, service, _profile, _desired, application, _child, _nodes = (
         _failed_profile(tmp_path)
@@ -705,13 +720,6 @@ def test_profile_load_of_an_editorial_successor_accepts_the_reused_build(
     consumer identity changed". An image is its content, not a revision's.
     """
 
-    import copy
-
-    from vonk_forge_contracts import RecipeDefinition, document_sha256
-
-    from vonk_control.models.cache import RecipeBuild
-    from vonk_control.recipe_builds.common import RecipeBuildPlan
-
     sessions, lifecycle, _queue, _mapping, build_id, nodes = setup_services(
         tmp_path, nodes=2
     )
@@ -798,7 +806,6 @@ def test_profile_load_of_an_editorial_successor_accepts_the_reused_build(
 def test_load_with_a_missing_image_requests_preparation_and_continues_when_ready(
     tmp_path: Path,
 ) -> None:
-    from vonk_control.models.cache import RecipeBuild
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
         tmp_path, nodes=2
@@ -884,10 +891,6 @@ def test_cancelling_a_queued_load_waiting_for_preparation_always_succeeds(
     tmp_path: Path,
 ) -> None:
     """A waiting load issued no workload effect: cancel leaves the workload alone."""
-
-    from vonk_control.models.cache import RecipeBuild
-    from vonk_control.models.execution import ResourceReservation
-    from vonk_control.models.fleet import AgentNode
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
         tmp_path, nodes=2
@@ -1001,12 +1004,6 @@ def test_waiting_load_follows_a_newer_recipe_revision_instead_of_failing(
     tmp_path: Path,
 ) -> None:
     """A load still waiting for preparation re-plans on the newest revision."""
-
-    import copy
-
-    from vonk_forge_contracts import document_sha256
-
-    from vonk_control.models.cache import RecipeBuild
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
         tmp_path, nodes=2
@@ -1175,8 +1172,6 @@ def test_a_stale_retry_keeps_waiting_past_the_old_window_and_admits_a_fresh_load
     takes: a wait is not a failure, and only a request ends it. A fresh load is
     admitted meanwhile."""
 
-    from vonk_control.fleet_profiles.contracts import FleetProfileReviewStale
-
     _sessions, lifecycle, service, _profile, _desired, first, _child, _nodes = (
         _failed_profile(tmp_path)
     )
@@ -1214,9 +1209,6 @@ def test_a_retry_refused_by_an_internal_defect_ends_instead_of_backing_off(
     ends failed with it as evidence instead of backing off for ever, and a
     fresh load is admitted. The same refusal raised from a cause that clears
     by itself (a timeout) keeps waiting."""
-
-    from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
-    from vonk_control.categorized_errors import InvalidValue
 
     _sessions, lifecycle, service, profile, _desired, first, _child, _nodes = (
         _failed_profile(tmp_path)
@@ -1259,7 +1251,6 @@ def test_a_retry_refused_by_an_internal_defect_ends_instead_of_backing_off(
 def test_a_child_start_reobserves_stale_effects_without_new_intent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from vonk_control.fleet_profiles.contracts import FleetProfileReviewStale
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
         tmp_path, nodes=2
@@ -1326,7 +1317,6 @@ def test_a_child_start_reobserves_stale_effects_without_new_intent(
 def test_a_child_start_waits_for_busy_admission_and_resumes_its_accepted_intent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from vonk_control.fleet_profiles.contracts import FleetProfileAdmissionEffectBusy
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
         tmp_path, nodes=2
@@ -1456,8 +1446,6 @@ def test_missing_selection_keeps_waiting_and_admits_a_fresh_load(
     no longer owns the selected profile. The load keeps waiting with its reason
     on the bounded retry clock (no timer ends it) and a fresh load is admitted."""
 
-    from vonk_control.models.fleet import FleetProfileSelection
-
     sessions, lifecycle, service, _profile, _desired, first, _child, _nodes = (
         _failed_profile(tmp_path)
     )
@@ -1493,7 +1481,6 @@ def test_retry_unknown_reobserves_and_releases_its_episode(
     tmp_path, monkeypatch, fault
 ):
     """Catches exception labels inventing a successor or leaving a queue head."""
-    from vonk_control.fleet_profiles.contracts import FleetProfileSelectionLost
 
     _sessions, lifecycle, service, _profile, _desired, first, _child, _nodes = (
         _failed_profile(tmp_path)
@@ -1528,7 +1515,6 @@ def test_retry_unknown_reobserves_and_releases_its_episode(
 def test_a_transient_conflict_still_parks_with_backoff(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from vonk_control.fleet_profiles.contracts import FleetProfileAdmissionBusy
 
     _sessions, lifecycle, service, _profile, _desired, first, _child, _nodes = (
         _failed_profile(tmp_path)
@@ -1552,8 +1538,6 @@ def test_a_retry_refused_by_busy_node_rows_queues_for_them_and_is_admitted(
     ever tried the node row locks, heartbeats held them, and it was refused 129
     times in a row while its Spark sat idle. After repeated refusals the owner
     queues for its locks and the retry is admitted."""
-    from vonk_control import admission_locking
-    from vonk_control.fleet_profiles.contracts import FleetProfileAdmissionBusy
 
     sessions, lifecycle, service, _profile, _desired, first, _child, _nodes = (
         _failed_profile(tmp_path)
@@ -1601,7 +1585,6 @@ def test_a_stale_replay_of_a_load_a_newer_request_took_over_is_superseded(
     hours while the newer load waited for it. The newest request steers: the
     old load is superseded. Without a newer request the stale review stays a
     wait."""
-    from vonk_control.fleet_profiles.contracts import FleetProfileReviewStale
 
     _sessions, lifecycle, service, profile, desired, first, _child, nodes = (
         _failed_profile(tmp_path, idle_sparks=2)
@@ -1650,14 +1633,6 @@ def test_child_observation_recovers_without_exception_taxonomy(
     tmp_path, monkeypatch, fault
 ):
     """Catches a local unknown being ended according to its exception label."""
-    from vonk_agent_protocol.outcome import UnknownOutcomeError
-    from vonk_control.fleet_profiles.contracts import (
-        FleetProfileAdmissionBusy,
-        FleetProfileReviewStale,
-        FleetProfileSelectionLost,
-    )
-
-    from .test_fleet_profile_lifecycle import _World
 
     world = _World(tmp_path)
     child_id = world.child_id()
@@ -1707,8 +1682,6 @@ def test_a_definite_failure_ends_the_load_once_with_its_cause(tmp_path: Path) ->
     """A workload that crashes at start fails the same way on every launch: the
     load ends on its first definite failure with the child's cause, and recovery
     never re-launches it."""
-
-    from vonk_control.recovery_policy import RECOVERY
 
     crash = "AssertionError: the attention heads do not divide the tensor parallel size"
     sessions, lifecycle, service, _profile, _desired, first, _child, _nodes = (
@@ -1805,8 +1778,6 @@ def test_a_failure_that_changes_keeps_being_retried(
 ) -> None:
     """Changing faults keep their evidence without ending standing intent."""
 
-    from vonk_control.recovery_policy import RECOVERY
-
     sessions, lifecycle, service, *_rest = _failed_profile(tmp_path)
     clock = {"now": lifecycle._clock()}
     service._clock = lambda: clock["now"]
@@ -1820,7 +1791,6 @@ def test_a_failure_that_changes_keeps_being_retried(
 def test_a_failure_that_differs_only_in_numbers_is_the_same_failure(
     tmp_path: Path, ending: str
 ) -> None:
-    from vonk_control.recovery_policy import RECOVERY
 
     sessions, lifecycle, service, *_rest = _failed_profile(tmp_path)
     clock = {"now": lifecycle._clock()}
@@ -1846,8 +1816,6 @@ def test_a_stall_with_a_stable_cause_keeps_retrying_with_evidence(
     tmp_path: Path,
 ) -> None:
     """A repeated expired child window cannot end standing profile intent."""
-
-    from vonk_control.recovery_policy import RECOVERY
 
     sessions, lifecycle, service, *_rest = _failed_profile(tmp_path)
     clock = {"now": lifecycle._clock()}

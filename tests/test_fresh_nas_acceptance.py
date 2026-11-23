@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -17,7 +18,10 @@ import pytest
 import yaml
 
 from tests.acceptance.runtime import AcceptanceError, reclaim_gateway_journal
+from vonk_agent_protocol.installer_setup import NasInstallTemplate
 from vonk_nas_setup.compose import resolve_compose
+from vonk_nas_setup.prompts import PromptIo
+from vonk_nas_setup.setup import prepare
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tests/acceptance/test_fresh_nas_install.py"
@@ -175,7 +179,6 @@ def test_nas_responses_answer_only_the_remaining_installer_prompts() -> None:
 
 def _installer_payload(tmp_path: Path):
     """The NAS installer payload this checkout publishes."""
-    from vonk_agent_protocol.installer_setup import NasInstallTemplate
 
     rendered = tmp_path / "rendered.yaml"
     _script_module(PRODUCTION_RENDERER, "acceptance_answers_renderer").render(
@@ -197,10 +200,6 @@ def test_lane_answers_are_the_installers_own_prompts_in_order(
     tmp_path: Path,
 ) -> None:
     """Catches lane answers drifting from the prompts the real installer asks."""
-    import io
-
-    from vonk_nas_setup.prompts import PromptIo
-    from vonk_nas_setup.setup import prepare
 
     acceptance = _acceptance_module()
     arguments = {

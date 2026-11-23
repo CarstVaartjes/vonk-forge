@@ -30,9 +30,14 @@ from vonk_control.catalog.revision_contract import (
     write_catalog_projection,
 )
 from vonk_control.library.contract import LibraryLocalState, LibraryRecipeProjection
+from vonk_control.library_projection import local_state
 from vonk_control.library_projection.common import compose_recipe_state
 from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.model_cache import model_artifact_cache
+from vonk_control.model_cache.errors import (
+    ModelCacheResolutionInvalid,
+    ModelCacheResolutionRefused,
+)
 from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet, RecipeBuild
 from vonk_control.models.catalog import (
     CatalogDocument,
@@ -684,7 +689,6 @@ def test_each_recipe_set_is_resolved_once_across_library_reads(
     cache,
     monkeypatch,
 ):
-    from vonk_control.library_projection import local_state
 
     _, sessions = cache
     world = _World(sessions, count=1)
@@ -713,11 +717,6 @@ def test_an_unresolvable_set_reads_unknown_not_cached_from_its_build(
     monkeypatch,
     refused: bool,
 ):
-    from vonk_control.library_projection import local_state
-    from vonk_control.model_cache.errors import (
-        ModelCacheResolutionInvalid,
-        ModelCacheResolutionRefused,
-    )
 
     service, sessions = cache
     world = _World(sessions, count=1)

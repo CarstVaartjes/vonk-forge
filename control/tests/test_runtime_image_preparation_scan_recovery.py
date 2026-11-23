@@ -1,15 +1,50 @@
 """Unrelated unavailable metadata must not obstruct request-led preparation."""
 
+import json
+import multiprocessing
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    SecurityRefusalReason,
+    WaitReason,
+)
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
+from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
+from vonk_control.jobs.documents import AvailabilityJobResult
+from vonk_control.lifecycle.image_availability import CANCEL_BUDGET
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability.availability_contract import (
+    AvailabilityBuildReceipt,
+)
+from vonk_control.recipe_image_availability.contracts import BuildUnsettled
 from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImagePreparationRefused,
+    RuntimeImagePreparationUnknown,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
+from .recipe_image_availability_support import (
+    ARCHIVE_SHA,
+    IMAGE_DIGEST,
+    Transport,
+    _add_recipe_successors,
+    _add_revision,
+    _build_id,
+    _builder,
+    _recipe,
+    _runtime,
+    _service,
+    _set_active_head,
+    _successor,
+)
 from .test_runtime_image_preparation import (
     ARCHIVE_DIGEST,
     BUILT_IMAGE_DIGEST,
@@ -87,30 +122,6 @@ def test_unknown_receipt_attempt_ends_without_blocking_fresh_preparation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Actual persisted availability claims end and a new request can prepare."""
-    from datetime import UTC, datetime, timedelta
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_control.model_primitives import Base
-    from vonk_control.models.cache import RecipeBuild
-    from vonk_control.models.jobs import Job
-    from vonk_control.recipe_image_availability.availability_contract import (
-        AvailabilityBuildReceipt,
-    )
-
-    from .recipe_image_availability_support import (
-        ARCHIVE_SHA,
-        IMAGE_DIGEST,
-        Transport,
-        _add_revision,
-        _build_id,
-        _builder,
-        _recipe,
-        _runtime,
-        _service,
-    )
 
     engine = create_engine(f"sqlite:///{tmp_path / 'operations.sqlite'}")
     Base.metadata.create_all(engine)
@@ -224,28 +235,6 @@ def test_observation_budget_is_owned_by_request_across_restart_for_all_unknowns(
     monkeypatch: pytest.MonkeyPatch,
     fault: str,
 ) -> None:
-    from datetime import UTC, datetime, timedelta
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
-    from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-    from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
-    from vonk_control.model_primitives import Base
-    from vonk_control.models.jobs import Job
-    from vonk_control.recipe_image_availability.contracts import BuildUnsettled
-    from vonk_control.runtime_image_preparation.contracts import (
-        RuntimeImagePreparationUnknown,
-    )
-
-    from .recipe_image_availability_support import (
-        _add_revision,
-        _builder,
-        _recipe,
-        _runtime,
-        _service,
-    )
 
     engine = create_engine(f"sqlite:///{tmp_path / 'budget.sqlite'}")
     Base.metadata.create_all(engine)
@@ -306,7 +295,6 @@ def test_observation_budget_is_owned_by_request_across_restart_for_all_unknowns(
     now[0] += timedelta(minutes=16)
     service = owner()
     service.run_pending()
-    from vonk_control.lifecycle.image_availability import CANCEL_BUDGET
 
     now[0] += CANCEL_BUDGET
     service.run_pending()
@@ -328,10 +316,6 @@ def test_observation_budget_is_owned_by_request_across_restart_for_all_unknowns(
 
 
 def _hold_availability_row(database_url: str, operation_id: str, pipe) -> None:
-    from sqlalchemy import create_engine, select
-    from sqlalchemy.orm import sessionmaker
-
-    from vonk_control.models.jobs import Job
 
     engine = create_engine(database_url)
     try:
@@ -353,28 +337,6 @@ def test_postgres_concurrent_owner_newer_intent_fences_stale_claim_and_restarts(
     tmp_path: Path,
     postgres_engine,
 ) -> None:
-    import json
-    import multiprocessing
-    from datetime import UTC, datetime, timedelta
-
-    from sqlalchemy.orm import sessionmaker
-
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
-    from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-    from vonk_control.jobs.documents import AvailabilityJobResult
-    from vonk_control.model_primitives import Base
-    from vonk_control.models.jobs import Job
-    from vonk_control.recipe_image_availability.contracts import BuildUnsettled
-
-    from .recipe_image_availability_support import (
-        _add_recipe_successors,
-        _builder,
-        _recipe,
-        _runtime,
-        _service,
-        _set_active_head,
-        _successor,
-    )
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -451,7 +413,6 @@ def test_postgres_concurrent_owner_newer_intent_fences_stale_claim_and_restarts(
     now[0] += timedelta(minutes=16)
     service = owner()
     service.run_pending()
-    from vonk_control.lifecycle.image_availability import CANCEL_BUDGET
 
     now[0] += CANCEL_BUDGET
     service.run_pending()

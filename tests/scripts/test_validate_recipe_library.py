@@ -10,6 +10,7 @@ import sys
 import tarfile
 import types
 from importlib.machinery import SourceFileLoader
+from importlib.resources import files
 from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
 
@@ -238,7 +239,6 @@ def test_contract_recipe_library_rejects_an_archive_without_recipe_entrypoint(
 
 
 def _option_recipe(env: dict[str, str]):
-    from importlib.resources import files
 
     from vonk_forge_contracts import read_recipe
 

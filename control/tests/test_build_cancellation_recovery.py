@@ -9,15 +9,19 @@ import pytest
 from sqlalchemy import select
 from vonk_forge_contracts import RecipeDefinition
 
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.execution import ResourceReservation
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_builds.cancellation import BuildConsumerError
 from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
+from vonk_control.recipe_operations import build_cancellation as owner
 from vonk_control.recipe_operations.execution_contract import parse_stored_build_plan
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
@@ -477,10 +481,6 @@ def test_cancellation_observes_consumer_uncertainty_then_releases_for_fresh_buil
     tmp_path, postgres_engine, monkeypatch
 ):
     """A transient consumer read cannot convert authorized cancellation to bad input."""
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
-    from vonk_control.recipe_builds.cancellation import BuildConsumerError
-    from vonk_control.recipe_operations import build_cancellation as owner
 
     sessions, _, operations, _, _, _, _, plan = _services(tmp_path, postgres_engine)
     original = operations.build(

@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
 import pytest
+from vonk_forge_contracts.systemone import SystemOneRequest, SystemOneResponse
 
 from cluster_profiles.cli_states_generated import FAILED, SUCCEEDED
 from cluster_profiles.serving_execution import (
@@ -195,7 +196,6 @@ def test_job_evaluator_distinguishes_failure_from_unknown_and_accepts_fresh_resu
 
 
 def test_native_decision_check_rejects_changed_option_probabilities() -> None:
-    from vonk_forge_contracts.systemone import SystemOneRequest, SystemOneResponse
 
     request = SystemOneRequest.model_validate_json(
         json.dumps(

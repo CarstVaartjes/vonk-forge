@@ -7,14 +7,17 @@ import subprocess
 import sys
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
+from typing import get_args
 
 import pytest
 from sqlalchemy import Engine, select
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
-from vonk_agent_protocol.state_machines import DesiredAssignmentState
+from vonk_agent_protocol.state_machines import DesiredAssignmentState, ReservationState
 from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignment,
     FleetProfileInput,
@@ -28,8 +31,13 @@ from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchChildResult,
     FleetProfileSwitchQueueItem,
 )
+from vonk_control.fleet_profile_contract.vocabulary import (
+    FLEET_PROFILE_ENDED_STATES,
+    FleetProfileOperationState,
+)
 from vonk_control.fleet_profiles.assessment_support import _operation_state
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.fleet_profiles.projection_support import _switch_queue
 from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.models.catalog import CatalogDocumentRevision
@@ -42,7 +50,10 @@ from vonk_control.models.fleet import (
     FleetProfileApplication,
 )
 from vonk_control.models.jobs import Job
+from vonk_control.operations.blockers import make_blocker
+from vonk_control.run_switch_contract.phase_results import RunSwitchUninstallResult
 from vonk_control.run_switch_contract.plans import RunSwitchAssessment
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .fleet_profiles_support import (
     NOW,
@@ -57,6 +68,16 @@ from .fleet_profiles_support import (
     _SwitchAdapter,
     _uuid,
 )
+from .non_blocking import assert_ended_without_blocking
+from .recipe_operations_support import (
+    installed_recipe,
+    setup_services,
+    started_recipe,
+)
+from .run_switch_operations_support import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
+)
 
 
 def test_profile_preview_projects_exact_preparation_from_run_switch_authority(
@@ -69,14 +90,6 @@ def test_profile_preview_projects_exact_preparation_from_run_switch_authority(
     reported ``allowed`` with an empty ``preparations`` list, which is the
     defect the Spark acceptance canary surfaced.
     """
-
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
-
-    from .recipe_operations_support import setup_services
-    from .run_switch_operations_support import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
-    )
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path, nodes=2
@@ -204,14 +217,6 @@ def test_profile_preview_delegates_removal_to_the_orchestrator(
 def _exact_planned_cleanup_profile(tmp_path: Path):
     """A production-wired exact profile whose only leftover is a persisted plan."""
 
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
-
-    from .recipe_operations_support import setup_services
-    from .run_switch_operations_support import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
-    )
-
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2
     )
@@ -285,7 +290,6 @@ def test_exact_profile_switch_abandons_a_never_installed_leftover(
     assert completed.state == "succeeded", completed.status_reason
     # The profile application keeps the Run/Switch receipt, so the operator
     # sees the abandonment and its reason rather than a silent disappearance.
-    from vonk_control.run_switch_contract.phase_results import RunSwitchUninstallResult
 
     receipts = [
         item.result.run_switch
@@ -319,18 +323,6 @@ def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(
     postgres_engine: Engine,
 ) -> None:
     """The packaged acceptance consumer follows delegated cleanup evidence."""
-
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
-
-    from .recipe_operations_support import (
-        installed_recipe,
-        setup_services,
-        started_recipe,
-    )
-    from .run_switch_operations_support import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
-    )
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=1, engine=postgres_engine
@@ -531,7 +523,6 @@ def test_persisted_child_progress_is_read_with_json_semantics() -> None:
 
 def test_a_replaced_workload_keeps_serving_until_its_successor_starts() -> None:
     """A replacement must prepare before stopping the exact old workload."""
-    from vonk_control.fleet_profiles.projection_support import _switch_queue
 
     identities = {
         name: _uuid(19890 + index)
@@ -593,17 +584,6 @@ def test_a_replaced_workload_keeps_serving_until_its_successor_starts() -> None:
 def test_a_stop_step_for_an_already_replaced_workload_is_skipped(
     tmp_path: Path,
 ) -> None:
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
-
-    from .recipe_operations_support import (
-        installed_recipe,
-        setup_services,
-        started_recipe,
-    )
-    from .run_switch_operations_support import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
-    )
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     installation = installed_recipe(
@@ -651,13 +631,6 @@ def test_a_stop_step_for_an_already_replaced_workload_is_skipped(
 def test_every_application_state_is_active_or_named_ended() -> None:
     """A new terminal state must join the one ended-state set every consumer uses."""
 
-    from typing import get_args
-
-    from vonk_control.fleet_profile_contract.vocabulary import (
-        FLEET_PROFILE_ENDED_STATES,
-        FleetProfileOperationState,
-    )
-
     active = {"queued", "running", "backoff"}
     assert {
         str(state) for state in get_args(FleetProfileOperationState)
@@ -700,12 +673,6 @@ def test_exhausted_preparation_ends_and_a_fresh_load_is_admitted(
     monkeypatch, end_path: str
 ) -> None:
     """An exhausted chain must release its application scope, not poison new loads."""
-    from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-    from vonk_agent_protocol.state_machines import ReservationState
-    from vonk_control.models.fleet import FleetProfileApplication
-    from vonk_control.operations.blockers import make_blocker
-
-    from .non_blocking import assert_ended_without_blocking
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
@@ -831,9 +798,6 @@ def test_planner_validation_defect_ends_load_with_evidence_after_restart(
     initially_waiting: bool,
 ) -> None:
     """Catch internal contract errors being requeued as missing cache evidence."""
-    from types import SimpleNamespace
-
-    from .non_blocking import assert_ended_without_blocking
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)

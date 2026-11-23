@@ -1,5 +1,7 @@
+import os
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from threading import Barrier, Event, Semaphore
 
 import httpx2
@@ -344,7 +346,6 @@ def test_symlink_cache_paths_cannot_touch_external_file(tmp_path, name):
 def test_resumed_range_peak_growth_fits_two_object_reservation(
     tmp_path, monkeypatch, resume_prefix, retained_segment
 ):
-    import os
 
     data = bytes(range(256)) * (2 * 1024 * 1024 // 256)
     target = tmp_path / "model.part"
@@ -407,7 +408,6 @@ def test_lost_range_at_assembly_is_a_miss_and_fresh_attempt_repairs(tmp_path):
 
 
 def test_lost_contiguous_prefix_is_refetched(tmp_path, monkeypatch):
-    from pathlib import Path
 
     target = tmp_path / "model.part"
     target.write_bytes(b"01234")

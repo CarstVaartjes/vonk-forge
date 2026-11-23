@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -1199,7 +1200,6 @@ def test_a_failed_payload_match_says_why_the_lanes_run_here(
 def test_main_reuses_only_fresh_digest_bound_pr_security(fault, tmp_path):
     """Catches skipping scans for another digest/attempt or stale PR evidence,
     and treating denied evidence access as permission."""
-    from datetime import UTC, datetime, timedelta
 
     roles = ("api", "worker", "litellm")
     digests = {

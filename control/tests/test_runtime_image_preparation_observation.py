@@ -4,14 +4,19 @@ from dataclasses import replace
 
 import pytest
 
+from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
+from .runtime_image_fixtures import place_test_image
 from .test_runtime_image_preparation import (
     ARCHIVE,
     ARCHIVE_DIGEST,
     BUILT_IMAGE_DIGEST,
     TinyTransport,
+    _build_receipt,
+    _document,
     _prepare,
+    _runtime,
 )
 
 
@@ -89,10 +94,6 @@ def test_transport_metadata_does_not_override_accepted_compatibility(tmp_path):
 
 
 def test_wrong_stored_build_size_is_reconstructed_from_exact_managed_content(tmp_path):
-    from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
-
-    from .runtime_image_fixtures import place_test_image
-    from .test_runtime_image_preparation import _build_receipt, _document, _runtime
 
     storage = FilesystemRuntimeImageStorage(tmp_path)
     place_test_image(storage, ARCHIVE_DIGEST, len(ARCHIVE))

@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import ast
+import gc
+import weakref
 
 import pytest
 
 from . import principle_guards, unproven_run_failures
+from . import principle_guards as guards
 from .principle_guards import (
     ROOT,
     rust_test_files,
+    scan_compose_shell,
     scan_rust,
     scan_rust_fixed_caps,
     scan_shell,
@@ -245,7 +249,6 @@ def test_real_activation_or_submission_is_fresh_admission_after_ending():
 
 
 def test_compose_embedded_shell_requires_a_bound_in_the_executed_loop():
-    from .principle_guards import scan_compose_shell
 
     source = """services:
   consumer:
@@ -355,7 +358,6 @@ def test_nested_package_get_helper_refusal_follows_concrete_import(
     tmp_path, monkeypatch
 ):
     """Moving a GET's rejecting helper cannot erase its existing refusal finding."""
-    from . import principle_guards as guards
 
     root = tmp_path / "control/src/vonk_control"
     root.mkdir(parents=True)
@@ -413,9 +415,6 @@ def test_bounded_ending_requires_distinct_fresh_execution_and_completion():
 @pytest.mark.parametrize("collecting", [False, True])
 def test_inventory_restores_gc_policy_on_every_exit(monkeypatch, fault, collecting):
     """Catches scanner failure leaking a disabled collector into later work."""
-    import gc
-
-    from . import principle_guards
 
     original = gc.isenabled()
     try:
@@ -443,10 +442,6 @@ def test_inventory_releases_temporary_trees_without_scanning_old_generations(
     tmp_path, monkeypatch, failure_at
 ):
     """Catches retained parsed trees, including an interrupted inventory."""
-    import gc
-    import weakref
-
-    from . import principle_guards
 
     sources = []
     for index in range(16):

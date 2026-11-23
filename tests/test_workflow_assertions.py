@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tools import pytest_prereqs
+
 ROOT = Path(__file__).resolve().parents[1]
 _PINNED_PASSED_SUMMARY = re.compile(r"\b[0-9]+\s+passed\b")
 _PYTHON_HEREDOC = re.compile(
@@ -179,7 +181,6 @@ def test_guard_rejects_pinned_passed_summary_but_allows_nonempty_pattern() -> No
 
 def test_control_ci_collects_lanes_and_requires_oci_ingress(monkeypatch) -> None:
     """Retiring OCI proof jobs must not silently skip their real ingress tests."""
-    from tools import pytest_prereqs
 
     workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
     steps = workflow["jobs"]["control-suite"]["steps"]

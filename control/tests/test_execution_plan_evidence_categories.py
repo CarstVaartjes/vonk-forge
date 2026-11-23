@@ -13,6 +13,8 @@ from vonk_control.execution_plan_service import (
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 
+from .recipe_image_availability_support import _reference_receipt
+
 
 def test_unfinished_build_is_observed_instead_of_invalidating_the_plan() -> None:
     build = RecipeBuild(state=LifecycleState.QUEUED)
@@ -31,7 +33,6 @@ def test_unavailable_receipt_is_observed_without_entering_a_launch_plan() -> Non
     with pytest.raises(Exception):  # noqa: B017 -- effects and subsequent admission witness rejection
         _runtime_image_receipt(cast(RuntimeImageReceipt, object()))
     # A fresh compilation can consume repaired evidence immediately.
-    from .recipe_image_availability_support import _reference_receipt
 
     assert (
         _runtime_image_receipt(_reference_receipt()).image_digest

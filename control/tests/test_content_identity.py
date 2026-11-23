@@ -11,6 +11,7 @@ from vonk_control.content_identity import (
     same_image,
     same_model_object,
 )
+from vonk_control.recipe_builds.common import RecipeBuildResolution
 
 DIGEST = "sha256:" + "a" * 64
 ARCHIVE = "b" * 64
@@ -108,7 +109,6 @@ def test_a_build_is_reusable_by_executable_inputs_not_by_the_builder_binary() ->
 
 def test_damaged_cached_builder_identity_does_not_block_fresh_resolution() -> None:
     """A corrupt cached receipt must be a miss, not a refusal of a fresh build."""
-    from vonk_control.recipe_builds.common import RecipeBuildResolution
 
     resolution = RecipeBuildResolution(
         recipe_revision_id="recipe",

@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_forge_contracts import document_sha256
+from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from vonk_agent_protocol.contracts import AgentOperation, canonical_message
 from vonk_agent_protocol.inventory import ModelStoreObject
@@ -15,13 +15,27 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.state_machines import InstallationState, NodeIdentityState
 from vonk_control.cache_removal_review import CacheAssetDisposition
-from vonk_control.fleet_model_removal_contract import FleetRemovalDisposition
+from vonk_control.catalog.entities import CatalogEntityService
+from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.fleet_model_removal_contract import (
+    STORE_RETENTION_MAX_AGE,
+    FleetRemovalDisposition,
+)
+from vonk_control.fleet_profile_contract.definitions import (
+    FleetProfileAssignmentInput,
+    FleetProfileInput,
+)
+from vonk_control.fleet_profiles.contracts import FleetProfileAdmissionEffectBusy
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
+from vonk_control.model_cache.contract import ModelCacheRemovalPayload
+from vonk_control.model_cache.errors import ModelCacheConflictInvalid
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheOperation
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import RecipeInstallation
 from vonk_control.models.fleet import AgentNode
@@ -31,6 +45,12 @@ from vonk_control.spark_store_retention import store_retention_request
 from vonk_control.strict_json import read_stored_model
 
 from .display_fixtures import reworded
+from .lifecycle_simulation.reach_world import (
+    MODEL_SELECTOR,
+    WEIGHTS,
+    build_reach_world,
+)
+from .lifecycle_simulation.world import SOLO
 from .model_cache_support import _artifact, _download
 from .recipe_operations_support import (
     NOW,
@@ -311,9 +331,6 @@ def test_shared_content_is_retained_on_nas_and_spark(
 
 def _refreshed_model(sessions, document_id: str, stored: object, digest: str) -> str:
     """Publish a metadata-only revision of a model; returns the new head digest."""
-    from vonk_forge_contracts import ModelDefinition, document_sha256
-
-    from vonk_control.catalog.entities import CatalogEntityService
 
     definition = ModelDefinition.model_validate(stored)
     document = reworded(definition, "refreshed").model_dump(mode="json")
@@ -338,7 +355,6 @@ def test_unused_installation_uninstalls_through_existing_job(
     installation of the earlier revision holds the same lineage's files and is
     uninstalled too, so the removal ends instead of waiting out its deadline.
     """
-    from vonk_control.cluster_mappings import ClusterMappingService
 
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine, nodes=installation_count, mapping_node_count=1
@@ -640,12 +656,6 @@ def test_profile_added_after_review_replans_without_fencing_or_deleting(
     postgres_engine, tmp_path: Path
 ) -> None:
     """Catches acceptance of an obsolete review after a profile acquires a pin."""
-    from vonk_control.fleet_profile_contract.definitions import (
-        FleetProfileAssignmentInput,
-        FleetProfileInput,
-    )
-    from vonk_control.fleet_profiles.service import FleetProfileService
-    from vonk_control.model_cache.errors import ModelCacheConflictInvalid
 
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine
@@ -716,8 +726,6 @@ def test_lost_owner_authority_expires_before_fresh_reference(
     """Catches an everlasting wait or releasing deletion gates while an agent
     still has a fresh eviction authority from the failed owner.
     """
-    from vonk_control.fleet_model_removal_contract import STORE_RETENTION_MAX_AGE
-    from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheOperation
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)
@@ -837,8 +845,6 @@ def test_changed_persisted_scope_never_authorizes_remote_eviction(
     """Catches inventory trusting a structurally valid plan whose effects no
     longer match the operator's accepted digest.
     """
-    from vonk_control.model_cache.contract import ModelCacheRemovalPayload
-    from vonk_control.models.cache import ModelCacheOperation
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)
@@ -903,20 +909,6 @@ def test_profile_draft_cannot_cross_accepted_fleet_object_fence(
     """Catches narrowing the draft guard to remote objects only: a fleet
     removal also owns NAS bytes before a Spark has copied them.
     """
-    import hashlib
-
-    from vonk_control.fleet_profile_contract.definitions import (
-        FleetProfileAssignmentInput,
-        FleetProfileInput,
-    )
-    from vonk_control.fleet_profiles.contracts import FleetProfileAdmissionEffectBusy
-
-    from .lifecycle_simulation.reach_world import (
-        MODEL_SELECTOR,
-        WEIGHTS,
-        build_reach_world,
-    )
-    from .lifecycle_simulation.world import SOLO
 
     world = build_reach_world(tmp_path, postgres_engine)
     cache = world.reach.cache

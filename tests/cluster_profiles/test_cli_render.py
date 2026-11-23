@@ -1,9 +1,13 @@
+import argparse
+import re
 import sys
 from io import BytesIO, TextIOWrapper
 from pathlib import Path
 
 import pytest
 
+import cluster_profiles
+from cluster_profiles.cli_presentations import PRESENTATIONS
 from cluster_profiles.cli_render.activity import (
     activity_continuation,
     unknown_membership,
@@ -19,6 +23,7 @@ from cluster_profiles.cli_render.fleet import (
     NO_SPARKS,
     RunProblem,
     _fleet_status_line,
+    _gpu,
     _needs_attention,
     clock_metric,
     run_problem,
@@ -34,6 +39,7 @@ from cluster_profiles.cli_render.progress import progress_line
 from cluster_profiles.cli_render.review import ReviewVerdict, review_verdict
 from cluster_profiles.cli_states_generated import GpuClockMetric, QualificationStatus
 from cluster_profiles.control_client.errors import ControlMalformedResponse
+from cluster_profiles.controller_cli.parser import add_controller_commands
 from cluster_profiles.generated_control.models.gpu_clock_observation import (
     GpuClockObservation,
 )
@@ -41,6 +47,7 @@ from cluster_profiles.generated_control.models.gpu_clock_unavailable import (
     GpuClockUnavailable,
 )
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+from vonk_agent_protocol.telemetry import GpuUnavailableReason
 
 
 def test_unknown_transfer_total_does_not_hide_measured_work_or_invent_percent():
@@ -107,12 +114,6 @@ def test_recipe_library_reads_any_unreadable_published_status_as_not_yet_verifie
 
 
 def test_every_controller_command_has_a_registered_presentation() -> None:
-    import argparse
-    import re
-
-    import cluster_profiles
-    from cluster_profiles.cli_presentations import PRESENTATIONS
-    from cluster_profiles.controller_cli.parser import add_controller_commands
 
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command")
@@ -137,8 +138,6 @@ def test_every_controller_command_has_a_registered_presentation() -> None:
 
 def test_gpu_partial_readings_and_typed_failure_survive_fleet_render():
     # Catches discarding temperature when utilisation is unsupported.
-    from cluster_profiles.cli_render.fleet import _gpu
-    from vonk_agent_protocol.telemetry import GpuUnavailableReason
 
     assert (
         _gpu(

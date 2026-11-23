@@ -5,6 +5,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import NoReturn, cast
 
 import pytest
@@ -78,6 +79,7 @@ from vonk_control.operation_api.responses import (
 )
 from vonk_control.operations.item_contract import operation_item
 from vonk_control.recovery_policy import RecoveryPolicy
+from vonk_control.summary_cut import summary_cut as _summary_cut
 
 from .agent_fences import fenced_attempt, fenced_operation, park_for_operator
 from .observation_transfer_peer import fleet_authority, observation_document
@@ -312,7 +314,6 @@ def test_generic_operation_read_contract_projects_bounded_durable_state() -> Non
 
 
 def test_operation_read_surfaces_a_recorded_claim_refusal_reason() -> None:
-    from types import SimpleNamespace
 
     reason = (
         "claim refused: live-mutation-in-progress "
@@ -2319,7 +2320,6 @@ def test_zero_target_upgrade_job_still_projects_a_valid_progress_object() -> Non
 
 
 def test_failure_summary_ends_at_a_whole_word() -> None:
-    from vonk_control.summary_cut import summary_cut as _summary_cut
 
     assert _summary_cut("short reason") == "short reason"
     text = "word " * 100

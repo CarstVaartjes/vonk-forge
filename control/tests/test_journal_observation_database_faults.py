@@ -1,6 +1,10 @@
 """Database observation faults consume the accepted journal repair budget."""
 
+from types import SimpleNamespace
+from uuid import uuid4
+
 import pytest
+from psycopg.errors import SerializationFailure
 from sqlalchemy.exc import OperationalError
 
 from vonk_agent_protocol.contracts import canonical_message
@@ -10,8 +14,11 @@ from vonk_control.run_switch_contract.journal import (
     JournalRepairDisposition,
     RunSwitchJournalRepairPendingState,
 )
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 from vonk_control.run_switch_journal_repair import observation as repair
+from vonk_control.run_switch_operations.planning_helpers import _run_switch_payload
 
+from .non_blocking import assert_ended_without_blocking
 from .test_run_switch_zero_transfer_journal_repair_postgres import (
     faulty_install,  # noqa: F401
 )
@@ -24,15 +31,6 @@ def test_database_observation_failure_ends_and_accepts_fresh(
     expiry_fault,
 ):
     """Catches observation faults escaping the clock or resetting it after restart."""
-    from types import SimpleNamespace
-    from uuid import uuid4
-
-    from psycopg.errors import SerializationFailure
-
-    from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
-    from vonk_control.run_switch_operations.planning_helpers import _run_switch_payload
-
-    from .non_blocking import assert_ended_without_blocking
 
     sessions, lifecycle, _, _planner, _, clock, nodes, _, switch, _, claim, *_ = (
         faulty_install

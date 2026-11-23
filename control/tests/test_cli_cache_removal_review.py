@@ -6,6 +6,7 @@ import io
 import json
 import sys
 from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
 
 import pytest
 
@@ -21,6 +22,11 @@ from cluster_profiles.controller_cli import cache_removal as cache_removal_modul
 from cluster_profiles.controller_cli import dispatch as dispatch_module
 from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
     FleetProfileEndpointsView,
+)
+from vonk_control.fleet_model_removal_contract import (
+    FleetModelRemovalCheckpoint,
+    FleetModelRemovalEffects,
+    FleetRemovalReason,
 )
 
 from .consumer_outcomes import not_adopted
@@ -666,13 +672,6 @@ def test_fleet_review_is_read_only_and_submission_binds_its_scope(
     monkeypatch, capsys
 ) -> None:
     """Catches a scope flag dropped by CLI review or model-removal submission."""
-    from datetime import UTC, datetime
-
-    from vonk_control.fleet_model_removal_contract import (
-        FleetModelRemovalCheckpoint,
-        FleetModelRemovalEffects,
-        FleetRemovalReason,
-    )
 
     effects = FleetModelRemovalEffects(
         nas_remove=True,

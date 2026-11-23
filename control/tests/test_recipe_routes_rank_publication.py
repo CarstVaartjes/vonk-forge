@@ -34,6 +34,7 @@ from vonk_control.fleet_profile_contract.endpoints import (
 from vonk_control.gateway.litellm import LiteLlmGeneration, ServedModelInfo
 from vonk_control.gateway.route_runtime import (
     AtomicRouteBundlePublisher,
+    verify_active_route_bundle,
 )
 from vonk_control.models.execution import (
     RecipeRun,
@@ -46,6 +47,7 @@ from vonk_control.models.routes import (
     RoutePublication,
     RoutePublicationOwner,
 )
+from vonk_control.operation_api import durable as operation_projection
 from vonk_control.operation_api.durable import durable_operation_services
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
@@ -776,7 +778,6 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     routes = json.loads((directory / "routes.json").read_text())
     assert routes["generation"] == generation.generation
     assert routes["state"] == "published"
-    from vonk_control.gateway.route_runtime import verify_active_route_bundle
 
     verified = verify_active_route_bundle(tmp_path / "live")
     assert not isinstance(verified, UnknownError)
@@ -878,8 +879,6 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     assert wrong_owner_endpoint.assignments is not None
     assert wrong_owner_endpoint.assignments[0].state == "withdrawn"
     assert wrong_owner_endpoint.assignments[0].endpoint is None
-
-    from vonk_control.operation_api import durable as operation_projection
 
     verify_bundle = operation_projection.verify_active_route_bundle
     renewed_during_verification = False

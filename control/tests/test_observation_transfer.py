@@ -24,17 +24,20 @@ from cluster_profiles.control_client.errors import ControlClientError
 from cluster_profiles.control_client.schema import source_schema_validator
 from cluster_profiles.control_client.transfers import ControlClient
 from vonk_agent_protocol.contracts import canonical_message
+from vonk_control.api import routes_platform as api
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.fleet_projection.common import (
     FleetSnapshot,
     UnavailableRecipePresence,
+    UnavailableRunPresence,
 )
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.fleet_stream_contract import FleetRefreshEvent
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentNode, AgentNodeContact
+from vonk_control.observation.platform_errors import ObservationCaptureUnavailable
 from vonk_control.observation.transfer import (
     ObservationTransferChunk,
     ObservationTransferComplete,
@@ -259,7 +262,6 @@ def test_transfer_identity_and_hash_owner_and_export_reject_terminal_newline():
 
 
 def test_whole_membership_has_no_observation_only_512_group_cap(tmp_path):
-    from vonk_control.fleet_projection.common import UnavailableRunPresence
 
     snapshot = _large_snapshot(tmp_path)
     node = snapshot.nodes[0]
@@ -401,8 +403,6 @@ def test_global_validation_error_bytes_match_streamed_route_and_cli_contract(tmp
 def test_platform_capture_failure_bytes_preserve_retry_through_cli(
     tmp_path, monkeypatch
 ):
-    from vonk_control.api import routes_platform as api
-    from vonk_control.observation.platform_errors import ObservationCaptureUnavailable
 
     def unreadable_capture():
         raise ObservationCaptureUnavailable(phase="stored-worker-validation")

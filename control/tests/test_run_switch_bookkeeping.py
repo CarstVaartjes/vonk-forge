@@ -4,20 +4,28 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select, update
 
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    LifecycleState,
+)
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.execution import RecipeRun
+from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.progress_view import _progress_view
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
+from vonk_control.run_switch_operations.errors import RunSwitchRequestInvalid
 from vonk_control.run_switch_operations.plan_persistence import _load_plan
 from vonk_control.run_switch_operations.results import _stored_result
+from vonk_control.strict_json import serialize_json_value
 
 from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service
@@ -167,10 +175,6 @@ def test_fresh_retry_keeps_verified_progress_but_has_independent_clocks(
     tmp_path: Path,
 ) -> None:
     """Catches a fresh authorized request inheriting an exhausted predecessor deadline."""
-    from datetime import timedelta
-
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_control.strict_json import serialize_json_value
 
     accepted = _accepted(tmp_path)
     with accepted.sessions.begin() as session:
@@ -196,15 +200,6 @@ def test_fresh_retry_keeps_verified_progress_but_has_independent_clocks(
 
 def test_a_retry_over_a_revoked_spark_is_refused_not_waited_on(tmp_path: Path) -> None:
     """Revocation never clears, so the retry ends as a definite CONFLICT refusal."""
-    from datetime import timedelta
-
-    from vonk_agent_protocol.lifecycle_vocabulary import (
-        InvalidRequestReason,
-        LifecycleState,
-    )
-    from vonk_control.models.fleet import AgentNode
-    from vonk_control.run_switch_operations.errors import RunSwitchRequestInvalid
-    from vonk_control.strict_json import serialize_json_value
 
     accepted = _accepted(tmp_path)
     with accepted.sessions.begin() as session:

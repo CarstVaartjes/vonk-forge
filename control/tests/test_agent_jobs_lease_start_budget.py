@@ -1034,8 +1034,6 @@ def test_transient_start_failure_retries_automatically_without_operator(
     code and parked every other transient start failure for an operator.
     """
 
-    from vonk_agent_protocol.contracts import AgentResult
-
     jobs, sessions, clock = service
     payload = canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30))
     operation = jobs.enqueue(

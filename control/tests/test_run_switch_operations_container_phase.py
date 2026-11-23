@@ -13,6 +13,10 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    WaitReason,
+)
 from vonk_agent_protocol.state_machines import ReservationState
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.inventory.repository import (
@@ -31,6 +35,7 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.recipe_builds.common import RecipeBuildPlan
+from vonk_control.recipe_operations.errors import RecipeRequestInvalid
 from vonk_control.recipe_operations.interfaces import RecipeOperationView
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_switch_contract.phase_results import (
@@ -43,6 +48,7 @@ from vonk_control.run_switch_contract.requests import (
     SparkGroup,
     SparkGroupNode,
 )
+from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
 from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
 from vonk_control.run_switch_operations.result_helpers import _phase_result
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
@@ -294,12 +300,6 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
     assert _phase_result(execution.result, phase=phase) == execution.result
 
     # A build preview superseded in place re-plans; it does not end the load.
-    from vonk_agent_protocol.lifecycle_vocabulary import (
-        InvalidRequestReason,
-        WaitReason,
-    )
-    from vonk_control.recipe_operations.errors import RecipeRequestInvalid
-    from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
 
     def superseded_build(*_args, **_kwargs) -> RecipeOperationView:
         raise RecipeRequestInvalid(

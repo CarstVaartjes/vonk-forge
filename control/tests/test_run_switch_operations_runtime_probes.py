@@ -10,16 +10,27 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_control.agent_jobs.waits import refresh_queue_waits
+from vonk_control.lifecycle.run_switch import RunSwitchAdapter
+from vonk_control.lifecycle.types import State
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.run_switch_contract.requests import (
     RunSwitchApplyRequest,
 )
+from vonk_control.run_switch_operations.observation_window import (
+    DEPENDENCY_WINDOW,
+    checkpoint_verdict,
+)
+from vonk_control.run_switch_operations.result_helpers import _read_progress
+from vonk_control.stall_window import Verdict
 
+from .agent_jobs_support import distribution_payload
 from .recipe_operations_support import NOW, setup_services
 from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service
-from .test_lifecycle_preflight import _clear
+from .test_lifecycle_preflight import _clear, _heartbeat, _heartbeating_build
 
 
 def _probing_switch(tmp_path, *, probe=True, engine=None):
@@ -59,7 +70,6 @@ def _probing_switch(tmp_path, *, probe=True, engine=None):
 
 def _probe_ids(switch) -> tuple[str, str] | None:
     """The run-switch's issued probe: its child job and its Spark order."""
-    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 
     with switch.sessions() as session:
         probe = session.scalar(
@@ -180,11 +190,6 @@ def test_a_queued_probe_names_its_spark_holder_as_the_load_reason(tmp_path):
     Incident 2026-10-26: the load kept the reason its probe round started with
     for hours while its probe sat queued behind another order holding the Spark.
     """
-    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_control.agent_jobs.waits import refresh_queue_waits
-
-    from .test_lifecycle_preflight import _heartbeat, _heartbeating_build
 
     sessions, lifecycle, _, _mapping_id, _build_id, nodes = setup_services(tmp_path)
     now = [NOW]
@@ -247,14 +252,6 @@ def test_a_live_probe_keeps_the_dependency_window_waiting(tmp_path):
     A probe ends by its own report, the gone-target sweep, supersession or the
     parent's cancel, so the dependency window only runs while none is live.
     """
-    from datetime import timedelta
-
-    from vonk_control.run_switch_operations.observation_window import (
-        DEPENDENCY_WINDOW,
-        checkpoint_verdict,
-    )
-    from vonk_control.run_switch_operations.result_helpers import _read_progress
-    from vonk_control.stall_window import Verdict
 
     switch = _probing_switch(tmp_path)
     assert _probe_ids(switch) is not None
@@ -274,12 +271,6 @@ def test_a_failed_run_switch_ends_its_unclaimed_probe_and_transfer(tmp_path, fie
     owner kept retrying for nobody, whether its phase child or the child a
     damaged checkpoint's recovery recorded. Copied bytes stay for reuse.
     """
-
-    from vonk_control.lifecycle.run_switch import RunSwitchAdapter
-    from vonk_control.lifecycle.types import State
-    from vonk_control.run_switch_operations.result_helpers import _read_progress
-
-    from .agent_jobs_support import distribution_payload
 
     switch = _probing_switch(tmp_path)
     probe = _probe_ids(switch)

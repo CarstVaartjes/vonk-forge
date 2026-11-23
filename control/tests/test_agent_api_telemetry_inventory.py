@@ -35,6 +35,8 @@ from vonk_agent_protocol.inventory import (
     NetworkInterface,
 )
 from vonk_agent_protocol.package_upgrade import PackageRollbackAuthority
+from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
+from vonk_control.agent_api import observations
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
@@ -43,6 +45,13 @@ from vonk_control.models.execution import InstallationNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.models.telemetry import NodeInventorySnapshot, NodeTelemetrySample
+from vonk_control.run_switch_contract.operations import (
+    RunSwitchAwaitedInventory,
+    RunSwitchOperationResult,
+)
+from vonk_control.run_switch_operations.errors import (
+    RunSwitchPostStopEvidencePending,
+)
 from vonk_control.telemetry.samples import TelemetryRepository
 
 from .agent_api_support import (
@@ -55,6 +64,7 @@ from .agent_api_support import (
     telemetry_payload,
 )
 from .agent_fences import fenced_operation
+from .package_upgrade_fixtures import rollback_authority
 from .test_catalog_revision_collection import Catalog
 
 
@@ -63,7 +73,6 @@ def chunked_asgi_telemetry(
     *,
     extra_headers: tuple[tuple[bytes, bytes], ...],
 ) -> tuple[int, int]:
-    from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
 
     async def request() -> tuple[int, int]:
         chunks = [
@@ -780,7 +789,6 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
             self, **kwargs: Unpack[_HostUpgradeGrantKwargs]
         ) -> object:
             self.upgrade_calls.append(kwargs)
-            from .package_upgrade_fixtures import rollback_authority
 
             operation = InstallVonkDebOperation(
                 type="install-vonk-deb",
@@ -993,14 +1001,6 @@ def test_post_stop_inventory_makes_the_waiting_switch_due_on_arrival(
     The ingest makes the wait due as the inventory commits; a collection that
     is not newer than the 30 s post-stop floor wakes nothing, and a failing
     wake never costs the Spark its accepted report."""
-    from vonk_control.agent_api import observations
-    from vonk_control.run_switch_contract.operations import (
-        RunSwitchAwaitedInventory,
-        RunSwitchOperationResult,
-    )
-    from vonk_control.run_switch_operations.errors import (
-        RunSwitchPostStopEvidencePending,
-    )
 
     client, services, _, clock = agent_system
     floor = clock.now

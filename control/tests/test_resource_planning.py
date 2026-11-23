@@ -1,7 +1,14 @@
+import ast
+import inspect
 import json
 from dataclasses import replace
+from importlib import resources
+from pathlib import Path
 
-from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
+from vonk_forge_contracts.memory_admission import (
+    PLATFORM_MEMORY_FLOOR_BYTES,
+    evaluate_memory_admission,
+)
 
 from vonk_agent_protocol.lifecycle_vocabulary import ResourceBlockerCode
 from vonk_agent_protocol.reason_codes.resources import ResourcePlanningCode
@@ -24,6 +31,9 @@ from vonk_control.resource_planning.types import (
     ResourceEvidence,
     UnknownRunMemoryResidual,
 )
+from vonk_control.run_admission import RunAdmissionService
+from vonk_control.run_switch_contract.evidence import EffectiveSettingsSelection
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 def _recipe_settings(
@@ -649,10 +659,6 @@ def test_composed_preflight_returns_settings_demand_and_capacity() -> None:
 
 
 def test_production_services_use_exactly_the_platform_memory_floor() -> None:
-    import ast
-    from pathlib import Path
-
-    from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
     source = Path(__file__).resolve().parents[1] / "src" / "vonk_control"
     services = {"RunAdmissionService", "RunSwitchOperationService"}
@@ -679,10 +685,6 @@ def test_production_services_use_exactly_the_platform_memory_floor() -> None:
                     f"{path.name}:{node.lineno} passes a floor other than the platform constant"
                 )
     assert seen == {"RunAdmissionService": 2, "RunSwitchOperationService": 2}
-    import inspect
-
-    from vonk_control.run_admission import RunAdmissionService
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     for service in (RunAdmissionService, RunSwitchOperationService):
         default = inspect.signature(service).parameters["memory_floor_bytes"].default
@@ -691,7 +693,6 @@ def test_production_services_use_exactly_the_platform_memory_floor() -> None:
 
 def test_stored_canonical_models_supply_exact_selected_weight_bytes() -> None:
     """Catches counting unused files, or sizing a Model the recipe does not pin."""
-    from importlib import resources
 
     from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
@@ -738,7 +739,6 @@ def test_stored_canonical_models_supply_exact_selected_weight_bytes() -> None:
 
 def test_typed_effective_selection_roundtrip_keeps_bound_identity_and_knobs() -> None:
     """Catches object duck-reading losing the already reviewed settings digest."""
-    from vonk_control.run_switch_contract.evidence import EffectiveSettingsSelection
 
     resolved = resolve_effective_settings(_recipe_document(_recipe_settings())).settings
     assert resolved is not None
@@ -804,8 +804,6 @@ def test_decision_context_participates_in_resource_settings_identity() -> None:
 def test_deepseek_deferral_uses_observed_host_not_recipe_reserve() -> None:
     # Wrong implementation: checking only peak+floor against total, or adding
     # recipe reserve, misses the real reason this empty-host load was refused.
-
-    from vonk_forge_contracts.memory_admission import evaluate_memory_admission
 
     occupied = 4_515_061_760
     left = PLATFORM_MEMORY_FLOOR_BYTES - 500_000_000

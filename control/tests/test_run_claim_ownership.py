@@ -18,6 +18,7 @@ from vonk_agent_protocol.state_machines import RunState
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.telemetry import NodeInventorySnapshot
@@ -176,7 +177,6 @@ def _load_over(tmp_path: Path, *, state: str, plan_readable: bool, engine=None):
 
 
 def _selector(sessions) -> str:
-    from vonk_control.models.catalog import CatalogDocumentRevision
 
     with sessions() as session:
         revision = session.scalar(

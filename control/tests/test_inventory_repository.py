@@ -6,9 +6,11 @@ from sqlalchemy.orm import sessionmaker
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.inventory import InstallationBytes
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
+    _validated_inventory,
     newest_snapshot_ids,
 )
 from vonk_control.model_primitives import Base
@@ -180,8 +182,6 @@ def test_original_directory_items_and_sizes_survive_store_load(
     tmp_path, reported
 ) -> None:
     """Catches retaining only reconciliation effects and discarding original facts."""
-    from vonk_agent_protocol.inventory import InstallationBytes
-    from vonk_control.inventory.repository import _validated_inventory
 
     repo, now = repository(tmp_path)
     node_id = "spk_" + "1" * 32

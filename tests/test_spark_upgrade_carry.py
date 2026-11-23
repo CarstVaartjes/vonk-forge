@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import http.client
+import itertools
 import json
 import sys
 import tarfile
@@ -10,13 +12,31 @@ import threading
 import time
 import types
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from scripts.development_slice_client import SliceError
 from tests.acceptance import spark_upgrade_carry as carry
+from tests.acceptance import test_spark_lifecycle as lifecycle
 from tests.acceptance.test_spark_lifecycle import LifecycleError
+from vonk_agent_protocol.agent_words import ProfileReportedPhase
+from vonk_agent_protocol.state_machines import (
+    CertificateState,
+    RouteState,
+    RunState,
+)
+from vonk_control.fleet_projection.common import (
+    CapacityReservations,
+    FleetNode,
+    FleetSnapshot,
+    NodeConnection,
+    RunPresence,
+)
+from vonk_control.run_switch_contract.phase_results import (
+    RunSwitchFinalVerifyResult,
+)
 
 
 def _lane(probes: list[carry.ProbeResult]) -> carry.UpgradeCarryLifecycle:
@@ -187,11 +207,6 @@ INSTALLATION_ID = "55555555-5555-4555-8555-555555555555"
 
 
 def _serving_receipt(run_id: str):
-    from vonk_agent_protocol.agent_words import ProfileReportedPhase
-    from vonk_agent_protocol.state_machines import RouteState, RunState
-    from vonk_control.run_switch_contract.phase_results import (
-        RunSwitchFinalVerifyResult,
-    )
 
     return RunSwitchFinalVerifyResult.model_validate_json(
         json.dumps(
@@ -209,20 +224,6 @@ def _serving_receipt(run_id: str):
 
 
 def _serving_fleet(installation_id: str, run_id: str):
-    from datetime import UTC, datetime
-
-    from vonk_agent_protocol.state_machines import (
-        CertificateState,
-        RouteState,
-        RunState,
-    )
-    from vonk_control.fleet_projection.common import (
-        CapacityReservations,
-        FleetNode,
-        FleetSnapshot,
-        NodeConnection,
-        RunPresence,
-    )
 
     node_id = "spk_0123456789abcdef0123456789abcdef"
     run = RunPresence(
@@ -305,9 +306,6 @@ def test_serving_identity_reobserves_unknown_and_ends_without_poisoning_fresh_lo
     monkeypatch,
 ):
     """Catches treating stale Fleet/receipt evidence as a permanent refusal."""
-    import itertools
-
-    from tests.acceptance import test_spark_lifecycle as lifecycle
 
     lane = object.__new__(carry.UpgradeCarryLifecycle)
     receipt = _serving_receipt(RUN_ID)
@@ -519,7 +517,6 @@ def test_an_unreadable_sync_status_keeps_the_phase_failure(monkeypatch):
 
 def test_acceptance_scripts_define_everything_before_their_entry_point():
     """A helper defined after the __main__ block does not exist when run as a script."""
-    import ast
 
     root = Path(__file__).resolve().parent / "acceptance"
     late: list[str] = []

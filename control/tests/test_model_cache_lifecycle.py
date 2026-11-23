@@ -11,7 +11,9 @@ harmless, and a missing object or a full disk is a wait that heals, never an end
 from __future__ import annotations
 
 import fcntl
+import time
 import uuid
+from collections import namedtuple
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -33,6 +35,8 @@ from vonk_control.lifecycle.types import (
     State,
     Tick,
 )
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.errors import ModelCacheStorageUnknown
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
 
@@ -498,7 +502,6 @@ def test_objects_that_are_complete_heal_a_set_that_says_otherwise(cache, tmp_pat
 def test_a_full_disk_queues_the_download_and_it_runs_when_space_returns(
     cache, tmp_path, monkeypatch
 ):
-    from collections import namedtuple
 
     service, sessions = cache
     usage = namedtuple("usage", "total used free")
@@ -534,7 +537,6 @@ def test_the_cache_writes_backoff_never_partial(cache, tmp_path):
     _edit(sessions, operation.id, state="running")
     service._lifecycle.reopen(_row(sessions, operation.id), datetime.now(UTC))
     assert LifecycleState.BACKOFF.value == "backoff"
-    from vonk_control.model_cache import states as model_cache_states
 
     assert model_cache_states.BACKOFF == "backoff"
 
@@ -544,8 +546,6 @@ def test_the_cache_writes_backoff_never_partial(cache, tmp_path):
 
 def _settle_background(service: ModelCacheService) -> None:
     """Tick the pool worker until its in-flight transfers have been settled."""
-
-    import time
 
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
@@ -559,7 +559,6 @@ def _settle_background(service: ModelCacheService) -> None:
 def test_a_background_transfer_with_an_unknown_outcome_is_kept_and_retried(
     threaded_cache, tmp_path
 ):
-    from vonk_control.model_cache.errors import ModelCacheStorageUnknown
 
     service, _sessions = threaded_cache
     now = _clock_at(service)

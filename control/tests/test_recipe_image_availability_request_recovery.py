@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -18,7 +19,11 @@ from vonk_control.lifecycle.image_availability import (
     CANCEL_BUDGET,
     PREPARATION_STALL_WINDOW,
 )
+from vonk_control.model_cache.contract import ModelCacheCounters
+from vonk_control.model_cache.errors import ModelCacheNotFound
+from vonk_control.model_cache.progress import cache_progress, progress_document
 from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.models.fleet import User
 from vonk_control.models.jobs import Job
 from vonk_control.recipe_image_availability.contracts import (
@@ -33,6 +38,9 @@ from .recipe_image_availability_support import (
     _add_revision,
     _availability_payload,
     _builder,
+    _download_preview,
+    _manifest,
+    _persist_fake_model_cache_child,
     _recipe,
     _runtime,
     _service,
@@ -383,18 +391,6 @@ def test_new_request_supersedes_parked_verified_image_without_losing_bytes(
 
 def test_lost_model_projection_is_reconciled_by_same_request_and_reuses_image(tmp_path):
     """Catch missing-child observations being overridden into permanent failures."""
-    from types import SimpleNamespace
-
-    from vonk_control.model_cache.contract import ModelCacheCounters
-    from vonk_control.model_cache.errors import ModelCacheNotFound
-    from vonk_control.model_cache.progress import cache_progress, progress_document
-    from vonk_control.models.cache import ModelCacheOperation
-
-    from .recipe_image_availability_support import (
-        _download_preview,
-        _manifest,
-        _persist_fake_model_cache_child,
-    )
 
     engine, sessions, service, now, transport = _owner(tmp_path)
     model_digest = next(

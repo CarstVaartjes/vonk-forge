@@ -47,7 +47,6 @@ from vonk_agent_protocol.agent_state import (
     NativeRenewalRequest,
     RenewalHelperManifest,
 )
-from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
@@ -58,6 +57,22 @@ from vonk_agent_protocol.route_activation import (
 
 sys.path.insert(0, os.fspath(Path(__file__).resolve().parents[2]))
 
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+)
+
+from cluster_profiles.control_transport import HTTPSResponse, open_https
+from cluster_profiles.generated_control.models.enrollment_grant_response import (
+    EnrollmentGrantResponse,
+)
+from cluster_profiles.generated_control.models.fleet_enroll_request import (
+    FleetEnrollRequest,
+)
+from cluster_profiles.generated_control.models.recipe_download_request import (
+    RecipeDownloadRequest,
+)
 from scripts.canary_package import canary_package_path
 from scripts.development_slice_client import (
     MAXIMUM_RESPONSE_BYTES,
@@ -101,6 +116,25 @@ from tests.acceptance.test_fresh_nas_install import (
     nas_responses,
     tailscale_service_hostname,
 )
+from vonk_agent_protocol.agent_words import ProfileReasonSeverity, ProfileReportedPhase
+from vonk_agent_protocol.state_machines import RouteState
+from vonk_control.fleet_profile_contract.review import (
+    FleetProfileApplicationView,
+    FleetProfileLoadRequest,
+    FleetProfilePreview,
+)
+from vonk_control.fleet_profile_contract.switch_state import (
+    FleetProfileSwitchChildResult,
+)
+from vonk_control.fleet_projection.common import FleetSnapshot, RunPresence
+from vonk_control.library.contract import LibraryRecipeIdentity
+from vonk_control.run_switch_contract.phase_results import (
+    RunSwitchCleanupVerifyResult,
+    RunSwitchFinalVerifyResult,
+    RunSwitchStopResult,
+    RunSwitchUninstallResult,
+)
+from vonk_control.source_bundles import generate_source_bundle
 
 PLATFORMS = ("linux-arm64",)
 
@@ -471,11 +505,6 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
 
 
 def _read_canary_fixture(root: Path) -> CanonicalCanaryFixture:
-    from vonk_forge_contracts import (
-        ModelDefinition,
-        RecipeDefinition,
-        document_sha256,
-    )
 
     index_path = _canary_index_path(root)
     try:
@@ -658,7 +687,6 @@ def _rebuild_recipe_entry(
     edit: Callable[[dict[str, object]], None],
     files: Mapping[str, Callable[[bytes], bytes]] | None,
 ) -> tuple[dict[str, object], bytes]:
-    from vonk_control.source_bundles import generate_source_bundle
 
     document_sha256, read_recipe = contracts.document_sha256, contracts.read_recipe
     entry = copy.deepcopy(json.loads(fixture.index_bytes)["recipes"][0])
@@ -1048,8 +1076,6 @@ def _validate_canary_cleanup_preview(
 ) -> None:
     """Require the exact admitted delegated-cleanup intent."""
 
-    from vonk_control.fleet_profile_contract.review import FleetProfilePreview
-
     try:
         typed = FleetProfilePreview.model_validate_json(_canonical(preview))
     except ValueError as error:
@@ -1073,11 +1099,6 @@ def _installations_removed(
     A canary that was replaced, or two Recipes that ran in turn, leave several
     installations; each one needs its own receipts.
     """
-
-    from vonk_control.run_switch_contract.phase_results import (
-        RunSwitchCleanupVerifyResult,
-        RunSwitchUninstallResult,
-    )
 
     return all(
         any(
@@ -1105,12 +1126,6 @@ def _validate_canary_cleanup_application(
     run_id: str,
 ) -> None:
     """Require terminal cleanup receipts from the profile application."""
-
-    from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
-    from vonk_control.fleet_profile_contract.switch_state import (
-        FleetProfileSwitchChildResult,
-    )
-    from vonk_control.run_switch_contract.phase_results import RunSwitchStopResult
 
     try:
         typed = FleetProfileApplicationView.model_validate_json(_canonical(application))
@@ -1218,7 +1233,6 @@ class LocalBrowserController:
             for name, value in request_headers.items()
         ):
             raise LifecycleError("local browser observation request is invalid")
-        from cluster_profiles.control_transport import HTTPSResponse, open_https
 
         # This acceptance boundary deliberately targets the local Caddy HTTP
         # listener with its original virtual Host and administrator credentials.
@@ -3189,12 +3203,6 @@ class SparkLifecycle:
         )
 
     def _create_grant(self) -> tuple[str, str, str, str]:
-        from cluster_profiles.generated_control.models.enrollment_grant_response import (
-            EnrollmentGrantResponse,
-        )
-        from cluster_profiles.generated_control.models.fleet_enroll_request import (
-            FleetEnrollRequest,
-        )
 
         assert self.control is not None
         try:
@@ -3485,7 +3493,6 @@ class SparkLifecycle:
                 assert self.control is not None
                 del completed[1:]
                 phase = "recipe-resolution"
-                from vonk_control.library.contract import LibraryRecipeIdentity
 
                 # A known identity resolves directly against committed catalog state.
                 # The periodically refreshed discovery index may still be older.
@@ -4203,7 +4210,6 @@ class SparkLifecycle:
     def _load_canary_profile(
         self, preview: dict[str, object], *, request_key: str
     ) -> object:
-        from vonk_control.fleet_profile_contract.review import FleetProfileLoadRequest
 
         assert self.control is not None
         request = FleetProfileLoadRequest.model_validate_json(
@@ -4276,9 +4282,6 @@ class SparkLifecycle:
     def _request_recipe_download(
         self, selector: str, *, request_key: str
     ) -> dict[str, object]:
-        from cluster_profiles.generated_control.models.recipe_download_request import (
-            RecipeDownloadRequest,
-        )
 
         assert self.control is not None
         _, payload = self.control.request(
@@ -4673,12 +4676,6 @@ class SparkLifecycle:
         The successor's final verification and the Fleet's run/installation
         relationship own this identity, rather than receipt count or revision.
         """
-        from vonk_agent_protocol.agent_words import ProfileReportedPhase
-        from vonk_agent_protocol.state_machines import RouteState
-        from vonk_control.fleet_projection.common import FleetSnapshot, RunPresence
-        from vonk_control.run_switch_contract.phase_results import (
-            RunSwitchFinalVerifyResult,
-        )
 
         deadline = time.monotonic() + _CANARY_ROUTE_SECONDS
         while time.monotonic() < deadline:

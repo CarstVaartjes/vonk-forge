@@ -18,6 +18,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import document_sha256
 
+from vonk_control.model_cache import removal_execution
 from vonk_control.model_cache.contract import (
     ModelCacheRemovalPayload,
     ModelCacheRemovalResult,
@@ -130,7 +131,6 @@ def test_locked_removal_row_is_bounded_and_same_owner_retries_after_release(
     step_errors: list[Exception] = []
     step_results: list[bool] = []
     original_advance = service._advance_model_removal
-    from vonk_control.model_cache import removal_execution
 
     original_scan = removal_execution.model_set_reference_findings
     scans_while_locked = []

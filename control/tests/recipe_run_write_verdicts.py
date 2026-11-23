@@ -5,6 +5,8 @@ from __future__ import annotations
 import ast
 import hashlib
 
+from .optimistic_boundaries import scan_unwrapped_recipe_run_writes
+
 # Caller-owned sessions are not automatically transition decisions. These
 # verdicts classify writes/callbacks, not permission to add another occurrence.
 RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
@@ -207,7 +209,6 @@ def classified_write_lines(path: str, source: str) -> set[int]:
     Function ASTs tolerate formatting/movement, but any changed helper needs
     an explicit verdict, even in an already listed file and function.
     """
-    from .optimistic_boundaries import scan_unwrapped_recipe_run_writes
 
     verdicts = RECIPE_RUN_WRITE_VERDICTS.get(
         path.removeprefix("control/src/vonk_control/"), {}

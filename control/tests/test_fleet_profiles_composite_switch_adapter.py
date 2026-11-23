@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import datetime as _datetime
 from datetime import UTC
 from pathlib import Path
 
 import pytest
 from sqlalchemy import Engine, create_engine, select, update
 
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.distribution import DistributionObject
+from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )
@@ -22,6 +26,7 @@ from vonk_control.fleet_profile_contract.switch_state import (
 )
 from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
 from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.jobs.documents import RunSwitchJobPayload
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision
@@ -39,6 +44,8 @@ from vonk_control.models.fleet import (
 from vonk_control.models.jobs import Job
 from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_operations.results import _persisted_result
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .fleet_profiles_support import (
     NOW,
@@ -50,6 +57,12 @@ from .fleet_profiles_support import (
     _seed_dual_solo_without_runtime_state,
     _SwitchAdapter,
     _uuid,
+)
+from .recipe_operations_support import setup_services
+from .run_switch_operations_support import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
+    _request,
 )
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 
@@ -317,12 +330,6 @@ def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
 def test_all_idle_profile_supersedes_a_queued_load_without_a_run(
     tmp_path: Path,
 ) -> None:
-    from vonk_agent_protocol.agent_words import ProfileChildJobKind
-    from vonk_control.jobs.documents import RunSwitchJobPayload
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
-
-    from .recipe_operations_support import setup_services
-    from .run_switch_operations_support import CompleteArtifactInspector, _request
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path
@@ -390,14 +397,6 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
     tmp_path: Path,
 ) -> None:
     """The profile child delegates exact preparation and run admission to RunSwitch."""
-
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
-
-    from .recipe_operations_support import setup_services
-    from .run_switch_operations_support import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
-    )
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path, nodes=2
@@ -517,11 +516,6 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
 def _transfer_result(nodes: tuple[str, ...]) -> dict[str, object]:
     """Return one real Run/Switch result document carrying a transfer phase."""
 
-    import datetime as _datetime
-
-    from vonk_agent_protocol.distribution import DistributionObject
-    from vonk_control.distribution_assignment import NodeDistributionAssignment
-
     node_id = nodes[0]
     archive_sha256 = "1" * 64
     assignment = NodeDistributionAssignment(
@@ -564,15 +558,6 @@ def test_completed_switch_child_keeps_its_run_switch_receipt(tmp_path: Path) -> 
     now travels with the completed child, so it survives the tick that finished
     it and any later restart.
     """
-
-    from vonk_control.run_switch_operations.results import _persisted_result
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
-
-    from .recipe_operations_support import setup_services
-    from .run_switch_operations_support import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
-    )
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path, nodes=2
@@ -690,15 +675,6 @@ def test_waiting_switch_child_keeps_the_profile_running(tmp_path: Path) -> None:
     fail the whole load with "Run/Switch child returned waiting".
     """
 
-    from vonk_control.run_switch_operations.results import _persisted_result
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
-
-    from .recipe_operations_support import setup_services
-    from .run_switch_operations_support import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
-    )
-
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path, nodes=2
     )
@@ -801,14 +777,6 @@ def test_switch_adapter_joins_the_callers_row_transaction(tmp_path: Path) -> Non
     opens its own writer then fails here with "database is locked".
     """
 
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
-
-    from .recipe_operations_support import setup_services
-    from .run_switch_operations_support import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
-    )
-
     engine = create_engine(
         f"sqlite:///{tmp_path / 'operations.sqlite'}",
         connect_args={"check_same_thread": False, "timeout": 0.25},
@@ -908,14 +876,6 @@ def test_profile_tick_advances_a_switch_child_on_postgres(
     ``canceling statement due to lock timeout`` instead of a worker that stops
     advancing forever.
     """
-
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
-
-    from .recipe_operations_support import setup_services
-    from .run_switch_operations_support import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
-    )
 
     engine = create_engine(
         postgres_engine.url.render_as_string(hide_password=False),

@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import uuid
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select, text
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.models.catalog import CatalogDocumentRevision
@@ -21,6 +24,7 @@ from vonk_control.models.fleet import (
 from vonk_control.models.jobs import Job
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+from .non_blocking import assert_ended_without_blocking
 from .recipe_operations_support import setup_services
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
@@ -214,12 +218,6 @@ def test_malformed_sibling_retry_root_does_not_block_new_pending_admission(
         node = session.get(AgentNode, nodes[0])
     assert node is not None
     assert node.workload_intent_ordinal == 1
-    from types import SimpleNamespace
-
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_agent_protocol.reason_codes.runs import SupersedeCode
-
-    from .non_blocking import assert_ended_without_blocking
 
     assert older_after.state == LifecycleState.SUPERSEDED
     assert (
@@ -320,7 +318,6 @@ def test_equal_persisted_acceptance_time_uses_deterministic_uuid4_order(
     tmp_path, postgres_engine, monkeypatch
 ) -> None:
     """Equal persisted acceptance timestamps use UUID4 as a stable tie-break."""
-    import uuid
 
     start = datetime(2026, 9, 2, tzinfo=UTC)
     sessions, profiles, nodes, selector, clock = _profile_order_services(

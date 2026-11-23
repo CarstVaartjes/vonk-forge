@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import fcntl
 import hashlib
+import os
 from pathlib import Path
 
 import pytest
 
-from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobBusy, ArtifactBlobStore
 
 
 def _digest(content: bytes) -> str:
@@ -145,8 +149,6 @@ def test_capacity_attempt_releases_claims_and_fresh_upload_recovers(
 
 def test_busy_quota_ends_stream_without_consuming_it_and_fresh_stream_fits(tmp_path):
     """Catches blocking flock and replaying a consumed upload on admission retry."""
-    import asyncio
-    import fcntl
 
     store = _store(tmp_path)
     store.usage()
@@ -190,10 +192,6 @@ def test_stream_retries_same_content_without_replaying_iterator(
     tmp_path, monkeypatch, boundary
 ):
     """Catches streaming callers bypassing retries or destroying verified temporary bytes."""
-    import asyncio
-
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_control.artifact_jobs.blob_store import ArtifactBlobBusy
 
     store = _store(tmp_path)
     content = b"exact streamed bytes"
@@ -237,7 +235,6 @@ def test_reservation_fsync_failure_releases_claim_and_fresh_upload_fits(
     tmp_path, monkeypatch
 ):
     """Catches an OS failure escaping the storage owner with a retained reservation."""
-    import os
 
     store = _store(tmp_path)
     real = os.fsync
@@ -262,7 +259,6 @@ def test_cleanup_fault_releases_kernel_owner_and_fresh_upload_reaps_partial(
     tmp_path, monkeypatch, boundary
 ):
     """Catches cleanup faults leaking a claim or counting abandoned bytes forever."""
-    import fcntl
 
     store = _store(tmp_path, quota=4)
     unlink = Path.unlink
@@ -307,7 +303,6 @@ def test_storage_admission_fault_observes_bound_without_consuming_stream(
     tmp_path, monkeypatch, boundary
 ):
     """Catches root/quota I/O escaping before the upload's bounded observations."""
-    import asyncio
 
     store = _store(tmp_path)
     calls = []

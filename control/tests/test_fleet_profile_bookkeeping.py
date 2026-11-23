@@ -12,11 +12,16 @@ Three families, one per rule of the blocker audit:
 
 from __future__ import annotations
 
+from datetime import timedelta
+from types import SimpleNamespace
+
 import pytest
 from sqlalchemy import select, update
 
+from vonk_agent_protocol.agent_words import ProfileOperationKind
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_control.fleet_profile_contract.definitions import UnavailableFleetProfileView
 from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchAdapterState,
@@ -32,17 +37,25 @@ from vonk_control.fleet_profiles.persistence import (
 )
 from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
 from vonk_control.fleet_profiles.service import FleetProfileService
-from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
+)
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.fleet import (
     AgentNode,
     AgentNodeContact,
     FleetProfile,
     FleetProfileApplication,
+    User,
 )
+from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
+from vonk_control.stored.json_values import write_guard_mode
 
 from .fleet_profiles_support import (
     NOW,
+    _assessment,
     _database,
     _exact_preparation,
     _input,
@@ -51,6 +64,7 @@ from .fleet_profiles_support import (
     _SwitchAdapter,
     _uuid,
 )
+from .non_blocking import assert_ended_without_blocking
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 
 
@@ -353,7 +367,6 @@ def test_a_save_without_active_recipe_evidence_remains_loadable_after_repair() -
             .where(CatalogDocumentRevision.id == revision_id)
             .values(state="active")
         )
-    from datetime import timedelta
 
     now = NOW + timedelta(minutes=2)
     service._clock = lambda: now
@@ -378,7 +391,6 @@ def test_a_save_without_active_recipe_evidence_remains_loadable_after_repair() -
 
 def test_denied_user_authority_has_no_effect_and_restored_authority_loads() -> None:
     """The real security boundary denies effects, rather than a synthetic reason."""
-    from vonk_control.models.fleet import User
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
@@ -410,7 +422,6 @@ def test_the_exact_identity_fence_of_a_recovery_still_refuses() -> None:
             "model": accepted.model.model_copy(update={"artifact_set_sha256": "e" * 64})
         }
     )
-    from vonk_agent_protocol.outcome import UnknownOutcomeError
 
     admitted = False
     try:
@@ -428,11 +439,6 @@ def test_the_exact_identity_fence_of_a_recovery_still_refuses() -> None:
 
 @pytest.mark.parametrize("damage", ["intent-identity", "review-identity", "scope"])
 def test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted(damage) -> None:
-    from types import SimpleNamespace
-
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-
-    from .non_blocking import assert_ended_without_blocking
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
@@ -457,9 +463,6 @@ def test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted(damage) 
         row.progress = progress
 
     def end(receipt):
-        from datetime import timedelta
-
-        from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
         assert service.tick()
         waiting = service.application(receipt.id)
@@ -500,12 +503,6 @@ def test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted(damage) 
 @pytest.mark.parametrize("damage", ["missing", "scope"])
 def test_planner_observation_damage_admits_load_and_reobserves(damage):
     """Catches an internal assessment becoming a caller refusal or dispatch."""
-    from datetime import timedelta
-
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
-
-    from .fleet_profiles_support import _assessment
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
@@ -562,12 +559,6 @@ def test_permanent_planner_unknown_waits_past_the_old_cap_until_a_fresh_request(
     never expires and dispatches nothing while it waits; once its cause clears
     it proceeds, and a fresh request is still admitted.
     """
-    from datetime import timedelta
-
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
-
-    from .fleet_profiles_support import _assessment
 
     sessions = _database()
     _, revision_id = _seed(sessions)
@@ -621,10 +612,6 @@ def test_permanent_planner_unknown_waits_past_the_old_cap_until_a_fresh_request(
 
 def test_damaged_newest_pending_plan_does_not_starve_readable_admission():
     """Catches a damaged batch head keeping admission pending while healthy work waits."""
-    from datetime import timedelta
-
-    from vonk_agent_protocol.agent_words import ProfileOperationKind
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
     sessions = _database()
     _, revision_id = _seed(sessions)
@@ -673,11 +660,6 @@ def test_damaged_retry_projection_cannot_hide_a_waiting_admission():
     No clock rescues it any more: an unreadable projection is retired as
     unknown at once.
     """
-    from datetime import timedelta
-
-    from vonk_agent_protocol.agent_words import ProfileOperationKind
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_control.stored.json_values import write_guard_mode
 
     sessions = _database()
     _, revision_id = _seed(sessions)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, cast
@@ -10,8 +11,14 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from vonk_agent_protocol.capability_reply import (
+    CapabilityReason,
+    ControllerCapability,
+)
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs.maintenance import ArtifactMaintenanceCadence
+from vonk_control.capabilities import CapabilityRegistry
+from vonk_control.capability_contract import CapabilityAvailability
 from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
@@ -23,6 +30,9 @@ from vonk_control.recipe_operations.operation_worker import RecipeOperationWorke
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runtime_image_preparation.storage import (
+    FilesystemRuntimeImageStorage,
+)
 from vonk_control.telemetry import maintenance as telemetry_maintenance
 from vonk_control.worker.assembly import assemble_production_worker
 from vonk_control.worker.loop import Worker
@@ -114,8 +124,6 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
     request,
     monkeypatch,
 ) -> None:
-    from vonk_agent_protocol.capability_reply import ControllerCapability
-    from vonk_control.capabilities import CapabilityRegistry
 
     registry = CapabilityRegistry()
     guard = registry.guard
@@ -352,15 +360,6 @@ def test_unusable_image_cache_root_leaves_the_other_lanes_running_and_heals(
     tmp_path, monkeypatch
 ) -> None:
     """Catches an optional image store, built eagerly at assembly, ending the process."""
-    from vonk_agent_protocol.capability_reply import (
-        CapabilityReason,
-        ControllerCapability,
-    )
-    from vonk_control.capabilities import CapabilityRegistry
-    from vonk_control.capability_contract import CapabilityAvailability
-    from vonk_control.runtime_image_preparation.storage import (
-        FilesystemRuntimeImageStorage,
-    )
 
     now = [datetime(2026, 8, 6, tzinfo=UTC)]
 
@@ -443,7 +442,6 @@ def test_unusable_image_cache_root_leaves_the_other_lanes_running_and_heals(
 
 def test_the_production_worker_runs_the_first_catalog_sync(tmp_path) -> None:
     """Catches the automatic catalog sync wired to no process at all."""
-    import threading
 
     started = threading.Event()
 

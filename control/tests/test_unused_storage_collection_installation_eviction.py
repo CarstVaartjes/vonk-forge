@@ -32,7 +32,10 @@ from vonk_control.storage_demands import (
     StorageDemands,
     spark_scope,
 )
-from vonk_control.unused_storage_collection.common import spark_eviction_capacity
+from vonk_control.unused_storage_collection.common import (
+    _eviction_order,
+    spark_eviction_capacity,
+)
 
 from .test_catalog_revision_collection import NODE, NOW, OLD, Catalog
 from .unused_storage_collection_support import (
@@ -414,7 +417,6 @@ def test_pointed_installations_are_planned_least_recently_used_first(
         (oldest,),
         (newer,),
     ]
-    from vonk_control.unused_storage_collection.common import _eviction_order
 
     assert [item.members[0] for item in _eviction_order(capacity.items)] == [
         oldest,

@@ -9,7 +9,7 @@ from io import BytesIO, StringIO
 from urllib.error import HTTPError
 
 import pytest
-from controller_cli_support import FakeClient, run
+from controller_cli_support import FakeClient, _removal_review, run
 
 from cluster_profiles import cli
 from cluster_profiles.control_client.errors import (
@@ -746,7 +746,6 @@ def test_model_resume_access_rejects_other_request_receipt():
 def _fleet_review(
     selector, *, removable, nas_bytes=100, digest="d", blocker=None, spark_bytes=None
 ):
-    from controller_cli_support import _removal_review
 
     return _removal_review("model", selector, model_digest="a" * 64) | {
         "review_digest": digest * 64,

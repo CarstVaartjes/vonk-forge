@@ -1,10 +1,19 @@
 """Prove ending alone cannot pass if a hold or refusal blocks the next request."""
 
+import uuid
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ArtifactLifecycleGate
 
 from .non_blocking import Hold, assert_ended_without_blocking, assert_no_orphaned_holds
+from .test_attempt_residues import _load
+from .test_reservation_owners import _end_application
 
 
 @dataclass
@@ -86,8 +95,6 @@ def test_hold_is_checked_before_fresh_request_and_after_it():
 
 
 def test_sql_reservations_and_session_factory_are_inspected(tmp_path):
-    from .test_attempt_residues import _load
-    from .test_reservation_owners import _end_application
 
     load = _load(tmp_path)
     assert_no_orphaned_holds(load)
@@ -100,14 +107,6 @@ def test_sql_reservations_and_session_factory_are_inspected(tmp_path):
 
 @pytest.mark.parametrize("owner_kind", ["model-cache-operation", "recipe-image-job"])
 def test_sql_removal_gate_with_missing_owner_is_detected(owner_kind):
-    import uuid
-    from datetime import UTC, datetime
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import Session
-
-    from vonk_control.model_primitives import Base
-    from vonk_control.models.cache import ArtifactLifecycleGate
 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

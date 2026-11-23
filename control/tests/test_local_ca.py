@@ -1,6 +1,7 @@
 """Local CA producer/store/consumer tests on real PostgreSQL, without sleeps."""
 
 import json
+import os
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -14,26 +15,38 @@ import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
 from vonk_agent_protocol.reason_codes.admission import CertificateCode
 from vonk_agent_protocol.state_machines import CertificateIssuancePurpose
+from vonk_control import runtime_init
 from vonk_control.agent_api.common import AgentApiServices
-from vonk_control.agent_services import build_agent_services
+from vonk_control.agent_services import build_agent_services, build_enrollment_service
+from vonk_control.enrollment.contract import EnrollmentGrant
+from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.local_ca import LocalCertificateAuthority
 from vonk_control.model_primitives import Base
-from vonk_control.models.fleet import AgentCertificate, LocalCertificateRevocation
-from vonk_control.step_ca import StepCAError
+from vonk_control.models.fleet import (
+    AgentCertificate,
+    AgentIssuedCertificateRevocation,
+    AgentNode,
+    LocalCertificateIssuance,
+    LocalCertificateRevocation,
+)
+from vonk_control.pki import IssuedCertificate
+from vonk_control.settings import Settings
+from vonk_control.step_ca import CERTIFICATE_LIFETIME, StepCAError
+from vonk_control.telemetry.maintenance import TelemetryMaintenance
 
 from .ca_material import NODE_ID, NOW, _csr, _leaf, _write_material
+from .test_enrollment import evidence
 
 
 @pytest.fixture
 def local_ca(tmp_path: Path, postgres_engine: Engine):
     # Source admission also checks pre-existing Controller-issued certificates.
-    from vonk_control.model_primitives import Base
 
     Base.metadata.create_all(postgres_engine)
     material = _write_material(tmp_path)
@@ -77,12 +90,6 @@ def test_production_factory_reads_normalized_compose_signing_secrets(
     tmp_path, monkeypatch
 ):
     """Catches staging signer secrets somewhere the production factory cannot read."""
-    import os
-
-    from vonk_control import runtime_init
-    from vonk_control.agent_services import build_enrollment_service
-    from vonk_control.enrollment.service import EnrollmentService
-    from vonk_control.settings import Settings
 
     material = _write_material(tmp_path / "material")
     secrets = tmp_path / "run-secrets"
@@ -328,7 +335,6 @@ def test_revocation_fences_a_pending_signature(local_ca):
 def test_preexisting_certificate_can_rotate(local_ca):
     """Catches requiring every rotation source to have been issued locally."""
     ca, material, options = local_ca
-    from vonk_control.models.fleet import AgentNode
 
     csr = _csr()
     leaf = _leaf(csr, material, serial=1234)
@@ -358,7 +364,6 @@ def test_preexisting_certificate_can_rotate(local_ca):
         ).generation
         == 2
     )
-    from vonk_control.telemetry.maintenance import TelemetryMaintenance
 
     ca.revoke_node("1234", NOW)
     expiry = leaf.not_valid_after_utc
@@ -395,7 +400,6 @@ def test_source_revocation_fences_pending_rotation(local_ca):
 
 def test_intermediate_key_identity_is_checked(local_ca, tmp_path: Path):
     """Catches signing with a valid encrypted key belonging to a different CA."""
-    from cryptography.hazmat.primitives.asymmetric import ed25519
 
     _, _, options = local_ca
     wrong_key = tmp_path / "other-intermediate-key"
@@ -422,12 +426,6 @@ def test_issue_refuses_foreign_node_identity(local_ca):
 
 def test_local_journal_retention_preserves_recovery_and_live_revocations(local_ca):
     """Catches early receipt/CRL deletion, unbounded pruning and immortal PENDING."""
-    from sqlalchemy import select
-
-    from vonk_control.models.fleet import (
-        LocalCertificateIssuance,
-    )
-    from vonk_control.telemetry.maintenance import TelemetryMaintenance
 
     ca, _, options = local_ca
     sessions = options["sessions"]
@@ -497,9 +495,6 @@ def test_a_serial_known_only_from_revocation_evidence_leaves_the_crl(local_ca):
     Its binding was made before the evidence, so the certificate it could have
     produced expires within one lifetime of the evidence.
     """
-    from vonk_control.models.fleet import AgentIssuedCertificateRevocation
-    from vonk_control.step_ca import CERTIFICATE_LIFETIME
-    from vonk_control.telemetry.maintenance import TelemetryMaintenance
 
     ca, _, options = local_ca
     sessions = options["sessions"]
@@ -532,12 +527,6 @@ def test_production_factory_enrolls_renews_and_keeps_revocations_across_restart(
     local_ca, tmp_path
 ):
     """Catches old HTTP wiring and a CRL that loses a confirmed revocation."""
-    from vonk_control.agent_services import build_enrollment_service
-    from vonk_control.enrollment.contract import EnrollmentGrant
-    from vonk_control.pki import IssuedCertificate
-    from vonk_control.settings import Settings
-
-    from .test_enrollment import evidence
 
     _ca, material, options = local_ca
     secrets = tmp_path / "production-secrets"

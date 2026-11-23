@@ -7,23 +7,65 @@ import os
 import subprocess
 import sys
 from datetime import timedelta
+from uuid import uuid4
 
 import pytest
-from sqlalchemy import JSON, Column, MetaData, Table, cast, inspect, literal, null, text
+from sqlalchemy import (
+    JSON,
+    Column,
+    MetaData,
+    Table,
+    cast,
+    create_engine,
+    inspect,
+    literal,
+    null,
+    select,
+    text,
+)
 from sqlalchemy.orm import sessionmaker
 
 from tests.signed_recipe_release import signed_recipe_releases
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitOwnerKind
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    WaitOwnerKind,
+    WaitReason,
+)
+from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
+from vonk_agent_protocol.state_machines import CatalogSyncState, CertificateRecordState
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.catalog.sync import (
+    AutomaticCatalogSync,
+    ManagedRecipeCatalogSyncService,
+)
 from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.due_waits import DueWaitBackstop, WaitSource
+from vonk_control.enrollment.service import EnrollmentService
+from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.jobs.queue import JobService
 from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeLibrarySyncRun
+from vonk_control.models.fleet import AgentIssuedCertificateRevocation
 from vonk_control.models.jobs import Job
-from vonk_control.persisted_waits import schedule_wait
+from vonk_control.models.operations import AgentOperation
+from vonk_control.operations.blockers import BlockingOperation, make_blocker
+from vonk_control.persisted_waits import read_wait, schedule_wait, write_wait
+from vonk_control.presence import ManagementAddressPolicy
+from vonk_control.step_ca import StepCAUnavailable
 from vonk_control.wait_contract import WaitEvidence
 from vonk_control.wait_redrive import WAIT_MODELS, wait_sources
+from vonk_control.worker.assembly import assemble_production_worker
 from vonk_control.worker.loop import Worker
 
+from .recipe_operations_support import NOW as RECIPE_NOW
+from .recipe_operations_support import (
+    _job_phases,
+    installed_recipe,
+    setup_services,
+    start_evidence,
+)
+from .test_agent_jobs_postgres import RevokingAuthority
+from .test_catalog_sync import Inline, Reader, _fixture
 from .test_persisted_waits import NOW, _job
 
 
@@ -293,9 +335,6 @@ def test_unevidenced_job_uses_its_owner_instead_of_first_table_binding(postgres_
 
 def test_logical_owners_sharing_a_table_get_independent_turns(postgres_engine):
     """Catches one Job kind consuming another kind's bounded observation turns."""
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_control.operations.blockers import BlockingOperation, make_blocker
-    from vonk_control.persisted_waits import write_wait
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -384,15 +423,6 @@ def test_cancellation_committed_after_selection_wins_before_retry(postgres_engin
 
 def test_owner_rotation_recovers_a_terminal_revocation_after_ca_outage(postgres_engine):
     """Catches an always-corrupt owner starving another owner's aliased due clock."""
-    from uuid import uuid4
-
-    from vonk_agent_protocol.state_machines import CertificateRecordState
-    from vonk_control.enrollment.service import EnrollmentService
-    from vonk_control.models.fleet import AgentIssuedCertificateRevocation
-    from vonk_control.persisted_waits import read_wait
-    from vonk_control.step_ca import StepCAUnavailable
-
-    from .test_agent_jobs_postgres import RevokingAuthority
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -469,7 +499,6 @@ def test_owner_rotation_recovers_a_terminal_revocation_after_ca_outage(postgres_
 
 def test_owner_handler_runs_after_the_selection_connection_is_released(postgres_engine):
     """A one-connection pool catches selection holding SQL across owner I/O."""
-    from sqlalchemy import create_engine
 
     engine = create_engine(
         postgres_engine.url, pool_size=1, max_overflow=0, pool_timeout=30
@@ -528,21 +557,6 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
     with_evidence,
 ):
     """Catches registering a parent callback that only polls its cleanup paths."""
-    from sqlalchemy import select
-
-    from vonk_control.agent_jobs.service import AgentJobService
-    from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
-    from vonk_control.models.operations import AgentOperation
-    from vonk_control.presence import ManagementAddressPolicy
-    from vonk_control.worker.assembly import assemble_production_worker
-
-    from .recipe_operations_support import NOW as RECIPE_NOW
-    from .recipe_operations_support import (
-        _job_phases,
-        installed_recipe,
-        setup_services,
-        start_evidence,
-    )
 
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=3, engine=postgres_engine
@@ -682,16 +696,6 @@ def test_catalog_retry_clock_survives_dependency_recovery_and_reconstruction(
     tmp_path, postgres_engine, monkeypatch
 ):
     """Catches resampling a logged retry or a restarted catalog owner losing its wait."""
-    from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
-    from vonk_agent_protocol.state_machines import CatalogSyncState
-    from vonk_control.catalog.sync import (
-        AutomaticCatalogSync,
-        ManagedRecipeCatalogSyncService,
-    )
-    from vonk_control.models.cache import RecipeLibrarySyncRun
-
-    from .test_catalog_sync import Reader, _fixture
-    from .test_catalog_sync_retry import Inline
 
     sessions, catalog, reader, _item = _fixture(tmp_path, engine=postgres_engine)
     available = [False]

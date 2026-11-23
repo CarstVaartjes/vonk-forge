@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections import namedtuple
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -43,6 +44,7 @@ from vonk_control.unused_storage_collection.common import ACTOR
 from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
 from .model_cache_support import _artifact, _download
+from .recipe_operations_support import installed_recipe, setup_services
 from .removal_settle import advance_until_ended
 from .runtime_image_fixtures import place_test_image
 from .test_catalog_revision_collection import NODE, NOW, OLD, Catalog
@@ -467,7 +469,6 @@ def _application(
 
 
 def _real_lifecycle(tmp_path: Path, *, nodes: int = 1, engine: Engine | None = None):
-    from .recipe_operations_support import installed_recipe, setup_services
 
     sessions, service, _queue, mapping_id, build_id, node_ids = setup_services(
         tmp_path, nodes=nodes, engine=engine
@@ -607,7 +608,6 @@ class _Volume:
         self.external = self.total - self.cache_used() - free
 
     def usage(self, _path: object = None):
-        from collections import namedtuple
 
         usage = namedtuple("usage", "total used free")
         return usage(self.total, self.total - self.free, self.free)

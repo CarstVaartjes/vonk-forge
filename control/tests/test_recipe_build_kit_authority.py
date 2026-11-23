@@ -7,17 +7,35 @@ from sqlalchemy import select, update
 
 from tests.signed_recipe_release import signed_recipe_releases
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-from vonk_agent_protocol.reason_codes.images import PrebuiltImageCode
+from vonk_agent_protocol.reason_codes.images import ImageStoreCode, PrebuiltImageCode
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import ResourceReservation
 from vonk_control.models.fleet import AgentNode
-from vonk_control.prebuilt_images import executable_build_key
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.oci_image_store import StoreUnknown
+from vonk_control.prebuilt_images import PrebuiltImageImporter, executable_build_key
 from vonk_control.recipe_builds.service import RecipeBuildService
+from vonk_control.runtime_image_preparation.storage import (
+    FilesystemRuntimeImageStorage,
+)
 from vonk_control.source_bundles import generate_source_bundle
 
 from .non_blocking import assert_no_orphaned_holds
 from .recipe_builds_support import setup
 from .runtime_identity_support import set_inventory_identity
+from .runtime_image_fixtures import place_test_image
+from .test_prebuilt_images import (
+    ADDRESS,
+    IMAGE_BYTES,
+    NODE,
+    NOW,
+    REFERENCE,
+    _published_library,
+    _Registry,
+    _services,
+)
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -144,23 +162,6 @@ def test_accepted_source_is_not_readmitted_by_declarative_policy(tmp_path):
 @pytest.mark.usefixtures(signed_recipe_releases.__name__)
 def test_failed_controller_pull_ends_and_fresh_request_publishes_exact_image(tmp_path):
     """A spent pull never dispatches a Spark build or poisons the pinned image."""
-    from vonk_agent_protocol.reason_codes.images import ImageStoreCode
-    from vonk_control.models.execution import ResourceReservation
-    from vonk_control.models.jobs import Job
-    from vonk_control.models.operations import AgentOperation
-    from vonk_control.oci_image_store import StoreUnknown
-    from vonk_control.prebuilt_images import PrebuiltImageImporter
-
-    from .test_prebuilt_images import (
-        ADDRESS,
-        IMAGE_BYTES,
-        NODE,
-        NOW,
-        REFERENCE,
-        _published_library,
-        _Registry,
-        _services,
-    )
 
     sessions, revision_id = _published_library(tmp_path)
     builds, operations = _services(sessions, tmp_path)
@@ -222,11 +223,6 @@ def test_failed_controller_pull_ends_and_fresh_request_publishes_exact_image(tmp
 
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_damaged_plan_repairs_without_discarding_last_verified_image(tmp_path):
-    from vonk_control.runtime_image_preparation.storage import (
-        FilesystemRuntimeImageStorage,
-    )
-
-    from .runtime_image_fixtures import place_test_image
 
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     storage = FilesystemRuntimeImageStorage(tmp_path / "images")

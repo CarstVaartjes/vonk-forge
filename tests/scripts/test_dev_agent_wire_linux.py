@@ -17,6 +17,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "dev_agent_wire_linux.py"
 sys.path.insert(0, str(ROOT / "scripts"))
+import subprocess
+
+import pytest
 
 
 def _module():
@@ -136,9 +139,6 @@ def test_stream_preserves_split_unicode_and_output_without_newline(capsys):
 
 
 def test_stream_times_out_a_silent_child_and_reaps_it(tmp_path):
-    import subprocess
-
-    import pytest
 
     module = _module()
     pidfile = tmp_path / "pid"
@@ -165,9 +165,6 @@ def test_stream_times_out_a_silent_child_and_reaps_it(tmp_path):
 def test_container_timeout_removes_only_owned_scope_and_preserves_log(
     tmp_path, monkeypatch
 ):
-    import subprocess
-
-    import pytest
 
     module = _module()
     commands = []

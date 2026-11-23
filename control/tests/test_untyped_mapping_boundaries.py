@@ -6,6 +6,7 @@ from textwrap import dedent
 
 import pytest
 
+from . import untyped_mapping_boundaries as scanner
 from .untyped_mapping_boundaries import (
     scan_bare_class_fields,
     scan_source,
@@ -65,7 +66,6 @@ def test_a_typed_mapping_is_not_a_site(annotation: str) -> None:
 
 
 def test_extensionless_python_tool_is_not_invisible(tmp_path, monkeypatch):
-    from . import untyped_mapping_boundaries as scanner
 
     monkeypatch.setattr(scanner, "REPO_ROOT", tmp_path)
     scripts = tmp_path / "scripts"
@@ -80,7 +80,6 @@ def test_extensionless_python_tool_is_not_invisible(tmp_path, monkeypatch):
 
 
 def test_generated_extension_dicts_do_not_hide_authored_cli_debt(tmp_path, monkeypatch):
-    from . import untyped_mapping_boundaries as scanner
 
     monkeypatch.setattr(scanner, "REPO_ROOT", tmp_path)
     root = tmp_path / "src" / "cluster_profiles"

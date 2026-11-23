@@ -12,21 +12,43 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select, text, update
 from sqlalchemy.engine import Engine
 
+from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    SecurityRefusalReason,
+)
+from vonk_agent_protocol.outcome import SecurityRefusalError
 from vonk_agent_protocol.route_activation import ActivationMarker
-from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
+from vonk_agent_protocol.state_machines import (
+    RoutePublicationState,
+    RouteState,
+    RunState,
+)
+from vonk_control.gateway.route_runtime import (
+    RECIPE_ROUTE_AUTHORITY_ID,
+    AtomicRouteBundlePublisher,
+)
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.models.fleet import AgentCertificate
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping
 from vonk_control.models.routes import RoutePublication
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
+from vonk_control.recipe_routes.shared import RecipeRouteNotReady
 
+from .agent_api_support import agent_headers, make_agent_system
 from .observed_actions import observe_action
 from .recipe_routes_support import (
     NOW,
@@ -282,7 +304,6 @@ def test_postgres_a_crash_between_effect_and_completion_is_recovered(
 
 def test_damaged_plan_is_retryable_and_a_fresh_publication_is_admitted(tmp_path):
     """A damaged projection must not turn a recoverable publication into refusal."""
-    from vonk_control.models.execution import RecipeRun
 
     base, _publisher, _applied, run_id = setup(tmp_path)
     with base.sessions.begin() as session:
@@ -299,7 +320,6 @@ def test_damaged_plan_is_retryable_and_a_fresh_publication_is_admitted(tmp_path)
 
 def test_disappeared_withdrawal_target_does_not_poison_completion(tmp_path):
     """Missing bookkeeping after activation cannot roll back its completion."""
-    from vonk_control.models.execution import RunNode
 
     base, _publisher, _applied, run_id = setup(tmp_path)
     base.publish_run(run_id)
@@ -338,9 +358,6 @@ def test_lost_acknowledgement_reconciles_the_same_generation(tmp_path, fault):
 
 
 def test_ended_run_does_not_gate_a_fresh_operation(tmp_path):
-    from vonk_agent_protocol.state_machines import RunState
-
-    from .observed_actions import observe_action
 
     service, _publisher, applied, run_id = setup(tmp_path)
     with service.sessions.begin() as session:
@@ -359,9 +376,6 @@ def test_unknown_evidence_has_durable_backoff_and_recovers_without_a_new_request
     tmp_path,
 ):
     """Unknown evidence must not spin on every tick or need manual publication."""
-    from datetime import UTC, timedelta
-
-    from vonk_agent_protocol.state_machines import RouteState
 
     clock = MutableClock(NOW)
     service, _publisher, _applied, run_id = setup(tmp_path, clock=clock)
@@ -393,10 +407,6 @@ def test_unknown_evidence_has_durable_backoff_and_recovers_without_a_new_request
 )
 def test_bookkeeping_evidence_is_typed_temporary_and_repaired_in_place(tmp_path, fault):
     """Bookkeeping damage cannot become a permanent publication refusal."""
-    from datetime import timedelta
-
-    from vonk_control.models.execution import RecipeInstallation, RunNode
-    from vonk_control.models.mapping import ClusterMapping
 
     service, _publisher, _applied, run_id = setup(tmp_path)
     with service.sessions.begin() as session:
@@ -444,8 +454,6 @@ def test_bookkeeping_evidence_is_typed_temporary_and_repaired_in_place(tmp_path,
 
 def test_damaged_endpoint_projection_keeps_the_verified_serving_route(tmp_path):
     """Corrupt SQL evidence cannot revoke a checksum-verified working route."""
-    from vonk_agent_protocol.state_machines import RouteState
-    from vonk_control.models.execution import RunNode
 
     base, _publisher, _applied, run_id = setup(tmp_path / "database")
     service = _service(base, tmp_path / "live", lambda: NOW)
@@ -460,10 +468,6 @@ def test_damaged_endpoint_projection_keeps_the_verified_serving_route(tmp_path):
 
 
 def test_publication_recovers_after_repeated_unknown_evidence_across_restart(tmp_path):
-    from datetime import UTC, timedelta
-
-    from vonk_agent_protocol.state_machines import RouteState, RunState
-    from vonk_control.models.execution import RunNode
 
     clock = MutableClock(NOW)
     base, _publisher, _applied, run_id = setup(tmp_path, clock=clock)
@@ -498,8 +502,6 @@ def test_publication_recovers_after_repeated_unknown_evidence_across_restart(tmp
 
 
 def test_security_acknowledgement_is_never_retried_or_adopted(tmp_path):
-    from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
-    from vonk_agent_protocol.outcome import SecurityRefusalError
 
     base, _publisher, _applied, run_id = setup(tmp_path)
     calls = []
@@ -525,7 +527,6 @@ def test_security_acknowledgement_is_never_retried_or_adopted(tmp_path):
 def _stale_executor_is_fenced_before_first_activation(
     tmp_path, monkeypatch, engine=None
 ):
-    from contextlib import contextmanager
 
     base, _publisher, _applied, first = setup(tmp_path, engine=engine)
     slow_id = add_running_run(
@@ -587,11 +588,6 @@ def test_postgres_stale_executor_is_fenced_before_first_activation(
 
 
 def test_target_change_during_activation_owes_cleanup_across_restart(tmp_path):
-    from vonk_agent_protocol.state_machines import RoutePublicationState, RunState
-    from vonk_control.gateway.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
-    from vonk_control.models.execution import RecipeRun
-
-    from .observed_actions import observe_action
 
     base, _publisher, _applied, first = setup(tmp_path)
     target = add_running_run(
@@ -629,7 +625,6 @@ def test_target_change_during_activation_owes_cleanup_across_restart(tmp_path):
         due = owner.next_action_at
         assert due is not None
     # The failed observation ends; the durable desired cleanup survives it.
-    from datetime import UTC, timedelta
 
     clock.now = due.replace(tzinfo=UTC) + timedelta(seconds=1)
     restarted = _service(base, root, clock)
@@ -648,12 +643,6 @@ def test_target_change_during_activation_owes_cleanup_across_restart(tmp_path):
 )
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_owner_scoped_damage_never_blocks_an_unrelated_publication(tmp_path, damage):
-    from sqlalchemy import select, update
-
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_control.models.catalog import CatalogDocumentRevision
-    from vonk_control.models.execution import RecipeInstallation, RunNode
-    from vonk_control.models.jobs import Job
 
     base, _publisher, _applied, first = setup(tmp_path)
     second = add_running_run(
@@ -750,14 +739,6 @@ def test_withdrawals_wait_for_drained_and_publications_for_ready(tmp_path):
 def test_authenticated_observation_producer_repairs_between_passes(
     tmp_path, monkeypatch
 ):
-    from datetime import timedelta
-
-    from sqlalchemy import select
-
-    from vonk_control.models.execution import RunNode
-    from vonk_control.models.fleet import AgentCertificate
-
-    from .agent_api_support import agent_headers, make_agent_system
 
     base, _publisher, applied, run_id = setup(tmp_path, ranks=1)
     observer_root = tmp_path / "observer"
@@ -781,8 +762,6 @@ def test_authenticated_observation_producer_repairs_between_passes(
                 not_after=NOW + timedelta(hours=1),
             )
         )
-
-    from vonk_control.recipe_routes.shared import RecipeRouteNotReady
 
     # The first pass finds no exact observation and ends: its request
     # observation has rolled back and released the owner/rank locks.
@@ -818,13 +797,6 @@ def _exhaust_publication(tmp_path, *, stale_reason=None):
     Returns the ended Start job's (id, state, status_reason, result) and the
     fresh run id plus the service, for the caller to assert on.
     """
-    from datetime import UTC, timedelta
-
-    from vonk_agent_protocol.contracts import AgentOperation
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_agent_protocol.state_machines import RunState
-    from vonk_control.models.jobs import Job
-    from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 
     base, _publisher, _applied, first = setup(tmp_path)
     fresh = add_running_run(
@@ -885,7 +857,6 @@ def test_exhausted_publication_ends_the_start_with_its_own_reason(tmp_path):
     On main the end kept the existing reason, so an earlier retry note
     survived instead of the publication error.
     """
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
     state, reason, result = _exhaust_publication(
         tmp_path, stale_reason="retry scheduled at 2026-01-01T00:00:00Z"

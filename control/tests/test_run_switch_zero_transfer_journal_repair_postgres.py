@@ -6,16 +6,24 @@ import copy
 import hashlib
 import json
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from threading import Event
+from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from psycopg.errors import LockNotAvailable
+from sqlalchemy import delete, event, inspect, select
+from sqlalchemy.engine import ExceptionContext
 
 from vonk_agent_protocol.contracts import AgentResult, canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import JournalRepairCode
 from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_control import terminal_history_collection
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.db.startup import initialize_database
 from vonk_control.jobs.documents import RunSwitchRunIntent
 from vonk_control.journal_models import (
     RunSwitchJournalRepair,
@@ -24,18 +32,24 @@ from vonk_control.journal_models import (
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.model_primitives import Base
 from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
-from vonk_control.models.operations import AgentOperation
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.operations.contract import OperationRecoveryAction
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_switch_contract.journal import (
     JournalRepairDisposition,
+    JournalRepairPurpose,
     RunSwitchJournalRepairEvidence,
+    RunSwitchJournalRepairPendingState,
 )
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
+from vonk_control.run_switch_journal_repair import repair as repair_owner
 from vonk_control.run_switch_journal_repair.discovery import journal_document
 from vonk_control.run_switch_journal_repair.observation import (
     try_repair_zero_transfer_journal,
 )
+from vonk_control.run_switch_journal_repair.pending import REPAIR_BUDGET
 from vonk_control.run_switch_operations import advance as advance_owner
 from vonk_control.run_switch_operations.image_receipts import _planned_transfer_parts
 from vonk_control.run_switch_operations.planning_helpers import (
@@ -44,8 +58,10 @@ from vonk_control.run_switch_operations.planning_helpers import (
 )
 from vonk_control.run_switch_operations.results import _stored_result
 from vonk_control.stored.json_values import write_guard_mode
+from vonk_control.terminal_history_collection import TerminalHistoryCollector
 
 from .lock_wait_support import backend_pid, lock_waits_behind
+from .non_blocking import assert_ended_without_blocking
 from .recipe_operations_support import setup_services
 from .runtime_identity_support import claim_agent
 from .runtime_image_fixtures import hold_image_through_another_recipe
@@ -489,9 +505,6 @@ def test_unproven_owner_preserves_raw_journal_during_bounded_observation(
 def test_startup_adds_evidence_storage_without_replacing_issued_checkpoint(
     faulty_install, postgres_engine
 ):
-    from sqlalchemy import inspect
-
-    from vonk_control.db.startup import initialize_database
 
     (
         sessions,
@@ -550,12 +563,6 @@ def test_startup_adds_evidence_storage_without_replacing_issued_checkpoint(
 def test_held_required_row_defers_without_clock_reset_and_disjoint_work_advances(
     faulty_install, held_kind, monkeypatch
 ):
-    from concurrent.futures import ThreadPoolExecutor
-    from types import SimpleNamespace
-
-    from vonk_control import terminal_history_collection
-    from vonk_control.models.fleet import AgentNode
-    from vonk_control.terminal_history_collection import TerminalHistoryCollector
 
     # This proves disjoint work advances past a held row in one pass, not how
     # much SQL a loaded runner fits in the collector's wall-clock pass budget.
@@ -680,9 +687,6 @@ def test_fault_cancel_preserves_issued_child_until_late_exact_fenced_receipts(
     monkeypatch,
     repair_race,
 ):
-    from uuid import uuid4
-
-    from vonk_control.run_switch_contract.journal import JournalRepairPurpose
 
     (
         sessions,
@@ -826,8 +830,6 @@ def test_fault_cancel_preserves_issued_child_until_late_exact_fenced_receipts(
 def test_native_lease_expiry_reconciles_same_owner_when_sample_repair_is_deferred(
     faulty_install,
 ):
-    from vonk_control.models.operations import AgentOperationAttempt
-    from vonk_control.run_switch_contract.journal import JournalRepairPurpose
 
     (
         sessions,
@@ -905,7 +907,6 @@ def test_native_lease_expiry_reconciles_same_owner_when_sample_repair_is_deferre
 def test_new_native_identity_after_discovery_aborts_declared_lock_set(
     faulty_install, monkeypatch
 ):
-    from vonk_control.run_switch_journal_repair import repair as repair_owner
 
     (
         sessions,
@@ -924,7 +925,6 @@ def test_new_native_identity_after_discovery_aborts_declared_lock_set(
         _claims,
         native_ids,
     ) = faulty_install
-    from vonk_control.models.operations import AgentOperationAttempt
 
     with sessions() as session:
         before_attempts = set(session.scalars(select(AgentOperationAttempt.id)))
@@ -972,7 +972,6 @@ def test_new_native_identity_after_discovery_aborts_declared_lock_set(
 def test_finished_rank_lease_cannot_waive_live_rank_measurement_provenance(
     faulty_install,
 ):
-    from vonk_control.models.operations import AgentOperationAttempt
 
     (
         sessions,
@@ -1078,18 +1077,6 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
     faulty_install, fault, cancel
 ):
     """Catches endless DEFERRED holds and cancel refusal before intent is saved."""
-    from types import SimpleNamespace
-    from uuid import uuid4
-
-    from sqlalchemy import delete
-
-    from vonk_control.models.operations import AgentOperationAttempt
-    from vonk_control.run_switch_contract.journal import (
-        RunSwitchJournalRepairPendingState,
-    )
-    from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
-
-    from .non_blocking import assert_ended_without_blocking
 
     (
         sessions,
@@ -1254,20 +1241,6 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
 
 def test_cancel_under_native_repair_contention_persists_before_proof(faulty_install):
     """A NOWAIT repair refusal cannot refuse or erase the accepted cancel."""
-    from threading import Event
-    from types import SimpleNamespace
-    from uuid import uuid4
-
-    from psycopg.errors import LockNotAvailable
-    from sqlalchemy import event
-    from sqlalchemy.engine import ExceptionContext
-
-    from vonk_control.jobs.documents import RunSwitchRunIntent
-    from vonk_control.run_switch_contract.journal import (
-        RunSwitchJournalRepairPendingState,
-    )
-
-    from .non_blocking import assert_ended_without_blocking
 
     (
         sessions,
@@ -1375,7 +1348,6 @@ def test_current_witness_repairs_despite_unusable_history(
     faulty_install, damaged_history
 ):
     """Stored diagnostics cannot veto the current exact verified witnesses."""
-    from uuid import uuid4
 
     sessions, _, _, _, _, clock, _, _, switch_id, _, _, identity, raw, _, _ = (
         faulty_install
@@ -1432,7 +1404,6 @@ def test_a_live_child_install_keeps_its_repair_waiting_past_the_old_budget(
     missing evidence is waited for past the old two-minute cap; once nothing
     holds the child any more, a whole window later the repair ends.
     """
-    from vonk_control.run_switch_journal_repair.pending import REPAIR_BUDGET
 
     (
         sessions,

@@ -7,18 +7,35 @@ stale size lets admission and storage relief count space that is not free.
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 from pathlib import Path
 
 from sqlalchemy import create_engine, select
 
 from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.inventory import InstallationBytes
-from vonk_agent_protocol.state_machines import InstallationNodeState
+from vonk_agent_protocol.inventory import (
+    MAX_REPORTED_INSTALLATIONS,
+    InstallationBytes,
+    InventoryRequest,
+)
+from vonk_agent_protocol.state_machines import (
+    InstallationNodeState,
+    InstallationState,
+    RunState,
+)
 from vonk_control.installed_bytes import refresh_installed_bytes
+from vonk_control.inventory.repository import (
+    InventoryRepository,
+    NodeInventoryReport,
+)
 from vonk_control.model_primitives import Base
-from vonk_control.models.execution import InstallationNode
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    RecipeRun,
+)
 
-from .test_catalog_revision_collection import NODE, Catalog
+from .test_catalog_revision_collection import NODE, NOW, Catalog
 
 
 def _sizes(world: Catalog) -> dict[str, int]:
@@ -75,20 +92,6 @@ def test_postgres_missing_installation_inventory_allows_reinstall_without_releas
 ):
     # Wrong implementation: successful directory listings only refresh sizes,
     # so deleted installations stay installed forever and are reused on apply.
-    from datetime import timedelta
-
-    from vonk_agent_protocol.inventory import (
-        MAX_REPORTED_INSTALLATIONS,
-        InventoryRequest,
-    )
-    from vonk_agent_protocol.state_machines import InstallationState, RunState
-    from vonk_control.inventory.repository import (
-        InventoryRepository,
-        NodeInventoryReport,
-    )
-    from vonk_control.models.execution import RecipeInstallation, RecipeRun
-
-    from .test_catalog_revision_collection import NOW
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)

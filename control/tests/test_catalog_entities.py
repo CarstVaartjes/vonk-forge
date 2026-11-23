@@ -625,7 +625,6 @@ def test_imported_recipe_recreates_missing_lookup_root(
     session: Session,
     service: CatalogEntityService,
 ) -> None:
-    from vonk_control.catalog.service import CatalogService
 
     model = _model()
     _resolve(service, model)

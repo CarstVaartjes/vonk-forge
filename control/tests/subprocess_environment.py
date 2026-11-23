@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import NoReturn
+
+import pytest
 
 
 def isolated_environment(
@@ -46,8 +49,6 @@ def isolated_environment(
 def prerequisite_unavailable(message: str) -> NoReturn:
     """Skip a local test whose required external fixture is unavailable."""
 
-    import pytest
-
     if os.environ.get("CI", "").lower() == "true":
         pytest.fail(f"CI prerequisite missing: {message}", pytrace=False)
     pytest.skip(message)
@@ -70,7 +71,6 @@ def cli_dependency_site_packages() -> Path:
 
 
 def _cli_dependencies_module(root: Path):
-    import importlib.util
 
     spec = importlib.util.spec_from_file_location(
         "vonk_cli_dependencies", root / "tools" / "cli_dependencies.py"

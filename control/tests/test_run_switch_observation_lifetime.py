@@ -23,6 +23,7 @@ from vonk_control.run_switch_contract.phase_results import (
     RunSwitchRuntimeImageResult,
     RunSwitchTargetTransferEvidenceResult,
 )
+from vonk_control.run_switch_contract.progress_view import RECOVERY_STALL_WINDOW
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 from vonk_control.run_switch_operations.artifact_validation import (
     _validate_artifact_execution,
@@ -351,7 +352,6 @@ def test_transfer_that_keeps_copying_outlives_the_recovery_window(tmp_path, copy
     Copied bytes restart the window, so a slow transfer runs past several
     windows; a transfer whose bytes stop is ended one window after the last.
     """
-    from vonk_control.run_switch_contract.progress_view import RECOVERY_STALL_WINDOW
 
     sessions, lifecycle, _, mapping, build, nodes = setup_services(tmp_path)
     installed_recipe(lifecycle, mapping, build, nodes, request_id=str(uuid4()))

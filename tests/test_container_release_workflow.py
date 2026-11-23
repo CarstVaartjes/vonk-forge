@@ -3,6 +3,8 @@ import io
 import json
 import os
 import re
+import runpy
+import shutil
 import subprocess
 import tarfile
 from pathlib import Path
@@ -1370,8 +1372,6 @@ def test_final_job_creates_checksum_protected_public_release_asset() -> None:
 
 @pytest.fixture
 def reusable_image_repo(tmp_path):
-    import runpy
-    import shutil
 
     policy = runpy.run_path(str(ROOT / "scripts/dev-image-inputs"))
     repo = tmp_path / "repo"

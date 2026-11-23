@@ -18,8 +18,10 @@ from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.bounded_retry import REQUEST_PAUSES
+from vonk_control.lifecycle.model_cache import RECOVERY_BUDGET
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 
 NOW = datetime(2026, 9, 27, 12, tzinfo=UTC)
@@ -671,10 +673,6 @@ def test_incomplete_redirect_observes_until_deadline_then_fresh_exact_request_he
     sessions, tmp_path: Path, response_shape: str
 ):
     """Catches transient redirect observations ending as permanent trust refusals."""
-    from datetime import timedelta
-
-    from vonk_control.lifecycle.model_cache import RECOVERY_BUDGET
-    from vonk_control.models.cache import ModelCacheOperation
 
     now = [NOW]
     healthy = [False]

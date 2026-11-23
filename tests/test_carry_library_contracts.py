@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import vonk_forge_contracts
 
 from tests.acceptance.test_spark_lifecycle import (
     LifecycleError,
@@ -71,7 +72,6 @@ def test_each_library_reads_its_own_documents_in_one_process(tmp_path: Path) -> 
 
 
 def test_the_process_contracts_are_restored_after_each_block(tmp_path: Path) -> None:
-    import vonk_forge_contracts
 
     before = sys.modules["vonk_forge_contracts"]
     path = list(sys.path)

@@ -4,7 +4,31 @@ import hashlib
 import json
 import uuid
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from importlib import resources
+
+from vonk_forge_contracts import read_recipe
+
+from cluster_profiles.cli_states_generated import UNKNOWN
+from cluster_profiles.generated_control.models.library_local_state import (
+    LibraryLocalState,
+)
+from cluster_profiles.generated_control.models.library_recipe_identity import (
+    LibraryRecipeIdentity,
+)
+from cluster_profiles.generated_control.models.library_recipe_projection import (
+    LibraryRecipeProjection,
+)
+from cluster_profiles.generated_control.models.library_resource_projection import (
+    LibraryResourceProjection,
+)
+from cluster_profiles.generated_control.models.recipe_definition import (
+    RecipeDefinition,
+)
+from cluster_profiles.generated_control.models.recipe_revision_projection import (
+    RecipeRevisionProjection,
+)
+from vonk_control.catalog.entities import recipe_document_projection
 
 
 def _recipe(
@@ -43,9 +67,6 @@ def _library_detail(
     **overrides: object,
 ) -> dict[str, object]:
     """Build the current generated Library list/detail transport shape."""
-    from cluster_profiles.generated_control.models.recipe_definition import (
-        RecipeDefinition,
-    )
 
     definition = RecipeDefinition.from_dict(recipe)
     canonical = definition.to_dict()
@@ -143,24 +164,6 @@ def _recipe_projection(
     model_selector: str | None = None,
 ):
     """A selector fixture uses the same canonical projection as the owner."""
-    from datetime import UTC, datetime
-
-    from cluster_profiles.cli_states_generated import UNKNOWN
-    from cluster_profiles.generated_control.models.library_local_state import (
-        LibraryLocalState,
-    )
-    from cluster_profiles.generated_control.models.library_recipe_identity import (
-        LibraryRecipeIdentity,
-    )
-    from cluster_profiles.generated_control.models.library_recipe_projection import (
-        LibraryRecipeProjection,
-    )
-    from cluster_profiles.generated_control.models.library_resource_projection import (
-        LibraryResourceProjection,
-    )
-    from cluster_profiles.generated_control.models.recipe_definition import (
-        RecipeDefinition,
-    )
 
     publisher, slug = selector.split("/")
     document = RecipeDefinition.from_dict(_recipe(slug))
@@ -169,12 +172,6 @@ def _recipe_projection(
         document.models[0].model.publisher = model_publisher
         document.models[0].model.slug = model_slug
     models = [f"{item.model.publisher}/{item.model.slug}" for item in document.models]
-    from vonk_forge_contracts import read_recipe
-
-    from cluster_profiles.generated_control.models.recipe_revision_projection import (
-        RecipeRevisionProjection,
-    )
-    from vonk_control.catalog.entities import recipe_document_projection
 
     return LibraryRecipeProjection(
         projected=RecipeRevisionProjection.from_dict(

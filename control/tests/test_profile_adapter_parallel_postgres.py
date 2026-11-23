@@ -59,7 +59,7 @@ from .recipe_operations_support import (
 from .run_switch_operations_support import RecordingArtifactExecutor, _service
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_profile_adapter_continuity import _running_child
-from .test_profile_continuity_postgres import (
+from .test_profile_claim_restore import (
     _assessment_with_promises,
     _SQLCancellationAdapter,
 )

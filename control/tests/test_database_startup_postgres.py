@@ -1,20 +1,42 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from alembic.config import Config
+from alembic.operations import Operations
 from alembic.script import ScriptDirectory
 from pytest import MonkeyPatch
+from sqlalchemy import event, insert, inspect, select, text, update
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import sessionmaker
 
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import InventoryRequest
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_control.db import node_facts
 from vonk_control.db import startup as startup_owner
 from vonk_control.db.startup import initialize_database
-from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.inventory.items import inventory_items, record_runtime
+from vonk_control.inventory.repository import InventoryRepository
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentNode, AgentNodeContact, AgentNodeProfile
+from vonk_control.models.telemetry import (
+    NodeInventoryItemsSnapshot,
+    NodeInventorySnapshot,
+)
+from vonk_control.repeated_evidence_contract import (
+    RepeatedEvidence,
+    RepeatedEvidenceSubject,
+)
 from vonk_control.stored.json_values import ContractJSON
+
+from .agent_api_support import NODE_A, agent_headers, make_agent_system
+from .test_agent_acceptance_postgres import _inventory
 
 
 def test_concurrent_fresh_startup_migrates_once(postgres_engine: Engine) -> None:
@@ -59,12 +81,6 @@ _LEGACY_CONTACT_COLUMNS = """ALTER TABLE agent_nodes
 
 
 def _contact_evidence(at: str) -> str:
-    from datetime import datetime
-
-    from vonk_control.repeated_evidence_contract import (
-        RepeatedEvidence,
-        RepeatedEvidenceSubject,
-    )
 
     return (
         "["
@@ -86,13 +102,6 @@ def test_contact_move_rolls_back_on_interruption_and_restarts(
     """Catches dropping the old owner before a durable copy, skipping replay,
     losing any of the nine facts, or losing a rolled-back Controller's newer
     contacts when the upgrade is applied again."""
-    import pytest
-    from sqlalchemy import event, insert, inspect, text
-    from sqlalchemy.orm import sessionmaker
-
-    from vonk_control.db import node_facts
-    from vonk_control.model_primitives import Base
-    from vonk_control.models.fleet import AgentNode, AgentNodeContact
 
     legacy, empty = "spk_" + "a" * 32, "spk_" + "b" * 32
     moved = set(AgentNodeContact.__table__.columns.keys()) - {"node_id"}
@@ -212,19 +221,6 @@ def test_runtime_items_migration_is_atomic_and_does_not_invent_capacity(
     postgres_engine: Engine, monkeypatch: MonkeyPatch
 ) -> None:
     """Catches a lost identity/hostname on restart, or a fabricated capacity row."""
-    import pytest
-    from sqlalchemy import event, insert, inspect, select, text
-    from sqlalchemy.orm import sessionmaker
-
-    from vonk_agent_protocol.claims import AgentRuntimeIdentity
-    from vonk_control.db import node_facts
-    from vonk_control.inventory.items import inventory_items
-    from vonk_control.model_primitives import Base
-    from vonk_control.models.fleet import AgentNode, AgentNodeProfile
-    from vonk_control.models.telemetry import (
-        NodeInventoryItemsSnapshot,
-        NodeInventorySnapshot,
-    )
 
     Base.metadata.create_all(postgres_engine)
     with postgres_engine.begin() as connection:
@@ -321,15 +317,6 @@ def test_partial_runtime_evidence_waits_for_claim_then_retires_columns(
     postgres_engine: Engine,
 ) -> None:
     """Catches discarding incomplete evidence or keeping it as a permanent gate."""
-    from datetime import UTC, datetime
-
-    from sqlalchemy import insert, inspect
-    from sqlalchemy.orm import sessionmaker
-
-    from vonk_agent_protocol.claims import AgentRuntimeIdentity
-    from vonk_control.inventory.items import inventory_items, record_runtime
-    from vonk_control.model_primitives import Base
-    from vonk_control.models.fleet import AgentNode
 
     Base.metadata.create_all(postgres_engine)
     with postgres_engine.begin() as connection:
@@ -394,14 +381,6 @@ def test_authenticated_claim_rebuilds_damaged_inventory_without_blessing_old_fac
     postgres_engine: Engine, tmp_path: Path
 ) -> None:
     """Catches a moved JSON owner permanently refusing every subsequent report."""
-    from sqlalchemy import update
-
-    from vonk_agent_protocol.outcome import UnknownOutcomeError
-    from vonk_control.inventory.items import inventory_items
-    from vonk_control.models.fleet import AgentNode
-    from vonk_control.models.telemetry import NodeInventoryItemsSnapshot
-
-    from .agent_api_support import NODE_A, agent_headers, make_agent_system
 
     client, services, _, _ = make_agent_system(tmp_path, engine=postgres_engine)
     headers = agent_headers(NODE_A, "serial-a")
@@ -447,15 +426,6 @@ def test_damaged_optional_inventory_keeps_capacity_and_fresh_report_recovers(
     postgres_engine: Engine, tmp_path: Path, field: str
 ) -> None:
     """Catches typed JSON damage refusing core capacity or poisoning fresh reports."""
-    from datetime import timedelta
-
-    from sqlalchemy import text
-
-    from vonk_agent_protocol.inventory import InventoryRequest
-    from vonk_control.inventory.repository import InventoryRepository
-
-    from .agent_api_support import NODE_A, agent_headers, make_agent_system
-    from .test_agent_acceptance_postgres import _inventory
 
     # Every injected field is optional evidence declared by the single wire
     # contract; no parser or admission fallback is used for the damaged bytes.
@@ -497,8 +467,6 @@ def test_unaddable_column_aborts_startup_instead_of_booting_without_it(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Catches a Controller that reports ready after a column add failed."""
-    from alembic.operations import Operations
-    from sqlalchemy.exc import OperationalError
 
     initialize_database(postgres_engine.url.render_as_string(hide_password=False))
     with postgres_engine.begin() as connection:
@@ -522,7 +490,6 @@ def test_column_add_blocked_by_a_lock_heals_when_the_lock_clears(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Catches a lock-blocked column add that is skipped or never retried."""
-    from sqlalchemy import event
 
     url = postgres_engine.url.render_as_string(hide_password=False)
     initialize_database(url)

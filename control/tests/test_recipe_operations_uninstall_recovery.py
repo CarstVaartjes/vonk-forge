@@ -33,8 +33,12 @@ from vonk_control.recipe_operations.observation_helpers import (
     prepare_exact_recipe_run_observation_nodes,
 )
 from vonk_control.recipe_routes.shared import RecipeRecoveryDeadlineError
+from vonk_control.run_switch_operations.constants import (
+    _FINAL_VERIFICATION_MAX_SECONDS,
+)
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+from .non_blocking import assert_ended_without_blocking
 from .recipe_operations_support import (
     NOW,
     FailingQueue,
@@ -51,6 +55,11 @@ from .recipe_operations_support import (
     setup_services,
     start_evidence,
     started_recipe,
+)
+from .run_switch_operations_support import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
+    _child_operation_id,
 )
 
 
@@ -205,11 +214,6 @@ def test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall(
     tmp_path: Path,
     first_node_removed: bool,
 ) -> None:
-    from .run_switch_operations_support import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
-        _child_operation_id,
-    )
 
     sessions, operations, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2
@@ -258,9 +262,6 @@ def test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall(
     )
     operations.record_node_result(
         first_job, nodes[1], succeeded=False, evidence={"code": "cleanup.failed"}
-    )
-    from vonk_control.run_switch_operations.constants import (
-        _FINAL_VERIFICATION_MAX_SECONDS,
     )
 
     switch._clock = lambda: NOW + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
@@ -545,8 +546,6 @@ def test_fresh_uninstall_request_supersedes_prior_cleanup_without_blocking(
     assert service.get(first.id).state == LifecycleState.CANCELLED
     assert service.get(fresh.id).state == LifecycleState.RUNNING
     assert {child.node_id for child in children} == set(nodes)
-
-    from .non_blocking import assert_ended_without_blocking
 
     def next_request(_world):
         next_plan = service.preview_uninstall(installation.owner_id)

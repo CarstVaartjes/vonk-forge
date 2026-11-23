@@ -12,8 +12,13 @@ import pytest
 from sqlalchemy import select
 
 from vonk_agent_protocol.contracts import AgentResult
-from vonk_agent_protocol.state_machines import ReservationState
+from vonk_agent_protocol.state_machines import (
+    InstallationNodeState,
+    InstallationState,
+    ReservationState,
+)
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.installed_bytes import reconcile_missing_installations
 from vonk_control.models.execution import (
     InstallationNode,
     RecipeInstallation,
@@ -28,6 +33,9 @@ from vonk_control.recipe_operations import (
 from vonk_control.run_switch_contract.requests import (
     RunSwitchCleanupApplyRequest,
     RunSwitchCleanupPreviewRequest,
+)
+from vonk_control.run_switch_operations.constants import (
+    _FINAL_VERIFICATION_MAX_SECONDS,
 )
 from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
 
@@ -260,9 +268,6 @@ def test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank(
         clock=lambda: NOW,
         result_consumer=lifecycle.consume_agent_result,
     ).record_result(cancelled)
-    from vonk_control.run_switch_operations.constants import (
-        _FINAL_VERIFICATION_MAX_SECONDS,
-    )
 
     service._clock = lambda: (
         NOW + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
@@ -368,11 +373,6 @@ def test_postgres_cache_loss_reinstalls_through_normal_prepared_installation(
 ) -> None:
     # Wrong implementation: marking missing bytes absent is cosmetic if normal
     # preparation still returns the old successful receipt instead of repairing.
-    from vonk_agent_protocol.state_machines import (
-        InstallationNodeState,
-        InstallationState,
-    )
-    from vonk_control.installed_bytes import reconcile_missing_installations
 
     sessions, lifecycle, _queue, mapping_id, build_id, node_ids = setup_services(
         tmp_path, engine=postgres_engine

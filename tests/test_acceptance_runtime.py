@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import pty
 import socket
 import ssl
 import subprocess
@@ -122,7 +123,6 @@ def test_interactive_runner_rejects_secret_in_fast_exit_argv_before_fork(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import pty
 
     def unexpected_fork():
         pytest.fail("secret-bearing caller input reached process execution")
@@ -149,7 +149,6 @@ def test_interactive_runner_rejects_secret_in_fast_exit_argv_before_fork(
 def test_interactive_runner_rejects_secret_in_fast_exit_environment_before_fork(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, environment: dict[str, str]
 ) -> None:
-    import pty
 
     def unexpected_fork():
         pytest.fail("secret-bearing caller input reached process execution")

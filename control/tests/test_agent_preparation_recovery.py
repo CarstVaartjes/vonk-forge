@@ -2,16 +2,35 @@
 
 from __future__ import annotations
 
+import ast
+import json
+import re
 from datetime import UTC, timedelta
+from pathlib import Path
 
 import pytest
 
 from vonk_agent_protocol.agent_words import FailureStage
-from vonk_agent_protocol.lifecycle_vocabulary import OutcomeKind, WaitReason
+from vonk_agent_protocol.contracts import (
+    AgentFailureKind,
+    AgentFailureResult,
+    AgentResult,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    AgentResultState,
+    FailureCode,
+    ObservationCause,
+    OutcomeKind,
+    WaitReason,
+)
+from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeFailed
+from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control.agent_jobs.retry import JOB_PRE_LAUNCH_STAGES
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.agent_operation_facts import attempt_is_live
 from vonk_control.lifecycle.core import LOST_OBSERVATION_BOUND, OBSERVE_BUDGET
 from vonk_control.lifecycle.types import State
+from vonk_control.recovery_policy import RecoveryPolicy
 
 from .agent_fences import fenced_attempt
 from .agent_jobs_support import (
@@ -34,15 +53,6 @@ from .test_agent_operation_lifecycle import KIND_STOP, _job_run_payload, _stored
 def test_dependency_recovery_is_bounded_and_fresh_request_is_claimable(
     agent_service,
 ) -> None:
-    from vonk_agent_protocol.contracts import (
-        AgentFailureKind,
-        AgentFailureResult,
-        AgentResult,
-    )
-    from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, FailureCode
-    from vonk_agent_protocol.outcome import OutcomeFailed
-    from vonk_agent_protocol.recipe_operations import RecipeStopResult
-    from vonk_control.recovery_policy import RecoveryPolicy
 
     jobs, sessions, clock = agent_service
     operation = jobs.enqueue(
@@ -82,7 +92,6 @@ def test_dependency_recovery_is_bounded_and_fresh_request_is_claimable(
             <= timedelta(seconds=policy.max_delay_seconds)
         )
         clock.now = due + timedelta(seconds=1)
-    import json
 
     failure = AgentFailureResult.model_validate_json(
         json.dumps(fenced_attempt(sessions, claim).result)
@@ -114,9 +123,6 @@ def test_dependency_recovery_is_bounded_and_fresh_request_is_claimable(
 def test_a_job_that_waits_before_launch_on_every_attempt_ends_at_the_recovery_deadline(
     agent_service,
 ) -> None:
-    from vonk_agent_protocol.contracts import AgentFailureKind, AgentResult
-    from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, FailureCode
-    from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeFailed
 
     jobs, sessions, clock = agent_service
     kind, payload = _job_run_payload()
@@ -178,13 +184,6 @@ def test_job_preparation_retries_without_replaying_an_uncertain_job(
     image, model, inputs, storage or launch layout) is retried: this attempt
     never ran the job. Production trigger: a transient artifact distribution
     or image pull failure ended a user's job failed."""
-    from vonk_agent_protocol.contracts import AgentFailureKind, AgentResult
-    from vonk_agent_protocol.lifecycle_vocabulary import (
-        AgentResultState,
-        FailureCode,
-        ObservationCause,
-    )
-    from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeFailed
 
     jobs, sessions, clock = agent_service
     kind, payload = _job_run_payload()
@@ -214,7 +213,6 @@ def test_job_preparation_retries_without_replaying_an_uncertain_job(
     # result must never become a second blind execute claim.
     jobs.record_result(_restart_interrupted_result(next_claim, kind))
     assert claim_agent(jobs, NODE_A, "serial-a") is None
-    from vonk_control.lifecycle.core import OBSERVE_BUDGET
 
     for _ in range(OBSERVE_BUDGET + 2):
         retained = _stored(sessions, operation.id)
@@ -227,7 +225,6 @@ def test_job_preparation_retries_without_replaying_an_uncertain_job(
     ended_attempt = fenced_attempt(sessions, next_claim)
     # Reconciliation may replace the report cause when it lapses the fence.
     # Validate the retained diagnostic, and prove that the fence cannot own work.
-    from vonk_control.agent_operation_facts import attempt_is_live
 
     ObservationCause(ended_attempt.observation_cause)
     assert not attempt_is_live(
@@ -250,9 +247,6 @@ def test_job_preparation_retries_without_replaying_an_uncertain_job(
 def test_a_job_wait_after_dispatch_is_never_reissued(agent_service, stage: str) -> None:
     """A stage a job also reaches after its process was dispatched never proves
     the attempt did not run: the job is never issued a second time."""
-    from vonk_agent_protocol.contracts import AgentFailureKind, AgentResult
-    from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, FailureCode
-    from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeFailed
 
     jobs, sessions, clock = agent_service
     kind, payload = _job_run_payload()
@@ -288,8 +282,6 @@ def test_a_job_wait_after_dispatch_is_never_reissued(agent_service, stage: str) 
 def test_a_reports_stage_decides_a_job_reissue_in_one_place() -> None:
     """Whole tree: only the pre-launch predicate reads a report's stage, so no
     second rule can reissue (or refuse to reissue) a job by its own list."""
-    import ast
-    from pathlib import Path
 
     root = Path(__file__).resolve().parents[1] / "src" / "vonk_control"
     readers = sorted(
@@ -310,8 +302,6 @@ def test_every_wait_the_agent_reports_before_a_job_launches_is_reissued() -> Non
     """Across the boundary: each stage the agent reports a job's pre-launch
     wait at (its job and installation preparation) is one the Controller
     reissues from, so no such wait ends a job that never ran."""
-    import re
-    from pathlib import Path
 
     executor = (
         Path(__file__).resolve().parents[2] / "rust/crates/vonk-agent/src/executor"

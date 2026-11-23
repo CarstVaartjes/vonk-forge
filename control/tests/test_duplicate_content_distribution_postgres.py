@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import delete
 from sqlalchemy.orm import sessionmaker
 
 from vonk_agent_protocol.distribution import DistributionObject
@@ -24,6 +25,7 @@ from vonk_control.distribution.types import DistributionUnknown
 from vonk_control.distribution_executor.identity import DistributionIdentity
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheSet, ModelCacheSetArtifact
 from vonk_control.models.fleet import AgentNode
 
 from .test_nas_cache_acceptance import (
@@ -190,9 +192,6 @@ def test_a_grant_registers_after_the_nas_evicted_its_set(
     postgres_engine, tmp_path: Path
 ) -> None:
     """A Spark holding the files gets the image: its grant needs no NAS set."""
-    from sqlalchemy import delete
-
-    from vonk_control.models.cache import ModelCacheSet, ModelCacheSetArtifact
 
     set_digest, model_source, distribution, identity, image = _world(
         postgres_engine, tmp_path

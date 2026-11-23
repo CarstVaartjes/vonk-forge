@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import os
 import re
@@ -18,10 +19,19 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
 
+import tests.acceptance.test_spark_lifecycle as canary
+from tests.acceptance import test_spark_lifecycle as lifecycle
+from tests.acceptance.test_spark_lifecycle import LifecycleError, SparkLifecycle
+from vonk_agent_protocol.agent_state import (
+    NativeRenewalClock,
+    NativeRenewalEvidence,
+    RenewalHelperManifest,
+)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.installer_release import (
     InstallerCandidateArtifacts,
@@ -138,7 +148,6 @@ runpy.run_path(script, run_name="__main__")
 
 def test_spark_acceptance_prepares_its_observation_contract(tmp_path, monkeypatch):
     """Catches a fresh Spark lane relying on a removed checkout OpenAPI file."""
-    from tests.acceptance import test_spark_lifecycle as lifecycle
 
     workflow = yaml.safe_load(
         (ROOT / ".github/workflows/release-acceptance-core.yml").read_text()
@@ -186,7 +195,6 @@ def test_native_renewal_helper_uses_candidate_content_identity(
     Execute the workflow's identity exports and manifest producer, then exercise
     the real canary gate up to its first effect. No git, compiler or host services.
     """
-    from tests.acceptance.test_spark_lifecycle import LifecycleError, SparkLifecycle
 
     package = InstallerPackageArtifact(
         path="agent.deb",
@@ -368,17 +376,6 @@ def test_renewal_observation_exhaustion_allows_a_fresh_invocation(
 
 
 def _exercise_renewal_observation(tmp_path, monkeypatch, fault, *, exhaust):
-    import argparse
-    import hashlib
-    import json
-    from types import SimpleNamespace
-
-    import tests.acceptance.test_spark_lifecycle as canary
-    from vonk_agent_protocol.agent_state import (
-        NativeRenewalClock,
-        NativeRenewalEvidence,
-        RenewalHelperManifest,
-    )
 
     helper = tmp_path / "helper"
     helper.write_bytes(b"verified native helper")

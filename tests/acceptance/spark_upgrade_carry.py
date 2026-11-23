@@ -87,6 +87,7 @@ from tests.acceptance.test_spark_lifecycle import (
     _sibling_recipes,
     _validate_canary_cleanup_preview,
 )
+from vonk_agent_protocol.installer_release import InstallerReleaseObject
 
 PROBE_INTERVAL_SECONDS = 3.0
 # Each settle phase waits for its observed condition, not a fixed time: the
@@ -226,7 +227,6 @@ def _retired_installer_responses(
     """Answers for the prompts this release's own NAS installer asks and the
     lane no longer knows: a release from before Hermes was removed still asks
     whether to enable it, and the lane declines it."""
-    from vonk_agent_protocol.installer_release import InstallerReleaseObject
 
     record = InstallerReleaseObject.model_validate_json(
         json.dumps(
@@ -427,7 +427,6 @@ def resolve_release(
             caddy,
         )
     openapi = directory / "openapi.json"
-    from vonk_agent_protocol.installer_release import InstallerReleaseObject
 
     wheel_record = InstallerReleaseObject.model_validate_json(
         json.dumps(

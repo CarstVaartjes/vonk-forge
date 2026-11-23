@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -31,9 +32,15 @@ from vonk_agent_protocol.contracts import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     SecurityRefusalReason,
+    WaitReason,
 )
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.reason_codes.runtime import (
+    RuntimeImageCode,
+    RuntimePreflightCode,
+)
 from vonk_control.categorized_errors import SecurityRefused
+from vonk_control.categorized_faults import OperationInterrupted
 from vonk_control.lifecycle.core import STOP_BUDGET
 from vonk_control.lifecycle.run_switch import RunSwitchAdapter
 from vonk_control.lifecycle.types import (
@@ -46,11 +53,21 @@ from vonk_control.lifecycle.types import (
     State,
     Tick,
 )
+from vonk_control.lifecycle_preflight import LifecyclePreflightCheckpoint
 from vonk_control.models.jobs import Job
+from vonk_control.persisted_waits import read_wait
+from vonk_control.recovery_policy import RECOVERY
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
-from vonk_control.run_switch_operations.errors import RunSwitchOperationConflict
+from vonk_control.run_switch_operations.errors import (
+    RunSwitchOperationConflict,
+    RunSwitchPostStopEvidencePending,
+    _RunSwitchDefiniteConflict,
+)
 from vonk_control.run_switch_operations.result_helpers import _read_progress
+from vonk_control.runtime_image_preparation.contracts import (
+    RuntimeImagePreparationUnknown,
+)
 
 from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .run_switch_operations_support import (
@@ -641,7 +658,6 @@ def test_a_changed_accepted_image_ends_the_operation_but_a_stop_gap_is_observed(
 
 
 def module_conflict(message: str) -> RunSwitchOperationConflict:
-    from vonk_control.run_switch_operations.errors import _RunSwitchDefiniteConflict
 
     return _RunSwitchDefiniteConflict(message)
 
@@ -679,11 +695,6 @@ def test_post_stop_inventory_pending_waits_past_the_retry_budget_and_then_heals(
     own; a Run/Switch is bounded by its checkpoint window instead, so the hold
     outlives many backoff steps and continues once fresh inventory arrives.
     """
-
-    from vonk_control.recovery_policy import RECOVERY
-    from vonk_control.run_switch_operations.errors import (
-        RunSwitchPostStopEvidencePending,
-    )
 
     executor = _ScriptedExecutor()
     pending = RunSwitchPostStopEvidencePending("Spark has no post-stop inventory")
@@ -736,12 +747,6 @@ def test_an_unknown_outcome_of_a_phase_is_retried_regardless_of_retryable_flag(
     """Unknown outcomes recover after restart and admit fresh work, regardless of
     the preparation owner's retryable flag."""
 
-    from vonk_agent_protocol.agent_words import ProfileChildPhase
-    from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
-    from vonk_control.runtime_image_preparation.contracts import (
-        RuntimeImagePreparationUnknown,
-    )
-
     executor = _ScriptedExecutor()
     unknown = RuntimeImagePreparationUnknown(
         RuntimeImageCode.RECEIPT_UNAVAILABLE,
@@ -787,7 +792,6 @@ def test_an_unknown_outcome_of_a_phase_is_retried_regardless_of_retryable_flag(
 def test_an_unknown_outcome_outside_the_phase_handler_is_retried_by_the_tick(
     tmp_path: Path,
 ) -> None:
-    from vonk_control.categorized_faults import OperationInterrupted
 
     harness = _Harness(tmp_path, RecordingArtifactExecutor())
     original = harness.service._advance
@@ -816,12 +820,6 @@ def test_an_unknown_outcome_outside_the_phase_handler_is_retried_by_the_tick(
 @pytest.mark.parametrize("cancelling", [False, True])
 def test_preflight_checkpoint_cannot_hide_retry_or_cancellation_wait(cancelling):
     """A leftover probe checkpoint must not overwrite the current lifecycle wait."""
-    from dataclasses import replace
-
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
-    from vonk_control.lifecycle_preflight import LifecyclePreflightCheckpoint
-    from vonk_control.persisted_waits import read_wait
 
     adapter = RunSwitchAdapter()
     job = _job(LifecycleState.RUNNING, {})

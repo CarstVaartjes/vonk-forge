@@ -13,6 +13,7 @@ from vonk_forge_contracts import PrebuiltImage
 
 from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
 from vonk_control.auth import CursorCodec
+from vonk_control.catalog import entities
 from vonk_control.catalog.revision_contract import (
     RecipeRevisionProjection,
     read_catalog_projection,
@@ -108,7 +109,6 @@ def test_sync_withdraws_pins_only_after_a_complete_authoritative_observation(par
 
 
 def test_policy_miss_is_reobserved_without_reusing_a_false_current_receipt(monkeypatch):
-    from vonk_control.catalog import entities
 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

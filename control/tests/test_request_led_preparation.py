@@ -6,13 +6,20 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.fleet_profiles.assessment_support import (
     _assignments_needing_preparation,
 )
 from vonk_control.fleet_profiles.dependencies import _PREPARATION_RESOLVABLE_CODES
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.unused_storage_collection.references import _applied_revision_ids
+
+from .fleet_profiles_support import NOW, _database, _input, _seed, _uuid
+from .test_recipe_image_availability_request_recovery import _owner
 
 ROOT = Path(__file__).resolve().parents[2]
 #: Wording that sends an operator to do what the Controller prepares itself.
@@ -54,11 +61,6 @@ def test_every_preparation_blocker_requests_the_preparation(code: str) -> None:
 
 def test_ended_preparation_does_not_block_a_fresh_application(tmp_path) -> None:
     """A cancelled application's preparation cannot gate a new request."""
-    from uuid import uuid4
-
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-
-    from .test_recipe_image_availability_request_recovery import _owner
 
     engine, _sessions, service, _now, _transport = _owner(tmp_path)
     service.ensure_preparation(
@@ -84,10 +86,6 @@ def test_ended_preparation_does_not_block_a_fresh_application(tmp_path) -> None:
 
 def test_pending_profile_references_are_read_from_the_canonical_stored_plan() -> None:
     """A queued load retains its resolved revision after real plan serialization."""
-    from vonk_control.fleet_profiles.service import FleetProfileService
-    from vonk_control.unused_storage_collection.references import _applied_revision_ids
-
-    from .fleet_profiles_support import NOW, _database, _input, _seed, _uuid
 
     sessions = _database()
     _, revision_id = _seed(sessions)

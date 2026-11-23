@@ -6,10 +6,19 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.contracts import (
+    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
+    canonical_message,
+)
 from vonk_agent_protocol.host_helper import (
+    HOST_RUNTIME_REQUEST_ENVELOPE_BYTES,
+    MAX_ARGV_BYTES,
+    MAX_HELPER_FRAME_BYTES,
+    MAX_HOST_RUNTIME_ARGUMENT_BYTES,
+    MAX_HOST_RUNTIME_REQUEST_BYTES,
     ExecuteContainerRuntimeRequestOperation,
     HostRuntimeRequest,
+    RecipeReconciliationIdentity,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 
@@ -68,14 +77,6 @@ def test_runtime_request_arguments_are_bounded_by_bytes_not_a_count() -> None:
     and the item pattern refused the empty element the plan's opaque-argv
     contract permits.
     """
-    from vonk_agent_protocol.contracts import MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES
-    from vonk_agent_protocol.host_helper import (
-        HOST_RUNTIME_REQUEST_ENVELOPE_BYTES,
-        MAX_ARGV_BYTES,
-        MAX_HELPER_FRAME_BYTES,
-        MAX_HOST_RUNTIME_ARGUMENT_BYTES,
-        MAX_HOST_RUNTIME_REQUEST_BYTES,
-    )
 
     assert MAX_HOST_RUNTIME_REQUEST_BYTES == (
         MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES + MAX_HELPER_FRAME_BYTES
@@ -318,7 +319,6 @@ def test_runtime_cleanup_identity_is_required_only_for_cleanup(model) -> None:
 def test_runtime_reconciliation_identity_is_bound_to_cleanup_request_and_grant() -> (
     None
 ):
-    from vonk_agent_protocol.host_helper import RecipeReconciliationIdentity
 
     identity = {
         "installation_id": "70000000-0000-4000-8000-000000000007",

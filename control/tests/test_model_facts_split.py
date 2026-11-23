@@ -23,6 +23,7 @@ from vonk_forge_contracts import (
     document_sha256,
     read_model,
     read_recipe,
+    read_recipe_api,
 )
 from vonk_forge_contracts.qualification_status import (
     PublishedQualificationStatusView,
@@ -39,6 +40,7 @@ from vonk_control.catalog.entities import (
     _digest,
     _execution_projection,
 )
+from vonk_control.catalog.entities import CatalogEntityService as Entities
 from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
@@ -416,9 +418,6 @@ def test_a_build_policy_refresh_keeps_the_api_facts_nullable_members(
 ) -> None:
     """The refresh re-validates what it wrote: an api block's required nullable
     member (max_input_tokens) must survive it, not be dropped as a None."""
-    from vonk_forge_contracts import read_recipe_api
-
-    from vonk_control.catalog.entities import CatalogEntityService as Entities
 
     sessions, _service, reader, item = _fixture(tmp_path)
     for entity in reader.snapshot.catalog_entities:

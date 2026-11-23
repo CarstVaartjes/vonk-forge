@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import document_sha256
 
+from cluster_profiles.cli_render.dispatch import render_payload
 from tests.fleet_projection_support import (
     NODE_A,
     NOW,
@@ -365,7 +366,6 @@ def test_profile_assignment_says_when_it_runs_an_older_revision() -> None:
 
 
 def test_fleet_output_shows_the_update_as_information_not_attention(capsys) -> None:
-    from cluster_profiles.cli_render.dispatch import render_payload
 
     sessions = _sessions()
     _seed(sessions, running=REVISION_1)

@@ -1,20 +1,28 @@
+import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
+from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import (
     OperationCheckpoint,
     OperationMemberProgress,
     OperationProgress,
 )
+from vonk_control.operation_api.responses import _progress_projection
 from vonk_control.operations.contract import validate_progress_update
 from vonk_control.operations.progress import (
     aggregate_progress,
     progress_document,
     progress_write_due,
     project_progress,
+    project_progress_for_state,
     sample_progress,
 )
+from vonk_control.recipe_image_availability.api import _progress
+from vonk_control.stall_window import progress_advanced
 
 NOW = datetime(2026, 9, 8, tzinfo=UTC)
 
@@ -159,7 +167,6 @@ def test_progress_rejects_invalid_or_unzoned_timestamps(value):
 
 
 def test_terminal_operation_never_claims_work_is_stalled_or_running():
-    from vonk_control.operation_api.responses import _progress_projection
 
     document = sample(completed_bytes=10, total_bytes=20, total_bytes_known=True)
     for state in ("succeeded", "failed", "cancelled", "needs-operator"):
@@ -178,7 +185,6 @@ def test_total_knowledge_can_be_explicitly_withdrawn_without_losing_bytes():
 
 
 def test_image_availability_boundary_preserves_canonical_measurements():
-    from vonk_control.recipe_image_availability.api import _progress
 
     original = sample(
         completed_bytes=10,
@@ -240,9 +246,6 @@ def test_the_aggregate_of_parallel_transfers_is_a_transfer_and_otherwise_prepare
 
 def test_successful_distribution_progress_no_longer_projects_pulling() -> None:
     # A retained heartbeat describes the last active step, not the terminal phase.
-    from vonk_agent_protocol.agent_words import ProgressPhase
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_control.operations.progress import project_progress_for_state
 
     pulled = OperationProgress(
         phase=ProgressPhase.PULLING.value, completed_bytes=5_381_019_286
@@ -255,8 +258,6 @@ def test_successful_distribution_progress_no_longer_projects_pulling() -> None:
 
 
 def test_subprocess_observations_advance_without_becoming_completed_items() -> None:
-    from vonk_agent_protocol.agent_words import ProgressPhase
-    from vonk_control.stall_window import progress_advanced
 
     before = OperationProgress(
         phase=ProgressPhase.BUILDING.value,
@@ -311,10 +312,6 @@ def test_restart_changes_checkpoint_key_and_resets_all_attempt_counters():
 
 
 def test_rust_restart_vector_is_accepted_and_resets_throughput():
-    import json
-    from pathlib import Path
-
-    from vonk_control.stall_window import progress_advanced
 
     first, second = [
         OperationProgress.model_validate_json(json.dumps(value))

@@ -21,6 +21,11 @@ from vonk_control.cache_removal_review import (
     CacheRemovalReviewContent,
     seal_cache_removal_review,
 )
+from vonk_control.fleet_model_removal_contract import (
+    FleetModelRemovalCheckpoint,
+    FleetModelRemovalEffects,
+    FleetRemovalReason,
+)
 
 from .test_cli_cache_removal_review import (
     _accept_response_contracts,  # noqa: F401
@@ -265,10 +270,6 @@ def test_json_review_is_unchanged_by_verbose(
 def test_fleet_review_confirm_command_keeps_the_fleet_scope(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from vonk_control.fleet_model_removal_contract import (
-        FleetModelRemovalEffects,
-        FleetRemovalReason,
-    )
 
     review = _review()
     review["fleet"] = FleetModelRemovalEffects(
@@ -286,7 +287,6 @@ def test_fleet_review_confirm_command_keeps_the_fleet_scope(
 def _fleet_review(
     assets: list[CacheRemovalAsset], *, nas_remove: bool, reason: object
 ) -> dict[str, object]:
-    from vonk_control.fleet_model_removal_contract import FleetModelRemovalEffects
 
     return seal_cache_removal_review(
         CacheRemovalReviewContent(
@@ -312,7 +312,6 @@ def _fleet_review(
 def test_protected_nas_copy_keeps_every_asset_without_inventing_a_reason(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from vonk_control.fleet_model_removal_contract import FleetRemovalReason
 
     kept = CacheAssetDisposition.RETAIN_REFERENCED
     review = _fleet_review(
@@ -337,7 +336,6 @@ def test_protected_nas_copy_keeps_every_asset_without_inventing_a_reason(
 def test_shared_fleet_object_without_membership_finding_names_no_sets(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from vonk_control.fleet_model_removal_contract import FleetRemovalReason
 
     review = _fleet_review(
         [
@@ -361,11 +359,6 @@ def test_fleet_receipt_that_kept_the_nas_copy_says_so_and_why(
 ) -> None:
     """Catches a fleet removal receipt that read as removed (#2354): it said
     ``succeeded`` with nothing about the NAS copy the Controller kept."""
-    from vonk_control.fleet_model_removal_contract import (
-        FleetModelRemovalCheckpoint,
-        FleetModelRemovalEffects,
-        FleetRemovalReason,
-    )
 
     fleet = FleetModelRemovalCheckpoint(
         deadline_at="2026-11-16T21:55:35Z",  # type: ignore[arg-type]

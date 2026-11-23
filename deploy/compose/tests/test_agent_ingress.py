@@ -1,8 +1,14 @@
+import gzip
+import hashlib
+import http.client
+import io
 import json
 import os
 import re
 import subprocess
 import sys
+import tarfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -11,6 +17,7 @@ from uuid import uuid4
 import pytest
 from vonk_forge_contracts.api import MAX_AUDIO_FILE_BYTES
 
+from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
 from vonk_control.agent_api.common import MAX_RECIPE_IMAGE_BYTES
 from vonk_control.api.common import (
@@ -1221,8 +1228,6 @@ def test_caddy_serves_the_file_the_controller_names_and_nothing_else(
     Controller's, a path outside the two content-addressed layouts, and ranges
     that are not honoured.
     """
-    import http.client
-    import time
 
     _require_docker_runtime()
     digest = "ab" + "0" * 62
@@ -1328,10 +1333,6 @@ def _runtime_image_store_snippet() -> str:
 
 def _oci_layout(store: Path) -> tuple[str, str]:
     """A one-layer arm64 runtime image, written as the Controller stores it."""
-    import gzip
-    import hashlib
-    import io
-    import tarfile
 
     def blob(payload: bytes) -> str:
         digest = hashlib.sha256(payload).hexdigest()
@@ -1393,8 +1394,6 @@ def test_docker_pulls_a_pinned_runtime_image_from_the_digest_only_store(
     Docker-Content-Digest, a route that exposes anything but digest reads,
     and a request without an agent identity reaching the store.
     """
-    import http.client
-    import time
 
     _require_docker_runtime()
     state = tmp_path / "state"
@@ -1519,10 +1518,6 @@ def test_docker_pulls_a_pinned_runtime_image_from_the_digest_only_store(
 @pytest.mark.slow(30)
 def test_edge_body_limit_errors_are_distinct_from_proxied_controller_limits(tmp_path):
     """Inject Caddy's handler error; never relabel an upstream 413 as edge."""
-    import http.client
-    import time
-
-    from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 
     text = DEV_CADDYFILE.read_text()
     snippets = []

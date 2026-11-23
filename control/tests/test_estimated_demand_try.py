@@ -25,6 +25,7 @@ from vonk_control.resource_planning.types import (
     MemoryReservationTotals,
     PlannedStopRelease,
     SwapCapacity,
+    SwapHolder,
 )
 
 from .test_resource_planning import (
@@ -177,7 +178,6 @@ def test_a_cut_swap_rise_waits_until_the_setting_is_reached() -> None:
 
 
 def test_a_cut_swap_rise_waits_on_swap_other_loads_hold() -> None:
-    from vonk_control.resource_planning.types import SwapHolder
 
     rise = usable_swap_bytes(SWAP_POLICY.maximum_gib * GIB) + GIB
     declared = replace(_declared_demand(10 * GIB), load_overshoot_bytes=rise)

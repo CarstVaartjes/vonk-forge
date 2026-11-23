@@ -10,7 +10,11 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import AgentFailureKind, AgentResult
+from vonk_agent_protocol.contracts import (
+    AgentFailureKind,
+    AgentFailureResult,
+    AgentResult,
+)
 from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
@@ -45,6 +49,7 @@ from .agent_jobs_support import (
     job_state,
     parent,
 )
+from .non_blocking import assert_ended_without_blocking
 from .runtime_identity_support import (
     claim_agent,
 )
@@ -60,8 +65,6 @@ def test_a_foreign_container_refusal_waits_visibly_and_the_start_resumes_when_it
     later.  The order stays re-issuable, names the container in its reason, and
     its parent stays open so the same intent starts once the name is free.
     """
-
-    from vonk_agent_protocol.contracts import AgentResult
 
     jobs, sessions, clock = service
     payload = canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30))
@@ -147,7 +150,6 @@ def test_spent_start_budget_fails_a_parked_start_instead_of_waiting(service) -> 
 
 
 def test_start_failure_after_the_deadline_is_not_retried(service) -> None:
-    from vonk_agent_protocol.contracts import AgentResult
 
     jobs, sessions, clock = service
     payload = canonical_start_payload(start_deadline=clock.now + timedelta(seconds=40))
@@ -460,7 +462,6 @@ def test_exact_late_stop_success_settles_without_another_attempt(
     assert claim is not None
     clock.advance(seconds=31)
     assert claim_agent(jobs, NODE_A, "serial-a") is None
-    from vonk_agent_protocol.contracts import AgentResult
 
     late = AgentResult.model_validate(
         {
@@ -496,8 +497,6 @@ def test_late_result_under_expired_fence_does_not_park_exact_resume_forever(
     the parked order from exact re-issue, so the job, its run and every
     observation of that run waited for an operator indefinitely.
     """
-
-    from vonk_agent_protocol.contracts import AgentResult
 
     jobs, sessions, clock = service
     operation = jobs.enqueue(
@@ -812,8 +811,6 @@ def test_a_failed_job_does_not_leave_a_sibling_parked_behind_an_unclaimable_retr
     (``parent-not-claimable``) and no operator action applied to it.
     """
 
-    from vonk_agent_protocol.contracts import AgentResult
-
     jobs, sessions, clock = service
     kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
     job = parent(sessions, clock)
@@ -859,8 +856,6 @@ def test_a_failed_job_does_not_leave_a_sibling_parked_behind_an_unclaimable_retr
         assert jobs.record_late_result(_restart_interrupted_result(claim_a, kind))
         refuse()
 
-    from .non_blocking import assert_ended_without_blocking
-
     def released() -> None:
         with sessions() as session:
             parked = session.get(AgentOperation, first.id)
@@ -879,8 +874,6 @@ def test_a_failed_job_does_not_leave_a_sibling_parked_behind_an_unclaimable_retr
         return job_state(sessions, new_job.id)
 
     def typed_reason(_ended: Job) -> None:
-        from vonk_agent_protocol.contracts import AgentFailureResult
-        from vonk_agent_protocol.lifecycle_vocabulary import FailureCode
 
         with sessions() as session:
             attempt = session.scalar(

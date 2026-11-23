@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
+import httpx2
 import pytest
 from sqlalchemy import event
 from sqlalchemy.exc import OperationalError
@@ -24,6 +25,14 @@ from vonk_control.models.cache import ModelCacheOperation
 
 from .model_cache_support import _artifact, _download, _remove_model, cache
 from .removal_settle import advance_until_ended
+from .test_model_cache_availability_regressions import (
+    _artifact as http_artifact,
+)
+from .test_model_cache_availability_regressions import (
+    _database,
+    _service,
+    _start,
+)
 
 __all__ = ["cache"]
 
@@ -187,17 +196,6 @@ def test_live_repair_keeps_its_partial_and_a_failed_one_loses_it_a_day_later(
     tmp_path: Path,
 ) -> None:
     """A repair cannot be cancelled; it ends by failing, which starts the clock."""
-
-    import httpx2
-
-    from .test_model_cache_availability_regressions import (
-        _artifact as http_artifact,
-    )
-    from .test_model_cache_availability_regressions import (
-        _database,
-        _service,
-        _start,
-    )
 
     sessions = _database(tmp_path)
     body = b"x" * 100
@@ -375,17 +373,6 @@ def test_tick_runs_once_per_interval(collector) -> None:
 
 def test_a_failed_download_keeps_its_partial_a_day_from_the_failure(tmp_path: Path):
     """A real terminal failure (the source is gone) starts the same clock."""
-
-    import httpx2
-
-    from .test_model_cache_availability_regressions import (
-        _artifact as http_artifact,
-    )
-    from .test_model_cache_availability_regressions import (
-        _database,
-        _service,
-        _start,
-    )
 
     sessions = _database(tmp_path)
     service, _client = _service(

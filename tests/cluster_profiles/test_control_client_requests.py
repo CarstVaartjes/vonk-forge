@@ -12,6 +12,7 @@ import urllib.request
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from copy import deepcopy
 from datetime import UTC, datetime
 from email.message import Message
 from pathlib import Path
@@ -21,13 +22,20 @@ import httpx2
 import pytest
 
 from cluster_profiles import cli
+from cluster_profiles.cli_states_generated import RUNNING, SUCCEEDED
+from cluster_profiles.control_client import common, schema
 from cluster_profiles.control_client.errors import (
     ControlClientError,
+    ControlHTTPError,
     ControlTimeout,
     LocalFilesystemError,
 )
 from cluster_profiles.control_client.transfers import ControlClient
 from cluster_profiles.control_client.transport import _RecordingTransport
+from cluster_profiles.controller_cli.observation import _poll_path
+from cluster_profiles.controller_cli.profile_load import (
+    _review_and_submit_profile_load,
+)
 from cluster_profiles.generated_control.models.fleet_profile_definition import (
     FleetProfileDefinition,
 )
@@ -43,16 +51,38 @@ from cluster_profiles.generated_control.models.fleet_profile_preview import (
 from cluster_profiles.generated_control.models.fleet_profile_scope_preview import (
     FleetProfileScopePreview,
 )
+from cluster_profiles.generated_control.models.fleet_snapshot import FleetSnapshot
+from cluster_profiles.generated_control.models.job_detail_response import (
+    JobDetailResponse,
+)
 from control.tests.observation_transfer_peer import ObservationHTTPPeer
+from vonk_agent_protocol.agent_words import AgentClientDecision
+from vonk_agent_protocol.error_response import (
+    BoundedErrorResponse,
+    ErrorContextResponse,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    SecurityRefusalReason,
+)
+from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+    FleetProfileApplicationResult,
+)
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
 from vonk_control.fleet_projection.common import FleetSnapshot as OwnedFleetSnapshot
 from vonk_control.observation.transfer import (
     OBSERVATION_MEDIA_TYPE,
     ObservationTransferChunk,
     ObservationTransferComplete,
+    ObservationTransferError,
     ObservationTransferStart,
     _record,
     observation_response,
 )
+from vonk_control.strict_json import serialize_json_value
 
 
 @pytest.fixture(autouse=True)
@@ -741,7 +771,6 @@ def test_generated_transport_uses_raw_openapi_contract_before_attrs_parser(
 def test_generated_transport_rejects_malformed_raw_response(
     tmp_path: Path, payload: dict[str, object], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cluster_profiles.generated_control.models.fleet_snapshot import FleetSnapshot
 
     peers: list[ObservationHTTPPeer] = []
     requests: list[urllib.request.Request] = []
@@ -1102,9 +1131,6 @@ def test_artifact_output_download_cleans_temporary_file_after_disk_failure(
 
 
 def _job_receipt(job_id: str, state: str):
-    from cluster_profiles.generated_control.models.job_detail_response import (
-        JobDetailResponse,
-    )
 
     return JobDetailResponse(
         authority_revision="a" * 64,
@@ -1132,7 +1158,6 @@ def test_wait_initial_and_later_unknown_share_budget_and_fresh_job_is_admitted(
     fault: str,
     verified_first: bool,
 ) -> None:
-    from cluster_profiles.cli_states_generated import RUNNING, SUCCEEDED
 
     job_id = "12345678-1234-4123-8123-123456789abc"
     calls: list[tuple[str, float]] = []
@@ -1221,7 +1246,6 @@ def test_real_denial_never_reads_untrusted_body_or_replays_mutation(
 ) -> None:
     calls: list[urllib.request.Request] = []
     denied = [True]
-    from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
 
     code = (
         SecurityRefusalReason.CONTROLLER_AUTHENTICATION_REQUIRED
@@ -1278,7 +1302,6 @@ def test_wait_invalid_options_have_no_effect_and_valid_fresh_read_works(
     invalid: float,
     option: str,
 ) -> None:
-    from cluster_profiles.cli_states_generated import SUCCEEDED
 
     calls: list[urllib.request.Request] = []
     job_id = "12345678-1234-4123-8123-123456789abc"
@@ -1305,7 +1328,6 @@ def test_unreadable_bundled_schema_recovers_before_network(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cluster_profiles.control_client import schema
 
     original = schema.files
     reads = []
@@ -1383,9 +1405,6 @@ def test_damaged_cached_response_schema_is_discarded_before_adoption(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from copy import deepcopy
-
-    from cluster_profiles.control_client import schema
 
     schema._control_openapi.cache_clear()
     good = json.loads(json.dumps(schema._control_openapi()))
@@ -1432,16 +1451,6 @@ def test_damaged_cached_response_schema_is_discarded_before_adoption(
 def test_preview_recovery_uses_canonical_transport_before_any_load(
     tmp_path, binding, fault_count
 ):
-    from cluster_profiles.controller_cli.profile_load import (
-        _review_and_submit_profile_load,
-    )
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_control.fleet_profile_contract.applications import (
-        FleetProfileApplicationProgress,
-        FleetProfileApplicationResult,
-    )
-    from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
-    from vonk_control.strict_json import serialize_json_value
 
     key = "11111111-1111-4111-8111-111111111111"
     application = FleetProfileApplicationView(
@@ -1516,9 +1525,6 @@ def test_preview_recovery_uses_canonical_transport_before_any_load(
 def test_whole_observation_unavailable_keeps_bytes_unconsumed_and_recovers(
     tmp_path, observation_clock, exhaust_budget
 ):
-    from cluster_profiles.controller_cli.observation import _poll_path
-    from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
-    from vonk_control.observation.transfer import ObservationTransferError
 
     snapshot = {
         "authority_revision": "a" * 64,
@@ -1575,7 +1581,6 @@ def test_whole_observation_unavailable_keeps_bytes_unconsumed_and_recovers(
         assert observation_clock[0] > started
         repaired[0] = True
         result = observe()
-    from vonk_control.strict_json import serialize_json_value
 
     assert result == serialize_json_value(
         OwnedFleetSnapshot.model_validate_json(json.dumps(snapshot))
@@ -1613,7 +1618,6 @@ def test_retry_waits_for_hint_or_full_jitter(
     tmp_path, monkeypatch, observation_clock, fault, generated
 ):
     """Catch deterministic backoff, ignored Retry-After, and dropped transient reasons."""
-    from cluster_profiles.control_client import common
 
     monkeypatch.setattr(common.random, "uniform", lambda low, high: high / 2)
     started = observation_clock[0]
@@ -1660,7 +1664,6 @@ def test_persistent_timeout_backoff_stays_jittered_and_capped(
     tmp_path, monkeypatch, observation_clock
 ):
     """Catch deterministic delays and a retry ceiling that keeps growing."""
-    from cluster_profiles.control_client import common
 
     ceilings = []
     started = observation_clock[0]
@@ -1689,12 +1692,6 @@ def test_persistent_timeout_backoff_stays_jittered_and_capped(
 @pytest.mark.parametrize("generated", [False, True])
 def test_typed_internal_error_is_not_retried(tmp_path, generated):
     """A typed deterministic 500 must not be replayed until the request deadline."""
-    from vonk_agent_protocol.agent_words import AgentClientDecision
-    from vonk_agent_protocol.error_response import (
-        BoundedErrorResponse,
-        ErrorContextResponse,
-    )
-    from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 
     calls = []
     request_id = "47057540-fc9b-494e-ad37-152c0fb154cb"
@@ -1720,7 +1717,6 @@ def test_typed_internal_error_is_not_retried(tmp_path, generated):
     client = ControlClient(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
-    from cluster_profiles.control_client.errors import ControlHTTPError
 
     with pytest.raises(ControlHTTPError) as caught:
         if generated:

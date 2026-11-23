@@ -8,12 +8,19 @@ once per run, however many revisions share it.
 from __future__ import annotations
 
 import io
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import event
+from sqlalchemy.orm import sessionmaker
 
-from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.recipe_builds.service import RecipeBuildService
+from vonk_control.source_bundles import (
+    DatabaseSourceBundleStore,
+    generate_source_bundle,
+)
 
 from .recipe_builds_support import setup
 
@@ -115,16 +122,6 @@ def test_database_store_cost_is_independent_of_distinct_digests(
     postgres_engine,
 ) -> None:
     """Catches one session and one join query per digest against the bundle store."""
-    from datetime import UTC, datetime
-
-    from sqlalchemy.orm import sessionmaker
-
-    from vonk_control.model_primitives import Base
-    from vonk_control.models.catalog import CatalogDocument
-    from vonk_control.source_bundles import (
-        DatabaseSourceBundleStore,
-        generate_source_bundle,
-    )
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)

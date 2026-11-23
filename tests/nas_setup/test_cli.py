@@ -5,12 +5,16 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from vonk_agent_protocol.installer_setup import NasInstallTemplate
+from vonk_agent_protocol.installer_setup import (
+    NasGroupReadableSecrets,
+    NasInstallTemplate,
+)
 from vonk_nas_setup.cli import open_private_answers
 from vonk_nas_setup.filesystem import SetupError
 
@@ -96,9 +100,6 @@ def test_answers_file_permission_refusal_is_visible(
     tmp_path: Path, template: NasInstallTemplate
 ) -> None:
     """Catch buffering the OS group refusal away while claiming bundle readiness."""
-    import tempfile
-
-    from vonk_agent_protocol.installer_setup import NasGroupReadableSecrets
 
     template = template.model_copy(
         update={

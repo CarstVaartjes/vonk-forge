@@ -6,6 +6,7 @@ contract it returns is proven to be the one ``create`` validates against.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -25,6 +26,7 @@ from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs.contracts import (
     ArtifactJobInvalid,
     _effective_parameters,
+    slot_input_media_type,
 )
 from vonk_control.artifact_jobs.job_contract import (
     ArtifactJobContractResponse,
@@ -376,7 +378,6 @@ def test_a_supplied_knob_reaches_the_adapter_argument(tmp_path) -> None:
 
 
 def _slot(media_types: list[str], extensions: list[str]) -> Any:
-    from types import SimpleNamespace
 
     return SimpleNamespace(
         id="in", media_types=media_types, extensions=extensions, max_files=1
@@ -401,6 +402,5 @@ def _slot(media_types: list[str], extensions: list[str]) -> Any:
 def test_an_input_media_type_comes_from_its_name_and_the_slot(
     name, media_types, extensions, expected
 ) -> None:
-    from vonk_control.artifact_jobs.contracts import slot_input_media_type
 
     assert slot_input_media_type(_slot(media_types, extensions), name) == expected

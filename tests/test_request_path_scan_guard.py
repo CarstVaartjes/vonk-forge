@@ -1,9 +1,13 @@
 """Class E scan guard fixtures, including indirect query construction."""
 
 import ast
+from pathlib import Path
 
 import pytest
 
+from control.tests.added_line_guards.check import check_source
+from control.tests.coordination_boundaries import scan_coordination_sites
+from control.tests.parsed_sources import parse_file
 from control.tests.request_path_scans import scan_tree
 
 
@@ -42,9 +46,6 @@ def test_scoped_or_bounded_request_read_is_permitted(query):
 
 def test_library_request_queries_are_scoped():
     """Whole-reader mutation guard: a new materialization needs a key or page."""
-    from pathlib import Path
-
-    from control.tests.parsed_sources import parse_file
 
     root = Path(__file__).resolve().parents[1]
     errors = []
@@ -104,10 +105,6 @@ def test_api_cursor_guard_rejects_server_cursors(query):
 
 def test_controller_sessions_end_before_suspension_and_api_reads_buffer():
     """Guard explicit lifetimes; process/PG tests own indirect I/O boundaries."""
-    from pathlib import Path
-
-    from control.tests.coordination_boundaries import scan_coordination_sites
-    from control.tests.parsed_sources import parse_file
 
     root = Path(__file__).resolve().parents[1]
     errors = []
@@ -158,7 +155,6 @@ def test_controller_sessions_end_before_suspension_and_api_reads_buffer():
 )
 def test_library_storage_walks_are_rejected_on_added_lines(provider, path):
     """A new direct storage provider in a view must fail the patch gate."""
-    from control.tests.added_line_guards.check import check_source
 
     target = provider if "." in provider else f"self.{provider}"
     source = f"def models(self):\n    return {target}()\n"

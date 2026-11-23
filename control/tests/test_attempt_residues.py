@@ -18,7 +18,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import OperationalError
 
 from vonk_control.attempt_residues import (
@@ -29,6 +29,8 @@ from vonk_control.attempt_residues import (
 )
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.install_admission.contracts import InstallAdmissionBusy
+from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import (
     InstallationNode,
@@ -48,7 +50,10 @@ from vonk_control.owner_liveness import (
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes.service import RecipeRouteService
-from vonk_control.run_switch_contract.requests import RunSwitchCleanupApplyRequest
+from vonk_control.run_switch_contract.requests import (
+    RunSwitchCleanupApplyRequest,
+    RunSwitchCleanupPreviewRequest,
+)
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .profile_due_fixtures import next_profile_due
@@ -57,6 +62,8 @@ from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )
+from .runtime_image_fixtures import refresh_inventory
+from .test_catalog_revision_collection import Catalog
 from .test_profile_build_process_recovery import _complete_agent_work
 
 
@@ -296,7 +303,6 @@ def test_an_install_that_fails_on_one_member_is_cleaned_and_retried(
     # The switch retries its phase on its own until the recovery window closes.
     load.now[0] += timedelta(hours=1, seconds=1)
     assert _loop(load, settled)
-    from .runtime_image_fixtures import refresh_inventory
 
     refresh_inventory(load.sessions, load.now[0])
     retried = _next_attempt(load)
@@ -606,11 +612,6 @@ def test_a_record_an_active_attempt_owns_is_left_alone(tmp_path: Path) -> None:
 def test_reconcile_discards_a_plan_that_never_reached_a_node(tmp_path: Path) -> None:
     """``recipe installation reconcile`` handles a planned installation too."""
 
-    from vonk_control.run_switch_contract.requests import (
-        RunSwitchCleanupApplyRequest,
-        RunSwitchCleanupPreviewRequest,
-    )
-
     load = _load(tmp_path)
     assert _loop(load, lambda: _at_phase(load, "target-copy"), complete=False)
     _fail_switch(load)
@@ -733,12 +734,6 @@ def _uninstalls(load, installation_id: str) -> list[Job]:
 @pytest.mark.parametrize("kind", ["leftover", "never-installed"])
 def test_unknown_residue_cleanup_backs_off_then_resumes(tmp_path, kind):
     """Catches retrying busy ownership on every tick or never revisiting it."""
-    from sqlalchemy import create_engine
-
-    from vonk_control.install_admission.contracts import InstallAdmissionBusy
-    from vonk_control.model_primitives import Base
-
-    from .test_catalog_revision_collection import Catalog
 
     engine = create_engine(f"sqlite:///{tmp_path / 'residues.sqlite'}")
     Base.metadata.create_all(engine)

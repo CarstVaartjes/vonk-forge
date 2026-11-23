@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -30,6 +31,7 @@ from vonk_control.fleet_profile_contract.endpoints import (
 from vonk_control.gateway.litellm import LiteLlmGeneration, ServedModelInfo
 from vonk_control.gateway.route_runtime import (
     AtomicRouteBundlePublisher,
+    verify_active_route_bundle,
 )
 from vonk_control.jobs.documents import RecipeStartParent
 from vonk_control.models.execution import (
@@ -43,12 +45,14 @@ from vonk_control.models.routes import (
 from vonk_control.operation_api.durable import durable_operation_services
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
+from vonk_control.recipe_routes import withdrawal as withdrawal_steps
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
 from vonk_control.recipe_routes.shared import (
     RecipeRouteNotReady,
     RecipeRouteOwnerBusy,
     RecipeRouteSuperseded,
+    _RecipeRunContended,
 )
 
 from .recipe_routes_support import (
@@ -65,6 +69,7 @@ from .recipe_routes_support import (
     atomic_service,
     setup,
 )
+from .test_route_runtime import _supervisor
 
 
 @pytest.mark.parametrize("missing_observations", [False, True])
@@ -224,9 +229,6 @@ def test_worker_keeps_every_serving_route_while_reports_are_missing(
 def test_postgres_current_publication_withdrawal_and_owner_recovery(
     tmp_path: Path, postgres_engine, monkeypatch
 ) -> None:
-    from vonk_control.gateway.route_runtime import verify_active_route_bundle
-
-    from .test_route_runtime import _supervisor
 
     clock = MutableClock(NOW)
     base, _, _, run_id = setup(
@@ -633,9 +635,6 @@ def test_bookkeeping_damage_retains_the_accepted_serving_route(
 def test_corrupt_serving_run_does_not_block_other_route_changes_and_recovers(
     tmp_path: Path, damage: str
 ) -> None:
-    from copy import deepcopy
-
-    from vonk_control.gateway.route_runtime import verify_active_route_bundle
 
     clock = MutableClock(NOW)
     base, _publisher, _applied, first = setup(tmp_path / "database", clock=clock)
@@ -859,7 +858,6 @@ def test_maintenance_contention_uses_the_typed_wait_schedule(
     contention,
 ) -> None:
     """Run contention must not fall through _advance's generic traceback handler."""
-    from vonk_control.recipe_routes.shared import _RecipeRunContended
 
     clock = MutableClock(NOW)
     routes, _, _, _ = setup(tmp_path, clock=clock)
@@ -930,7 +928,6 @@ def test_route_maintenance_decides_once_per_pass(
 def test_withdrawal_maintenance_raises_after_one_decision(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from vonk_control.recipe_routes import withdrawal as withdrawal_steps
 
     service, _publisher, _applied, _run_id = setup(tmp_path)
     calls = _count_maintenance_decisions(service, monkeypatch)

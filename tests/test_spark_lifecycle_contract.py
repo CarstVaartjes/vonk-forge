@@ -12,6 +12,11 @@ from pathlib import Path
 import pytest
 
 from scripts import spark_lifecycle_contract
+from vonk_agent_protocol.installer_release import (
+    InstallerAcceptanceBaselineRelease,
+    InstallerCandidateRelease,
+    InstallerReleaseManifest,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 ENTRY_POINT = ROOT / "tests/acceptance/test_spark_lifecycle.py"
@@ -302,11 +307,6 @@ def _graph_command(objects: Path, candidate: Path, baseline: Path) -> list[str |
 
 def test_baseline_retains_the_observers_exact_cli_wheel(tmp_path: Path) -> None:
     """Catches a typed publication dropping the observer's Controller contract."""
-    from vonk_agent_protocol.installer_release import (
-        InstallerAcceptanceBaselineRelease,
-        InstallerCandidateRelease,
-        InstallerReleaseManifest,
-    )
 
     objects, candidate_path, baseline_path, _ = _graph_inputs(tmp_path)
     candidate = InstallerCandidateRelease.model_validate_json(

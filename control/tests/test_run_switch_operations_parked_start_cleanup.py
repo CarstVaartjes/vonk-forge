@@ -34,6 +34,10 @@ from vonk_control.run_switch_contract.requests import (
     RunSwitchCleanupApplyRequest,
     RunSwitchCleanupPreviewRequest,
 )
+from vonk_control.run_switch_operations.constants import (
+    _FINAL_VERIFICATION_MAX_SECONDS,
+)
+from vonk_control.run_switch_operations.result_helpers import _read_progress
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .recipe_operations_support import NOW, installed_recipe, setup_services
@@ -505,9 +509,6 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
             "reason": "temporary dependency",
         },
     )
-    from vonk_control.run_switch_operations.constants import (
-        _FINAL_VERIFICATION_MAX_SECONDS,
-    )
 
     service._clock = lambda: (
         lifecycle._clock() + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
@@ -740,8 +741,6 @@ def test_capacity_backoff_and_checkpoint_retry_share_one_attempt_counter(
     Each owner backs off from the shared counter, a capacity wait for a new
     reason starts its own backoff again, and phase progress clears it.
     """
-
-    from vonk_control.run_switch_operations.result_helpers import _read_progress
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     installation = installed_recipe(

@@ -31,6 +31,10 @@ from spark_lifecycle_contract import recompute_publication_graphs, validate_life
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "agent_protocol/src"))
+from vonk_agent_protocol.installer_release import (
+    InstallerAcceptanceBaselineRelease,
+    InstallerCandidateRelease,
+)
 
 SPARK_PLATFORMS = ("linux-arm64",)
 PHASE_ORDER = {"immutable": 0, "endpoint": 1, "pointer": 2}
@@ -508,10 +512,6 @@ def _install_object(objects: Path, key: str, content: bytes, mode: int = 0o644) 
 
 
 def assemble(arguments: argparse.Namespace) -> str:
-    from vonk_agent_protocol.installer_release import (
-        InstallerAcceptanceBaselineRelease,
-        InstallerCandidateRelease,
-    )
 
     channel = arguments.channel
     version = arguments.version
@@ -2075,7 +2075,6 @@ def refresh(arguments: argparse.Namespace) -> None:
         release_signature,
         "release object",
     )
-    from vonk_agent_protocol.installer_release import InstallerCandidateRelease
 
     try:
         release = InstallerCandidateRelease.model_validate_json(

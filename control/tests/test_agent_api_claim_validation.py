@@ -20,6 +20,8 @@ from vonk_agent_protocol.agent_words import (
     RecipeRunDispositionValue,
 )
 from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.enrollment import IssuedCertificateResponse
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.state_machines import RunState
 from vonk_control import agent_operation_states as aos
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
@@ -30,6 +32,7 @@ from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperationAttempt
 from vonk_control.pki import IssuedCertificate
+from vonk_control.step_ca import StepCAIssuancePending
 
 from .agent_api_support import (
     NODE_A,
@@ -43,6 +46,7 @@ from .agent_api_support import (
     parent,
     valid_enrollment_body,
 )
+from .host_memory_guard_support import guard_diagnostics
 from .node_contacts import contact_row
 
 
@@ -655,10 +659,6 @@ def test_recipe_run_observation_report_applies_process_state_per_run(
             json={"observed_at": observed_at.isoformat(), "runs": list(runs)},
         )
 
-    from vonk_agent_protocol.failure_evidence import FailureDiagnostics
-
-    from .host_memory_guard_support import guard_diagnostics
-
     diagnostics = guard_diagnostics(clock.now.isoformat())
     run: dict[str, object] = {
         "run_id": run_id,
@@ -745,7 +745,6 @@ def test_a_guard_stop_of_a_serving_co_tenant_is_not_the_runs_failure(
     recovery relaunches it as it would any lost rank. The run never seen alive
     keeps the guard stop as its failure. Catches settling the co-tenant for good.
     """
-    from .host_memory_guard_support import guard_diagnostics
 
     client, services, _, clock = agent_system
     serving, tried = (
@@ -970,8 +969,6 @@ def test_rotation_follower_heals_a_begun_journal_row_after_a_busy_reply(
     agent_system,
     monkeypatch,
 ) -> None:
-    from vonk_agent_protocol.enrollment import IssuedCertificateResponse
-    from vonk_control.step_ca import StepCAIssuancePending
 
     client, services, _, clock = agent_system
     with services.sessions.begin() as session:

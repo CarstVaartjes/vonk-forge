@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
+from tests.subprocess_environment import isolated_environment
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import FleetProfileApplication
@@ -84,7 +85,6 @@ def _server_process(
 ) -> tuple[subprocess.Popen[str], Path]:
     ready = tmp_path / f"api-ready-{uuid.uuid4().hex}"
     helper = Path(__file__).with_name("_profile_https_process.py")
-    from tests.subprocess_environment import isolated_environment
 
     environment = isolated_environment(
         tmp_path / "api-home",

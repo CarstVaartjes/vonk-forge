@@ -6,7 +6,7 @@ import threading
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,7 +21,12 @@ from sqlalchemy.pool import StaticPool
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import ArtifactDistributionPayload, canonical_message
+from vonk_agent_protocol.contracts import (
+    AgentResult,
+    ArtifactDistributionPayload,
+    ArtifactDistributionResult,
+    canonical_message,
+)
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, LifecycleState
@@ -93,7 +98,9 @@ from .agent_api_support import NODE_A, NODE_B, agent_headers, agent_system  # no
 from .agent_jobs_support import distribution_payload
 from .recipe_operations_support import NOW, setup_services
 from .run_switch_operations_support import _runtime_receipt
+from .runtime_identity_support import claim_agent
 from .runtime_image_fixtures import place_test_image
+from .test_distribution import _assignment
 
 
 def _receipt_json(receipt: BaseModel | None) -> dict[str, object]:
@@ -2087,12 +2094,6 @@ def test_child_persistence_retains_in_place_default_members(
 
 def test_expired_distribution_fence_cannot_revive_or_block_fresh_transfer(agent_system):  # noqa: F811
     """Issued transfer expiry releases dispatch while retaining late evidence."""
-    from datetime import timedelta
-
-    from vonk_agent_protocol.contracts import AgentResult, ArtifactDistributionResult
-
-    from .runtime_identity_support import claim_agent
-    from .test_distribution import _assignment
 
     _client, services, _tokens, clock = agent_system
     source = MemoryObjectSource()

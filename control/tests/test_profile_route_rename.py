@@ -14,16 +14,29 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from hashlib import sha256
 
 import pytest
 from sqlalchemy import func, select
 
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.route_activation import SupervisorPhase
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.distributed_recovery import common
+from vonk_control.distributed_recovery.authority import _recovery_authority
+from vonk_control.distributed_recovery.common import _RecoveryAuthority
+from vonk_control.distributed_recovery.coordinator import (
+    DistributedRecoveryCoordinator,
+)
 from vonk_control.gateway.litellm import ServedModelInfo
-from vonk_control.models.execution import RecipeRun, ResourceReservation
+from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
-from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
+from vonk_control.persisted_waits import read_wait
+from vonk_control.recipe_operations.execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_run_plan,
+)
 from vonk_control.recipe_operations.progress import _parent_identity
 from vonk_control.recipe_routes.shared import RecipeRouteNotReady
 
@@ -352,8 +365,6 @@ def test_the_original_start_key_replays_after_a_rename(
 def test_crashed_rank_recovery_authority_holds_after_a_rename(
     tmp_path, postgres_engine
 ) -> None:
-    from vonk_control.distributed_recovery.authority import _recovery_authority
-    from vonk_control.distributed_recovery.common import _RecoveryAuthority
 
     world = build_world(tmp_path, postgres_engine)
     try:
@@ -389,9 +400,6 @@ def test_crashed_rank_recovery_authority_holds_after_a_rename(
 def test_new_run_plans_carry_no_alias_and_keep_digests_and_routes(
     tmp_path, postgres_engine
 ) -> None:
-    from vonk_control.recipe_operations.execution_contract import (
-        RecipeExecutionContractError,
-    )
 
     world = build_world(tmp_path, postgres_engine)
     try:
@@ -498,10 +506,6 @@ def test_a_rename_owns_the_name_over_a_newer_run_the_same_plan_stops(
 
 
 def _coordinator(world: World):
-    from vonk_control.agent_jobs.service import AgentJobService
-    from vonk_control.distributed_recovery.coordinator import (
-        DistributedRecoveryCoordinator,
-    )
 
     return DistributedRecoveryCoordinator(
         world.sessions,
@@ -519,8 +523,6 @@ def _recover(world: World, sim: Simulation, run_id: str, rounds: int = 80) -> No
     (The simulation's Sparks do not model the following next-generation Start;
     that leg is proven on the wire in ``test_recipe_observation_wire_bridge``.)
     """
-
-    from vonk_control.models.execution import RunNode
 
     with world.sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
@@ -595,12 +597,6 @@ def test_a_wait_remembered_by_an_older_reader_is_cleared_and_recovery_resumes(
     """The old worker, still running while the new API strips the plans, cannot
     read them and remembers 'unreadable' by the bytes alone.  This release reads
     the plan again once and clears that wait."""
-
-    from hashlib import sha256
-
-    from vonk_agent_protocol.contracts import canonical_message
-    from vonk_control.distributed_recovery import common
-    from vonk_control.persisted_waits import read_wait
 
     world = build_world(tmp_path, postgres_engine)
     try:

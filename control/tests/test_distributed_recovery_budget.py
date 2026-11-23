@@ -6,9 +6,14 @@ import pytest
 from sqlalchemy import select
 
 from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    WaitResumeCondition,
+)
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_agent_protocol.state_machines import RunState
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.distributed_recovery import common
 from vonk_control.distributed_recovery.common import (
     _recovery_marker,
     enforce_recovery_deadline,
@@ -18,6 +23,8 @@ from vonk_control.models.execution import RecipeRun, RunNode
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
+from vonk_control.persisted_waits import read_wait
+from vonk_control.recovery_policy import DISTRIBUTED_RECOVERY
 
 from .host_memory_guard_support import guard_diagnostics
 from .node_contacts import contact_row
@@ -422,7 +429,6 @@ def test_distributed_recovery_backoff_survives_restart_and_resumes(
     # durable rate, never counted toward the degraded cooldown however long it
     # lasts. Restart the coordinator between checks to prove SQL owns the due
     # time.
-    from vonk_control.recovery_policy import DISTRIBUTED_RECOVERY
 
     for _check in range(DISTRIBUTED_RECOVERY.max_failures * 2):
         with sessions() as session:
@@ -643,13 +649,6 @@ def test_malformed_plan_waits_for_changed_content_without_repeating_decision(
     tmp_path, postgres_engine, monkeypatch
 ):
     """Catches unchanged damaged plans bypassing cooldown and re-parsing forever."""
-    from vonk_agent_protocol.lifecycle_vocabulary import (
-        InvalidRequestReason,
-        WaitResumeCondition,
-    )
-    from vonk_control.distributed_recovery import common
-    from vonk_control.persisted_waits import read_wait
-    from vonk_control.recovery_policy import DISTRIBUTED_RECOVERY
 
     sessions, service, queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine

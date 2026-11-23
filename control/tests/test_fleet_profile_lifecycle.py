@@ -19,12 +19,16 @@ changed:
 
 from __future__ import annotations
 
+import ast
 import json
 import uuid
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 
+import vonk_control.fleet_profiles as module
+from tests.lifecycle_writer_boundaries import scan_lifecycle_writes
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -461,8 +465,6 @@ def test_a_restart_in_the_middle_of_a_load_is_safe(tmp_path) -> None:
 def test_an_application_row_is_written_only_through_the_adapter() -> None:
     """The class, guarded: the module no longer writes an application's state."""
 
-    from tests.lifecycle_writer_boundaries import scan_lifecycle_writes
-
     writes = [
         write for write in scan_lifecycle_writes() if "/fleet_profiles/" in write.path
     ]
@@ -477,11 +479,6 @@ def test_profile_stop_selection_never_uses_the_active_run_set() -> None:
     elsewhere may keep the active set; the profile module decides only what to
     stop and what is observed, so it must not name it at all.
     """
-
-    import ast
-    from pathlib import Path
-
-    import vonk_control.fleet_profiles as module
 
     tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
     uses = sorted(

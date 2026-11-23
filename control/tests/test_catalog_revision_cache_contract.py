@@ -1,19 +1,26 @@
 from __future__ import annotations
 
 import json
+from collections import OrderedDict
+from copy import deepcopy
 from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
 
 import pytest
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
-from vonk_control.catalog.entities import CatalogEntityService
+import vonk_control.catalog.revision_contract as contract
+from vonk_agent_protocol.reason_codes.catalog import CatalogCode
+from vonk_control.auth import TokenCodec
+from vonk_control.catalog.entities import CatalogEntityService, CatalogValidationError
 from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     read_catalog_document,
     read_catalog_projection,
 )
+from vonk_control.catalog.service import CatalogService
+from vonk_control.fleet_profiles.persistence import _stored_recipe
 from vonk_control.model_cache.contract import (
     ModelCacheDownloadPayload,
     parse_model_cache_payload,
@@ -21,6 +28,7 @@ from vonk_control.model_cache.contract import (
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.stored.json_values import read_row_column
 
 from .display_fixtures import create_draft, reword
 from .test_model_cache_availability_regressions import _artifact, _database, _start
@@ -113,14 +121,6 @@ def test_model_cache_operation_payload_round_trips_through_database_and_reads_ma
 )
 def test_catalog_readers_parse_one_content_identity_once(monkeypatch, kind, example):
     """Separate ORM rows and read APIs must share one strict parse, without hashing."""
-    from collections import OrderedDict
-    from copy import deepcopy
-
-    from vonk_forge_contracts import document_sha256
-
-    import vonk_control.catalog.revision_contract as contract
-    from vonk_control.fleet_profiles.persistence import _stored_recipe
-    from vonk_control.stored.json_values import read_row_column
 
     monkeypatch.setattr(contract, "_document_cache", OrderedDict(), raising=False)
     monkeypatch.setattr(contract, "_document_cache_size", 0, raising=False)
@@ -177,12 +177,6 @@ def test_catalog_readers_parse_one_content_identity_once(monkeypatch, kind, exam
 
 def test_import_refuses_a_mismatched_digest_even_when_content_was_cached(tmp_path):
     """The process cache cannot bypass the signed ingress content identity check."""
-    from vonk_forge_contracts import document_sha256
-
-    from vonk_agent_protocol.reason_codes.catalog import CatalogCode
-    from vonk_control.auth import TokenCodec
-    from vonk_control.catalog.entities import CatalogValidationError
-    from vonk_control.catalog.service import CatalogService
 
     sessions = _database(tmp_path)
     raw = json.loads(

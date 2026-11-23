@@ -9,17 +9,21 @@ by the successor instead of refusing it as "already bound".
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+from threading import Barrier
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.distribution.types import DistributionError
+from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.distribution_executor.durable import DurableDistributionPhaseExecutor
 from vonk_control.distribution_executor.receipts import RuntimeImagePull
 from vonk_control.models.fleet import AgentNode
@@ -27,17 +31,18 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import ArtifactDistributionAssignment
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 
-from .agent_api_support import NODE_A, NODE_B, agent_system  # noqa: F401
+from .agent_api_support import (  # noqa: F401
+    NODE_A,
+    NODE_B,
+    agent_system,
+    make_agent_system,
+)
 from .test_distribution_executor import _phase, _plan
 
 
 def _register_grant_independently(database_url, mapping, now, start):
     """Independent worker with its own engine, pool and service: PostgreSQL,
     not shared in-process state, owns coordination between the workers."""
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    from vonk_control.distribution_assignment import NodeDistributionAssignment
 
     assignment = NodeDistributionAssignment.parse(mapping)
     source = MemoryObjectSource(
@@ -74,10 +79,6 @@ def test_concurrent_workers_reclaim_a_grant_without_mutating_its_identity(
     # Each worker owns its engine and service, so they share no in-process
     # state; threads interleave their PostgreSQL transactions without spawning
     # a full interpreter per worker (a killed pool worker flaked CI).
-    from concurrent.futures import ThreadPoolExecutor
-    from threading import Barrier
-
-    from .agent_api_support import make_agent_system
 
     system = make_agent_system(tmp_path, engine=postgres_engine)
     transfer = _transfer(system)
@@ -272,7 +273,6 @@ def test_a_renewal_that_lands_during_expiry_survives(
     tmp_path, postgres_engine, monkeypatch
 ) -> None:
     """Expiry is decided on a read; a renewal committed since must not be undone."""
-    from .agent_api_support import make_agent_system
 
     system = make_agent_system(tmp_path, engine=postgres_engine)
     transfer = _transfer(system)
@@ -314,7 +314,6 @@ def test_a_renewal_that_lands_during_expiry_survives(
 def test_an_unrenewed_lapsed_grant_is_marked_expired(tmp_path, postgres_engine) -> None:
     """The deadline read from the row matches the stored one exactly, so the
     conditional expiry really lands (no timezone or microsecond mismatch)."""
-    from .agent_api_support import make_agent_system
 
     system = make_agent_system(tmp_path, engine=postgres_engine)
     transfer = _transfer(system)

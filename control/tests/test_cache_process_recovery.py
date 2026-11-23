@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import time
@@ -171,7 +172,6 @@ with open(sys.argv[1], "a+b") as lock:
 def test_model_worker_death_resumes_real_prefix_and_fresh_cli_reconnects(
     postgres_engine, tmp_path
 ):
-    import json
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine)

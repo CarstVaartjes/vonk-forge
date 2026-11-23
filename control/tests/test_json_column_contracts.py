@@ -15,26 +15,43 @@ fails when
 
 from __future__ import annotations
 
+import hashlib
+from datetime import UTC, datetime
 from typing import Annotated
 
 import pytest
 from pydantic import BaseModel, ConfigDict, JsonValue
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session
 
 from vonk_control.db.connections import build_engine
+from vonk_control.journal_models import (
+    RunSwitchJournalRepair,
+    RunSwitchJournalRepairPending,
+)
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.model_primitives import Base
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_contract.journal import (
+    JournalRepairPurpose,
+    NativeProgressWitness,
+    RunSwitchJournalRepairEndEvidence,
+    RunSwitchJournalRepairEvidence,
+    RunSwitchJournalRepairPendingState,
+)
 from vonk_control.stored import json_values as stored_json
 from vonk_control.stored.json_values import (
     ExternalPassthrough,
     bind,
+    binding_for,
     bindings,
     column_violations,
     dump_column,
     install_write_guard,
     json_columns,
     read_column,
+    read_row_column,
     untyped_leaves,
     write_guard_mode,
 )
@@ -101,7 +118,6 @@ class _Marker(BaseModel):
 
 
 def _scratch_binding(**options: object):
-    from vonk_control.stored import json_values as stored_json
 
     key = "scratch.document"
     stored_json._REGISTRY.pop(key, None)
@@ -147,9 +163,6 @@ def test_the_strict_write_guard_refuses_a_document_no_contract_describes() -> No
     install_write_guard()
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
-    from datetime import UTC, datetime
-
-    from vonk_control.models.jobs import Job
 
     now = datetime(2026, 9, 1, tzinfo=UTC)
     row = Job(
@@ -180,16 +193,6 @@ def test_installing_the_guard_again_keeps_the_process_mode() -> None:
 
 
 def _journal_documents():
-    import hashlib
-    from datetime import UTC, datetime
-
-    from vonk_control.run_switch_contract.journal import (
-        JournalRepairPurpose,
-        NativeProgressWitness,
-        RunSwitchJournalRepairEndEvidence,
-        RunSwitchJournalRepairEvidence,
-        RunSwitchJournalRepairPendingState,
-    )
 
     now = datetime(2026, 10, 7, tzinfo=UTC)
     identity = "00000000-0000-4000-8000-000000000001"
@@ -232,21 +235,6 @@ def _journal_documents():
 @pytest.mark.parametrize("document", _journal_documents())
 def test_journal_columns_return_models_and_keep_damaged_reads_non_blocking(document):
     """Catch raw-dict ORM reads, skipped decorated columns and refused damaged reads."""
-    from datetime import UTC, datetime
-
-    from sqlalchemy import text
-    from sqlalchemy.exc import StatementError
-
-    from vonk_control.journal_models import (
-        RunSwitchJournalRepair,
-        RunSwitchJournalRepairPending,
-    )
-    from vonk_control.models.jobs import Job
-    from vonk_control.run_switch_contract.journal import (
-        RunSwitchJournalRepairEndEvidence,
-        RunSwitchJournalRepairPendingState,
-    )
-    from vonk_control.stored.json_values import binding_for, read_row_column
 
     now = datetime(2026, 10, 7, tzinfo=UTC)
     identity = "00000000-0000-4000-8000-000000000001"

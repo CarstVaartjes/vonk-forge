@@ -11,12 +11,17 @@ from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
     RuntimePreflightResult,
 )
+from vonk_control.inventory.items import record_preflight
 from vonk_control.inventory.items_contract import PreflightInventoryItem
+from vonk_control.models.fleet import AgentNode
 from vonk_control.runtime.preflight import (
     admission_blockers,
+    latest_result,
     mandatory_capabilities,
     request_digest,
 )
+
+from .test_lifecycle_preflight import _setup
 
 
 def request(**changes):
@@ -198,11 +203,6 @@ def test_failed_preflight_is_readable_and_repaired_evidence_admits(
 def test_receipts_are_retained_per_digest_for_the_current_host(tmp_path):
     """Catches retention by age (a receipt for another digest pruned after
     300 s) and retention without a bound (receipts from an old host kept)."""
-    from vonk_control.inventory.items import record_preflight
-    from vonk_control.models.fleet import AgentNode
-    from vonk_control.runtime.preflight import latest_result
-
-    from .test_lifecycle_preflight import _setup
 
     sessions, _, clock, node_id, _, _ = _setup(tmp_path)
     a = request()

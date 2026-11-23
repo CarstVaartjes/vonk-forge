@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, event, func, select, text
+from sqlalchemy import create_engine, delete, event, func, inspect, select, text
 from sqlalchemy.orm import sessionmaker
 
 from vonk_agent_protocol.contracts import canonical_message
@@ -26,6 +26,7 @@ from vonk_control.fleet_events import (
     FleetEventDraft,
     FleetEventRecorder,
     FleetEventRepository,
+    _FleetStoredEventGap,
     _walk_payload,
 )
 from vonk_control.fleet_stream_contract import FleetChangeEvent
@@ -951,7 +952,6 @@ def test_outbox_preserves_current_values_without_field_presence(sessions) -> Non
 
 
 def test_projection_damage_preserves_source_then_capture_and_fresh_events(sessions):
-    from vonk_control.fleet_events import _FleetStoredEventGap
 
     FleetEventRecorder.install(sessions, clock=lambda: NOW)
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
@@ -975,7 +975,6 @@ def test_projection_damage_preserves_source_then_capture_and_fresh_events(sessio
 
 
 def test_missing_cursor_repairs_without_losing_source_or_next_event(sessions):
-    from sqlalchemy import delete
 
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
     with sessions.begin() as session:
@@ -993,7 +992,6 @@ def test_missing_cursor_repairs_without_losing_source_or_next_event(sessions):
 
 def test_recorder_watchers_reference_current_owner_fields() -> None:
     """Catches stale field registrations after moving a fact to another mapper."""
-    from sqlalchemy import inspect
 
     for owner, fields in FleetEventRecorder._tracked_fields.items():
         mapper = inspect(owner)

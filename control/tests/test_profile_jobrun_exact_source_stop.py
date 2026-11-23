@@ -30,7 +30,7 @@ from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )
-from .test_artifact_job_lifecycle import _issued_job
+from .test_artifact_job_recovery import _issued_job
 
 
 def _damage(sessions, artifact_job_id: str, damage: str) -> str:

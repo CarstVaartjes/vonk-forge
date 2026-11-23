@@ -8,6 +8,8 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from vonk_control.agent_api.common import AgentApiServices, EnrollmentGrantResponse
 from vonk_control.agent_upgrades.contract import (
@@ -18,9 +20,12 @@ from vonk_control.agent_upgrades.errors import AgentUpgradeConflict
 from vonk_control.auth import MUTATION_ROLES, Actor, CursorError
 from vonk_control.enrollment.contract import EnrollmentRevocationStatus
 from vonk_control.enrollment.types import EnrollmentDenied, RemoteRevocationUncertain
+from vonk_control.fleet_projection.common import FleetNode, FleetSnapshot
+from vonk_control.library.api import SelectorAmbiguityHTTPError
 from vonk_control.library.api import _error as library_error
+from vonk_control.library_projection.common import LibrarySelectorAmbiguous
 from vonk_control.operator_projection_api.contracts import FleetActionResponse
-from vonk_control.operator_projection_api.errors import _operator_error
+from vonk_control.operator_projection_api.errors import _node, _operator_error
 from vonk_control.operator_projection_api.routes import (
     install_operator_projection_routes,
 )
@@ -32,6 +37,7 @@ from vonk_control.operator_projection_api.wiring import build_fleet_operator_ser
 from vonk_control.request_fault import RequestFault
 
 from .test_agent_upgrades import PACKAGE_MODEL
+from .test_metrics import NODE, _fleet_snapshot
 
 _NODE = "spk_" + "a" * 32
 _GRANT = {
@@ -175,8 +181,6 @@ def test_production_service_builder_does_not_enable_missing_authorities() -> Non
 
 
 def test_fleet_locks_is_administrator_only_and_empty_on_sqlite() -> None:
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
 
     services = FleetOperatorServices(sessions=sessionmaker(create_engine("sqlite://")))
     admin = TestClient(_app(Actor("admin", "administrator"), services=services))
@@ -195,9 +199,6 @@ def test_fleet_locks_is_administrator_only_and_empty_on_sqlite() -> None:
 
 
 def test_fleet_node_detail_preserves_typed_live_observations() -> None:
-    from vonk_control.fleet_projection.common import FleetNode, FleetSnapshot
-
-    from .test_metrics import NODE, _fleet_snapshot
 
     snapshot = _fleet_snapshot()
 
@@ -219,10 +220,6 @@ def test_fleet_node_detail_preserves_typed_live_observations() -> None:
 
 
 def test_node_selection_returns_exact_ids_before_names_and_all_ambiguity_candidates():
-    from vonk_control.library_projection.common import LibrarySelectorAmbiguous
-    from vonk_control.operator_projection_api.errors import _node
-
-    from .test_metrics import _fleet_snapshot
 
     snapshot = _fleet_snapshot()
     template = snapshot.nodes[0]
@@ -240,7 +237,6 @@ def test_node_selection_returns_exact_ids_before_names_and_all_ambiguity_candida
     ids = [node.id for node in snapshot.nodes]
     assert error.value.candidates == tuple(ids)
     response = _operator_error(error.value)
-    from vonk_control.library.api import SelectorAmbiguityHTTPError
 
     assert isinstance(response, SelectorAmbiguityHTTPError)
     assert response.problem.candidates == ids
@@ -329,7 +325,6 @@ class _SnapshotProjection:
     """Serve the shared typed Fleet snapshot to the action routes."""
 
     def read(self) -> object:
-        from .test_metrics import _fleet_snapshot
 
         return _fleet_snapshot()
 
@@ -506,8 +501,6 @@ def test_a_refused_removal_names_the_enrollment_layer(
     Both are ``RuntimeError`` and used to reach the generic 503 tail, which
     blamed the projection for the enrollment authority's own decision.
     """
-
-    from .test_metrics import NODE
 
     app = _action_app(
         Actor("admin", "administrator"),

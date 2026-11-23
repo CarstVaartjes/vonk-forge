@@ -31,6 +31,7 @@ from cryptography.x509.oid import NameOID
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from tests.subprocess_environment import install_cli_wheel, isolated_environment
 from vonk_control.models.fleet import FleetProfileApplication
 
 from .test_profile_load_submission import _profile_api
@@ -261,7 +262,6 @@ def _build_installed_vonkctl(workspace: Path) -> Path:
     workspace.mkdir(parents=True, exist_ok=True)
     wheel_directory = workspace / "wheel"
     wheel_directory.mkdir()
-    from tests.subprocess_environment import isolated_environment
 
     environment = isolated_environment(
         workspace / "build-home",
@@ -292,7 +292,6 @@ def _build_installed_vonkctl(workspace: Path) -> Path:
     wheels = list(wheel_directory.glob("vonk_cluster_profiles-*-py3-none-any.whl"))
     assert len(wheels) == 1
     venv = workspace / "venv"
-    from tests.subprocess_environment import install_cli_wheel
 
     python = install_cli_wheel(uv, venv, wheels[0], environment)
     executable = venv / "bin" / "vonkctl"
@@ -328,7 +327,6 @@ def _process_environment(
     token.write_text(headers["Authorization"].removeprefix("Bearer "), encoding="utf-8")
     token.chmod(0o600)
     default_recipe_root = "/opt/vonk-forge-recipes"
-    from tests.subprocess_environment import isolated_environment
 
     return isolated_environment(
         Path(tmp_path) / "cli-home",

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from vonk_agent_protocol.installer_setup import NasInstallTemplate
+from vonk_agent_protocol.installer_setup import NasInstallTemplate, NasSecretPrompt
 from vonk_nas_setup import publication
 from vonk_nas_setup.environment import parse_environment
 from vonk_nas_setup.filesystem import ObservationUnavailable, atomic_replace
@@ -224,7 +224,6 @@ def test_interrupted_older_intent_replays_before_new_template_inputs(
     installed: Path, template: NasInstallTemplate
 ) -> None:
     """Catch applying a newer kit's secret inventory to an older complete journal."""
-    from vonk_agent_protocol.installer_setup import NasSecretPrompt
 
     members = publication.load_members(installed / "secrets", template)
     environment = parse_environment(installed / ".env")
@@ -265,7 +264,6 @@ def test_large_template_lineage_permits_new_inputs(
     installed: Path, template: NasInstallTemplate
 ) -> None:
     """Catch reusing a 256KiB secret-read cap for allowed 16MiB template lineage."""
-    from vonk_agent_protocol.installer_setup import NasSecretPrompt
 
     large = template.model_copy(
         update={"docker_compose_yaml": "#" + "a" * (300 * 1024) + "\nservices: {}\n"}

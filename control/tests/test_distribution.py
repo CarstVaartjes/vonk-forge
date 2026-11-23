@@ -1,17 +1,27 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from threading import Event
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import event
 
 from vonk_agent_protocol.distribution import DistributionAssignment, DistributionObject
+from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
+from vonk_agent_protocol.outcome import SecurityRefusalError
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 from vonk_control.distribution.filesystem import FilesystemObjectSource
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import CompositeObjectSource, MemoryObjectSource
-from vonk_control.distribution.types import DistributionError, DistributionUnknown
+from vonk_control.distribution.types import (
+    DistributionError,
+    DistributionRefused,
+    DistributionUnknown,
+)
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 
 from .agent_api_support import NODE_A, NODE_B, agent_headers
@@ -382,9 +392,6 @@ def test_stored_object_is_served_by_name_and_size_without_hashing(tmp_path) -> N
 def test_model_cache_manifest_publication_is_atomic_across_readers(tmp_path):
     # Break caught: describing one file exposes its authorization before the
     # rest of the set has been checked, even if a later descriptor is corrupt.
-    from concurrent.futures import ThreadPoolExecutor
-    from threading import Event
-    from types import SimpleNamespace
 
     descriptor_ready, finish = Event(), Event()
     path = tmp_path / "model.bin"
@@ -422,7 +429,6 @@ def test_model_cache_manifest_publication_is_atomic_across_readers(tmp_path):
 def test_authorization_is_decided_once_per_assignment_not_per_range(
     agent_system,
 ) -> None:
-    from sqlalchemy import event
 
     _client, services, _tokens, clock = agent_system
     source = MemoryObjectSource()
@@ -506,8 +512,6 @@ def test_denied_nas_source_cannot_fall_back_then_recovers_after_access_restored(
     agent_system, tmp_path, denial
 ):
     """Catch the composite source hiding an explicit NAS refusal with OCI bytes."""
-    from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
-    from vonk_agent_protocol.outcome import SecurityRefusalError
 
     client, services, _, clock = agent_system
     fallback = MemoryObjectSource()
@@ -564,8 +568,6 @@ def test_denied_nas_source_cannot_fall_back_then_recovers_after_access_restored(
 
 
 def test_secondary_source_refusal_is_not_masked_by_primary_cache_miss():
-    from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
-    from vonk_control.distribution.types import DistributionRefused
 
     class DeniedSource(MemoryObjectSource):
         def open_object(self, digest, expected_bytes):

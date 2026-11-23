@@ -16,6 +16,7 @@ from sqlalchemy import select as sa_select
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
@@ -30,6 +31,11 @@ from vonk_agent_protocol.host_helper import (
     host_helper_grant_signing_bytes,
 )
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
+from vonk_agent_protocol.package_upgrade import (
+    PackageActivationOutcome,
+    PackageActivationPhase,
+    PackageActivationReceipt,
+)
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import (
     RecipeStartPayload,
@@ -37,6 +43,10 @@ from vonk_agent_protocol.recipe_operations import (
 )
 from vonk_agent_protocol.state_machines import RunState
 from vonk_control.agent_api.authority import issue_host_runtime_grant
+from vonk_control.agent_api.authority import (
+    issue_host_runtime_grant as request_grant,
+)
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.compiled_artifact_contract import compile_artifact_contract
 from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,
@@ -1421,12 +1431,6 @@ def upgrade_payload():
 
 
 def test_activation_grant_is_bound_to_live_source_candidate_nonce_and_identity():
-    from vonk_agent_protocol.claims import AgentRuntimeIdentity
-    from vonk_agent_protocol.package_upgrade import (
-        PackageActivationOutcome,
-        PackageActivationPhase,
-        PackageActivationReceipt,
-    )
 
     payload = upgrade_payload()
     service = runtime_service(
@@ -1768,10 +1772,6 @@ def test_live_grant_waits_for_lease_renewal_then_succeeds(
     Catches the security refusal of a current, exact request whose ten-second
     grant straddles the next heartbeat. Renewal recovers without a new attempt.
     """
-    from vonk_control.agent_api.authority import (
-        issue_host_runtime_grant as request_grant,
-    )
-    from vonk_control.agent_jobs.service import AgentJobService
 
     service = runtime_service(engine=postgres_engine, cancel_requested=cancel_requested)
     now = NOW + timedelta(seconds=55)

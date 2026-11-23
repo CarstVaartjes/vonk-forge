@@ -5,8 +5,12 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 
-from .test_recipe_update_batches import update_env
+from vonk_control.models.fleet import User
+from vonk_control.models.jobs import Job
+
+from .test_recipe_update_batches import _start, update_env
 
 __all__ = ["update_env"]
 
@@ -79,12 +83,6 @@ def test_maintenance_cannot_add_an_original_author_permission_gate(
 
 @pytest.mark.parametrize("maintenance", ["batch-child", "profile-preparation-cancel"])
 def test_accepted_preparation_survives_author_removal(update_env, maintenance):
-    from sqlalchemy import select
-
-    from vonk_control.models.fleet import User
-    from vonk_control.models.jobs import Job
-
-    from .test_recipe_update_batches import _start
 
     # Use the real preparation producer/store/worker seam. The wrong
     # implementation reauthorizes an accepted child or its profile cleanup.

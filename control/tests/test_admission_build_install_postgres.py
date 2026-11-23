@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import event, select
+from sqlalchemy.orm import Session
 
+from vonk_agent_protocol.state_machines import ReservationState
 from vonk_control.install_admission.contracts import InstallAdmissionBusy
 from vonk_control.models.cache import RecipeBuild
-from vonk_control.models.execution import RecipeInstallation
+from vonk_control.models.execution import RecipeInstallation, ResourceReservation
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.recipe_builds.service import RecipeBuildService
@@ -182,12 +185,6 @@ def test_source_build_plan_writer_and_install_retry_share_builder_admission(
 def test_install_admission_ignores_a_row_lock_on_a_released_reservation(
     tmp_path, postgres_engine
 ) -> None:
-    from datetime import UTC, datetime
-
-    from sqlalchemy.orm import Session
-
-    from vonk_agent_protocol.state_machines import ReservationState
-    from vonk_control.models.execution import ResourceReservation
 
     sessions, operations, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine, model_artifact=True

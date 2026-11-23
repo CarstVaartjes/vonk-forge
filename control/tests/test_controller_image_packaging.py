@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import ssl
 import subprocess
 from pathlib import Path
 
+import certifi
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -106,9 +108,6 @@ def test_controller_image_build_fails_when_the_admin_web_mount_path_is_empty() -
 
 def test_python_tls_bundle_distrusts_compromised_emsign_root() -> None:
     # Wrong implementation: the old certifi lock still accepts chains to the compromised root.
-    import ssl
-
-    import certifi
 
     context = ssl.create_default_context(cafile=certifi.where())
     names = {

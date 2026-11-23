@@ -4,18 +4,35 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
+import sys
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from email.message import Message
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from urllib.error import URLError
 
 import pytest
+from fastapi import Depends, FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from cluster_profiles.cli import main
+from cluster_profiles.control_client.transfers import ControlClient
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.reason_codes.recipes import RecipeUpdateCode
+from vonk_control.auth import Actor
+from vonk_control.availability_production.scheduler import (
+    RecipeImageAvailabilityScheduler,
+)
+from vonk_control.lifecycle.recipe_update_batch import CANCEL_BUDGET
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
@@ -23,9 +40,15 @@ from vonk_control.models.fleet import User
 from vonk_control.models.jobs import Job
 from vonk_control.operation_api.contracts import OperationQuery
 from vonk_control.operation_api.responses import operation_detail_response
+from vonk_control.operations.contract import AvailabilityOperationFailure
 from vonk_control.operations.item_contract import operation_item
+from vonk_control.recipe_image_availability.api import (
+    install_recipe_operator_routes,
+)
 from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityError,
+    RecipeImageAvailabilityInvalid,
+    RecipeImageAvailabilityUnknown,
 )
 from vonk_control.recipe_image_availability.view_contract import (
     RecipeImageAvailabilityView,
@@ -33,6 +56,7 @@ from vonk_control.recipe_image_availability.view_contract import (
 from vonk_control.recipe_update_batches.contract import RecipeUpdateResponse
 from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
+from vonk_control.strict_json import serialize_json_value
 
 from .display_fixtures import reworded
 from .insert_collision_support import collide_inserts
@@ -178,11 +202,6 @@ def test_unknown_child_admission_retries_even_without_retryable_hint(
     update_env, monkeypatch
 ):
     """Unknown evidence cannot permanently fail an exact frozen child."""
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_agent_protocol.reason_codes.recipes import RecipeUpdateCode
-    from vonk_control.recipe_image_availability.contracts import (
-        RecipeImageAvailabilityUnknown,
-    )
 
     _, recipes, now, fresh = update_env
     service = fresh()
@@ -218,7 +237,6 @@ def test_unknown_child_admission_retries_even_without_retryable_hint(
 def test_changed_frozen_revision_is_observed_without_unverified_child_commit(
     update_env,
 ):
-    from vonk_control.lifecycle.recipe_update_batch import CANCEL_BUDGET
 
     sessions, recipes, now, fresh = update_env
     service = fresh()
@@ -280,8 +298,6 @@ def test_malformed_parent_does_not_block_other_eligible_updates(update_env):
 def test_restart_adopts_frozen_children_across_worker_process_death(
     update_env, crash_point
 ):
-    import subprocess
-    import sys
 
     sessions, recipes, now, fresh = update_env
     service = fresh()
@@ -425,7 +441,6 @@ def test_one_admission_failure_does_not_suppress_other_children(update_env):
     result = service.get_operator_operation(parent.id)
     assert result.state == LifecycleState.RUNNING
     assert service.get_operator_operation(child_id).state == LifecycleState.SUCCEEDED
-    from vonk_control.lifecycle.recipe_update_batch import CANCEL_BUDGET
 
     now[0] += CANCEL_BUDGET
     for _ in range(4):
@@ -601,19 +616,6 @@ def test_activity_projects_parent_with_common_ordering_and_state_filter(update_e
 def test_registered_update_route_cli_recovers_lost_receipt_and_follows_same_parent(
     update_env, tmp_path, capsys
 ):
-    from email.message import Message
-    from io import BytesIO
-    from urllib.error import URLError
-
-    from fastapi import Depends, FastAPI
-    from fastapi.testclient import TestClient
-
-    from cluster_profiles.cli import main
-    from cluster_profiles.control_client.transfers import ControlClient
-    from vonk_control.auth import Actor
-    from vonk_control.recipe_image_availability.api import (
-        install_recipe_operator_routes,
-    )
 
     _, recipes, now, fresh = update_env
     service = fresh()
@@ -1104,8 +1106,6 @@ def test_postgres_concurrent_parent_acceptance_reconciles_original_key(
 def test_postgres_takeover_fences_old_parent_admission_and_result(
     postgres_update_env, pause_after_commit
 ):
-    import threading
-    from concurrent.futures import ThreadPoolExecutor
 
     sessions, revision, _, now, fresh = postgres_update_env
     service = fresh()
@@ -1143,8 +1143,6 @@ def test_postgres_takeover_fences_old_parent_admission_and_result(
 def test_postgres_author_revocation_does_not_revoke_accepted_child_scope(
     postgres_update_env,
 ):
-    import threading
-    from concurrent.futures import ThreadPoolExecutor
 
     sessions, revision, _, now, fresh = postgres_update_env
     service = fresh()
@@ -1182,11 +1180,6 @@ def test_postgres_author_revocation_does_not_revoke_accepted_child_scope(
 def test_scheduler_keeps_image_slot_available_while_parent_admits_another_child(
     update_env,
 ):
-    import threading
-
-    from vonk_control.availability_production.scheduler import (
-        RecipeImageAvailabilityScheduler,
-    )
 
     _, recipes, _, fresh = update_env
     service = fresh()
@@ -1303,7 +1296,6 @@ def test_update_reconnects_by_exact_child_request_despite_damaged_row_pointer(
     update_env,
 ):
     """A stale child row pointer cannot veto an exact current content receipt."""
-    from vonk_control.strict_json import serialize_json_value
 
     sessions, recipes, _, fresh = update_env
     service = fresh()
@@ -1325,7 +1317,6 @@ def test_invalid_child_observation_repairs_then_has_a_bounded_end_and_fresh_admi
     update_env, monkeypatch
 ):
     """Invalid local receipts are retried; exhausted observers cannot hold new intent."""
-    from vonk_control.lifecycle.recipe_update_batch import CANCEL_BUDGET
 
     _, recipes, now, fresh = update_env
     service = fresh()
@@ -1376,9 +1367,6 @@ def test_unreadable_child_failure_reobserves_exact_request_across_restart(
     update_env, monkeypatch, missing_field, repair
 ):
     """Missing peer failure fields cannot adopt terminal state or duplicate work."""
-    from vonk_agent_protocol.reason_codes.recipes import RecipeUpdateCode
-    from vonk_control.lifecycle.recipe_update_batch import CANCEL_BUDGET
-    from vonk_control.operations.contract import AvailabilityOperationFailure
 
     sessions, recipes, now, fresh = update_env
     service = fresh()
@@ -1403,10 +1391,6 @@ def test_unreadable_child_failure_reobserves_exact_request_across_restart(
         delattr(damaged, missing_field)
 
     def unreadable(*_args, **_kwargs):
-        from vonk_control.recipe_image_availability.contracts import (
-            RecipeImageAvailabilityError,
-            RecipeImageAvailabilityInvalid,
-        )
 
         if missing_field == "peer-error":
             raise RecipeImageAvailabilityError(

@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from vonk_forge_contracts import document_sha256
 
+from vonk_control.model_cache import removal_execution
 from vonk_control.models.cache import (
     ModelCacheOperation,
     ModelCacheSet,
@@ -256,7 +257,6 @@ def test_touched_removal_yields_its_set_to_a_newer_download_of_it(
 def test_yielded_set_whose_request_is_cancelled_is_still_reclaimable(
     postgres_engine: Engine, tmp_path: Path, monkeypatch
 ) -> None:
-    from vonk_control.model_cache import removal_execution
 
     monkeypatch.setattr(
         removal_execution, "REMOVAL_BATCH_SECONDS", 0
@@ -322,7 +322,6 @@ def test_yielded_set_whose_request_is_cancelled_is_still_reclaimable(
 def test_object_kept_for_an_owner_that_is_then_cancelled_is_not_stranded(
     postgres_engine: Engine, tmp_path: Path, monkeypatch
 ) -> None:
-    from vonk_control.model_cache import removal_execution
 
     monkeypatch.setattr(removal_execution, "REMOVAL_BATCH_SECONDS", 0)
     service, sessions = _removal_service(postgres_engine, tmp_path)

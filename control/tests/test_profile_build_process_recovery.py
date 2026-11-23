@@ -70,8 +70,8 @@ from .run_switch_operations_support import (
     RecordingArtifactExecutor,
     _target_copy_evidence,
 )
+from .run_switch_operations_support import _finish as complete_preflight
 from .runtime_image_fixtures import place_test_image, remove_test_image
-from .test_lifecycle_preflight import _finish as complete_preflight
 from .test_profile_build_memory import _accepted_build_profile
 
 

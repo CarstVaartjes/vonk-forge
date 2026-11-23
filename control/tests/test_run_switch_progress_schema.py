@@ -10,6 +10,9 @@ import pytest
 
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReportedPhase
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_control.fleet_profile_contract.switch_state import (
+    FleetProfileSwitchAdapterResult,
+)
 from vonk_control.models.jobs import Job
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
@@ -25,6 +28,7 @@ from .run_switch_operations_support import (
     _request,
     _service,
 )
+from .test_run_switch_bookkeeping import _accepted
 
 
 def test_writer_normalizes_a_mutated_measurement_before_persistence() -> None:
@@ -127,9 +131,6 @@ def test_production_queue_receipts_share_the_persisted_progress_contract() -> No
     by the API; the final verification belongs to a succeeding Stop at index 2.
     This fixture does not invent the unavailable raw failed document.
     """
-    from vonk_control.fleet_profile_contract.switch_state import (
-        FleetProfileSwitchAdapterResult,
-    )
 
     result = FleetProfileSwitchAdapterResult.model_validate_json(
         (
@@ -150,7 +151,6 @@ def test_replan_replaces_measurements_owned_by_the_previous_transfer_budget(
     tmp_path: Path,
 ) -> None:
     """Catches a refreshed zero-copy plan retaining the old byte high-water mark."""
-    from .test_run_switch_bookkeeping import _accepted
 
     accepted = _accepted(tmp_path)
     with accepted.sessions.begin() as session:
@@ -174,7 +174,6 @@ def test_replan_replaces_measurements_owned_by_the_previous_transfer_budget(
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_unreadable_checkpoint_replans_from_current_observation(tmp_path: Path) -> None:
     """Catches unreadable checkpoints ending the accepted request instead of replanning."""
-    from .test_run_switch_bookkeeping import _accepted
 
     accepted = _accepted(tmp_path)
     with accepted.sessions.begin() as session:

@@ -4,17 +4,34 @@ from __future__ import annotations
 
 import ast
 import functools
+import hashlib
 import importlib.util
 import json
 import os
+import re
 import subprocess
+import sys
+import uuid
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from scripts.development_slice_client import Client
+from tests.acceptance import artifact_job_canary as job
+from tests.acceptance.controller_contract import ControllerContract
 from tests.spark_lifecycle_runner_support import _module
+from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
+from vonk_agent_protocol.recipe_operations import RecipeStartPayload
+from vonk_control.fleet_profile_contract.assessment import (
+    FleetProfileAdmissionDecision,
+)
+from vonk_control.library import contract
+from vonk_control.recipe_operations.start_payloads import (
+    RecipeStartPlacement,
+    build_recipe_start_payload,
+)
 
 
 @pytest.mark.parametrize("foreign_host", [False, True])
@@ -22,12 +39,6 @@ def test_lost_start_probe_binds_produced_placement_to_owned_interface(
     tmp_path: Path,
     foreign_host: bool,
 ) -> None:
-    from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
-    from vonk_agent_protocol.recipe_operations import RecipeStartPayload
-    from vonk_control.recipe_operations.start_payloads import (
-        RecipeStartPlacement,
-        build_recipe_start_payload,
-    )
 
     lifecycle = _module()
     address = "172.31.42.1"
@@ -114,9 +125,6 @@ def test_artifact_job_stub_writes_its_result_or_fails_with_stderr(
     tmp_path: Path,
 ) -> None:
     """The stub the job canary installs, run with the flags the job harness passes."""
-    import sys
-
-    from tests.acceptance import artifact_job_canary as job
 
     script = tmp_path / job.JOB_SCRIPT_NAME
     script.write_bytes(job.JOB_SCRIPT)
@@ -249,13 +257,6 @@ def test_artifact_job_canary_speaks_the_controller_contract() -> None:
     A scripted Controller answers with documents its own OpenAPI accepts; the
     canary must drive two jobs to success and one to failure with evidence.
     """
-    import hashlib
-    import re
-    import uuid
-
-    from scripts.development_slice_client import Client
-    from tests.acceptance import artifact_job_canary as job
-    from tests.acceptance.controller_contract import ControllerContract
 
     # The operator CLI's copy of the Controller contract.
     openapi = (
@@ -384,9 +385,6 @@ def test_preview_diagnostic_names_assignment_level_admission_blockers() -> None:
     pytest.importorskip(
         "fastapi", reason="Controller contract tests run in the control suite"
     )
-    from vonk_control.fleet_profile_contract.assessment import (
-        FleetProfileAdmissionDecision,
-    )
 
     lifecycle = _module()
 
@@ -450,7 +448,6 @@ def _canary_lane_under_withdrawal(
     lane stops at the profile load, the first step after the re-offered serve.
     """
     lifecycle = _module()
-    from vonk_control.library import contract
 
     sha = "a" * 64
     fixture = lifecycle.CanonicalCanaryFixture(
@@ -668,7 +665,6 @@ def test_an_unreadable_sync_status_never_replaces_the_canary_failure(
 
 
 def _calls(node, name: str) -> bool:
-    import ast
 
     return any(
         isinstance(call, ast.Call) and getattr(call.func, "attr", None) == name
@@ -682,7 +678,6 @@ def _serves_without_admission(tree) -> list[str]:
     The Controller previews again when it loads, so a serve that ends at the
     preview leaves a withdrawal between preview and load outside the retry.
     """
-    import ast
 
     functions = {
         node.name: node
@@ -713,7 +708,6 @@ def _serves_without_admission(tree) -> list[str]:
 
 
 def _unguarded_fixture_imports(node, enclosing: tuple = ()) -> list[str]:
-    import ast
 
     found: list[str] = []
     for child in ast.iter_child_nodes(node):
@@ -741,7 +735,6 @@ def test_every_fixture_import_in_the_lane_code_is_offered_once_more() -> None:
     candidate library is only imported: the carry that follows serves the
     workload that already runs.
     """
-    import ast
 
     root = Path(__file__).parent / "acceptance"
     unguarded: list[str] = []

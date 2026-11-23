@@ -10,7 +10,7 @@ from email.message import Message
 from typing import NoReturn, Self
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 
 from cluster_profiles import cli
@@ -187,7 +187,6 @@ def test_worker_observation_filters_only_on_the_indexed_completed_at(
     tmp_path, monkeypatch
 ) -> None:
     """The heartbeat table grows per process; step_started_at has no index."""
-    from sqlalchemy import event
 
     engine = create_engine(f"sqlite:///{tmp_path / 'sql.sqlite'}")
     Base.metadata.create_all(engine)

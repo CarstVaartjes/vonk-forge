@@ -5,19 +5,25 @@ from __future__ import annotations
 import json
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import select
 
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
 from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping
 
 from .fleet_profiles_support import _uuid
+from .recipe_operations_support import installed_recipe, started_recipe
 from .test_fleet_profile_recovery_current import _failed_profile
 
 
 def test_profile_edit_does_not_replace_accepted_retry_snapshot(
     tmp_path,
 ):
-    from vonk_control.models.fleet import FleetProfileApplication
-    from vonk_control.models.jobs import Job
 
     sessions, _lifecycle, service, profile, desired, original, _child, _nodes = (
         _failed_profile(tmp_path)
@@ -56,10 +62,6 @@ def test_profile_edit_does_not_replace_accepted_retry_snapshot(
 
 
 def test_retry_does_not_override_newer_direct_workload_intent(tmp_path):
-    from vonk_control.models.cache import RecipeBuild
-    from vonk_control.models.mapping import ClusterMapping
-
-    from .recipe_operations_support import installed_recipe, started_recipe
 
     sessions, lifecycle, service, _profile, _desired, original, _child, nodes = (
         _failed_profile(tmp_path)
@@ -82,7 +84,6 @@ def test_retry_does_not_override_newer_direct_workload_intent(tmp_path):
     )
     declined = service.retry(original.id, request_key=_uuid(801), actor="admin")
     assert declined.id == original.id
-    from vonk_control.models.execution import RecipeRun
 
     with sessions() as session:
         running = session.get(RecipeRun, direct.owner_id)
@@ -93,10 +94,6 @@ def test_retry_does_not_override_newer_direct_workload_intent(tmp_path):
 
 
 def test_terminal_application_contract_rejects_contradictory_receipts(tmp_path):
-
-    from pydantic import ValidationError
-
-    from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
 
     _sessions, _lifecycle, service, _profile, _desired, original, _child, _nodes = (
         _failed_profile(tmp_path)

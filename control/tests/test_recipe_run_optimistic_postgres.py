@@ -2,26 +2,60 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
+from unittest.mock import Mock
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.contracts import AgentResult
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    AgentResultState,
+    LifecycleState,
+    WaitOwnerKind,
+    WaitReason,
+)
+from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
+from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.state_machines import RouteState, RunState
+from vonk_control import agent_operation_states as aos
+from vonk_control.agent_jobs import results as ingress
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.db.startup import verify_schema_is_current
+from vonk_control.due_waits import DueWaitBackstop, WaitSource
 from vonk_control.failure_classification import disposition
 from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.models.routes import RoutePublicationOwner
 from vonk_control.optimistic import Applied, transition
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
+from vonk_control.recipe_routes import service as service_module
+from vonk_control.recipe_routes.shared import RecipeRouteNotReady
 from vonk_control.recovery_policy import ROUTE_RECOVERY, WAIT_STEP
 
+from .agent_fences import fenced_attempt
+from .agent_jobs_support import COMMIT, parent
 from .node_contacts import contact_row
-from .recipe_routes_support import NOW, MutableClock, setup
+from .recipe_operations_support import NOW as OPERATION_NOW
+from .recipe_operations_support import (
+    _issue_exact_stop_grant,
+    installed_recipe,
+    setup_services,
+    started_recipe,
+)
+from .recipe_routes_support import NOW, MutableClock, add_running_run, setup
+from .recipe_stop_fixtures import recipe_stop_payload
+from .runtime_identity_support import claim_agent
 
 
 def test_concurrent_run_decisions_replan_and_rollback_rank_effects(
@@ -129,7 +163,6 @@ def test_startup_adopts_version_and_preserves_running_run(
     postgres_engine, tmp_path
 ) -> None:
     """Catches destructive adoption or a nullable/defaultless column on restart."""
-    from vonk_control.db.startup import verify_schema_is_current
 
     routes, _publisher, _applied, run_id = setup(tmp_path, engine=postgres_engine)
     routes.publish_run(run_id)
@@ -199,9 +232,6 @@ def test_owner_contention_after_activation_keeps_completion_and_generation(
     postgres_engine, tmp_path, monkeypatch
 ) -> None:
     """Catches dropping the completion decision on the first NOWAIT refusal."""
-    from sqlalchemy.exc import OperationalError
-
-    from vonk_control.recipe_routes import service as service_module
 
     routes, runtime, applied, run_id = setup(tmp_path, engine=postgres_engine)
     activated = threading.Event()
@@ -260,7 +290,6 @@ def test_unwrapped_stale_writer_waits_without_spending_publication_budget(
     postgres_engine, tmp_path
 ) -> None:
     """Catches raw mapper conflicts outside transition being deterministic FAIL."""
-    from sqlalchemy.orm.exc import StaleDataError
 
     routes, _runtime, _applied, run_id = setup(tmp_path, engine=postgres_engine)
     worker = RecipeOperationWorker(routes.sessions, routes, clock=lambda: NOW)
@@ -292,11 +321,6 @@ def test_deadline_contention_is_visible_wait_and_heals_next_tick(
     postgres_engine, tmp_path, caplog
 ) -> None:
     """Catches a stale expiry reaching _advance's generic traceback handler."""
-    import json
-    import logging
-    from datetime import timedelta
-
-    from vonk_control.models.fleet import AgentNode
 
     routes, _publisher, _applied, run_id = setup(tmp_path, engine=postgres_engine)
     now = [NOW]
@@ -344,13 +368,6 @@ def test_publication_deferral_contention_continues_without_traceback(
     postgres_engine, tmp_path, monkeypatch, caplog, failure
 ) -> None:
     """Catches a stale deferral logged as a failure or starving the next run."""
-    import json
-    import logging
-
-    from vonk_agent_protocol.outcome import SecurityRefusalError
-    from vonk_control.recipe_routes.shared import RecipeRouteNotReady
-
-    from .recipe_routes_support import add_running_run
 
     routes, _publisher, _applied, run_id = setup(tmp_path, engine=postgres_engine)
     later = add_running_run(
@@ -411,35 +428,6 @@ def test_order_sweep_conflict_rolls_back_continues_and_resweeps(
     postgres_engine, tmp_path, monkeypatch, caplog
 ) -> None:
     """Catches raw receipt-consumer conflicts aborting a pass past its cursor."""
-    import json
-    import logging
-    from datetime import datetime, timedelta
-    from unittest.mock import Mock
-
-    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-    from vonk_agent_protocol.contracts import AgentResult
-    from vonk_agent_protocol.lifecycle_vocabulary import (
-        AgentResultState,
-        LifecycleState,
-    )
-    from vonk_agent_protocol.recipe_operations import RecipeStopResult
-    from vonk_control import agent_operation_states as aos
-    from vonk_control.agent_jobs import results as ingress
-    from vonk_control.agent_jobs.service import AgentJobService
-    from vonk_control.models.fleet import AgentNode
-    from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
-
-    from .agent_fences import fenced_attempt
-    from .agent_jobs_support import COMMIT, parent
-    from .recipe_operations_support import NOW as OPERATION_NOW
-    from .recipe_operations_support import (
-        _issue_exact_stop_grant,
-        installed_recipe,
-        setup_services,
-        started_recipe,
-    )
-    from .recipe_stop_fixtures import recipe_stop_payload
-    from .runtime_identity_support import claim_agent
 
     sessions, operations, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2, mapping_node_count=1, engine=postgres_engine
@@ -616,13 +604,6 @@ def test_due_route_recovery_contention_is_typed_wait_and_redrives(
     postgres_engine, tmp_path, caplog
 ) -> None:
     """Catches the backstop reporting normal redrive contention as a failure."""
-    import json
-    import logging
-    from datetime import datetime, timedelta
-
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitOwnerKind
-    from vonk_control.due_waits import DueWaitBackstop, WaitSource
-    from vonk_control.models.fleet import AgentNode
 
     routes, _publisher, _applied, run_id = setup(tmp_path, engine=postgres_engine)
     now = [NOW]
@@ -683,7 +664,6 @@ def test_due_route_recovery_contention_is_typed_wait_and_redrives(
         assert run is not None
         assert run.route_state == RouteState.WITHDRAWN
         assert run.state == RunState.RUNNING
-    from .recipe_routes_support import add_running_run
 
     fresh = add_running_run(
         routes, run_id, alias="qwen", route_state=RouteState.PENDING, identity=9

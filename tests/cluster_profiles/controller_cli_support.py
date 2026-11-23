@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import uuid
 from contextlib import redirect_stdout
 from importlib.resources import files
@@ -499,7 +500,6 @@ class _Prompt:
     """A terminal that answers the confirmation questions it is asked."""
 
     def __init__(self, monkeypatch, *answers: str) -> None:
-        import sys
 
         class Stderr(StringIO):
             def isatty(self) -> bool:

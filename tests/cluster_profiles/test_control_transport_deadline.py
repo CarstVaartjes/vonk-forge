@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import inspect
 import ipaddress
 import json
 import os
@@ -21,6 +22,7 @@ from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -30,9 +32,10 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 from test_control_client_requests import _artifact_job_response, _not_adopted
 
-from cluster_profiles import cli
+from cluster_profiles import cli, control_transport
 from cluster_profiles.control_client.errors import ControlTransportError
 from cluster_profiles.control_client.transfers import ControlClient
+from cluster_profiles.control_transport import HTTPSResponse
 from control.tests.test_observation_transfer import _large_snapshot
 from vonk_control.observation.transfer import (
     OBSERVATION_MEDIA_TYPE,
@@ -343,7 +346,6 @@ def test_cancelled_dns_cannot_delay_exit_or_send_a_late_request(
     https_peer, monkeypatch
 ):
     _, state = https_peer
-    from pathlib import Path
 
     original = socket.getaddrinfo
     release = threading.Event()
@@ -561,10 +563,6 @@ def _wedged_loop_response(monkeypatch, *, interrupt: bool):
     the next ``run`` fails with "Event loop stopped before Future completed".
     """
 
-    from types import SimpleNamespace
-
-    from cluster_profiles import control_transport
-
     async def refuses(_self) -> None:
         raise RuntimeError("Event loop stopped before Future completed.")
 
@@ -723,8 +721,6 @@ def test_continuous_valid_observation_progress_cannot_extend_attempt(
 def test_sigint_during_executor_shutdown_finishes_cleanup(monkeypatch):
     """Ctrl-C at coroutine creation must not abandon Runner shutdown."""
 
-    import inspect
-
     transport, request = _wedged_loop_response(monkeypatch, interrupt=False)
 
     async def closes(_self):
@@ -757,9 +753,6 @@ def test_sigint_during_executor_shutdown_finishes_cleanup(monkeypatch):
 
 def test_interrupt_before_runner_adopts_read_closes_coroutines(monkeypatch):
     """A signal before task creation cannot leak read or deadline coroutines."""
-    import inspect
-
-    from cluster_profiles.control_transport import HTTPSResponse
 
     response = object.__new__(HTTPSResponse)
     response._deadline = 1
@@ -800,7 +793,6 @@ def test_sigint_landing_as_the_runner_arms_is_still_a_ctrl_c(monkeypatch):
     A SIGINT in that window cancels the task but is forgotten, so the runner
     re-raises CancelledError. The transport must still report Ctrl-C (exit 130).
     """
-    from cluster_profiles.control_transport import HTTPSResponse
 
     real_signal = signal.signal
     delivered = []
@@ -829,7 +821,6 @@ def test_sigint_landing_as_the_runner_arms_is_still_a_ctrl_c(monkeypatch):
 
 def test_a_cancel_in_a_worker_thread_is_not_relabelled_a_ctrl_c():
     """Only a run that armed Runner's SIGINT handler may report Ctrl-C."""
-    from cluster_profiles.control_transport import HTTPSResponse
 
     outcome = []
 

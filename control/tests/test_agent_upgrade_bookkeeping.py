@@ -30,7 +30,11 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 
 from .node_contacts import contact_row
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    claim_agent,
+    inventory_items_fixture,
+)
 from .test_agent_upgrades import (  # noqa: F401  (the autouse fixture pins the rollback source)
     NODE_A,
     NODE_B,
@@ -221,7 +225,6 @@ def test_a_stored_package_or_source_that_cannot_be_used_skips_the_spark(
         outcome = upgrades._enqueue_node(session, _parent(payload), NODE_A)
 
     assert outcome is not None
-    from .runtime_identity_support import claim_agent
 
     assert claim_agent(upgrades._operations, NODE_A, "serial-a") is None
 
@@ -257,6 +260,5 @@ def test_a_rollout_with_a_damaged_source_skips_that_spark_and_finishes(
         assert set(require_mapping(stored.result["skipped"], "skipped nodes")) == {
             NODE_B
         }
-    from .runtime_identity_support import claim_agent
 
     assert claim_agent(operations, NODE_B, "serial-b") is None

@@ -13,10 +13,21 @@ import pytest
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.capability_reply import ControllerCapability
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.state_machines import RunState
+from vonk_control.capabilities import CapabilityRegistry
 from vonk_control.catalog.revision_collection import GRACE
+from vonk_control.distributed_recovery.common import (
+    _settle_unrecoverable,
+    release_inactive_run_claims_in_session,
+)
+from vonk_control.fleet_profile_contract.effects import (
+    FleetProfileInstallationEffect,
+)
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.jobs.documents import RecipeInstallParent
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ArtifactLifecycleGate
@@ -35,6 +46,7 @@ from vonk_control.models.fleet import (
     FleetProfileSelection,
 )
 from vonk_control.models.jobs import Job
+from vonk_control.recipe_operations.errors import RecipeRetryLater
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.storage_demands import (
     NAS_MODELS,
@@ -47,6 +59,7 @@ from vonk_control.unused_storage_collection.evidence import _Evidence
 from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
 from .model_cache_support import _artifact, _download
+from .recipe_operations_support import started_recipe
 from .test_catalog_revision_collection import NODE, NOW, Catalog
 from .unused_storage_collection_support import (
     _REAL_CLOCK,
@@ -72,8 +85,6 @@ from .unused_storage_collection_support import (
 
 def _queued_load(world: Catalog, installation_id: str) -> None:
     """A load that has been accepted and names this exact installation."""
-    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-    from vonk_control.jobs.documents import RecipeInstallParent
 
     with world.sessions.begin() as session:
         session.add(
@@ -113,9 +124,6 @@ def test_selected_application_releases_historical_installation_hold(
     ended: LifecycleState | None,
 ) -> None:
     """A selected snapshot must not retain obsolete effects after its owner ends."""
-    from vonk_control.fleet_profile_contract.effects import (
-        FleetProfileInstallationEffect,
-    )
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)
@@ -264,8 +272,6 @@ def test_unknown_removal_is_deferred_and_retried_without_blocking_other_items(
     world, monkeypatch
 ):
     """Catches treating temporary ownership uncertainty as a refusal or hot loop."""
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_control.recipe_operations.errors import RecipeRetryLater
 
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")
@@ -616,13 +622,6 @@ def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load
     removable "insufficient" and removed nothing while relief told the load
     "evicting", so the load waited out its budget."""
 
-    from vonk_control.distributed_recovery.common import (
-        _settle_unrecoverable,
-        release_inactive_run_claims_in_session,
-    )
-
-    from .recipe_operations_support import started_recipe
-
     sessions, service, installation_id, nodes = _real_lifecycle(tmp_path, nodes=sparks)
     run_id = started_recipe(
         sessions, service, installation_id, nodes, request_id=str(uuid.uuid4())
@@ -847,13 +846,6 @@ def test_a_failed_run_is_stopped_while_its_recipe_revision_row_is_held(
     without reading it, ended in a lock timeout pass after pass. Catches a Stop
     that waits on the revision row: it is queued while the row stays held."""
 
-    from vonk_control.distributed_recovery.common import (
-        _settle_unrecoverable,
-        release_inactive_run_claims_in_session,
-    )
-
-    from .recipe_operations_support import started_recipe
-
     sessions, service, installation_id, nodes = _real_lifecycle(
         tmp_path, engine=postgres_engine
     )
@@ -977,9 +969,6 @@ def test_an_unavailable_image_store_is_no_image_items_this_pass_then_heals(
 ) -> None:
     """Catches the guarded image store's unavailability escaping the sweep as a
     failure that ends the storage lane on the first flap of the cache mount."""
-
-    from vonk_agent_protocol.capability_reply import ControllerCapability
-    from vonk_control.capabilities import CapabilityRegistry
 
     path = _receipt(tmp_path, AN_IMAGE)
     now = [NOW]

@@ -15,18 +15,22 @@ from fastapi.testclient import TestClient
 from sqlalchemy import event, select
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+import vonk_control.library.assessment as assessment_module
 from cluster_profiles.cli import main
 from cluster_profiles.cli_render.dispatch import render_payload
 from cluster_profiles.control_client.transfers import ControlClient
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.reason_codes.catalog import LibraryAssessmentCode
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
+from vonk_control.library import assessment as library_assessment
 from vonk_control.library.api import install_library_routes
 from vonk_control.library.assessment import LibraryAssessment
+from vonk_control.library.contract import RecipeReadinessCheck
 from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.model_cache.artifacts import ArtifactSetManifest
 from vonk_control.model_cache.service import ModelCacheService
@@ -421,9 +425,6 @@ def test_a_library_pass_reads_failed_copies_once_for_every_candidate(
     assessed_library, monkeypatch
 ):
     """Catches one jobs scan per candidate placement."""
-    from vonk_agent_protocol.reason_codes.catalog import LibraryAssessmentCode
-    from vonk_control.library import assessment as library_assessment
-    from vonk_control.library.contract import RecipeReadinessCheck
 
     projection, sessions, _, service, _, _, _, _, _, _ = assessed_library
     _add_fitting_spark(sessions, "spk_" + "0" * 32)
@@ -490,7 +491,6 @@ def test_a_failing_group_does_not_turn_a_holder_search_blocked(
 def test_late_assessment_is_discarded_and_selector_scan_does_not_assess(
     assessed_library, monkeypatch
 ):
-    import vonk_control.library.assessment as assessment_module
 
     projection, _, _, service, app, *_ = assessed_library
     clock = [0.0]

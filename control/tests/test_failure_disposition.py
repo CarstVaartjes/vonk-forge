@@ -9,11 +9,14 @@ schedule it keeps), not by which helper decided it.
 from __future__ import annotations
 
 import errno
+import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import httpx2
 import pytest
+from sqlalchemy.orm.exc import StaleDataError
 
 from cluster_profiles import cli_states_generated as cli_words
 from cluster_profiles.control_client.common import observation_disposition
@@ -36,8 +39,13 @@ from vonk_agent_protocol.outcome import (
     SecurityRefusalError,
     UnknownOutcomeError,
 )
+from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
+from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
+from vonk_agent_protocol.state_machines import RouteState
 from vonk_control.admission_locking import AdmissionLockBusy
+from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleError
+from vonk_control.distribution.types import DistributionError, DistributionUnknown
 from vonk_control.failure_classification import disposition, is_definite
 from vonk_control.lifecycle.core import transition
 from vonk_control.lifecycle.types import (
@@ -52,15 +60,31 @@ from vonk_control.lifecycle.types import (
 )
 from vonk_control.model_cache.errors import (
     ModelCacheConflictInvalid,
+    ModelCacheDeletionFenceLost,
     ModelCacheNotFoundInvalid,
+    ModelCacheRemovalOwnerInvalid,
     ModelCacheResolutionInvalid,
     ModelCacheResolutionRefused,
     ModelCacheStorageInvalid,
     ModelCacheStorageRefused,
     ModelCacheStorageUnknown,
+    _reference_error_type,
 )
-from vonk_control.recovery_policy import RECOVERY, RecoveryPolicy, schedule
+from vonk_control.models.execution import RecipeRun
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
+from vonk_control.recovery_policy import (
+    RECOVERY,
+    ROUTE_RECOVERY,
+    RecoveryPolicy,
+    schedule,
+)
 
+from .added_line_guards.scans import rust_test_lines
+from .deterministic_retries import (
+    DISPOSITION_OWNERS,
+    scan_dispositions,
+    scan_rust_dispositions,
+)
 from .test_lifecycle_core import FakeAdapter
 
 NOW = datetime(2026, 10, 13, 12, tzinfo=UTC)
@@ -336,7 +360,6 @@ _GUARD_PATH = "control/src/vonk_control/example.py"
     ],
 )
 def test_the_guard_finds_a_hand_classified_retry(source: str) -> None:
-    from .deterministic_retries import scan_dispositions
 
     assert scan_dispositions(source, path=_GUARD_PATH)
 
@@ -358,13 +381,11 @@ def test_the_guard_finds_a_hand_classified_retry(source: str) -> None:
     ],
 )
 def test_the_guard_leaves_the_one_disposition_alone(source: str) -> None:
-    from .deterministic_retries import scan_dispositions
 
     assert not scan_dispositions(source, path=_GUARD_PATH)
 
 
 def test_the_owners_of_the_primitive_may_build_it() -> None:
-    from .deterministic_retries import DISPOSITION_OWNERS, scan_dispositions
 
     for owner in DISPOSITION_OWNERS:
         assert not scan_dispositions(
@@ -375,9 +396,6 @@ def test_the_owners_of_the_primitive_may_build_it() -> None:
 def test_no_failure_is_classified_outside_the_one_disposition() -> None:
     # Whole tree: every Controller and CLI site reports, counts and limits a
     # failure through ``disposition``/``Reported.failed``/``recovery_policy``.
-    from pathlib import Path
-
-    from .deterministic_retries import scan_dispositions
 
     root = Path(__file__).resolve().parents[2]
     found = [
@@ -398,8 +416,6 @@ def test_a_distribution_identity_mismatch_is_definite_and_unavailability_observe
     # manifest" was a transient unknown, so the same mismatch was re-planned
     # every minute forever.  A mismatch is definite (#1476 names it); a
     # manifest that cannot be read stays an observed unknown.
-    from vonk_agent_protocol.reason_codes.fleet import DistributionCode
-    from vonk_control.distribution.types import DistributionError, DistributionUnknown
 
     mismatch = DistributionError(
         DistributionCode.MODEL_SET_MISMATCH, "assignment model objects differ"
@@ -416,8 +432,6 @@ def test_a_distribution_identity_mismatch_is_definite_and_unavailability_observe
 def test_the_agent_reads_the_exported_status_table() -> None:
     # The Rust agent holds its status match to this export
     # (rust/crates/vonk-agent/tests/failure_disposition.rs).
-    import json
-    from pathlib import Path
 
     root = Path(__file__).resolve().parents[2]
     exported = json.loads(
@@ -442,7 +456,6 @@ def test_the_agent_reads_the_exported_status_table() -> None:
     ],
 )
 def test_the_agent_guard_finds_a_hand_read_status(line: str) -> None:
-    from .deterministic_retries import scan_rust_dispositions
 
     path = "rust/crates/vonk-agent/src/executor/heartbeat.rs"
     assert scan_rust_dispositions(line, path=path)
@@ -461,7 +474,6 @@ def test_the_agent_guard_finds_a_hand_read_status(line: str) -> None:
     ],
 )
 def test_the_agent_guard_finds_a_refusal_classified_outside_refusal(line: str) -> None:
-    from .deterministic_retries import scan_rust_dispositions
 
     path = "rust/crates/vonk-agent/src/executor/agent_loop.rs"
     assert scan_rust_dispositions(line, path=path)
@@ -475,10 +487,6 @@ def test_the_agent_guard_finds_a_refusal_classified_outside_refusal(line: str) -
 
 
 def test_no_agent_lane_reads_an_http_status_by_hand() -> None:
-    from pathlib import Path
-
-    from .added_line_guards.scans import rust_test_lines
-    from .deterministic_retries import scan_rust_dispositions
 
     root = Path(__file__).resolve().parents[2]
     found = [
@@ -550,13 +558,6 @@ def test_cache_reference_adapter_preserves_typed_unknowns_and_refusals(
     condition, expected
 ):
     """A non-retryable effect is not necessarily known; lost authority remains a refusal."""
-    from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
-    from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleError
-    from vonk_control.model_cache.errors import (
-        ModelCacheDeletionFenceLost,
-        ModelCacheRemovalOwnerInvalid,
-        _reference_error_type,
-    )
 
     if condition == "unknown_owner":
         error = ModelCacheRemovalOwnerInvalid(
@@ -582,12 +583,6 @@ def test_stale_writer_across_worker_passes_waits_then_publishes(
     tmp_path, monkeypatch
 ) -> None:
     """Catches a mapper conflict becoming terminal after six publication passes."""
-    from sqlalchemy.orm.exc import StaleDataError
-
-    from vonk_agent_protocol.state_machines import RouteState
-    from vonk_control.models.execution import RecipeRun
-    from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
-    from vonk_control.recovery_policy import ROUTE_RECOVERY
 
     from .recipe_routes_support import NOW, setup
 

@@ -13,18 +13,31 @@ import pytest
 from sqlalchemy import create_engine, select
 
 from cluster_profiles.control_client.schema import validate_control_document
-from vonk_agent_protocol.agent_words import ProfileChildJobKind
+from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, ResourceBlockerCode
+from vonk_agent_protocol.reason_codes.resources import StorageDemandCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import RunState
+from vonk_control.catalog.revision_collection import operation_tokens
+from vonk_control.distributed_recovery.common import (
+    _settle_unrecoverable,
+    release_inactive_run_claims_in_session,
+)
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
-from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_profile_contract.review import (
+    FleetProfileApplicationView,
+    FleetProfilePreview,
+)
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.install_admission.identity import _primary_model_sha256
+from vonk_control.jobs.documents import RunSwitchJobPayload
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import (
     InstallationNode,
@@ -33,7 +46,7 @@ from vonk_control.models.execution import (
     ResourceReservation,
     RunNode,
 )
-from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.fleet import FleetProfile, FleetProfileApplication
 from vonk_control.models.jobs import Job
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS
@@ -41,8 +54,10 @@ from vonk_control.recipe_operations.execution_contract import (
     parse_stored_installation_plan,
 )
 from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.phase_results import (
     RunSwitchInstallationVerifyResult,
+    RunSwitchRuntimeInstallResult,
 )
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 from vonk_control.run_switch_operations import resource_admission
@@ -51,6 +66,7 @@ from vonk_control.settings import (
     PROFILE_STALL_WINDOW_SECONDS,
     STORAGE_ADMISSION_RETRY_SECONDS,
 )
+from vonk_control.spark_store_retention import store_retention_request
 from vonk_control.storage_demands import (
     STORAGE_EVICTING,
     STORAGE_EVICTION_TIMED_OUT,
@@ -62,6 +78,7 @@ from vonk_control.storage_demands import (
 from vonk_control.unused_storage_collection.common import _STORAGE_WAIT_CODES
 from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
+from .non_blocking import assert_ended_without_blocking
 from .recipe_operations_support import installed_recipe, setup_services, started_recipe
 from .run_switch_operations_support import (
     MODEL_ARTIFACT,
@@ -71,6 +88,8 @@ from .run_switch_operations_support import (
     _request,
 )
 from .runtime_image_fixtures import copy_as_another_recipe
+from .test_fleet_profile_api import _client, _headers
+from .unused_storage_collection_support import _agents_succeed
 
 
 def _profile_service(sessions, lifecycle):
@@ -259,7 +278,6 @@ def test_child_retry_preserves_plan_and_per_node_relief_through_progress_api(
     measured disk loss after admission. Preview, worker/store and API must retain
     both, then the original load completes when the observations recover.
     """
-    from .test_fleet_profile_api import _client, _headers
 
     sessions, lifecycle, _, _, _, nodes = setup_services(
         tmp_path, nodes=2, engine=postgres_engine
@@ -720,7 +738,6 @@ def test_disk_only_review_submits_a_wait_that_reaches_spark_retention(
     tmp_path: Path, postgres_engine
 ) -> None:
     """Catches review refusing before an accepted owner can demand native eviction."""
-    from vonk_control.spark_store_retention import store_retention_request
 
     sessions, lifecycle, _, _, _, nodes = setup_services(
         tmp_path, engine=postgres_engine
@@ -863,7 +880,6 @@ def test_a_load_ends_with_typed_evidence_when_reclamation_cannot_make_room(
     tmp_path: Path,
 ) -> None:
     """Catches the real collector's fresh insufficient answer holding admission forever."""
-    from vonk_agent_protocol.reason_codes.resources import StorageDemandCode
 
     sessions, lifecycle, service, planner, waiting, nodes = _disk_starved_load(tmp_path)
     with sessions.begin() as session:
@@ -1294,9 +1310,6 @@ def test_a_review_plans_evicting_installations_a_saved_profile_points_to(
     still admits the plan, and the warning names the profile. Models stay on the
     NAS, so a later load reinstalls."""
 
-    from vonk_control.models.catalog import CatalogDocumentRevision
-    from vonk_control.models.fleet import FleetProfile
-
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
     installed_recipe(lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4()))
     _, planner = _profile_service(sessions, lifecycle)
@@ -1342,8 +1355,6 @@ def test_a_review_plans_evicting_installations_a_saved_profile_points_to(
 
 
 def _fresh_after_storage_ending(sessions, service, ended):
-
-    from .non_blocking import assert_ended_without_blocking
 
     assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
@@ -1406,13 +1417,6 @@ def test_a_started_load_waiting_for_disk_lets_a_failed_run_be_stopped_and_evicte
     issued while the disk is short, the waiting load renews its demand, the
     collector stops the other recipe's failed run and uninstalls it, and the
     load then installs."""
-
-    from vonk_control.distributed_recovery.common import (
-        _settle_unrecoverable,
-        release_inactive_run_claims_in_session,
-    )
-
-    from .unused_storage_collection_support import _agents_succeed
 
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=sparks
@@ -1511,13 +1515,6 @@ def test_live_copy_on_other_spark_does_not_prevent_eviction_and_load(
     Keep the old application live while the second load's actual worker waits,
     uninstalls through the lifecycle, observes disk and issues its install.
     """
-    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-    from vonk_control.fleet_profile_contract.applications import (
-        FleetProfileApplicationProgress,
-    )
-    from vonk_control.fleet_profile_contract.review import FleetProfilePreview
-
-    from .unused_storage_collection_support import _agents_succeed
 
     sessions, lifecycle, _, mapping, build, nodes = setup_services(
         tmp_path, nodes=2, mapping_node_count=1, engine=postgres_engine
@@ -1606,13 +1603,6 @@ def test_prepared_installation_is_referenced_before_its_child_is_issued(
     postgres_engine, tmp_path: Path
 ) -> None:
     """Catches replacing the node hold while ignoring the prepared result."""
-    from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
-    from vonk_control.catalog.revision_collection import operation_tokens
-    from vonk_control.jobs.documents import RunSwitchJobPayload
-    from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
-    from vonk_control.run_switch_contract.phase_results import (
-        RunSwitchRuntimeInstallResult,
-    )
 
     sessions, lifecycle, _, _, _, nodes = setup_services(
         tmp_path, engine=postgres_engine

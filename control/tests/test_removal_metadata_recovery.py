@@ -12,7 +12,8 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
@@ -23,15 +24,44 @@ from vonk_control.artifact_jobs.service import ArtifactJobService
 from vonk_control.model_cache import removal_execution
 from vonk_control.model_cache import states as model_cache_states
 from vonk_control.model_cache.contract import CacheManifest
-from vonk_control.models.cache import ModelCacheSet, ModelCacheSetArtifact
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import (
+    ArtifactLifecycleGate,
+    ModelCacheOperation,
+    ModelCacheSet,
+    ModelCacheSetArtifact,
+)
 from vonk_control.models.execution import ArtifactJobBlob
 from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability import (
+    removal_execution as image_execution,
+)
+from vonk_control.recipe_image_availability import removal_review as image_review
+from vonk_control.recipe_image_availability.view_contract import (
+    RecipeCacheRemovalStatus,
+    RecipeImageAvailabilityView,
+)
+from vonk_control.runtime_image_preparation.storage import (
+    FilesystemRuntimeImageStorage,
+)
 
 from .artifact_jobs_support import running_artifact_service
 from .model_cache_support import _download, cache  # noqa: F401
 from .non_blocking import assert_ended_without_blocking
+from .recipe_image_availability_support import (
+    ARCHIVE,
+    ARCHIVE_SHA,
+    _add_head,
+    _add_revision,
+    _recipe,
+    _reference_receipt,
+    _runtime,
+    _service,
+)
+from .recipe_removal_review_support import remove_after_review
 from .removal_settle import advance_until_ended, release_ended_gates
-from .test_model_cache_lifecycle import _clock_at, _queue
+from .runtime_image_fixtures import place_test_image
+from .test_model_cache_lifecycle import MODEL, _clock_at, _queue
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -195,34 +225,6 @@ def test_recipe_scan_unknown_is_accepted_and_never_blocks_fresh_preparation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, restored: bool
 ):
     """Catches refusing removal before durable intent or unlinking on an unknown scan."""
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    from vonk_control.model_primitives import Base
-    from vonk_control.recipe_image_availability import (
-        removal_execution as image_execution,
-    )
-    from vonk_control.recipe_image_availability import removal_review as image_review
-    from vonk_control.recipe_image_availability.view_contract import (
-        RecipeCacheRemovalStatus,
-        RecipeImageAvailabilityView,
-    )
-    from vonk_control.runtime_image_preparation.storage import (
-        FilesystemRuntimeImageStorage,
-    )
-
-    from .recipe_image_availability_support import (
-        ARCHIVE,
-        ARCHIVE_SHA,
-        _add_head,
-        _add_revision,
-        _recipe,
-        _reference_receipt,
-        _runtime,
-        _service,
-    )
-    from .recipe_removal_review_support import remove_after_review
-    from .runtime_image_fixtures import place_test_image
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -307,7 +309,6 @@ def test_logical_removal_discovers_missing_index_only_after_admission(
     cache, tmp_path: Path
 ):
     """Catches an absent set index producing a successful empty removal."""
-    from .test_model_cache_lifecycle import MODEL
 
     service, sessions = cache
     cached, artifact = _queue(service, tmp_path, str(uuid.uuid4()))
@@ -345,7 +346,6 @@ def test_newer_preparation_wins_before_pending_scope_acquires_gates(
     cache, tmp_path: Path
 ):
     """Catches pending discovery deleting bytes a newer request already reused."""
-    from .test_model_cache_lifecycle import MODEL
 
     service, sessions = cache
     now = _clock_at(service)
@@ -388,7 +388,6 @@ def test_newer_preparation_wins_before_pending_scope_acquires_gates(
 
 def test_explicit_empty_scope_cannot_expand_to_logical_content(cache, tmp_path: Path):
     """Catches scope reconstruction broadening an explicitly empty effect."""
-    from .test_model_cache_lifecycle import MODEL
 
     service, sessions = cache
     cached, artifact = _queue(service, tmp_path, str(uuid.uuid4()))
@@ -479,7 +478,6 @@ def test_scope_observation_recovers_same_removal_without_inventing_objects(
     cache, tmp_path: Path
 ):
     """Catches damaged scope deleting guessed objects or poisoning a new request."""
-    from vonk_control.models.cache import ModelCacheOperation
 
     service, sessions = cache
     accepted, _ = _queue(service, tmp_path, str(uuid.uuid4()))
@@ -537,26 +535,6 @@ def test_recipe_receipt_observation_is_request_owned(
     tmp_path: Path, damage: str, repair: bool
 ):
     """Catches receipt admission veto, unverified deletion and permanently owned bytes."""
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    from vonk_control.model_primitives import Base
-    from vonk_control.models.cache import ArtifactLifecycleGate
-    from vonk_control.runtime_image_preparation.storage import (
-        FilesystemRuntimeImageStorage,
-    )
-
-    from .recipe_image_availability_support import (
-        ARCHIVE,
-        ARCHIVE_SHA,
-        _add_head,
-        _add_revision,
-        _recipe,
-        _reference_receipt,
-        _runtime,
-        _service,
-    )
-    from .runtime_image_fixtures import place_test_image
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -643,7 +621,6 @@ def test_exact_scope_owner_repair_is_independent_of_inventory_cursor(
     cache, tmp_path: Path, owner_damage: str
 ):
     """Catches repairing only the first global batch and retaining the exact old fence."""
-    from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheOperation
 
     service, sessions = cache
     accepted, _ = _queue(service, tmp_path, str(uuid.uuid4()))

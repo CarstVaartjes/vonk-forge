@@ -1,16 +1,30 @@
 """Recovery consumes effects and explicit authority, never diagnostic prose."""
 
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
-from sqlalchemy.exc import SQLAlchemyError
+from psycopg.errors import AdminShutdown, DeadlockDetected, LockNotAvailable
+from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError, SQLAlchemyError
+from sqlalchemy.exc import TimeoutError as PoolTimeout
+from sqlalchemy.orm.exc import StaleDataError
 
+from vonk_agent_protocol.contracts import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     SecurityRefusalReason,
+    WaitReason,
 )
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 from vonk_control.categorized_errors import SecurityRefused
+from vonk_control.failure_classification import disposition, error_code, wait_reason
+from vonk_control.fleet_profiles.error_summary import _error_summary
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 
+from .run_switch_operations_support import _request
 from .test_run_switch_background_image import (
     _background_image_switch,
     _drive_until,
@@ -57,15 +71,6 @@ def test_transport_diagnostics_do_not_prevent_recovery(
 def test_explicit_authority_denial_has_no_start_effect_and_allows_fresh_admission(
     tmp_path: Path,
 ) -> None:
-    from uuid import uuid4
-
-    from sqlalchemy import select
-
-    from vonk_agent_protocol.contracts import AgentOperation
-    from vonk_control.models.jobs import Job
-    from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
-
-    from .run_switch_operations_support import _request
 
     outer = ValueError("wrapped peer denial")
     outer.__cause__ = SecurityRefused(
@@ -116,14 +121,6 @@ def test_explicit_authority_denial_has_no_start_effect_and_allows_fresh_admissio
 )
 def test_wait_reason_preserves_contention_and_typed_evidence(cause, wrapped):
     """Catches a wait logged without a reason, or contention as unavailability."""
-    from psycopg.errors import AdminShutdown, DeadlockDetected, LockNotAvailable
-    from sqlalchemy.exc import OperationalError
-    from sqlalchemy.exc import TimeoutError as PoolTimeout
-    from sqlalchemy.orm.exc import StaleDataError
-
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_agent_protocol.outcome import UnknownOutcomeError
-    from vonk_control.failure_classification import wait_reason
 
     expected: WaitReason | None = WaitReason.OBSERVATION_UNAVAILABLE
     if cause == "version":
@@ -161,7 +158,6 @@ class _CodedError(Exception):
 
 
 def _database_errors() -> list[SQLAlchemyError]:
-    from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 
     return [
         OperationalError("select 1", {}, Exception("connection refused")),
@@ -175,9 +171,6 @@ def test_database_errors_never_leak_sqlalchemy_documentation_codes() -> None:
     """Catches `run-switch.phase-retry: e3q8`: SQLAlchemy's `.code` anchor
     surfaced as the reason. Every code classification produces from a database
     error is a contract reason, never the library's own word."""
-    from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
-    from vonk_control.failure_classification import disposition, error_code
-    from vonk_control.fleet_profiles.error_summary import _error_summary
 
     for error in _database_errors():
         assert getattr(error, "code", None), "SQLAlchemy errors carry a docs code"
@@ -195,8 +188,6 @@ def test_database_errors_never_leak_sqlalchemy_documentation_codes() -> None:
 
 
 def test_generic_typed_code_is_preserved() -> None:
-    from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
-    from vonk_control.failure_classification import error_code
 
     typed = ControllerErrorCode.TIMEOUT.value
     assert error_code(_CodedError(typed)) == typed

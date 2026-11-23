@@ -14,6 +14,8 @@ from typing import Any
 import pytest
 import yaml
 
+from vonk_nas_setup.compose import resolve_compose
+
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "deploy/compose/compose.yaml"
 DIGEST = "a" * 64
@@ -321,7 +323,6 @@ def test_a_hermes_enabled_install_upgrades_to_a_compose_without_hermes(
     tmp_path: Path,
 ) -> None:
     """Catches a stale `hermes` profile or secret still shaping the upgraded bundle."""
-    from vonk_nas_setup.compose import resolve_compose
 
     output = tmp_path / "docker-compose.yaml"
     assert _run_renderer(output).returncode == 0

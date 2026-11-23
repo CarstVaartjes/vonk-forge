@@ -33,6 +33,7 @@ from vonk_control.gateway.route_runtime import (
 from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.model_primitives import Base
 from vonk_control.models.execution import (
+    STOPPABLE_RUN_STATES,
     RecipeRun,
     RunNode,
 )
@@ -577,8 +578,6 @@ def test_every_failed_start_leaves_what_it_launched_stoppable_or_queues_its_stop
     Sparks by then, the run is never left ``failed`` (which nothing stops): a stop
     is queued (under the intent that owns the Sparks now, never taking a new one),
     or, with no single owner, the run stays stoppable for its owner."""
-
-    from vonk_control.models.execution import STOPPABLE_RUN_STATES
 
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2

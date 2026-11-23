@@ -5,11 +5,13 @@ import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from alembic.script import ScriptDirectory
 from sqlalchemy import (
     ForeignKeyConstraint,
@@ -20,14 +22,18 @@ from sqlalchemy import (
     text,
     update,
 )
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control.db.schema_helpers import SchemaDriftKind
 from vonk_control.db.startup import initialize_database, verify_schema_is_current
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
+from vonk_control.models.operations import ArtifactDistributionAssignment
 from vonk_control.models.routes import RoutePublicationOwner
 from vonk_control.models.telemetry import (
     NodeInventoryResourceSnapshot,
@@ -35,6 +41,7 @@ from vonk_control.models.telemetry import (
 )
 
 from .telemetry_support import telemetry_with_resources
+from .test_distribution import _assignment
 
 ROOT = Path(__file__).resolve().parents[1]
 LEGACY_TABLES = {
@@ -48,14 +55,6 @@ def test_startup_retires_unproven_distribution_identity_and_allows_redistributio
     postgres_engine,
 ) -> None:
     """NULL identity must not block tightening or poison the next exact grant."""
-    from uuid import uuid4
-
-    from vonk_control.distribution.service import DistributionService
-    from vonk_control.distribution.sources import MemoryObjectSource
-    from vonk_control.models.fleet import AgentNode
-    from vonk_control.models.operations import ArtifactDistributionAssignment
-
-    from .test_distribution import _assignment
 
     database_url = postgres_engine.url.render_as_string(hide_password=False)
     _initialize_source_checkout(database_url)
@@ -904,8 +903,6 @@ def test_unaddable_missing_column_fails_reconciliation_instead_of_skipping(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Catches booting without a column whose add timed out on a lock."""
-    from alembic.operations import Operations
-    from sqlalchemy.exc import OperationalError
 
     class LockTimeout(Exception):
         sqlstate = "55P03"
@@ -933,7 +930,6 @@ def test_missing_column_left_after_reconciliation_fails_startup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Catches a column add that silently did nothing and let startup finish."""
-    from alembic.operations import Operations
 
     url = f"sqlite:///{tmp_path / 'net-column.sqlite'}"
     _upgrade(url)

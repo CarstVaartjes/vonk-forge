@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ast
+import posixpath
 import subprocess
 import zipfile
 from pathlib import Path
@@ -174,8 +176,6 @@ def test_every_wheel_in_the_docker_copy_is_scanned(tmp_path: Path) -> None:
 
 
 def test_scripts_copied_into_the_controller_image_bring_their_sibling_modules() -> None:
-    import ast
-    import posixpath
 
     copied: dict[str, set[str]] = {}
     for line in (ROOT / "control/Dockerfile").read_text().splitlines():

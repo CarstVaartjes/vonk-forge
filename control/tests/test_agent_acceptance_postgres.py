@@ -13,19 +13,38 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import event, func, select, update
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.contracts import AgentClaim, AgentProgress, AgentResult
+from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.contracts import (
+    AgentClaim,
+    AgentProgress,
+    AgentResult,
+    canonical_message,
+)
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.inventory import InventoryRequest
-from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState
+from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
+from vonk_control import agent_acceptance
+from vonk_control.agent_api.common import AgentApiServices
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.api.application import create_app
-from vonk_control.models.execution import RunNode
-from vonk_control.models.fleet import AgentCertificate
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
+from vonk_control.artifact_jobs.service import ArtifactJobService
+from vonk_control.auth import TokenCodec
+from vonk_control.browser_auth import BrowserAuthService
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import ArtifactJobFile, InstallationNode, RunNode
+from vonk_control.models.fleet import AgentCertificate, LoginSession, User
 from vonk_control.models.operations import AgentOperationAttempt
 from vonk_control.models.telemetry import NodeInventorySnapshot, NodeTelemetrySample
 from vonk_control.operator_receipt_contract import AcceptanceReceipt, ReceiptCode
+from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
+from vonk_control.source_bundles import SourceBundleStore
 
 from .agent_api_support import (
     NODE_A,
@@ -40,6 +59,9 @@ from .agent_api_support import (
     telemetry_payload,
     valid_enrollment_body,
 )
+from .artifact_jobs_support import running_artifact_service, submitted_artifact_job
+from .stored_documents_support import valid_policy_report
+from .test_catalog_revision_collection import Catalog
 from .test_operator_acceptance_postgres import DropFirstResponse
 
 
@@ -63,8 +85,6 @@ def _inventory(clock):
 
 
 def _run_observation(services, engine, clock):
-
-    from .test_catalog_revision_collection import Catalog
 
     world = Catalog(engine)
     _, run_id = world.workload(
@@ -303,8 +323,6 @@ def test_large_inventory_and_damaged_history_do_not_block_exact_ingress(
     client, services, codec, clock = make_agent_system(tmp_path, engine=postgres_engine)
     headers = agent_headers(NODE_A, "serial-a")
     body = _inventory(clock)
-    from vonk_agent_protocol.contracts import canonical_message
-    from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
     item_bytes = len(canonical_message({"sha256": "f" * 64, "bytes": 1024**2})) + 1
     # Exercise most of the shared transport budget; the Rust producer drops
@@ -392,11 +410,6 @@ def test_image_upload_commits_binding_after_publication_and_recovers(
     tmp_path, postgres_engine
 ):
     """Catches a successful PUT with bytes published but no committed build identity."""
-    from vonk_agent_protocol.agent_words import ProgressPhase
-    from vonk_control.models.cache import RecipeBuild
-
-    from .stored_documents_support import valid_policy_report
-    from .test_catalog_revision_collection import Catalog
 
     client, services, codec, clock = make_agent_system(tmp_path, engine=postgres_engine)
     world = Catalog(postgres_engine)
@@ -460,12 +473,6 @@ def test_image_upload_commits_binding_after_publication_and_recovers(
 
 def test_lost_login_response_requires_fresh_authentication(tmp_path, postgres_engine):
     """Catches applying generic request replay to credential issuance at the security edge."""
-    from sqlalchemy.orm import sessionmaker
-
-    from vonk_control.auth import TokenCodec
-    from vonk_control.browser_auth import BrowserAuthService
-    from vonk_control.model_primitives import Base
-    from vonk_control.models.fleet import LoginSession, User
 
     from .test_auth_api import ADMIN_PASSWORD, ADMIN_VERIFIER, NOW, ORIGIN
 
@@ -514,9 +521,6 @@ def test_inventory_receipt_binds_measurements_and_stale_replay_cannot_rewind_siz
     tmp_path, postgres_engine
 ):
     """Catches snapshot/size dual commits and accepting changed bytes under the same report identity."""
-    from vonk_control.models.execution import InstallationNode
-
-    from .test_catalog_revision_collection import Catalog
 
     client, services, codec, clock = make_agent_system(tmp_path, engine=postgres_engine)
     world = Catalog(postgres_engine)
@@ -569,15 +573,7 @@ def test_artifact_output_commit_fault_and_lost_response_reuse_attachment(
     tmp_path, postgres_engine, monkeypatch
 ):
     """Catches acknowledging a published blob before its exact job/file attachment commits."""
-    from vonk_control.agent_api.common import AgentApiServices
-    from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
-    from vonk_control.artifact_jobs.service import ArtifactJobService
-    from vonk_control.auth import TokenCodec
-    from vonk_control.models.execution import ArtifactJobFile
-    from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
-    from vonk_control.source_bundles import SourceBundleStore
 
-    from .artifact_jobs_support import running_artifact_service, submitted_artifact_job
     from .recipe_operations_support import NOW
 
     sessions, operations, _queue, artifacts, run_id, node_id = running_artifact_service(
@@ -705,9 +701,6 @@ def test_unknown_receipt_read_after_commit_preserves_owner_and_retry(
     tmp_path, postgres_engine, monkeypatch
 ):
     """Catches an unknown owner read being converted to a terminal internal-error response."""
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_agent_protocol.outcome import UnknownOutcomeError
-    from vonk_control import agent_acceptance
 
     client, services, _, clock = make_agent_system(tmp_path, engine=postgres_engine)
     headers = agent_headers(NODE_A, "serial-a")

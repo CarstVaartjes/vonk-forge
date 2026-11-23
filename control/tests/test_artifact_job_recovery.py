@@ -52,6 +52,7 @@ from vonk_control.terminal_history_collection import TerminalHistoryCollector
 
 from .agent_fences import fenced_operation
 from .artifact_jobs_support import (
+    MutableClock,
     artifact_create_request,
     create_artifact_job,
     finalized_artifact_job,
@@ -59,9 +60,8 @@ from .artifact_jobs_support import (
     submitted_artifact_job,
 )
 from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
-from .recipe_operations_support import _issue_exact_stop_grant
+from .recipe_operations_support import NOW, _issue_exact_stop_grant
 from .runtime_identity_support import claim_agent
-from .test_artifact_job_lifecycle import _issued_job
 
 
 @pytest.mark.parametrize("exhausted", [False, True])
@@ -498,9 +498,6 @@ def test_cancelled_job_evidence_survives_uncertain_stop_and_history_collection(
     exact cleanup and the artifact job's full terminal retention grace.
     """
 
-    from .artifact_jobs_support import MutableClock
-    from .recipe_operations_support import NOW
-
     sessions, operations, _queue, service, run_id, node_id = running_artifact_service(
         tmp_path, engine=postgres_engine
     )
@@ -667,3 +664,25 @@ def test_cancelled_job_evidence_survives_uncertain_stop_and_history_collection(
             )
             is not None
         )
+
+
+def _issued_job(tmp_path, suffix: int):
+    """A submitted job whose order a Spark claimed (so its effect may exist)."""
+
+    sessions, operations, _queue, service, run_id, node_id = running_artifact_service(
+        tmp_path
+    )
+    clock = MutableClock(NOW)
+    agent_jobs = AgentJobService(sessions, clock=clock)
+
+    def consume(session, operation, attempt, message) -> None:
+        service.consume_agent_result(session, operation, attempt, message)
+        operations.consume_agent_result(session, operation, attempt, message)
+
+    agent_jobs.set_result_consumer(consume)
+    operations._agent_jobs = agent_jobs
+    assert claim_agent(agent_jobs, node_id, "serial-0") is None
+    submitted = submitted_artifact_job(service, run_id, request_suffix=suffix)
+    claim = claim_agent(agent_jobs, node_id, "serial-0")
+    assert claim is not None
+    return sessions, operations, service, agent_jobs, clock, submitted, claim, run_id

@@ -8,6 +8,7 @@ import multiprocessing
 import os
 import uuid
 from collections import Counter
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from threading import Event
@@ -23,7 +24,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_control.categorized_errors import BookkeepingUnknown
 from vonk_control.fleet_profiles import read_observation as profile_read_observation
-from vonk_control.fleet_profiles.read_observation import profile_read
+from vonk_control.fleet_profiles.read_observation import observe_storage, profile_read
 from vonk_control.model_cache import observation
 from vonk_control.model_cache.artifacts import ArtifactSetManifest
 from vonk_control.model_cache.contract import (
@@ -418,7 +419,6 @@ def test_restart_resumes_checkpoint_without_reobserving_completed_objects(
 
 def test_nested_observation_outlives_request_deadline(monkeypatch, frozen_pass_budgets):
     """Fails on main: nested probes stop at the expired parent request budget."""
-    from vonk_control.fleet_profiles.read_observation import observe_storage
 
     entered, release, finished = Event(), Event(), Event()
     calls = []
@@ -461,7 +461,6 @@ def test_nested_observation_outlives_request_deadline(monkeypatch, frozen_pass_b
 
 def test_slow_set_does_not_block_unrelated_content(observed_cache, monkeypatch):
     """Catches one stalled set monopolizing all background observation slots."""
-    from dataclasses import replace
 
     cache, _sessions, manifest, _now = observed_cache
     slow = replace(manifest, artifacts=(manifest.artifacts[0],))
@@ -559,7 +558,6 @@ def test_model_only_checkpoint_reloads_required_null_fields(
     observed_cache, monkeypatch
 ):
     """Catches a writer dropping required nulls so another process starts over."""
-    from dataclasses import replace
 
     cache, sessions, manifest, now = observed_cache
     model_only = replace(

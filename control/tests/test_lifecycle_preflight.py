@@ -1,25 +1,39 @@
+import ast
 import uuid
+from dataclasses import replace
 from datetime import timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import delete, select
 
+import vonk_control
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
+from vonk_agent_protocol.host_helper import (
+    ContainerRuntimeAction,
+    ExecuteContainerRuntimeRequestOperation,
+    host_helper_grant_signing_bytes,
+)
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     ProgressAlarmCode,
     WaitReason,
 )
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
-from vonk_agent_protocol.runtime_preflight import (
-    RuntimePreflightRequest,
-    RuntimePreflightResult,
-)
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_jobs.waits import refresh_queue_waits
-from vonk_control.inventory.items import inventory_items, record_preflight
+from vonk_control.host_helper_authority import (
+    HostHelperGrantIssuer,
+    HostRuntimeAuthorityService,
+)
+from vonk_control.inventory.items import inventory_items
+from vonk_control.lifecycle.run_switch import RunSwitchAdapter
+from vonk_control.lifecycle.types import State
 from vonk_control.lifecycle_preflight import (
     LifecyclePreflight,
     LifecyclePreflightCheckpoint,
@@ -30,15 +44,24 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.operations.blockers import BlockingOperation, make_blocker
 from vonk_control.persisted_waits import read_wait
-from vonk_control.runtime.preflight import mandatory_capabilities
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 
 from .agent_fences import fenced_operation
-from .recipe_operations_support import NOW, setup_services
-from .runtime_identity_support import set_inventory_fingerprint
-
-
-def _pending(checkpoint):
-    return next(iter(checkpoint.pending_jobs.values()), None)
+from .recipe_operations_support import NOW, installed_recipe, setup_services
+from .run_switch_operations_support import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
+    _finish,
+    _pending,
+    _request,
+    _service,
+)
+from .runtime_identity_support import (
+    PACKAGED_RUNTIME_IDENTITY,
+    claim_agent,
+    set_inventory_fingerprint,
+)
 
 
 def _clear(sessions):
@@ -63,55 +86,6 @@ def _clear(sessions):
             )
             session.delete(operation)
             session.delete(session.get(Job, operation.parent_job_id))
-
-
-def _finish(
-    sessions, checkpoint, now, *, failed=None, fingerprint="a" * 64, observed_at=None
-):
-    with sessions.begin() as session:
-        job = session.get(Job, _pending(checkpoint))
-        operation = session.scalar(
-            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
-        )
-        request = RuntimePreflightRequest.model_validate(operation.payload)
-        job.state = operation.state = "succeeded"
-        operation.current_attempt = 1
-        operation.updated_at = now
-        result = RuntimePreflightResult.model_validate_json(
-            canonical_message(
-                {
-                    "fingerprint": fingerprint,
-                    "observed_at": int((observed_at or now).timestamp()),
-                    "findings": [
-                        {
-                            "capability": capability,
-                            "status": "failed" if capability == failed else "passed",
-                            "code": "probe_failed"
-                            if capability == failed
-                            else "available",
-                        }
-                        for capability in mandatory_capabilities(request)
-                    ],
-                }
-            )
-        )
-        session.add(
-            AgentOperationAttempt(
-                operation_id=operation.id,
-                attempt=1,
-                fence=str(uuid.uuid4()),
-                lease_deadline=now + timedelta(seconds=60),
-                agent_certificate_serial="serial-0",
-                state="succeeded",
-                result=result.model_dump(mode="json"),
-            )
-        )
-        record_preflight(
-            session.get(AgentNode, operation.node_id),
-            operation.payload_digest,
-            result,
-            now,
-        )
 
 
 def _setup(tmp_path, *, node_count=1):
@@ -325,21 +299,6 @@ def test_removed_node_is_a_terminal_preflight_blocker(tmp_path):
 
 
 def test_dispatched_preflight_claim_can_receive_its_signed_helper_grant(tmp_path):
-    from cryptography.hazmat.primitives.asymmetric import ed25519
-
-    from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
-    from vonk_agent_protocol.host_helper import (
-        ContainerRuntimeAction,
-        ExecuteContainerRuntimeRequestOperation,
-        host_helper_grant_signing_bytes,
-    )
-    from vonk_control.agent_jobs.service import AgentJobService
-    from vonk_control.host_helper_authority import (
-        HostHelperGrantIssuer,
-        HostRuntimeAuthorityService,
-    )
-
-    from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 
     sessions, _, clock, node_id, _, arguments = _setup(tmp_path)
     queue = AgentJobService(sessions, clock=lambda: clock.now)
@@ -671,15 +630,6 @@ def test_completed_probe_is_consumed_even_when_controller_resumes_after_deadline
 def test_high_level_gate_finishes_probe_before_dispatching_expensive_transfer(
     tmp_path, probe_completed
 ):
-    from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
-
-    from .recipe_operations_support import installed_recipe
-    from .run_switch_operations_support import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
-        _request,
-        _service,
-    )
 
     sessions, lifecycle, _queue, mapping, build, nodes = setup_services(tmp_path)
     installed_recipe(lifecycle, mapping, build, nodes, request_id=str(uuid.uuid4()))
@@ -766,7 +716,6 @@ def test_spark_clock_ten_minutes_ahead_does_not_expire_received_probe(tmp_path):
 
 def test_checkpoint_rederivation_keeps_existing_children_after_upgrade(tmp_path):
     """An obsolete derived checkpoint must not erase issued work or replay it."""
-    from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 
     sessions, queue, clock, node_id, service, arguments = _setup(tmp_path)
     pending, error = service.ensure(**arguments, previous=None)
@@ -892,11 +841,6 @@ def test_pending_probe_beside_a_compiling_build_shows_its_own_wait(
     the load showed the round-start reason. A build now runs beside the claim
     lane, so the probe waits only for node B's next poll, and says so.
     """
-    from dataclasses import replace
-
-    from vonk_control.lifecycle.run_switch import RunSwitchAdapter
-    from vonk_control.lifecycle.types import State
-    from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 
     sessions, _queue, clock, _, service, arguments = _setup(tmp_path, node_count=2)
     with sessions() as session:
@@ -1010,10 +954,6 @@ def test_only_the_checkpoint_reads_its_round_reason():
     ``last_failure_code``/``last_failure_detail`` explain why a round started;
     what it waits for now is ``current_reason``/``current_blockers``.
     """
-    import ast
-    from pathlib import Path
-
-    import vonk_control
 
     root = Path(vonk_control.__file__).parent
     readers = sorted(

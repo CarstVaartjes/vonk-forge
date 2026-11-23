@@ -44,17 +44,14 @@ from vonk_control.models.fleet import (
 )
 from vonk_control.models.jobs import Job
 from vonk_control.persisted_waits import read_wait
-from vonk_control.platform_ports import HOST_ENDPOINT_PORT
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .agent_jobs_support import canonical_start_payload
 from .fleet_profiles_support import (
     NOW,
-    _assessment,
-    _exact_preparation,
     _node_id,
     _seed,
-    _SwitchAdapter,
+    _seed_dual_solo_without_runtime_state,
     _uuid,
 )
 from .runtime_identity_support import (
@@ -63,23 +60,11 @@ from .runtime_identity_support import (
     inventory_items_fixture,
 )
 from .test_profile_adapter_continuity import _running_child
-from .test_profile_claim_restore import seed_idle_spark
-
-
-class _SQLCancellationAdapter(_SwitchAdapter):
-    def request_superseded_workload_cancellation_in_session(
-        self, session, targets, ordinal, now
-    ):
-        AgentJobService.request_superseded_workload_cancellation_in_session(
-            session, targets, ordinal, now
-        )
-
-
-def _assessment_with_promises(_session, _assignment, expected_nodes, **_kwargs):
-    assessment = _assessment(_exact_preparation(tuple(expected_nodes)))
-    assessment.fit_current.nodes[0].ports_required = [HOST_ENDPOINT_PORT]
-    assessment.fit_current.nodes[0].disk_required_bytes = 100
-    return assessment
+from .test_profile_claim_restore import (
+    _assessment_with_promises,
+    _SQLCancellationAdapter,
+    seed_idle_spark,
+)
 
 
 def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cleanup(
@@ -366,7 +351,6 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
 
 def test_postgres_new_profile_never_adopts_half_of_a_dual_spark_effect(postgres_engine):
     """Catches preserving one rank of a replaced gang as independent work."""
-    from .fleet_profiles_support import _seed_dual_solo_without_runtime_state
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)

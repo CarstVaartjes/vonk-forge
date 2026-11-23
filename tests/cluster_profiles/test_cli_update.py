@@ -3,9 +3,11 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import ipaddress
 import json
 import os
 import shutil
+import socket
 import ssl
 import subprocess
 import sys
@@ -19,14 +21,35 @@ from pathlib import Path
 from threading import Event, Thread
 
 import pytest
+import uvicorn
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import NameOID
+from jsonschema import Draft202012Validator
+from sqlalchemy import create_engine
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import sessionmaker
 
-from cluster_profiles import cli, cli_update
-from cluster_profiles.runtime_identity import contract_fingerprint
+from cluster_profiles import cli, cli_update, runtime_identity
+from cluster_profiles.control_client.transfers import ControlClient
+from cluster_profiles.runtime_identity import (
+    contract_fingerprint,
+    verified_wheel_identity,
+)
 from control.tests.consumer_outcomes import not_adopted
+from tools import cli_dependencies
+from vonk_control import api as api_module
+from vonk_control import build_identity
+from vonk_control.api.application import create_app
+from vonk_control.auth import Actor, TokenCodec
+from vonk_control.model_primitives import Base
+from vonk_control.observation import platform as platform_observation
+from vonk_control.observation.platform import PlatformObservation, PlatformObserver
+from vonk_control.observation.transfer import OBSERVATION_MEDIA_TYPE
+from vonk_control.operation_api.openapi import admin_openapi_schema
+from vonk_control.worker import loop as worker_module
+from vonk_control.worker.liveness import WorkerHeartbeatRecorder
 
 
 def _control_schema():
@@ -588,7 +611,6 @@ def _install_cli_wheel(uv: str, venv: Path, wheel: Path) -> Path:
     """
 
     root = Path(__file__).resolve().parents[2]
-    from tools import cli_dependencies
 
     found, reason = cli_dependencies.site_packages(root)
     if found is None:
@@ -857,7 +879,6 @@ def transition_signed_update_tool(tmp_path_factory: pytest.TempPathFactory):
 
 
 def _proof_tls_files(workspace: Path) -> tuple[Path, Path]:
-    import ipaddress
 
     tls_key = rsa.generate_private_key(public_exponent=65537, key_size=3072)
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
@@ -1044,27 +1065,6 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
     transition_signed_update_tool, monkeypatch
 ) -> None:
     """Prove the trusted bootstrap when an old release schema refuses an epoch."""
-    import socket
-
-    import uvicorn
-    from sqlalchemy import create_engine
-    from sqlalchemy.exc import SQLAlchemyError
-    from sqlalchemy.orm import sessionmaker
-
-    from cluster_profiles import runtime_identity
-    from cluster_profiles.control_client.transfers import ControlClient
-    from cluster_profiles.runtime_identity import verified_wheel_identity
-    from vonk_control import api as api_module
-    from vonk_control import build_identity
-    from vonk_control.api.application import create_app
-    from vonk_control.auth import Actor, TokenCodec
-    from vonk_control.model_primitives import Base
-    from vonk_control.observation import platform as platform_observation
-    from vonk_control.observation.platform import PlatformObservation, PlatformObserver
-    from vonk_control.observation.transfer import OBSERVATION_MEDIA_TYPE
-    from vonk_control.operation_api.openapi import admin_openapi_schema
-    from vonk_control.worker import loop as worker_module
-    from vonk_control.worker.liveness import WorkerHeartbeatRecorder
 
     workspace, environment, executable, python, candidate_wheel = (
         transition_signed_update_tool
@@ -1407,7 +1407,6 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
 def test_update_installs_across_release_format_changes(
     tmp_path, monkeypatch, schema_version
 ):
-    from jsonschema import Draft202012Validator
 
     key, objects = _signed_publication(
         tmp_path,

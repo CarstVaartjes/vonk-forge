@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import timedelta
@@ -16,14 +17,23 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import Session
-from vonk_forge_contracts import RecipeDefinition, document_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import RunState
+from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.fleet_profile_contract.definitions import (
+    FleetProfileAssignmentInput,
+    FleetProfileInput,
+)
+from vonk_control.fleet_profiles.factory import (
+    build_production_fleet_profile_service,
+)
 from vonk_control.models.cache import RecipeBuild
-from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.models.execution import (
     InstallationNode,
     RecipeInstallation,
@@ -37,7 +47,9 @@ from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.operation_api.contracts import OperationQuery
 from vonk_control.operations.item_contract import operation_item
 from vonk_control.preparation_contract import RuntimeImageIdentity
+from vonk_control.recipe_builds.common import _reopen_build_attempt
 from vonk_control.recipe_operations.errors import RecipeOperationConflict
+from vonk_control.recipe_operations.impact_plans import StopPlan
 from vonk_control.run_switch_contract.evidence import RunSwitchPhase, RunSwitchReason
 from vonk_control.run_switch_contract.operations import (
     RunSwitchOperationResult,
@@ -51,6 +63,11 @@ from vonk_control.run_switch_contract.requests import (
     RunSwitchProfileStopScope,
     SparkGroup,
     SparkGroupNode,
+)
+from vonk_control.run_switch_operations import (
+    build_selection,
+    planning_helpers,
+    resource_fit,
 )
 from vonk_control.run_switch_operations.errors import (
     RunSwitchIssuedWorkloadPending,
@@ -272,7 +289,6 @@ def test_shared_admission_contention_preserves_operation_for_retry(
     tmp_path: Path,
 ) -> None:
     """A busy child enqueue must retain intent instead of escaping the worker."""
-    from vonk_control.admission_locking import AdmissionLockBusy
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path
@@ -733,19 +749,6 @@ def test_dual_profile_disk_review_does_not_decode_unrelated_catalog_documents(
     tmp_path, request, database
 ):
     """Catches eviction fitting each rank by fetching every catalog head's JSON."""
-    from collections import Counter
-
-    from vonk_forge_contracts import document_sha256, read_recipe
-
-    from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-    from vonk_control.fleet_profile_contract.definitions import (
-        FleetProfileAssignmentInput,
-        FleetProfileInput,
-    )
-    from vonk_control.fleet_profiles.factory import (
-        build_production_fleet_profile_service,
-    )
-    from vonk_control.models.catalog import CatalogDocument
 
     decoded = Counter()
 
@@ -912,8 +915,6 @@ def test_planner_entrypoints_return_valid_contracts(
     retention delete can leave the current fit infeasible while the after-Stop
     fit is conditional.
     """
-    from vonk_control.recipe_operations.impact_plans import StopPlan
-    from vonk_control.run_switch_operations import resource_fit
 
     world = planner_world
     with world.sessions.begin() as session:
@@ -1252,12 +1253,6 @@ def test_plan_reuses_inventory_when_a_new_sample_lands_between_read_points(
     tmp_path: Path, postgres_engine, monkeypatch, during_builder: bool
 ) -> None:
     """Catch READ COMMITTED mixing builder/current/post-stop inventory samples."""
-    from vonk_control.recipe_builds.common import _reopen_build_attempt
-    from vonk_control.run_switch_operations import (
-        build_selection,
-        planning_helpers,
-        resource_fit,
-    )
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine

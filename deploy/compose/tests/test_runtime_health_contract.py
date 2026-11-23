@@ -7,6 +7,9 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from vonk_control.db.constants import _DATABASE_STARTUP_TIMEOUT_SECONDS
+from vonk_control.settings import DATABASE_WAIT_BUDGETS
+
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_ROOT = ROOT / "deploy/compose"
 DEFAULT_SERVICES = {
@@ -109,8 +112,6 @@ def test_worker_health_grace_covers_its_startup_waits() -> None:
     probe may overrun it by a lock wait. `compose up --wait` must not see that
     wait as a failure.
     """
-    from vonk_control.db.constants import _DATABASE_STARTUP_TIMEOUT_SECONDS
-    from vonk_control.settings import DATABASE_WAIT_BUDGETS
 
     healthcheck = _rendered()["services"]["control-worker"]["healthcheck"]
     waits = (

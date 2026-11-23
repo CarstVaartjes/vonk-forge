@@ -20,6 +20,7 @@ from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.db.connections import session_factory
 from vonk_control.fleet_event_contract import (
     AgentOperationPayload,
@@ -38,7 +39,7 @@ from vonk_control.fleet_events import (
     FleetEventRepository,
     FleetReplayBatch,
 )
-from vonk_control.fleet_projection.common import FleetSnapshot
+from vonk_control.fleet_projection.common import FleetSnapshot, TelemetryPoint
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.fleet_stream import FleetStream, _event_frame, parse_last_event_id
 from vonk_control.fleet_stream_contract import (
@@ -385,7 +386,6 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
         "id": "6",
         "event": "node-telemetry",
     }
-    from vonk_control.fleet_projection.common import TelemetryPoint
 
     assert isinstance(telemetry_data, dict)
     assert telemetry_data["event_cursor"] == 6
@@ -1219,7 +1219,6 @@ def test_malformed_saved_sparse_payload_becomes_bounded_truthful_refresh_notice(
     None
 ):
     """A malformed stored payload is repairable within normal SQL constraints."""
-    from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
     engine, sessions, repository = _production_stream_store()
     try:
@@ -1280,7 +1279,6 @@ def test_malformed_saved_sparse_payload_becomes_bounded_truthful_refresh_notice(
 
 
 def test_oversized_canonical_frame_becomes_bounded_truthful_notice() -> None:
-    from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
     fields = JobPayload(
         entity_kind="job",

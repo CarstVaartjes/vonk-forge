@@ -415,7 +415,6 @@ def test_recipe_lookup_preserves_id_visibility_and_private_request_correlation(
 
 def test_download_consent_digest_survives_observation_only_drift(tmp_path: Path):
     """Catches transfer/capacity drift requiring new consent for identical effects."""
-    from sqlalchemy import create_engine
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)

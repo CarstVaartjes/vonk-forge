@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import pytest
 from sqlalchemy import create_engine, delete, event, select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import (
     PrebuiltImage,
@@ -212,8 +213,6 @@ def test_policy_fault_preserves_one_projection_and_repairs_healthy_siblings(
 def test_projection_write_fault_rolls_back_only_its_row(
     catalog: CatalogService, monkeypatch
 ):
-    from sqlalchemy import event
-    from sqlalchemy.exc import OperationalError
 
     views = [
         _request_import(catalog, _recipe(_model(), slug=slug))

@@ -23,6 +23,7 @@ from vonk_agent_protocol.contracts import (
     AgentResult,
     canonical_message,
 )
+from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control.agent_jobs.contracts import StaleAgentAttempt
 from vonk_control.agent_jobs.service import AgentJobService
@@ -270,8 +271,6 @@ def test_control_environment_installs_the_workspace_protocol() -> None:
 
 
 def test_control_environment_preserves_the_canonical_zero_byte_model_contract() -> None:
-    from vonk_agent_protocol.contracts import AgentProtocolError
-    from vonk_agent_protocol.distribution import DistributionObject
 
     empty = DistributionObject.parse(
         {

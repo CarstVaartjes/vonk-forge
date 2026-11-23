@@ -11,6 +11,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
+from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
@@ -32,6 +34,7 @@ from vonk_control.run_switch_contract.requests import (
     RunSwitchApplyRequest,
 )
 from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
+from vonk_control.run_switch_operations.planning_helpers import _run_switch_payload
 from vonk_control.run_switch_operations.provider import RunSwitchOperationProvider
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime.preflight import latest_result
@@ -39,12 +42,14 @@ from vonk_control.runtime_image_preparation.contracts import PulledImageEvidence
 from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
+from .non_blocking import assert_ended_without_blocking
 from .preflight_fixtures import record_passing_preflight
 from .recipe_operations_support import NOW, _CanonicalModelCache, setup_services
 from .run_switch_operations_support import (
     ColdStartPhaseExecutor,
     CompleteArtifactInspector,
     _cold_compile_switch,
+    _finish,
     _fixture_execution,
     _host_changes_during_compile,
     _request,
@@ -55,7 +60,7 @@ from .runtime_identity_support import (
     set_inventory_identity,
 )
 from .runtime_image_fixtures import place_test_image
-from .test_lifecycle_preflight import _clear, _finish
+from .test_lifecycle_preflight import _clear
 
 
 def test_cold_model_and_image_plan_defers_compile_until_both_preparations(
@@ -437,7 +442,6 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
 
 
 def _runtime_probes(sessions) -> int:
-    from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
 
     with sessions() as session:
         return len(
@@ -509,8 +513,6 @@ def test_agent_upgrade_during_runtime_install_preflight_completes_the_switch(
     The probe is the newest host sample, so the gate admits it with no extra
     round and the switch still creates exactly one installation.
     """
-
-    from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
 
     switch = _cold_compile_switch(tmp_path, seconds=1, slow_compiles=0)
     sessions, clock, service = switch.sessions, switch.clock, switch.service
@@ -689,9 +691,6 @@ def test_preflight_refresh_after_repeated_cold_compiles_ends_and_admits_fresh(
     tmp_path: Path,
 ) -> None:
     """A host that changes during every compile ends the refresh; fresh intent runs."""
-    from vonk_control.run_switch_operations.planning_helpers import _run_switch_payload
-
-    from .non_blocking import assert_ended_without_blocking
 
     switch = _cold_compile_switch(tmp_path, slow_compiles=99)
     _host_changes_during_compile(switch)
@@ -791,7 +790,6 @@ def test_cancellation_during_expiring_compile_prevents_a_subsequent_attempt(
 
 def test_preflight_reuse_ignores_operation_history_ordering(tmp_path: Path) -> None:
     """Catches an old operation timestamp poisoning fresh inventory evidence."""
-    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 
     switch = _cold_compile_switch(tmp_path, seconds=1, slow_compiles=0)
     # One second earlier only tells the old receipts from the fresh ones.

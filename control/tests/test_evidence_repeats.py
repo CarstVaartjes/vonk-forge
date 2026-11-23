@@ -17,6 +17,8 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import text
 
+from cluster_profiles.cli_render.dispatch import render_payload
+from cluster_profiles.control_client.schema import validate_control_document
 from vonk_agent_protocol.lifecycle_vocabulary import (
     FailureCode,
     SecurityRefusalReason,
@@ -215,8 +217,6 @@ def test_a_runtime_grant_refused_on_every_ask_is_attention(tmp_path) -> None:
 def test_an_attention_code_from_a_newer_controller_still_renders_in_the_cli(
     tmp_path, capsys
 ) -> None:
-    from cluster_profiles.cli_render.dispatch import render_payload
-    from cluster_profiles.control_client.schema import validate_control_document
 
     client, services, _codec, clock = make_agent_system(tmp_path)
     failed = {

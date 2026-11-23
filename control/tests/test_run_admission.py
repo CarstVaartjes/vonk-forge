@@ -15,9 +15,10 @@ from vonk_forge_contracts import (
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.inventory import GpuHealth, MemoryPool
+from vonk_agent_protocol.inventory import GPU_RESET_RECOVERY, GpuHealth, MemoryPool
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
@@ -621,7 +622,6 @@ def test_an_estimate_try_survives_free_memory_changing_before_accept(tmp_path) -
 def test_envelope_larger_than_the_spark_with_another_claim_is_a_retryable_wait(
     tmp_path,
 ) -> None:
-    from vonk_control.run_admission import require_admissible
 
     sessions, now, node, installation = setup(
         tmp_path, free_memory=300, peak_bytes=1001
@@ -900,8 +900,6 @@ def test_gpu_health_refuses_work_and_fresh_healthy_inventory_recovers(
 ) -> None:
     # Catches unsupported-metric admission, an invented zero-byte physical
     # capacity refusal after driver loss, and a sticky manual health flag.
-    from vonk_agent_protocol.inventory import GPU_RESET_RECOVERY
-    from vonk_control.fleet_projection.service import FleetProjection
 
     engine = request.getfixturevalue("postgres_engine") if postgres else None
     sessions, now, node, installation = setup(tmp_path, engine=engine)

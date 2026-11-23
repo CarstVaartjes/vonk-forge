@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ast
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -9,24 +11,35 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import RecipeDefinition
 
+import vonk_control.recipe_image_availability as module
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    SecurityRefusalReason,
+)
+from vonk_agent_protocol.outcome import SecurityRefusalError
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_control.jobs.documents import AvailabilityJobPayload
+from vonk_control.jobs.documents import AvailabilityJobPayload, AvailabilityModelChild
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.model_cache.contract import ModelCacheCancellation
+from vonk_control.model_cache.errors import ModelCacheError, ModelCacheNotFound
 from vonk_control.model_primitives import Base
-from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheOperation
 from vonk_control.models.fleet import User
 from vonk_control.models.jobs import Job
 from vonk_control.recipe_image_availability import requests
 from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityUnknown,
     _removal_retry_is_due,
+)
+from vonk_control.recipe_image_availability.removal_contract import (
+    RECIPE_CACHE_REMOVE_KIND,
 )
 from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
@@ -35,15 +48,24 @@ from vonk_control.recipe_image_availability.view_contract import (
     RecipeCacheRemovalStatus,
     RecipeImageAvailabilityView,
 )
+from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.stored.json_values import read_row_column
+from vonk_control.strict_json import serialize_json_value
 
+from .non_blocking import assert_ended_without_blocking
 from .recipe_image_availability_support import (
+    ARCHIVE,
+    ARCHIVE_SHA,
+    _add_head,
     _add_revision,
     _recipe,
+    _reference_receipt,
     _runtime,
     _service,
 )
+from .recipe_removal_review_support import remove_after_review
+from .runtime_image_fixtures import place_test_image
 
 
 def _started(tmp_path: Path):
@@ -89,9 +111,6 @@ def test_public_availability_service_reuses_published_content_after_restart(
 def test_a_malformed_stored_retry_time_makes_the_removal_due_instead_of_failing(
     caplog,
 ) -> None:
-    from vonk_control.recipe_image_availability.removal_contract import (
-        RECIPE_CACHE_REMOVE_KIND,
-    )
 
     # A pre-contract row can retain a malformed progress clock. It is due for
     # owner reconciliation, while a valid scheduling column remains a bound.
@@ -147,7 +166,6 @@ def test_damaged_cancellation_evidence_reads_as_none_and_a_fresh_cancel_heals_it
     assert observed.cancellation == cancelled.cancellation
     assert observed.state == "cancelled"
     assert service.run_pending() == 0
-    from .non_blocking import assert_ended_without_blocking
 
     assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
@@ -215,10 +233,6 @@ def test_stored_damage_is_not_raised_as_an_invalid_operation_outside_the_removal
     what it cannot read; a new ``recipe_image.operation_invalid`` raise elsewhere
     would bring the refusal back.
     """
-
-    import ast
-
-    import vonk_control.recipe_image_availability as module
 
     allowed = {"_read_removal_owner", "_read_removal_result"}
     assert module.__file__ is not None
@@ -369,9 +383,6 @@ def test_model_child_cancel_intent_survives_unrelated_payload_damage(
     tmp_path: Path,
 ) -> None:
     """A damaged download envelope must not forget its accepted cancellation."""
-    from vonk_control.recipe_image_availability.service import (
-        RecipeImageAvailabilityService,
-    )
 
     cancel = ModelCacheCancellation(
         request_key="00000000-0000-4000-8000-000000000a02",
@@ -391,7 +402,6 @@ def test_model_child_cancel_intent_survives_unrelated_payload_damage(
     assert RecipeImageAvailabilityService._model_child_has_cancel_intent(row)
     row.payload = {"cancellation": {"request_key": "damaged"}}
     assert not RecipeImageAvailabilityService._model_child_has_cancel_intent(row)
-    from .non_blocking import assert_ended_without_blocking
 
     engine, sessions, service, parent = _started(tmp_path)
 
@@ -477,7 +487,6 @@ def test_busy_catalog_lock_raises_database_busy_and_same_key_is_admitted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Catch the nowait lock timeout becoming a synthetic terminal view."""
-    from sqlalchemy.exc import OperationalError
 
     monkeypatch.setattr(requests, "REQUEST_OBSERVATION_BUDGET_SECONDS", 0)
     engine, _sessions, service, _ = _started(tmp_path)
@@ -502,9 +511,6 @@ def test_a_gone_model_child_ends_parent_and_admits_fresh_preparation(
     tmp_path: Path,
 ) -> None:
     """A vanished exact child must not keep its parent's execution claim retrying."""
-    from vonk_control.jobs.documents import AvailabilityModelChild
-    from vonk_control.model_cache.errors import ModelCacheNotFound
-    from vonk_control.strict_json import serialize_json_value
 
     engine, sessions, service, operation = _started(tmp_path)
     with sessions.begin() as session:
@@ -564,21 +570,6 @@ def test_recovered_removal_releases_storage_gate_before_a_fresh_preparation(
     tmp_path: Path,
 ) -> None:
     """An uncertain child observation recovers after the former count ceiling."""
-    import json
-
-    from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-    from vonk_control.models.cache import ArtifactLifecycleGate
-    from vonk_control.recovery_policy import RecoveryPolicy
-
-    from .non_blocking import assert_ended_without_blocking
-    from .recipe_image_availability_support import (
-        ARCHIVE,
-        ARCHIVE_SHA,
-        _add_head,
-        _reference_receipt,
-    )
-    from .recipe_removal_review_support import remove_after_review
-    from .runtime_image_fixtures import place_test_image
 
     recipe = _recipe("recipe-source-build.json")
     engine = create_engine(f"sqlite:///{tmp_path / 'terminal-removal.sqlite'}")
@@ -673,8 +664,6 @@ def test_metadata_security_refusal_is_preserved_without_an_admission_retry(
     tmp_path: Path,
 ) -> None:
     """A denied authority must never become a retryable metadata observation."""
-    from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
-    from vonk_agent_protocol.outcome import SecurityRefusalError
 
     engine, _sessions, service, _ = _started(tmp_path)
     denied = SecurityRefusalError(
@@ -706,11 +695,6 @@ def test_child_observation_fault_does_not_refuse_read_or_discard_verified_image(
     fault: str,
 ) -> None:
     """A read fault must not turn verified image availability into a refusal."""
-    from sqlalchemy.exc import SQLAlchemyError
-
-    from vonk_control.jobs.documents import AvailabilityModelChild
-    from vonk_control.model_cache.errors import ModelCacheError
-    from vonk_control.strict_json import serialize_json_value
 
     engine, sessions, service, operation = _started(tmp_path)
     assert service.run_pending() == 1

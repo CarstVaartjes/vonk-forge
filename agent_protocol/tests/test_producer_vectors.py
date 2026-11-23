@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from vonk_agent_protocol.contracts import AgentFailureResult, AgentResult
+from vonk_agent_protocol.inventory import GpuHealth, InventoryRequest
 from vonk_agent_protocol.outcome import OutcomeUnknown
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 
@@ -64,7 +65,6 @@ def test_an_inspected_exited_workload_observation_is_accepted() -> None:
 
 def test_inventory_health_shared_vectors_survive_ingress() -> None:
     # Catches dropping health while retaining otherwise valid GB10 inventory.
-    from vonk_agent_protocol.inventory import GpuHealth, InventoryRequest
 
     for health in GpuHealth:
         document = _vector("inventory-wifi-link-v1.json")

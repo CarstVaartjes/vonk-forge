@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import errno
 from datetime import timedelta
 from pathlib import Path
 
@@ -288,7 +289,6 @@ def test_persisted_canonical_settings_preserve_build_identity_and_rebuild_change
 def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
     tmp_path, monkeypatch
 ):
-    import errno
 
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     rederived = []

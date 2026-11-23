@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,12 +13,14 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityModelChild,
 )
+from vonk_control.lifecycle.image_availability import PREPARATION_STALL_WINDOW
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import (
@@ -34,6 +37,9 @@ from vonk_control.recipe_image_availability.contracts import (
 )
 from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
+)
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationCancellationResult,
 )
 from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImagePreparationError,
@@ -56,6 +62,7 @@ from .recipe_image_availability_support import (
     _set_active_head,
     _successor,
 )
+from .test_model_removal_worker_postgres import _prepare_removal_target
 
 
 def test_image_preparation_retries_with_capped_backoff_until_it_succeeds(
@@ -406,9 +413,6 @@ def test_live_download_survives_a_parent_observation_gap_and_resumes(
     postgres_engine,
 ) -> None:
     """A stale parent checkpoint cannot cancel a live child after worker restart."""
-    from dataclasses import dataclass
-
-    from vonk_control.lifecycle.image_availability import PREPARATION_STALL_WINDOW
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine)
@@ -473,13 +477,6 @@ def test_live_download_survives_a_parent_observation_gap_and_resumes(
 def test_preparation_expiry_preserves_download_but_explicit_cancel_still_owns_it(
     tmp_path: Path, postgres_engine, checkpointed: bool
 ) -> None:
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-    from vonk_control.recipe_operations.lifecycle_contract import (
-        RecipeOperationCancellationResult,
-    )
-
-    from .test_model_removal_worker_postgres import _prepare_removal_target
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)

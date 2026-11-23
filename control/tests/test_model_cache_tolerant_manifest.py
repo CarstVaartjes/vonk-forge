@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from sqlalchemy import update
 
 from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.cache import ModelCacheSet
 from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.run_switch_operations.artifact_inspection import (
+    DatabaseRunSwitchArtifactInspector,
+)
 
 from .display_fixtures import reword
 from .test_canonical_cache_build_identity import (
@@ -171,14 +177,6 @@ def test_an_installation_of_an_unreadable_revision_does_not_stop_inspection(
     preview measures storage; that read must resolve through the newest
     readable exact model bindings instead of failing unrelated inspection.
     """
-
-    from datetime import UTC, datetime
-
-    from vonk_control.models.cache import ModelCacheSet
-    from vonk_control.models.execution import RecipeInstallation
-    from vonk_control.run_switch_operations.artifact_inspection import (
-        DatabaseRunSwitchArtifactInspector,
-    )
 
     sessions = _sessions()
     now = datetime(2026, 9, 29, 12, tzinfo=UTC)

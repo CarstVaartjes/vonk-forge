@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from threading import Event
 from typing import Any
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from vonk_agent_protocol.contracts import AgentResult
@@ -49,7 +50,7 @@ from vonk_control.models.fleet import (
     User,
 )
 from vonk_control.models.jobs import Job
-from vonk_control.models.operations import AgentOperation
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.operation_api.durable import durable_operation_services
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations.service import RecipeOperationService
@@ -370,7 +371,6 @@ def _profile_worker_process_dies_with_pending_cancel(
     database_url: str, now_text: str
 ) -> None:
     """Rebuild the production owners, observe once, then die like a worker."""
-    from sqlalchemy import create_engine
 
     engine = create_engine(
         database_url, connect_args={"options": "-c lock_timeout=3000"}
@@ -416,7 +416,6 @@ def _resume_profile_cancel_process(
     database_url: str, now_text: str, application_id: str
 ) -> None:
     """A fresh real worker settles the exact child after its receipt arrives."""
-    from sqlalchemy import create_engine
 
     engine = create_engine(
         database_url, connect_args={"options": "-c lock_timeout=3000"}
@@ -1635,10 +1634,6 @@ def test_profile_cancel_settles_when_a_distribution_sibling_is_parked_for_retry(
     job never received) from a transfer that runs nothing, so the profile
     cancel never completed. Parked idempotent transfers are closed instead.
     """
-
-    import uuid
-
-    from vonk_control.models.operations import AgentOperationAttempt
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path, nodes=2

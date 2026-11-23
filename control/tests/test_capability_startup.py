@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import time
 from datetime import UTC, datetime, timedelta
+from threading import Event, Thread
 
 import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
 from vonk_agent_protocol.capability_reply import CapabilityReason, ControllerCapability
+from vonk_control import capabilities
 from vonk_control.api import production as api
 from vonk_control.artifact_jobs import blob_store as artifact_blob_store
 from vonk_control.auth import Actor, TokenCodec
@@ -20,6 +23,7 @@ from vonk_control.capability_contract import CapabilityAvailability
 from vonk_control.gateway import route_runtime
 from vonk_control.gateway.keys import GatewayKeyService
 from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
 from vonk_control.observation.platform import PlatformObservation
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.settings import Settings
@@ -51,7 +55,6 @@ def test_production_constructor_fault_and_repair(
 ):
     # Catches eager startup construction, stale unavailable state, and reads
     # that secretly construct/retry a failed capability.
-    from vonk_control.model_primitives import Base
 
     Base.metadata.create_all(postgres_engine)
     now = [datetime.now(UTC)]
@@ -208,7 +211,6 @@ def test_health_outage_recovers_without_reconstructing_or_replaying_effects():
 
 
 def test_background_recovery_is_independent_of_reads_and_requests():
-    import asyncio
 
     async def scenario():
         healthy = [False]
@@ -282,9 +284,6 @@ def test_initializer_retry_reuses_owned_resources_and_shutdown_does_not_construc
 @pytest.mark.parametrize("boundary", ["factory", "initializer", "health"])
 def test_hung_construction_releases_owner_and_fences_late_result(boundary, monkeypatch):
     """Catches a timeout that leaves the lock owned or publishes a stale result."""
-    from threading import Event, Thread
-
-    from vonk_control import capabilities
 
     threads = []
 
@@ -373,10 +372,6 @@ def test_executor_start_failure_recovers_without_request_or_status_read(
     monkeypatch,
 ):
     """Catches a failed dispatch consuming the last automatic retry timer."""
-    import asyncio
-    from threading import Event, Thread
-
-    from vonk_control import capabilities
 
     async def scenario():
         attempts = 0
@@ -422,9 +417,6 @@ def test_executor_start_failure_recovers_without_request_or_status_read(
 
 def test_cold_method_invocation_waits_for_its_bounded_constructor(monkeypatch):
     """Catches a healthy cold facade racing its constructor and refusing wiring."""
-    from threading import Event
-
-    from vonk_control import capabilities
 
     release = Event()
 

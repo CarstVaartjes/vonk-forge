@@ -33,8 +33,10 @@ from vonk_control.agent_jobs.contracts import (
     fencing_intent,
 )
 from vonk_control.artifact_jobs import states as ajs
+from vonk_control.artifact_jobs.api import _view
 from vonk_control.artifact_jobs.contracts import (
     ArtifactJobError,
+    ArtifactJobResponse,
     _effective_parameters,
 )
 from vonk_control.bounded_json import require_mapping
@@ -797,11 +799,9 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
     completed = service.get(job.id)
     assert completed.state == "succeeded"
     assert completed.output_manifest_sha256 == recipe_job_manifest_sha256(outputs)
-    from vonk_control.artifact_jobs.api import _view
 
     response = _view(completed)
     assert response.result_evidence is not None
-    from vonk_control.artifact_jobs.contracts import ArtifactJobResponse
 
     degraded = ArtifactJobResponse.model_validate(
         response.model_dump() | {"output_manifest_sha256": None}

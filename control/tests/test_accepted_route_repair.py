@@ -7,6 +7,7 @@ import pytest
 
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.state_machines import GatewayRouteState
+from vonk_agent_protocol.state_machines import RouteState as RunRouteState
 from vonk_control.gateway.litellm import LiteLlmPolicy, RouteState, render_config
 from vonk_control.gateway.route_bundle_contract import (
     RouteAcceptedModelPolicy,
@@ -20,6 +21,14 @@ from vonk_control.gateway.route_runtime import (
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.shared import _RecipeCandidate, _RecipeEndpoint
+
+from .recipe_routes_support import (
+    NOW,
+    MutableClock,
+    add_running_run,
+    atomic_service,
+    setup,
+)
 
 
 @pytest.mark.parametrize(
@@ -97,15 +106,6 @@ def test_accepted_projection_miss_is_repaired_without_unverified_reuse(
 
 def test_latest_explicit_route_intent_wins_over_older_alias_owner(tmp_path):
     """Catches a persisted alias collision blocking the next authorized publication."""
-    from vonk_agent_protocol.state_machines import RouteState as RunRouteState
-
-    from .recipe_routes_support import (
-        NOW,
-        MutableClock,
-        add_running_run,
-        atomic_service,
-        setup,
-    )
 
     clock = MutableClock(NOW)
     base, _, _, first = setup(tmp_path / "database", clock=clock)

@@ -19,6 +19,7 @@ from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.jobs.queue import JobService
+from vonk_control.lifecycle.image_availability import PREPARATION_STALL_WINDOW
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocument
 from vonk_control.models.jobs import Job
@@ -97,7 +98,6 @@ def test_installed_retry_preserves_frozen_intent_after_catalog_change_and_lost_r
     )
     # End the request through its owning lifetime budget, not a fake terminal
     # classification of recoverable source loss.
-    from vonk_control.lifecycle.image_availability import PREPARATION_STALL_WINDOW
 
     now += PREPARATION_STALL_WINDOW
     with sessions.begin() as session:

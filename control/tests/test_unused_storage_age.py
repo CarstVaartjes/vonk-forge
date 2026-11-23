@@ -5,17 +5,28 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from sqlalchemy import select
 
+from vonk_agent_protocol.contracts import AgentOperation as Operation
 from vonk_agent_protocol.state_machines import InstallationState, RunState
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.models.operations import AgentOperation
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
 from .test_catalog_revision_collection import NOW, Catalog
 from .unused_storage_collection_support import (
+    _REAL_CLOCK,
     A_MODEL,
     AN_IMAGE,
     TOTAL,
     FakeLifecycle,
+    _agents_succeed,
     _collector,
+    _models,
+    _real_lifecycle,
     _receipt,
+    _set_exists,
     _size,
 )
 
@@ -78,7 +89,6 @@ def test_non_model_expiry_survives_restart_and_retries_failed_unlink(
 
 def test_age_collection_keeps_the_real_nas_model_cache(world: Catalog, cached) -> None:
     """Catches accidentally applying runtime expiry to model cache objects."""
-    from .unused_storage_collection_support import _models, _set_exists
 
     service, digest = cached
     result = _models(world, service, free=TOTAL // 2).collect()
@@ -90,19 +100,6 @@ def test_age_uninstall_binds_model_retention_in_real_queue(
     tmp_path: Path, postgres_engine
 ) -> None:
     """Catches preview retaining models while acceptance still asks the agent to erase them."""
-    from sqlalchemy import select
-
-    from vonk_agent_protocol.contracts import AgentOperation as Operation
-    from vonk_control.models.execution import RecipeInstallation
-    from vonk_control.models.operations import AgentOperation
-    from vonk_control.models.telemetry import NodeInventorySnapshot
-    from vonk_control.unused_storage_collection.service import UnusedStorageCollector
-
-    from .unused_storage_collection_support import (
-        _REAL_CLOCK,
-        _agents_succeed,
-        _real_lifecycle,
-    )
 
     sessions, service, installation_id, _nodes = _real_lifecycle(
         tmp_path, engine=postgres_engine

@@ -2,23 +2,28 @@
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select, update
 from vonk_forge_contracts import RecipeDefinition
 
 from vonk_agent_protocol.inventory import ModelStoreObject
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.cache_removal_review import CacheAssetDisposition, CacheRemovalReview
 from vonk_control.fleet_model_removal_contract import FleetRemovalReason
+from vonk_control.lifecycle.evidence import BookkeepingReason
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheSet
+from vonk_control.models.execution import RecipeInstallation
 from vonk_control.models.fleet import AgentNode, User
 from vonk_control.models.telemetry import NodeInventorySnapshot
 
 from .canonical_recipe_fixtures import canonical_example
+from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .test_catalog_revision_collection import NODE, Catalog
 from .test_fleet_model_removal_postgres import inventory, submit_model_download
 from .test_model_removal_worker_postgres import _prepare_removal_target
@@ -159,12 +164,6 @@ def test_unreadable_installation_is_unknown_and_next_review_recovers(
     postgres_engine, tmp_path: Path
 ) -> None:
     """Catches scanning an older installation plan before filtering its model."""
-    from uuid import uuid4
-
-    from vonk_control.lifecycle.evidence import BookkeepingReason
-    from vonk_control.models.execution import RecipeInstallation
-
-    from .recipe_operations_support import NOW, installed_recipe, setup_services
 
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine, nodes=2, mapping_node_count=1
@@ -213,9 +212,6 @@ def test_accepted_removal_waits_for_repaired_evidence_under_original_request(
     postgres_engine, tmp_path: Path
 ) -> None:
     """Catches treating a post-acceptance observation fault as permanent failure."""
-    from uuid import uuid4
-
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)

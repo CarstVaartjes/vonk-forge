@@ -24,6 +24,9 @@ from vonk_control.models.jobs import Job
 from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityError,
 )
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
 from vonk_control.recipe_update_batches.contract import (
     UPDATE_KIND,
     RecipeUpdateChild,
@@ -141,9 +144,6 @@ def test_a_cancel_that_cannot_confirm_ends_after_the_stop_budget() -> None:
     document = _document("running")
     job = _job("observing")
     job.updated_at = NOW
-    from vonk_control.recipe_operations.lifecycle_contract import (
-        RecipeOperationCancellationResult,
-    )
 
     document.cancellation = RecipeOperationCancellationResult(
         cancel_requested=True,

@@ -32,7 +32,7 @@ from cluster_profiles.control_client.errors import (
 from cluster_profiles.controller_cli import common, profile_authoring, selection
 from cluster_profiles.controller_cli import observation as observation_module
 from cluster_profiles.controller_cli import run as run_module
-from cluster_profiles.controller_cli.selection import _read_concurrently
+from cluster_profiles.controller_cli.selection import _read_concurrently, _skipped_read
 
 
 def test_run_review_leads_with_profile_sparks_and_what_stops(monkeypatch) -> None:
@@ -276,7 +276,6 @@ def test_definition_read_past_its_deadline_reports_its_own_timed_out_observation
 
 
 def test_a_single_real_read_runs_inline_and_keeps_its_error() -> None:
-    from cluster_profiles.controller_cli.selection import _skipped_read
 
     seen: list[threading.Thread] = []
 

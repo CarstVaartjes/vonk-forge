@@ -6,6 +6,7 @@ import errno
 import hashlib
 import os
 import uuid
+from collections import namedtuple
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from pydantic import ValidationError
 
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.auth import TokenCodec
 from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
@@ -25,12 +27,22 @@ from vonk_control.model_cache.api import (
 )
 from vonk_control.model_cache.contract import (
     ModelCacheCounters,
+    ModelCacheRepairCheckpoint,
 )
 from vonk_control.model_cache.errors import (
     ModelCacheStorageError,
     _retry_after_seconds,
 )
+from vonk_control.model_cache.progress import cache_progress, progress_document
 from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.operation_api.contracts import (
+    OperationListPage,
+    OperationProvider,
+    OperationQuery,
+)
+from vonk_control.operation_api.contracts import (
+    OperationQuery as operation_api_OperationQuery,
+)
 from vonk_control.operations.item_contract import operation_item
 from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.worker.loop import Worker
@@ -42,14 +54,6 @@ from .test_model_cache_recovery_support import observe_unknown
 def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     cache, tmp_path: Path
 ) -> None:
-    from vonk_agent_protocol.wire_model import OperationProgress
-    from vonk_control.operation_api.contracts import (
-        OperationListPage,
-        OperationProvider,
-    )
-    from vonk_control.operation_api.contracts import (
-        OperationQuery as operation_api_OperationQuery,
-    )
 
     service, _sessions = cache
     cursor_codec = TokenCodec(b"c" * 32).cursor_codec()
@@ -155,7 +159,6 @@ def test_malformed_pagination_observation_is_partial_and_recovers(
     cache, monkeypatch, clears
 ) -> None:
     """The public provider observes at most three times and retains readable rows."""
-    from vonk_control.operation_api.contracts import OperationQuery
 
     service, _sessions = cache
     provider = ModelCacheOperationProvider(
@@ -724,7 +727,6 @@ def test_empty_http_support_artifact_does_not_issue_an_invalid_zero_range(
 
 
 def test_activity_progress_with_unknown_total_has_no_rate_or_eta_fields() -> None:
-    from vonk_control.model_cache.progress import cache_progress, progress_document
 
     value = progress_document(
         cache_progress(
@@ -950,7 +952,6 @@ def test_ingress_rejects_bytes_that_do_not_match_the_pinned_digest(cache, tmp_pa
 def test_repair_capacity_admission_preserves_verified_object(
     cache, tmp_path, monkeypatch
 ):
-    from collections import namedtuple
 
     service, _ = cache
     artifact = _artifact(tmp_path, b"model")
@@ -990,7 +991,6 @@ def test_repair_capacity_admission_preserves_verified_object(
 
 
 def test_repair_checkpoint_requires_exact_nested_contract():
-    from vonk_control.model_cache.contract import ModelCacheRepairCheckpoint
 
     valid = {"transfer_id": "a" * 32, "completed_objects": ["b" * 64]}
     assert (

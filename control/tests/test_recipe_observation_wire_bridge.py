@@ -14,6 +14,7 @@ from typing import Literal, overload
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -26,11 +27,12 @@ from vonk_agent_protocol.recipe_observations import (
     RecipeRunObservationWire,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
-from vonk_control.agent_api.common import AgentApiServices
+from vonk_control.agent_api.common import RANK_UNREADY_GRACE, AgentApiServices
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence
+from vonk_control.distributed_recovery.common import _proves_fresh_absence
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
@@ -38,7 +40,12 @@ from vonk_control.host_helper_authority import (
 )
 from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.jobs.documents import RecipeStartParent, RecipeStopParent
-from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.models.execution import (
+    RecipeInstallation,
+    RecipeRun,
+    ResourceReservation,
+    RunNode,
+)
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
@@ -88,8 +95,6 @@ class _UnusedJobs:
 
 def _singleton_recovery_process_tick(database_url: str, now_value: str) -> None:
     """Reconstruct the Controller worker in a new process against PostgreSQL."""
-
-    from vonk_control.agent_jobs.service import AgentJobService
 
     now = datetime.fromisoformat(now_value)
     engine = create_engine(database_url)
@@ -321,7 +326,6 @@ def _submit_observation(
     endpoint_ready: bool | None = None,
     unassigned_run_ids: tuple[str, ...] = (),
 ):
-    from fastapi.testclient import TestClient
 
     headers = {
         "x-vonk-agent-node": identity["node_id"],
@@ -482,7 +486,6 @@ def test_production_start_rust_observation_and_controller_consume(
     nodes: int,
 ) -> None:
     """Connect the Controller start evidence, the Rust report and the consume route."""
-    from fastapi.testclient import TestClient
 
     app, sessions, run_id, start_job_id, node_id, _grant_public_key, produced = (
         _production_controller_app(
@@ -558,9 +561,6 @@ def test_singleton_absence_reboots_through_new_controller_processes(
     postgres_engine,
 ) -> None:
     """A stored exact absence drives one Stop then an exact next-generation Start."""
-
-    from vonk_control.distributed_recovery.common import _proves_fresh_absence
-    from vonk_control.models.execution import ResourceReservation
 
     (
         now,
@@ -910,11 +910,6 @@ def test_newer_workload_intent_wins_over_singleton_reboot_recovery(
     recipe_observation_wire_probe: Path,
     postgres_engine,
 ) -> None:
-    from vonk_control.distributed_recovery.coordinator import (
-        DistributedRecoveryCoordinator,
-    )
-    from vonk_control.models.execution import ResourceReservation
-    from vonk_control.models.fleet import AgentNode
 
     (
         now,
@@ -988,10 +983,6 @@ def test_uncertain_singleton_recovery_stop_retains_run_claims(
     recipe_observation_wire_probe: Path,
     postgres_engine,
 ) -> None:
-    from vonk_control.distributed_recovery.coordinator import (
-        DistributedRecoveryCoordinator,
-    )
-    from vonk_control.models.execution import ResourceReservation
 
     (
         now,
@@ -1132,9 +1123,6 @@ def test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered(
     recipe_observation_wire_probe: Path,
     postgres_engine,
 ) -> None:
-    from vonk_control.distributed_recovery.coordinator import (
-        DistributedRecoveryCoordinator,
-    )
 
     (
         now,
@@ -1221,9 +1209,6 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
     recipe_observation_wire_probe: Path,
     postgres_engine,
 ) -> None:
-    from vonk_control.distributed_recovery.coordinator import (
-        DistributedRecoveryCoordinator,
-    )
 
     (
         now,
@@ -1310,9 +1295,6 @@ def test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop(
     recipe_observation_wire_probe: Path,
     postgres_engine,
 ) -> None:
-    from vonk_control.distributed_recovery.coordinator import (
-        DistributedRecoveryCoordinator,
-    )
 
     (
         now,
@@ -1430,10 +1412,6 @@ def test_singleton_recovery_checks_compiled_lifecycle_authority(
     postgres_engine,
     authority_copy: Literal["installed", "accepted-start"],
 ) -> None:
-    from vonk_control.distributed_recovery.coordinator import (
-        DistributedRecoveryCoordinator,
-    )
-    from vonk_control.models.execution import ResourceReservation
 
     (
         now,
@@ -1539,10 +1517,6 @@ def test_singleton_recovery_refuses_per_node_start_for_another_plan(
     postgres_engine,
 ) -> None:
     """The Job binds the run plan; the replayed per-node payload must too."""
-
-    from vonk_control.distributed_recovery.coordinator import (
-        DistributedRecoveryCoordinator,
-    )
 
     (
         now,
@@ -1724,8 +1698,6 @@ def test_a_failing_readiness_probe_fails_the_rank_only_after_its_grace_period(
     recipe_observation_wire_probe: Path,
 ) -> None:
     """One missed readiness probe never takes a serving workload down."""
-
-    from vonk_control.agent_api.common import RANK_UNREADY_GRACE
 
     now = [NOW]
     app, sessions, run_id, _start_id, node_id, _key, produced = (

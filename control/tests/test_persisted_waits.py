@@ -7,14 +7,44 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import Integer, inspect, select, text
 from sqlalchemy.orm import sessionmaker
 
 from tests.signed_recipe_release import signed_recipe_releases
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    OperatorActionName,
+    ProgressAlarmCode,
+    WaitOwnerKind,
+    WaitReason,
+    WaitResumeCondition,
+)
+from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
+from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
+from vonk_control.db.schema import reconcile_schema
+from vonk_control.lifecycle.evidence import Residue
 from vonk_control.lifecycle.job import JobAdapter
 from vonk_control.model_primitives import Base
-from vonk_control.models.jobs import Job
+from vonk_control.models.cache import RecipeLibrarySyncRun
+from vonk_control.models.jobs import Job, JobAttempt
+from vonk_control.operation_api.lane_wait import apply_queue_wait
+from vonk_control.operations.blockers import (
+    BlockingOperation,
+    OperationBlocker,
+    StorageReliefEvidence,
+    make_blocker,
+)
+from vonk_control.operations.item_contract import OperationItem
+from vonk_control.persisted_waits import (
+    owner_identity,
+    read_wait,
+    schedule_wait,
+    write_wait,
+)
+from vonk_control.stored.json_values import binding_for
+from vonk_control.wait_contract import WaitEvidence
+
+from .test_catalog_sync import _fixture
 
 NOW = datetime(2026, 10, 19, tzinfo=UTC)
 
@@ -50,7 +80,6 @@ def test_generic_adapter_persists_its_wait_clock_and_cause() -> None:
     )
     adapter.apply(job, after, NOW)
     assert getattr(job, "next_action_at", None) == due
-    from vonk_control.persisted_waits import read_wait
 
     wait = read_wait(job)
     assert wait is not None
@@ -62,18 +91,6 @@ def test_wait_round_trip_reconstruction_projection_and_rollback(
     postgres_engine,
 ) -> None:
     """Catches dropped enum/nullable evidence, split transactions and read churn."""
-    from vonk_agent_protocol.lifecycle_vocabulary import (
-        WaitOwnerKind,
-        WaitResumeCondition,
-    )
-    from vonk_control.operation_api.lane_wait import apply_queue_wait
-    from vonk_control.operations.blockers import (
-        BlockingOperation,
-        OperationBlocker,
-        StorageReliefEvidence,
-    )
-    from vonk_control.operations.item_contract import OperationItem
-    from vonk_control.persisted_waits import read_wait, schedule_wait, write_wait
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -193,10 +210,6 @@ def test_startup_adds_wait_columns_without_restarting_a_live_attempt(
     postgres_engine,
 ) -> None:
     """Catches an upgrade discarding running work or treating NULL waits as failure."""
-    from sqlalchemy import inspect
-
-    from vonk_control.db.schema import reconcile_schema
-    from vonk_control.models.jobs import JobAttempt
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -243,9 +256,6 @@ def test_startup_adds_wait_columns_without_restarting_a_live_attempt(
 
 def test_wait_model_inventory_is_exhaustive() -> None:
     """Every concrete owner binds its JSON to the canonical persisted model."""
-    from vonk_control.model_primitives import Base
-    from vonk_control.stored.json_values import binding_for
-    from vonk_control.wait_contract import WaitEvidence
 
     owners = [
         table
@@ -273,19 +283,6 @@ def test_wait_model_inventory_is_exhaustive() -> None:
 
 def test_every_durable_wait_owner_has_identity_and_projection() -> None:
     """Catches an owner added to storage without custody or an API observation."""
-    from datetime import UTC, datetime
-
-    from sqlalchemy import Integer
-
-    from vonk_agent_protocol.lifecycle_vocabulary import (
-        WaitOwnerKind,
-        WaitReason,
-        WaitResumeCondition,
-    )
-    from vonk_control.model_primitives import Base
-    from vonk_control.models.jobs import Job
-    from vonk_control.operations.blockers import make_blocker
-    from vonk_control.persisted_waits import owner_identity, read_wait, write_wait
 
     now = datetime(2026, 10, 19, tzinfo=UTC)
     for mapper in Base.registry.mappers:
@@ -325,8 +322,6 @@ def test_corrupt_wait_does_not_erase_intent_or_hide_another_owner(
     postgres_engine,
 ) -> None:
     """Catches one malformed historical row stopping projection of eligible work."""
-    from vonk_control.lifecycle.evidence import Residue
-    from vonk_control.persisted_waits import read_wait
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -371,12 +366,6 @@ def test_catalog_wait_survives_reconstruction_and_reuses_exact_observation(
     tmp_path, postgres_engine
 ) -> None:
     """Catches a restarted loop losing its delay or attaching it to unrelated history."""
-    from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
-    from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
-    from vonk_control.models.cache import RecipeLibrarySyncRun
-    from vonk_control.persisted_waits import read_wait
-
-    from .test_catalog_sync import _fixture
 
     sessions, catalog, reader, _item = _fixture(tmp_path, engine=postgres_engine)
     now = [NOW]
@@ -411,9 +400,6 @@ def test_catalog_wait_survives_reconstruction_and_reuses_exact_observation(
 
 def test_stall_alarm_is_not_a_new_dependency_or_progress() -> None:
     """Catches an attention warning resetting the dependency's original age."""
-    from vonk_agent_protocol.lifecycle_vocabulary import ProgressAlarmCode
-    from vonk_control.operations.blockers import make_blocker
-    from vonk_control.persisted_waits import read_wait, schedule_wait
 
     job = _job()
     cause = make_blocker(WaitReason.SPARK_BUSY, "exact child still owns the Spark")
@@ -433,11 +419,6 @@ def test_operator_wait_retains_the_owners_real_action_after_store_load(
     postgres_engine,
 ) -> None:
     """Catches publishing an operator wait without the resume action its owner accepts."""
-    from vonk_agent_protocol.lifecycle_vocabulary import (
-        OperatorActionName,
-        WaitResumeCondition,
-    )
-    from vonk_control.persisted_waits import read_wait, schedule_wait
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)

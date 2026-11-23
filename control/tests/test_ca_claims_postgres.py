@@ -11,6 +11,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
 
 from vonk_control.db.connections import build_engine
+from vonk_control.db.connections import build_engine as db_build_engine
 from vonk_control.enrollment.contract import EnrollmentGrant
 from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.model_primitives import Base
@@ -153,7 +154,6 @@ def test_postgres_grant_lock_conflict_ends_observation_and_same_request_recovers
 def test_enrollment_transactions_commit_durably_on_async_controller_connections(
     postgres_engine,
 ):
-    from vonk_control.db.connections import build_engine as db_build_engine
 
     engine = db_build_engine(postgres_engine.url.render_as_string(hide_password=False))
     try:

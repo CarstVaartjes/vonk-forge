@@ -16,15 +16,20 @@ from starlette.types import Message
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_control.agent_api.authority import RESULT_REFUSALS
 from vonk_control.agent_api.common import (
     AgentApiServices,
     EnrollmentRateLimiter,
 )
 from vonk_control.api.application import create_app
 from vonk_control.enrollment.body import _bounded_enrollment_body
-from vonk_control.models.fleet import AgentCertificate
+from vonk_control.enrollment.validation import _decode_token, _digest
+from vonk_control.evidence_repeats import repeating_evidence
+from vonk_control.failure_evidence import FailureEvidenceService
+from vonk_control.models.fleet import AgentCertificate, AgentEnrollmentGrant
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.recovery_policy import RECOVERY
 
 from .agent_api_support import (
     NODE_A,
@@ -40,7 +45,7 @@ from .agent_api_support import (
     valid_enrollment_body,
 )
 from .agent_fences import fenced_attempt, fenced_operation
-from .agent_jobs_support import canonical_start_payload
+from .agent_jobs_support import canonical_start_payload, distribution_payload
 
 
 class ChunkedEnrollmentRequest:
@@ -72,8 +77,6 @@ class CopyBoundedChunk(bytes):
 
 
 def assert_grant_available(services: AgentApiServices, token: str) -> None:
-    from vonk_control.enrollment.validation import _decode_token, _digest
-    from vonk_control.models.fleet import AgentEnrollmentGrant
 
     assert services.enrollment is not None
     with services.enrollment._sessions() as session:
@@ -87,8 +90,6 @@ def assert_grant_available(services: AgentApiServices, token: str) -> None:
 
 
 def assert_grant_unconsumed(services: AgentApiServices, token: str) -> None:
-    from vonk_control.enrollment.validation import _decode_token, _digest
-    from vonk_control.models.fleet import AgentEnrollmentGrant
 
     with services.sessions() as session:
         grant = session.scalar(
@@ -318,10 +319,6 @@ def test_a_result_refused_on_every_delivery_is_shown_until_one_is_accepted(
 ) -> None:
     """Catches a Spark whose every result is refused before the route runs, unseen."""
 
-    from vonk_control.agent_api.authority import RESULT_REFUSALS
-    from vonk_control.evidence_repeats import repeating_evidence
-    from vonk_control.recovery_policy import RECOVERY
-
     client, services, _, clock = agent_system
     services.operations.enqueue(
         parent(services.sessions, clock).id,
@@ -536,8 +533,6 @@ def test_declared_failure_kind_survives_agent_result_ingress(agent_system) -> No
     both acceptance and the preserved receipt.
     """
 
-    from .agent_jobs_support import distribution_payload
-
     client, services, _, clock = agent_system
     services.operations.enqueue(
         parent(services.sessions, clock).id,
@@ -627,7 +622,6 @@ def test_boundary_failures_record_a_correlated_operator_reason(agent_system) -> 
         # reissue of the same work.
         assert operation.state == LifecycleState.FAILED
         assert operation.next_action_at is None
-    from vonk_control.failure_evidence import FailureEvidenceService
 
     attempt = fenced_attempt(services.sessions, claim["fence"])
     bundle = FailureEvidenceService(services.sessions, clock=clock).read(
@@ -812,8 +806,6 @@ def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
 def test_recipe_job_failure_uses_its_typed_exit_result_at_authenticated_ingress(
     agent_system,
 ):
-    import json
-    from pathlib import Path
 
     client, services, _, clock = agent_system
     vectors = (

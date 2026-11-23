@@ -39,6 +39,8 @@ from vonk_control.lifecycle.types import (
 from vonk_control.models.jobs import Job, JobAttempt
 from vonk_control.models.operations import AgentOperation
 
+from .agent_fences import fenced_attempt, fenced_operation
+from .non_blocking import assert_ended_without_blocking
 from .test_agent_upgrades import (  # noqa: F401  (published_source is autouse)
     NODE_A,
     OLD_IDENTITY,
@@ -233,8 +235,6 @@ def test_a_projection_never_writes_a_wait() -> None:
 def test_package_preparation_dependency_retries_same_package_across_restart_then_ends_and_admits_fresh(
     tmp_path,
 ):
-    from .agent_fences import fenced_attempt, fenced_operation
-    from .non_blocking import assert_ended_without_blocking
 
     clock = Clock()
     sessions, operations, upgrades, _job = _rollout(

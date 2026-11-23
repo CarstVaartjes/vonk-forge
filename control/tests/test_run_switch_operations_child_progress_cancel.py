@@ -24,7 +24,12 @@ from vonk_control.models.execution import (
 )
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
-from vonk_control.operation_api.contracts import OperationQuery
+from vonk_control.operation_api.contracts import OperationProvider, OperationQuery
+from vonk_control.operation_api.providers import (
+    get_operation_from_providers,
+    merge_operation_providers,
+)
+from vonk_control.operation_api.responses import operation_detail_response
 from vonk_control.operations.contract import (
     OperationFailureEvidence,
     OperationRecoveryAction,
@@ -68,6 +73,7 @@ from .run_switch_operations_support import (
     _service,
     _target_copy_evidence,
 )
+from .test_run_switch_build_fencing import _direct_parent
 
 
 def test_artifact_child_checkpoint_advances_to_verify(
@@ -474,12 +480,6 @@ def test_activity_provider_preserves_group_and_canonical_nested_progress(
 def test_activity_provider_integrates_with_global_cursor_and_detail_projection(
     tmp_path: Path,
 ) -> None:
-    from vonk_control.operation_api.contracts import OperationProvider
-    from vonk_control.operation_api.providers import (
-        get_operation_from_providers,
-        merge_operation_providers,
-    )
-    from vonk_control.operation_api.responses import operation_detail_response
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path
@@ -544,9 +544,6 @@ def test_activity_provider_integrates_with_global_cursor_and_detail_projection(
 def test_activity_provider_keeps_valid_items_when_one_plan_is_unreadable(
     tmp_path: Path,
 ) -> None:
-    from vonk_control.operation_api.contracts import OperationProvider
-    from vonk_control.operation_api.providers import merge_operation_providers
-    from vonk_control.operation_api.responses import operation_detail_response
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path
@@ -627,7 +624,6 @@ def test_activity_provider_keeps_valid_items_when_one_plan_is_unreadable(
 def test_measured_operation_keeps_unknown_totals_and_failure_readable(
     tmp_path: Path, failed: bool
 ) -> None:
-    from vonk_control.operation_api.responses import operation_detail_response
 
     switch = _cold_compile_switch(tmp_path)
     _host_changes_during_compile(switch)  # held for a refresh: totals unknown
@@ -1071,7 +1067,6 @@ def test_production_build_queue_receipt_survives_phase_handoff_and_completion(
     tmp_path: Path,
     postgres_engine,
 ) -> None:
-    from .test_run_switch_build_fencing import _direct_parent
 
     sessions, planner, parent, request, selected = _direct_parent(
         tmp_path, postgres_engine

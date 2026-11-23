@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
 from cryptography.x509.oid import NameOID
 from sqlalchemy import create_engine, delete, event, func, select
 from sqlalchemy.engine import Engine
@@ -21,6 +21,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
 from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.enrollment import MAX_CSR_BYTES, ExpiredRenewRequest
 from vonk_agent_protocol.lifecycle_vocabulary import (
     ErrorCategory,
     SecurityRefusalReason,
@@ -56,6 +57,7 @@ from vonk_control.models.fleet import (
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.pki import IssuedCertificate
+from vonk_control.step_ca import StepCAUnavailable
 
 from .agent_fences import fenced_operation
 from .ca_test_authority import FixtureCertificateAuthority
@@ -213,7 +215,6 @@ def invalid_signature_csr() -> bytes:
 
 
 def rsa_csr() -> bytes:
-    from cryptography.hazmat.primitives.asymmetric import rsa
 
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     return (
@@ -613,7 +614,6 @@ def test_consumed_grant_reuses_content_after_reboot_and_rejects_another_key(serv
 def test_consumed_enrollment_grant_refuses_oversized_valid_csr_replay(service):
     # Break caught: the PEM parser tolerates trailing whitespace, so an
     # oversized replay bypasses the fresh-submission CSR byte limit.
-    from vonk_agent_protocol.enrollment import MAX_CSR_BYTES
 
     enrollment, _, _, authority = service
     request = csr()
@@ -1905,7 +1905,6 @@ def test_grant_revocation_and_consumption_serialize_on_postgres(postgres_engine,
 def test_rotation_reader_miss_ends_and_preserves_active_certificate(
     service, monkeypatch
 ):
-    from vonk_control.step_ca import StepCAUnavailable
 
     enrollment, sessions, _, authority = service
     source = enroll(enrollment)
@@ -1940,7 +1939,6 @@ def recovery_service(service):
 
 
 def expired_proof(key, node_id, serial, replacement, now):
-    from vonk_agent_protocol.enrollment import ExpiredRenewRequest
 
     proof = ExpiredRenewRequest(
         node_id=node_id,
@@ -2025,7 +2023,6 @@ def test_expired_renewal_refusals_do_not_issue_or_poison_fresh_enrollment(
 def test_expired_renewal_consumes_the_same_signed_fixture_as_the_rust_agent(
     recovery_service,
 ):
-    from vonk_agent_protocol.enrollment import ExpiredRenewRequest
 
     enrollment, _sessions, clock, authority = recovery_service
     proof = ExpiredRenewRequest.model_validate_json(

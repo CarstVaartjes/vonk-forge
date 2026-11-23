@@ -12,7 +12,7 @@ import pytest
 from sqlalchemy import func, select
 from vonk_forge_contracts.model import ModelReference
 
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_control.catalog.revision_collection import GRACE
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.cache import (
@@ -32,7 +32,10 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import (
     ArtifactDistributionAssignment,
 )
-from vonk_control.recipe_operations.errors import RecipeOperationConflict
+from vonk_control.recipe_operations.errors import (
+    RecipeOperationConflict,
+    RecipeRetryLater,
+)
 from vonk_control.storage_demands import (
     NAS_MODELS,
     STORAGE_EVICTING,
@@ -729,8 +732,6 @@ def test_a_waiting_load_is_told_evicting_only_while_the_removal_can_happen(
     waits for is refused: the space it was promised never comes. A deferred
     removal (outcome unknown, retried next pass) is still under way; a refused
     one is not, until a later pass removes it after all."""
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_control.recipe_operations.errors import RecipeRetryLater
 
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")

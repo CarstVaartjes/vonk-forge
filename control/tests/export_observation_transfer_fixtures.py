@@ -25,6 +25,7 @@ from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.fleet_stream import FleetStream
 from vonk_control.models.fleet import AgentNode, AgentNodeContact
 from vonk_control.models.telemetry import FleetStreamEvent
+from vonk_control.observation.platform_errors import ObservationCaptureUnavailable
 from vonk_control.observation.transfer import (
     ObservationTransferResponse,
     observation_response,
@@ -128,7 +129,6 @@ def _export_response_errors(output: Path) -> None:
 def _export_peer_response_errors(
     app: FastAPI, peer: TestClient, records: list[dict[str, object]]
 ) -> None:
-    from vonk_control.observation.platform_errors import ObservationCaptureUnavailable
 
     for path in ("/api/fleet", "/api/platform", "/api/fleet/stream"):
         response = peer.get(path, headers={"Authorization": "Bearer invalid"})

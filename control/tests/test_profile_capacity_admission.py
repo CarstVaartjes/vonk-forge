@@ -47,10 +47,15 @@ from vonk_control.models.mapping import ClusterMapping
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS, RENDEZVOUS_PORT
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 from vonk_control.storage_demands import (
     STORAGE_EVICTING,
+    STORAGE_EVICTION_TIMED_OUT,
     STORAGE_INSUFFICIENT,
+    StorageDemands,
+    StorageRelief,
 )
+from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
 from .recipe_operations_support import installed_recipe, setup_services, started_recipe
 from .test_fleet_profile_api import _client, _headers
@@ -720,7 +725,6 @@ def test_pending_admission_constraint_defect_fails_at_once_and_a_fresh_load_is_a
 ) -> None:
     """A schema refusal is a defect: the load fails naming the constraint (never
     retried as it stands), and once it is corrected a fresh load is admitted."""
-    from datetime import timedelta
 
     sessions, profiles, _, profile, _, _, _, _ = _capacity_profile(
         tmp_path, postgres_engine
@@ -1317,7 +1321,6 @@ class _Relief:
         self.inventory_observed_at: datetime | None = None
 
     def __call__(self, node_id, required_free_bytes, *, source, subject, reason):
-        from vonk_control.storage_demands import StorageRelief
 
         self.asked.append((node_id, required_free_bytes, source))
         return StorageRelief(
@@ -1493,8 +1496,6 @@ def test_storage_observation_without_fresh_inventory_has_a_durable_deadline(
     tmp_path,
     monkeypatch,
 ) -> None:
-    from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
-    from vonk_control.storage_demands import STORAGE_EVICTION_TIMED_OUT
 
     relief = _Relief(STORAGE_INSUFFICIENT)
     sessions, profiles, _nodes, _lifecycle = _load_short_of_disk(
@@ -1513,7 +1514,6 @@ def test_active_storage_relief_waits_then_settled_shortfall_ends(
     monkeypatch,
 ) -> None:
     """A paused collector can recover within the bound and settle its shortfall."""
-    from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
     relief = _Relief(STORAGE_INSUFFICIENT, paused=True)
     sessions, profiles, _nodes, _lifecycle = _load_short_of_disk(
@@ -1536,7 +1536,6 @@ def test_storage_wait_ends_without_measured_progress_after_restart(
     tmp_path, monkeypatch, postgres_engine, code, paused
 ) -> None:
     """Catches eviction reports resetting the durable wait on each fresh inventory."""
-    from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
     relief = _Relief(code, paused=paused)
     sessions, profiles, nodes, _lifecycle = _load_short_of_disk(
@@ -1579,7 +1578,6 @@ def test_storage_wait_extends_only_when_measured_available_bytes_increase(
     tmp_path, monkeypatch, postgres_engine
 ) -> None:
     """Catches expiring a reclaim that advances bytes, or treating retries as progress."""
-    from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
     relief = _Relief(STORAGE_EVICTING)
     sessions, profiles, _nodes, lifecycle = _load_short_of_disk(
@@ -1588,8 +1586,6 @@ def test_storage_wait_extends_only_when_measured_available_bytes_increase(
     application_id = _only_application(sessions).id
     _later(profiles, PROFILE_STALL_WINDOW_SECONDS - 1)
     # Exercise the real collector's typed bytes, with optional object evidence absent.
-    from vonk_control.storage_demands import StorageDemands
-    from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
     assert lifecycle is not None
     collector = UnusedStorageCollector(

@@ -35,6 +35,7 @@ from vonk_control.recipe_image_availability.service import (
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .test_fleet_profile_api import _client, _headers
+from .test_fleet_profile_cancel import _application
 from .test_operator_acceptance_postgres import DropFirstResponse
 
 NOW = datetime(2026, 10, 6, tzinfo=UTC)
@@ -80,7 +81,6 @@ def test_profile_mutation_routes_isolate_damaged_saved_definition(
     postgres_engine, tmp_path, field, value, action
 ):
     """Catches old draft parsers breaking replacement, review or accepted work."""
-    from .test_fleet_profile_cancel import _application
 
     sessions, _switch, service, profile, application, _adapter, _nodes = _application(
         tmp_path, engine=postgres_engine

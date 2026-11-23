@@ -14,7 +14,7 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import select
 
-from vonk_control.agent_api import ended_runs
+from vonk_control.agent_api import ended_runs, observations
 from vonk_control.models.execution import RecipeRun, RunNode
 
 from .agent_api_support import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
@@ -244,7 +244,6 @@ def test_run_leaving_the_stoppable_states_between_the_reads_is_a_wait(
     agent_system,  # noqa: F811
     monkeypatch,
 ) -> None:
-    from vonk_control.agent_api import observations
 
     client, services, _, clock = agent_system
     run_id = _ended_run(services, clock, state="lost")

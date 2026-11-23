@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any
 
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.inventory.items import inventory_items
+from vonk_control.inventory.items_contract import AgentInventoryItems
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.telemetry import NodeInventoryItemsSnapshot
 
 PACKAGED_RUNTIME_IDENTITY = {
     "architecture": "linux-amd64",
@@ -40,12 +48,6 @@ def inventory_items_fixture(
     preflight_fingerprint=None,
 ):
     """A typed inventory item can exist before the first capacity report."""
-    import hashlib
-    from datetime import UTC, datetime
-
-    from vonk_agent_protocol.contracts import canonical_message
-    from vonk_control.inventory.items_contract import AgentInventoryItems
-    from vonk_control.models.telemetry import NodeInventoryItemsSnapshot
 
     at = observed_at or datetime(2026, 8, 7, 12, tzinfo=UTC)
     items = AgentInventoryItems(
@@ -65,8 +67,6 @@ def inventory_items_fixture(
 
 
 def set_inventory_identity(node, **fields):
-    from vonk_agent_protocol.claims import AgentRuntimeIdentity
-    from vonk_control.inventory.items import inventory_items
 
     items = inventory_items(node)
     if any(value is None for value in fields.values()):
@@ -94,7 +94,6 @@ def set_inventory_identity(node, **fields):
 
 
 def set_inventory_fingerprint(node, fingerprint):
-    from vonk_control.inventory.items import inventory_items
 
     if node.inventory_snapshot is None:
         node.inventory_snapshot = inventory_items_fixture(node.node_id)
@@ -104,8 +103,6 @@ def set_inventory_fingerprint(node, fingerprint):
 
 
 def set_inventory_hostname(session, node_id, hostname):
-    from vonk_control.inventory.items import inventory_items
-    from vonk_control.models.fleet import AgentNode
 
     node = session.get(AgentNode, node_id)
     assert node is not None

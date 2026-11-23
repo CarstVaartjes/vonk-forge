@@ -11,14 +11,17 @@ from pathlib import Path
 from typing import ClassVar
 
 import pytest
-from asn1crypto import keys, pem
+from asn1crypto import core, keys, pem
 from cryptography import x509
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes, padding, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from vonk_agent_protocol.installer_setup import NasStepCaControllerRequest
 from vonk_nas_setup.pki import (
     generate_pki,
+    normalize_controller_key,
     normalize_intermediate_key,
     pki_hostnames,
     renew_controller_leaf,
@@ -444,10 +447,6 @@ def test_normalizing_previous_pkcs8_encoding_preserves_signer_and_runs_once(
 ) -> None:
     # Catches dropping existing encrypted signer authority, retaining the old
     # OpenSSL-unreadable public-key extension, or reencrypting on every upgrade.
-    from asn1crypto import core
-    from cryptography.hazmat.primitives import hashes, padding
-    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
     class OneAsymmetricKey(core.Sequence):
         _fields: ClassVar = [
@@ -520,7 +519,6 @@ def test_rust_controller_public_key_encoding_is_valid_and_normalizes_once(
 ) -> None:
     # Catches using OpenSSL's version-0-only loader before validating and
     # preserving the current Rust producer's version-1 controller identity.
-    from asn1crypto import core
 
     class OneAsymmetricKey(core.Sequence):
         _fields: ClassVar = [
@@ -570,7 +568,6 @@ def test_rust_controller_public_key_encoding_is_valid_and_normalizes_once(
             now=NOW,
         )
     validate_pki_material(request_contract, ENVIRONMENT, candidate, now=NOW)
-    from vonk_nas_setup.pki import normalize_controller_key
 
     replacement = normalize_controller_key(request_contract, candidate)
     loaded = serialization.load_pem_private_key(

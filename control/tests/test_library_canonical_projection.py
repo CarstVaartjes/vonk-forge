@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import copy
 import json
+import runpy
+import subprocess
+import time
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
+import httpx2
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Table, create_engine, select, update
+from sqlalchemy import Table, create_engine, event, select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import (
     ModelDefinition,
@@ -31,7 +37,14 @@ from vonk_control.catalog.revision_contract import (
 from vonk_control.catalog.service import CatalogService
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.library.api import install_library_routes
-from vonk_control.library.contract import _MAX_PAGE_RECIPES, ModelLibraryResponse
+from vonk_control.library.contract import (
+    _MAX_PAGE_RECIPES,
+    ModelLibraryResponse,
+    RecipeDetailResponse,
+    RecipeLibraryResponse,
+)
+from vonk_control.library_projection import catalog, local_state
+from vonk_control.library_projection import common as library_projection
 from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.model_cache.contract import ModelCacheOperationProgress
 from vonk_control.model_primitives import Base
@@ -496,7 +509,6 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     assert detail_payload["document"]["topology"] == serialize_json_value(
         expected_recipe.topology
     )
-    from vonk_control.library.contract import RecipeDetailResponse
 
     consumed_detail = RecipeDetailResponse.model_validate_json(
         json.dumps(detail_payload)
@@ -1124,7 +1136,6 @@ _SMALL_WIRE_BUDGET = 64 * 1024
 
 @pytest.fixture
 def small_wire_budget(monkeypatch: pytest.MonkeyPatch) -> int:
-    from vonk_control.library_projection import common as library_projection
 
     monkeypatch.setattr(
         library_projection, "MAX_CONTROL_DOCUMENT_BYTES", _SMALL_WIRE_BUDGET
@@ -1381,11 +1392,6 @@ def test_detail_and_page_scope_history_and_latest_request_by_time(
     tmp_path, monkeypatch, caplog
 ):
     """Catches catalog/history scans and reverse-UUID recency overriding a request."""
-    from datetime import timedelta
-
-    from sqlalchemy import event
-
-    from vonk_control.library_projection import catalog, local_state
 
     index = json.loads((ROOT / "catalog-index.json").read_text())
     engine = create_engine(f"sqlite:///{tmp_path / 'scoped-library.sqlite'}")
@@ -1513,7 +1519,6 @@ def test_detail_and_page_scope_history_and_latest_request_by_time(
 
     # Optional SQL observation failure leaves readable catalog content usable.
     def unavailable(*args):
-        from sqlalchemy.exc import OperationalError
 
         raise OperationalError("optional local read", {}, ConnectionError("offline"))
 
@@ -1657,7 +1662,6 @@ def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
 
 def test_list_shared_vector_preserves_sweep_inputs_without_executable_documents():
     """The transport must carry pins and selectors without executable documents."""
-    from vonk_control.library.contract import RecipeLibraryResponse
 
     vector = Path(__file__).resolve().parents[2] / "tests/fixtures/library-list.json"
     raw = json.loads(vector.read_text())
@@ -1690,12 +1694,6 @@ def test_connected_consumers_read_documents_only_from_detail(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Catch API/CLI acceptance readers that still expect documents in lists."""
-    import runpy
-    import subprocess
-    import time
-    from typing import Any
-
-    import httpx2
 
     repository = Path(__file__).resolve().parents[2]
     consumer = runpy.run_path(

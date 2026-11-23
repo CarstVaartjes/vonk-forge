@@ -14,11 +14,14 @@ from pathlib import Path
 
 import httpx2
 import pytest
+from fastapi import Depends, FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_control.auth import Actor
 from vonk_control.bounded_json import (
     require_integer,
     require_mapping,
@@ -26,6 +29,7 @@ from vonk_control.bounded_json import (
     text,
 )
 from vonk_control.failure_classification import is_security_failure
+from vonk_control.model_cache.api import install_model_operator_routes
 from vonk_control.model_cache.constants import ProviderKind
 from vonk_control.model_cache.contract import (
     ModelCacheOperationProgress,
@@ -899,11 +903,6 @@ def test_hf_access_recheck_resumes_the_exact_retained_transfer(
 def test_resume_access_keeps_its_own_receipt_while_an_older_transfer_is_live(
     tmp_path: Path,
 ) -> None:
-    from fastapi import Depends, FastAPI
-    from fastapi.testclient import TestClient
-
-    from vonk_control.auth import Actor
-    from vonk_control.model_cache.api import install_model_operator_routes
 
     sessions = _database(tmp_path)
     token_path = tmp_path / "hf-token"

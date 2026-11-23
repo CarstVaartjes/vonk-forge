@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -8,7 +9,11 @@ from sqlalchemy.orm import sessionmaker
 
 from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import ControlProcessHeartbeat
-from vonk_control.worker.liveness import WorkerHeartbeatRecorder
+from vonk_control.worker.liveness import (
+    WorkerHeartbeatRecorder,
+    WorkerWatchdog,
+    watch_worker,
+)
 from vonk_control.worker_healthcheck import verify_worker_ready
 
 NOW = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
@@ -157,9 +162,6 @@ def test_slow_step_is_published_by_the_watchdog_and_cleared_by_the_next_loop(
     tmp_path,
 ) -> None:
     """A step running past a third of the readiness window is named once."""
-    import threading
-
-    from vonk_control.worker.liveness import WorkerWatchdog, watch_worker
 
     engine = create_engine(f"sqlite:///{tmp_path / 'step.sqlite'}")
     Base.metadata.create_all(engine)
@@ -215,9 +217,6 @@ def test_slow_step_is_published_by_the_watchdog_and_cleared_by_the_next_loop(
 
 
 def _watched(watchdog, polls, **kwargs):
-    import threading
-
-    from vonk_control.worker.liveness import watch_worker
 
     stop = threading.Event()
     remaining = iter(polls)
@@ -226,7 +225,6 @@ def _watched(watchdog, polls, **kwargs):
 
 
 def test_failed_step_record_is_retried_on_the_next_poll() -> None:
-    from vonk_control.worker.liveness import WorkerWatchdog
 
     now = [0.0]
     wall = datetime(2026, 11, 1, tzinfo=UTC)
@@ -253,9 +251,6 @@ def test_failed_step_record_is_retried_on_the_next_poll() -> None:
 
 
 def test_blocked_step_record_never_delays_the_hung_step_restart() -> None:
-    import threading
-
-    from vonk_control.worker.liveness import WorkerWatchdog
 
     now = [0.0]
     watchdog = WorkerWatchdog(timeout_seconds=180, clock=lambda: now[0])

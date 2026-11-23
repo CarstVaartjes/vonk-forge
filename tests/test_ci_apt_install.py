@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,8 +58,6 @@ def test_guard_catches_composite_and_indirect_bypasses(tmp_path: Path) -> None:
 def test_mirror_recovery_is_bounded_and_a_fresh_request_can_succeed(
     tmp_path: Path,
 ) -> None:
-    import os
-    import subprocess
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()

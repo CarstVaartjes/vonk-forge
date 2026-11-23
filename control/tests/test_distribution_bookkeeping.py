@@ -1,6 +1,9 @@
 """Hermetic regressions for storage recovery, content custody, and gone children."""
 
+import hashlib
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -23,7 +26,6 @@ from .test_distribution import _assignment
 
 def test_missing_stored_object_is_typed_observation_then_recovers(tmp_path: Path):
     """An absent file must retain unknown semantics, rather than become a refusal."""
-    import hashlib
 
     payload = b"recovered bytes"
     digest = hashlib.sha256(payload).hexdigest()
@@ -171,7 +173,6 @@ def test_corrupt_local_object_is_a_miss_then_recovered():
 )
 def test_local_distribution_identity_miss_does_not_poison_a_new_request(damage):
     """Local mismatches cannot become security refusals or leave a busy grant."""
-    from dataclasses import replace
 
     class Source(MemoryObjectSource):
         damaged = False
@@ -232,7 +233,6 @@ def test_manifest_unavailability_never_exposes_descriptors_and_reobserves(denied
         broken = True
 
         def manifest_for_artifact_set(self, digest):
-            from types import SimpleNamespace
 
             if self.broken:
                 if denied:
@@ -266,7 +266,6 @@ def test_manifest_unavailability_never_exposes_descriptors_and_reobserves(denied
 
 def test_unsafe_managed_root_never_serves_bytes_and_recovers(tmp_path):
     """Repairing local directory mode makes the next read eligible without a grant reset."""
-    import hashlib
 
     payload = b"managed bytes"
     digest = hashlib.sha256(payload).hexdigest()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import uuid
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -15,14 +16,30 @@ import pytest
 from sqlalchemy import Engine, create_engine, event, select, update
 from sqlalchemy.orm import sessionmaker
 
+from vonk_agent_protocol.agent_words import (
+    ProfileEffectState,
+    ProfileSwitchChildKind,
+)
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-from vonk_agent_protocol.state_machines import InstallationState, RunState
+from vonk_agent_protocol.recipe_operations import RecipeInstallPayload
+from vonk_agent_protocol.state_machines import (
+    InstallationState,
+    NodeIdentityState,
+    RunState,
+)
+from vonk_control.artifact_jobs.lifecycle import (
+    ArtifactIdentity,
+    require_reference_open,
+)
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileEffectProgress,
 )
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.jobs.documents import InstallPhaseOperation, RecipeInstallParent
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import (
@@ -47,6 +64,13 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import (
     ArtifactDistributionAssignment,
 )
+from vonk_control.recipe_operations.execution_contract import (
+    parse_stored_installation_plan,
+)
+from vonk_control.settings import (
+    FREE_SPACE_FOR_COLOCATED_SERVICES_FRACTION,
+    STORAGE_LOW_FREE_FRACTION,
+)
 from vonk_control.storage_demands import (
     NAS_MODELS,
     STORAGE_EVICTING,
@@ -54,8 +78,10 @@ from vonk_control.storage_demands import (
     StorageDemands,
     spark_scope,
 )
+from vonk_control.unused_storage_collection import evidence as collector_evidence
 from vonk_control.unused_storage_collection.common import ACTOR, spark_eviction_capacity
 from vonk_control.unused_storage_collection.evidence import _Evidence
+from vonk_control.unused_storage_collection.references import _installation_kept
 from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
 from .model_cache_support import _artifact, _download
@@ -165,10 +191,6 @@ def test_receipt_unlink_is_outside_sql_with_committed_fence_and_fresh_admission(
     postgres_engine: Engine, tmp_path: Path, monkeypatch, fault: str
 ) -> None:
     """Catches filesystem effects under SQL locks and gates leaked on failure."""
-    from vonk_control.artifact_jobs.lifecycle import (
-        ArtifactIdentity,
-        require_reference_open,
-    )
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)
@@ -276,13 +298,6 @@ def test_live_two_spark_owner_does_not_pin_unrelated_installations(
     Catches node ownership or a profile scope retaining every installation.
     Exact installation/run references and a running workload must still survive.
     """
-    from vonk_agent_protocol.agent_words import (
-        ProfileEffectState,
-        ProfileSwitchChildKind,
-    )
-    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-    from vonk_agent_protocol.state_machines import NodeIdentityState
-    from vonk_control.jobs.documents import RecipeInstallParent
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)
@@ -395,11 +410,6 @@ def test_installation_content_references_hold_but_provenance_does_not(
 ) -> None:
     """Catches keeping only UUIDs, or treating recipe/build provenance as use."""
 
-    from vonk_control.recipe_operations.execution_contract import (
-        parse_stored_installation_plan,
-    )
-    from vonk_control.unused_storage_collection.references import _installation_kept
-
     sessions, _, installation_id, _ = _real_lifecycle(tmp_path, engine=postgres_engine)
     with sessions() as session:
         installation = _required(session.get(RecipeInstallation, installation_id))
@@ -432,7 +442,6 @@ def test_pressure_promises_profile_pointed_spark_objects_but_not_live_ones(
 ) -> None:
     """Saved profiles pin the NAS cache, not Spark copies (the agent frees
     them); only a live operation keeps a model's objects on the Spark."""
-    from collections import Counter
 
     _hard_linked_models(world)
 
@@ -461,13 +470,6 @@ def test_shared_file_does_not_pin_an_unrelated_installation(
     Catches retaining all of its gigabytes for one shared tokenizer file.
     Exact installation and aggregate model/image references still retain use.
     """
-    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-    from vonk_agent_protocol.recipe_operations import RecipeInstallPayload
-    from vonk_control.jobs.documents import InstallPhaseOperation, RecipeInstallParent
-    from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
-    from vonk_control.recipe_operations.execution_contract import (
-        parse_stored_installation_plan,
-    )
 
     sessions, _, installation_id, nodes = _real_lifecycle(
         tmp_path, engine=postgres_engine
@@ -594,10 +596,6 @@ def _wait_for_download_of(service: ModelCacheService, tmp_path: Path, size: int)
 
 def test_the_reserve_is_a_tenth_of_the_volume(tmp_path: Path, monkeypatch) -> None:
     """Catches a fixed 10 GiB reserve on a 10 TB volume shared with PostgreSQL."""
-    from vonk_control.settings import (
-        FREE_SPACE_FOR_COLOCATED_SERVICES_FRACTION,
-        STORAGE_LOW_FREE_FRACTION,
-    )
 
     volume = _Volume(tmp_path / "cache", 10_000)
     monkeypatch.setattr("shutil.disk_usage", volume.usage)
@@ -1035,8 +1033,6 @@ def test_a_pass_scans_operations_once_for_what_is_live_and_once_for_ordering(
     removal or per consumer: the pass reads live operations once, the last day
     once (ordering only), and a removal's verify re-reads live operations once
     and never the last day."""
-
-    from vonk_control.unused_storage_collection import evidence as collector_evidence
 
     calls: list[bool] = []
     original = collector_evidence.operation_tokens

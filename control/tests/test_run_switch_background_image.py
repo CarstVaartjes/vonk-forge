@@ -63,11 +63,11 @@ from .recipe_operations_support import NOW, _CanonicalModelCache, setup_services
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
     _AdvancingClock,
+    _finish,
     _request,
     _target_copy_evidence,
 )
 from .runtime_image_fixtures import place_test_image
-from .test_lifecycle_preflight import _finish
 
 
 class _ColdInspector(CompleteArtifactInspector):

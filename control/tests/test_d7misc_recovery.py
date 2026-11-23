@@ -1,25 +1,69 @@
 """Hermetic regressions for range recovery and package content admission."""
 
+import io
 import json
+import tarfile
 from dataclasses import replace
+from datetime import UTC, datetime
 from importlib.resources import files
 from threading import Event
 from typing import Never
+from unittest.mock import Mock
 
 import httpx2
 import pytest
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session, sessionmaker
 
-from vonk_agent_protocol.outcome import InvalidRequestError
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
+from vonk_agent_protocol.state_machines import ReservationState
+from vonk_control.auth import CursorCodec, CursorError
+from vonk_control.availability_production.build_observation import (
+    _cached_build_receipt,
+)
+from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync import (
+    ManagedRecipeCatalogSyncService,
+    RecipeLibrarySyncReader,
+)
 from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )
+from vonk_control.fleet_profiles import capacity as profile_capacity
+from vonk_control.model_cache.api import (
+    ModelCacheOperationProvider,
+)
 from vonk_control.model_cache.ranges import download_ranges, range_partial_bytes
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeLibrarySyncRun
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.operation_api.contracts import OperationApiServices
+from vonk_control.operation_api.providers import (
+    _global_get_operation,
+    _global_list_operations,
+)
+from vonk_control.recipe_builds.cancellation import (
+    lock_availability_build_dependency,
+)
+from vonk_control.recipe_builds.common import RecipeBuildResolution
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot
 from vonk_control.recipe_packages.client import RecipePackageClient
 from vonk_control.recipe_packages.contracts import RecipePackageError
+from vonk_control.source_bundles import (
+    BundleLimits,
+    SourceBundleStore,
+    SourceBundleUnknown,
+    _generated_bundle,
+    generate_source_bundle,
+    parse_source_bundle,
+)
 
 from .display_fixtures import model_entry
+from .non_blocking import assert_ended_without_blocking
 
 
 def _unused_job_operations(*_args: object) -> Never:
@@ -85,8 +129,6 @@ def test_package_preparation_rejects_changed_content_with_same_commit(tmp_path):
 
 
 def test_activity_read_without_optional_projections_is_empty():
-    from vonk_control.operation_api.contracts import OperationApiServices
-    from vonk_control.operation_api.providers import _global_list_operations
 
     services = OperationApiServices(
         agents=lambda: (),
@@ -100,8 +142,6 @@ def test_activity_read_without_optional_projections_is_empty():
 
 
 def test_activity_absent_projection_is_not_a_read_failure():
-    from vonk_control.operation_api.contracts import OperationApiServices
-    from vonk_control.operation_api.providers import _global_get_operation
 
     services = OperationApiServices(
         agents=lambda: (),
@@ -113,13 +153,6 @@ def test_activity_absent_projection_is_not_a_read_failure():
 
 
 def test_cache_pagination_uses_authenticated_observation_cursors():
-    from unittest.mock import Mock
-
-    from vonk_control.auth import CursorCodec, CursorError
-    from vonk_control.model_cache.api import (
-        ModelCacheOperationProvider,
-    )
-    from vonk_control.model_cache.service import ModelCacheService
 
     provider = ModelCacheOperationProvider(Mock(spec=ModelCacheService))
     assert (
@@ -161,10 +194,6 @@ def test_cache_pagination_uses_authenticated_observation_cursors():
 
 
 def test_incomplete_cached_build_enters_normal_preparation():
-    from vonk_control.availability_production.build_observation import (
-        _cached_build_receipt,
-    )
-    from vonk_control.recipe_builds.common import RecipeBuildResolution
 
     resolution = RecipeBuildResolution(
         recipe_revision_id="revision",
@@ -178,14 +207,6 @@ def test_incomplete_cached_build_enters_normal_preparation():
 
 
 def test_unmatched_active_handoff_is_named_and_preserves_owners(monkeypatch):
-    from unittest.mock import Mock
-
-    from sqlalchemy.orm import Session
-
-    from vonk_agent_protocol.outcome import UnknownOutcomeError
-    from vonk_agent_protocol.state_machines import ReservationState
-    from vonk_control.fleet_profiles import capacity as profile_capacity
-    from vonk_control.models.execution import ResourceReservation
 
     claims = {
         node: ResourceReservation(
@@ -221,25 +242,6 @@ def test_unmatched_active_handoff_is_named_and_preserves_owners(monkeypatch):
 
 
 def test_unknown_catalog_sync_ends_and_admits_a_fresh_request(tmp_path):
-    from datetime import UTC, datetime
-    from unittest.mock import Mock
-
-    from sqlalchemy import create_engine, select
-    from sqlalchemy.orm import sessionmaker
-
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
-    from vonk_control.auth import CursorCodec
-    from vonk_control.catalog.service import CatalogService
-    from vonk_control.catalog.sync import (
-        ManagedRecipeCatalogSyncService,
-        RecipeLibrarySyncReader,
-    )
-    from vonk_control.model_primitives import Base
-    from vonk_control.models.cache import RecipeLibrarySyncRun
-    from vonk_control.source_bundles import SourceBundleUnknown
-
-    from .non_blocking import assert_ended_without_blocking
 
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)
@@ -299,12 +301,6 @@ def test_unknown_catalog_sync_ends_and_admits_a_fresh_request(tmp_path):
 
 
 def test_unreadable_incoming_bundle_is_input_validation(monkeypatch):
-    import tarfile
-
-    from vonk_control.source_bundles import (
-        generate_source_bundle,
-        parse_source_bundle,
-    )
 
     incoming = generate_source_bundle({"Dockerfile": b"FROM scratch\n"})
     monkeypatch.setattr(tarfile.TarFile, "extractfile", lambda *_: None)
@@ -313,17 +309,6 @@ def test_unreadable_incoming_bundle_is_input_validation(monkeypatch):
 
 
 def test_catalog_source_storage_absence_recovers_on_the_next_request(tmp_path):
-    import io
-    from datetime import UTC, datetime
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    from vonk_agent_protocol.outcome import UnknownOutcomeError
-    from vonk_control.auth import CursorCodec
-    from vonk_control.catalog.service import CatalogService
-    from vonk_control.model_primitives import Base
-    from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -346,14 +331,6 @@ def test_catalog_source_storage_absence_recovers_on_the_next_request(tmp_path):
 
 
 def test_unreadable_stored_bundle_remains_unknown(monkeypatch):
-    import tarfile
-
-    from vonk_control.source_bundles import (
-        BundleLimits,
-        SourceBundleUnknown,
-        _generated_bundle,
-        generate_source_bundle,
-    )
 
     stored = generate_source_bundle({"Dockerfile": b"FROM scratch\n"})
     monkeypatch.setattr(tarfile.TarFile, "extractfile", lambda *_: None)
@@ -369,13 +346,6 @@ def test_unreadable_stored_bundle_remains_unknown(monkeypatch):
     ],
 )
 def test_invalid_availability_dependency_is_pre_effect_input(payload):
-    from unittest.mock import Mock
-
-    from sqlalchemy.orm import Session
-
-    from vonk_control.recipe_builds.cancellation import (
-        lock_availability_build_dependency,
-    )
 
     session = Mock(spec=Session)
     with pytest.raises(InvalidRequestError):

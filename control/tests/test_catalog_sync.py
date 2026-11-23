@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from concurrent.futures import Executor, Future
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -30,6 +31,7 @@ from vonk_control.catalog.revision_contract import (
 )
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import (
+    AutomaticCatalogSync,
     ManagedRecipeCatalogSyncService,
     _empty_result,
 )
@@ -726,9 +728,6 @@ def test_worker_sync_runs_when_due_and_leaves_a_live_import_alone(
     tmp_path: Path,
 ) -> None:
     """Catches an early re-read, or a second read beside a live request-led import."""
-    from vonk_control.catalog.sync import AutomaticCatalogSync
-
-    from .test_catalog_sync_retry import Inline
 
     sessions, service, reader, _item_value = _fixture(tmp_path)
     now = [datetime(2026, 9, 5, tzinfo=UTC)]
@@ -1754,3 +1753,12 @@ def test_sync_retracts_every_document_kind_absent_from_the_published_library(
     assert "dropped-upstream-model" not in {
         model.identity.slug for model in library.models(limit=100).models
     }
+
+
+class Inline(Executor):
+    """Run the sync in the calling thread: the next tick collects its outcome."""
+
+    def submit(self, fn, /, *args, **kwargs):
+        done: Future = Future()
+        done.set_result(fn(*args, **kwargs))
+        return done

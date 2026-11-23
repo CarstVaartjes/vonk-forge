@@ -3,20 +3,30 @@
 from __future__ import annotations
 
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
+from threading import Barrier
 from types import SimpleNamespace
 
 import pytest
 from alembic import command
 from alembic.config import Config
+from fastapi.testclient import TestClient
 from sqlalchemy import event, select
 
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
+from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_agent_protocol.state_machines import RouteState
+from vonk_control.agent_api.common import AgentApiServices
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.api import production
+from vonk_control.distribution_executor.preparation import (
+    CompositeDistributionPhaseExecutor,
+)
 from vonk_control.logging import configure_controller_logging
 from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
 from vonk_control.models.fleet import AgentNode
@@ -32,7 +42,11 @@ from vonk_control.run_switch_contract.requests import (
     SparkGroupNode,
 )
 from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runtime.preflight import latest_result, request_digest
+from vonk_control.settings import Settings
 
+from .agent_api_support import agent_headers
 from .agent_fences import fenced_operation
 from .non_blocking import assert_ended_without_blocking
 from .recipe_operations_support import (
@@ -48,11 +62,14 @@ from .recipe_operations_support import (
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
+    _finish,
     _replace_child,
     _request,
     _service,
 )
-from .test_lifecycle_preflight import _finish
+from .runtime_identity_support import claim_agent
+from .test_lifecycle_preflight import _clear
+from .test_runtime_preflight import result as passing_result
 
 
 @pytest.fixture
@@ -583,8 +600,6 @@ def test_postgres_newer_intent_supersedes_parked_final_verification(
 def test_postgres_duplicate_apply_converges_under_target_lock(
     tmp_path, migrated_engine
 ):
-    from concurrent.futures import ThreadPoolExecutor
-    from threading import Barrier
 
     sessions, lifecycle, nodes, _ = _installed(tmp_path, migrated_engine)
     service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
@@ -622,14 +637,6 @@ def test_preflight_delayed_passes_and_completion_wake_reach_transfer(
     whether the completion notification arrives or is lost.
     The Spark clock leads the Controller by ten minutes throughout.
     """
-    from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
-    from vonk_control.agent_jobs.service import AgentJobService
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
-    from vonk_control.runtime.preflight import latest_result, request_digest
-
-    from .runtime_identity_support import claim_agent
-    from .test_lifecycle_preflight import _clear
-    from .test_runtime_preflight import result as passing_result
 
     sessions, lifecycle, nodes, _ = _installed(
         tmp_path, migrated_engine, nodes=node_count
@@ -717,20 +724,6 @@ def test_production_result_handler_only_schedules_worker(
     tmp_path, migrated_engine, monkeypatch
 ):
     """Production's synchronous Composite executor must never run inside POST /result."""
-    from fastapi.testclient import TestClient
-
-    from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
-    from vonk_control.agent_api.common import AgentApiServices
-    from vonk_control.api import production
-    from vonk_control.distribution_executor.preparation import (
-        CompositeDistributionPhaseExecutor,
-    )
-    from vonk_control.settings import Settings
-
-    from .agent_api_support import agent_headers
-    from .runtime_identity_support import claim_agent
-    from .test_lifecycle_preflight import _clear
-    from .test_runtime_preflight import result as passing_result
 
     sessions, lifecycle, nodes, _ = _installed(tmp_path, migrated_engine)
     _clear(sessions)

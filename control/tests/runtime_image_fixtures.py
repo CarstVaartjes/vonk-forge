@@ -7,13 +7,28 @@ already uses instead of producing real registry content.
 
 from __future__ import annotations
 
+import copy as copying
 import hashlib
 import json
 from datetime import timedelta
+from uuid import uuid4
+
+from sqlalchemy import select
 
 from vonk_agent_protocol.contracts import canonical_message
+from vonk_control.install_admission.identity import _primary_model_sha256
+from vonk_control.inventory.repository import (
+    InventoryRepository,
+    NodeInventoryReport,
+)
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.models.execution import InstallationNode, RecipeInstallation
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.oci_image_store import OCI_MANIFEST
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
+from vonk_control.strict_json import serialize_json_value
 
 RUNTIME_CONFIG = {
     "architecture": "arm64",
@@ -70,14 +85,6 @@ def remove_test_image(storage: FilesystemRuntimeImageStorage, address: str) -> N
 def refresh_inventory(sessions, now) -> None:
     """Publish current physical fixture evidence after advancing an injected clock."""
 
-    from sqlalchemy import select
-
-    from vonk_control.inventory.repository import (
-        InventoryRepository,
-        NodeInventoryReport,
-    )
-    from vonk_control.models.telemetry import NodeInventorySnapshot
-
     with sessions() as session:
         snapshots = {
             row.node_id: row
@@ -130,7 +137,6 @@ def install_image_of_replaced_source(
     Its installed ranks keep that image on their Sparks; it is simply not the
     image this revision builds now.
     """
-    from vonk_control.models.cache import RecipeBuild
 
     install_another_image(installation, digest=digest)
     current = session.get(RecipeBuild, installation.recipe_build_id)
@@ -160,10 +166,6 @@ def copy_as_another_recipe(session, revision_id: str, *, model_content_sha256=No
     document, so the same image, under another identity, optionally pinning
     another primary model. No profile of the original recipe names it and no
     load of it reuses its installations. Returns the copied revision."""
-    import copy as copying
-    from uuid import uuid4
-
-    from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 
     revision = session.get(CatalogDocumentRevision, revision_id)
     assert revision is not None
@@ -204,13 +206,6 @@ def hold_image_through_another_recipe(lifecycle, sessions, *, now) -> None:
     """Another recipe that builds the same image is installed on the Sparks, so
     its installed ranks keep that image there. No profile of this recipe names
     it and no load of this recipe reuses it."""
-    from sqlalchemy import select
-
-    from vonk_control.install_admission.identity import _primary_model_sha256
-    from vonk_control.models.cache import RecipeBuild
-    from vonk_control.models.execution import InstallationNode, RecipeInstallation
-    from vonk_control.models.mapping import ClusterMapping
-    from vonk_control.strict_json import serialize_json_value
 
     with sessions() as session:
         build = session.scalar(select(RecipeBuild))

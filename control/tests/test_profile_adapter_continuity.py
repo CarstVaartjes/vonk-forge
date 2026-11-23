@@ -1,11 +1,13 @@
 """Original profile queue recovery stays inside the currently adopted lanes."""
 
+from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileAssignmentFailure,
@@ -201,9 +203,6 @@ def test_partial_adoption_keeps_active_identity_and_skips_changed_queued_lane(
 
 def test_selected_cancel_observes_borrowed_agent_receipt_before_completion(monkeypatch):
     """Catches clean cancellation while a borrowed exact effect remains live."""
-    from datetime import timedelta
-
-    from vonk_control.agent_jobs.service import AgentJobService
 
     sessions, service, _fake, _first, _original, second_profile = _world()
     second = service.apply(second_profile.id, request_key=_uuid(18200), actor="admin")

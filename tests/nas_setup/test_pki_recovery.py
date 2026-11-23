@@ -14,8 +14,12 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from vonk_agent_protocol.installer_setup import NasInstallTemplate
-from vonk_nas_setup import publication
+from vonk_agent_protocol.installer_setup import (
+    NasInstallTemplate,
+    NasInternalValue,
+    NasSecretPrompt,
+)
+from vonk_nas_setup import pki, publication
 from vonk_nas_setup.environment import parse_environment, render_environment
 from vonk_nas_setup.pki import renew_controller_leaf, validate_pki_material
 from vonk_nas_setup.prompts import PromptIo
@@ -72,7 +76,6 @@ def test_killed_pki_publisher_replays_bound_old_template_before_new_inputs(
     boundary: str,
 ) -> None:
     """Catch key/cert mismatch after death or applying new inventory to old intent."""
-    from vonk_agent_protocol.installer_setup import NasSecretPrompt
 
     source, template = pki_project
     bundle = tmp_path / "vonk-forge"
@@ -169,8 +172,6 @@ def test_failed_pki_renewal_keeps_previous_bundle_and_rerun_publishes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Catch a failed run leaving a new Compose/.env next to old secrets."""
-    from vonk_agent_protocol.installer_setup import NasInternalValue
-    from vonk_nas_setup import pki
 
     source, template = pki_project
     bundle = tmp_path / "vonk-forge"

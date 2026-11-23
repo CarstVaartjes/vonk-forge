@@ -9,11 +9,25 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentUpgradeResult, canonical_message
+from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import (
+    AgentResult,
+    AgentUpgradeResult,
+    canonical_message,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    AgentResultState,
+    LifecycleState,
+    ObservationCause,
+    OutcomeKind,
+    WaitReason,
+)
+from vonk_agent_protocol.outcome import OutcomeUnknown
+from vonk_agent_protocol.package_source import AgentPackageSource
 from vonk_agent_protocol.package_upgrade import PackageActivationOutcome
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control import agent_operation_states as aos
+from vonk_control.agent_jobs.retry import schedule_agent_upgrade_retry
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_upgrades import package as agent_upgrades_module
 from vonk_control.agent_upgrades.constants import _AGENT_UPGRADE_RECOVERY_FENCE
@@ -22,10 +36,12 @@ from vonk_control.agent_upgrades.contract import (
     AgentUpgradeRequestIntent,
 )
 from vonk_control.agent_upgrades.errors import AgentUpgradeConflict
+from vonk_control.agent_upgrades.intent import _request_intent
 from vonk_control.agent_upgrades.service import AgentUpgradeService
 from vonk_control.agent_upgrades.status import (
     AGENT_UPGRADE_AWAITING_IDENTITY_PREDECESSOR_REASON,
 )
+from vonk_control.evidence_repeats import note_repeat, owner_evidence
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.queue import AttemptFence, JobService, StaleAttempt
 from vonk_control.model_primitives import Base
@@ -41,6 +57,7 @@ from .runtime_identity_support import (
     inventory_items_fixture,
     set_inventory_identity,
 )
+from .test_evidence_repeats import LIMIT, _repeating
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -109,7 +126,6 @@ NEW_IDENTITY["package_activation"] = ACTIVATION_RECEIPT
 
 @pytest.fixture(autouse=True)
 def published_source(monkeypatch):
-    from vonk_agent_protocol.package_source import AgentPackageSource
 
     monkeypatch.setattr(
         "vonk_control.agent_upgrades.acceptance.load_package_source",
@@ -2070,7 +2086,6 @@ def test_a_conflict_names_a_spark_only_by_its_canonical_identifier() -> None:
 
 
 def test_invalid_upgrade_intent_has_no_targets_and_valid_intent_is_accepted() -> None:
-    from vonk_control.agent_upgrades.intent import _request_intent
 
     with pytest.raises(Exception):  # noqa: B017 -- effects and subsequent admission witness rejection
         _request_intent({"all": "yes", "selectors": None}, None)
@@ -2084,19 +2099,6 @@ def test_upgrade_identity_warning_names_its_order_and_clears_on_confirmation(
     postgres_engine,
     monkeypatch,
 ) -> None:
-    from vonk_agent_protocol.contracts import AgentResult
-    from vonk_agent_protocol.lifecycle_vocabulary import (
-        AgentResultState,
-        LifecycleState,
-        OutcomeKind,
-        WaitReason,
-    )
-    from vonk_agent_protocol.outcome import OutcomeUnknown
-    from vonk_control.evidence_repeats import note_repeat, owner_evidence
-    from vonk_control.models.operations import AgentOperation
-
-    from .agent_fences import fenced_operation
-    from .test_evidence_repeats import LIMIT, _repeating
 
     # Exercise the real PostgreSQL producer/store/projection/confirmation seam.
     monkeypatch.setattr(f"{__name__}.create_engine", lambda *_: postgres_engine)
@@ -2185,13 +2187,6 @@ def test_idle_worker_adopts_only_exact_retained_upgrade_receipt(
     The same stored report must settle on a reconstructed worker, without a
     claim, contact renewal, reinstall or adoption under changed authority.
     """
-    from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
-    from vonk_agent_protocol.lifecycle_vocabulary import (
-        AgentResultState,
-        LifecycleState,
-        ObservationCause,
-    )
-    from vonk_control.agent_jobs.retry import schedule_agent_upgrade_retry
 
     monkeypatch.setattr(f"{__name__}.create_engine", lambda *_: postgres_engine)
     clock = Clock()

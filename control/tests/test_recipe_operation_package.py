@@ -9,6 +9,10 @@ import pytest
 from vonk_agent_protocol.gpu_clock import GpuClockRange
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, WaitReason
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
+from vonk_control.gateway.route_runtime import (
+    AtomicRouteBundlePublisher,
+    RouteRuntimeError,
+)
 from vonk_control.recipe_operations.service import RecipeOperationService
 
 
@@ -164,10 +168,6 @@ def test_publication_input_validation_leaves_a_fresh_input_eligible(
 ):
     # The wrong implementation treats caller syntax as stored-state damage,
     # or keeps a busy publication owner after rejecting the input.
-    from vonk_control.gateway.route_runtime import (
-        AtomicRouteBundlePublisher,
-        RouteRuntimeError,
-    )
 
     with pytest.raises(RouteRuntimeError):
         AtomicRouteBundlePublisher._identity(authority, plan, evidence)

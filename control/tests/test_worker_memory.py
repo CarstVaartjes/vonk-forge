@@ -5,9 +5,18 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
+from vonk_control.jobs.queue import JobService
 from vonk_control.metrics.registry import MetricsRegistry
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.storage_demands import StorageDemands
+from vonk_control.worker.assembly import assemble_production_worker
 from vonk_control.worker.loop import Worker
 from vonk_control.worker.memory import (
     LinuxProcessProbe,
@@ -23,6 +32,8 @@ from vonk_control.worker.memory_contract import (
     WorkerMemoryComponent,
     WorkerTraceState,
 )
+
+from .test_worker import _failures, _service
 
 START = datetime(2026, 10, 5, 12, tzinfo=UTC)
 GIB = 1024**3
@@ -197,7 +208,6 @@ def test_linux_probe_separates_heap_cache_and_children(tmp_path) -> None:
 
 
 def test_worker_collects_footprints_and_skips_a_failing_source(tmp_path) -> None:
-    from .test_worker import _failures, _service
 
     class Broken:
         def memory_footprint(self):
@@ -243,23 +253,12 @@ def test_metrics_export_bounded_worker_gauges_and_trace_growth(tmp_path) -> None
 
 
 def test_production_worker_reports_every_declared_component(tmp_path) -> None:
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
-    from vonk_control.jobs.queue import JobService
-    from vonk_control.model_cache.service import ModelCacheService
-    from vonk_control.model_primitives import Base
-    from vonk_control.presence import ManagementAddressPolicy
-    from vonk_control.worker.assembly import assemble_production_worker
 
     engine = create_engine(f"sqlite:///{tmp_path / 'w.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     jobs = JobService(sessions, clock=Clock())
     model_cache = ModelCacheService(sessions, tmp_path / "models", clock=Clock())
-
-    from vonk_control.agent_jobs.service import AgentJobService
 
     worker = assemble_production_worker(
         jobs=jobs,

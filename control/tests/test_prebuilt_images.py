@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -57,6 +58,8 @@ from vonk_control.prebuilt_images import (
     PrebuiltImageImporter,
     write_library_image_plan,
 )
+from vonk_control.recipe_builds import common as recipe_builds
+from vonk_control.recipe_builds.cancellation import request_build_cancellation
 from vonk_control.recipe_builds.common import RecipeBuildUnknown
 from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot
@@ -68,6 +71,10 @@ from vonk_control.run_switch_operations.interfaces import ArtifactInspection
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_bundles import SourceBundleStore
+from vonk_control.source_policy import (
+    SourcePolicyFinding,
+    SourcePolicyReport,
+)
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .stored_documents_support import valid_policy_report
@@ -270,11 +277,6 @@ def _start(
 def test_a_recipe_the_controller_refuses_gets_no_image_and_says_why(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from vonk_control.recipe_builds import common as recipe_builds
-    from vonk_control.source_policy import (
-        SourcePolicyFinding,
-        SourcePolicyReport,
-    )
 
     def refuse(document, bundle, *, source_sha256=None):
         finding = SourcePolicyFinding(
@@ -907,9 +909,6 @@ def test_prebuilt_import_observes_cancellation_between_claim_and_io(
     tmp_path: Path,
 ) -> None:
     """Catches a restarted importer pulling after a newer durable cancel won."""
-    from uuid import uuid4
-
-    from vonk_control.recipe_builds.cancellation import request_build_cancellation
 
     sessions, revision_id = _published_library(tmp_path)
     builds, operations = _services(sessions, tmp_path)

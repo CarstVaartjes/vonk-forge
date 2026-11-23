@@ -6,7 +6,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.contracts import AgentClaim, AgentProgress, AgentResult
+from vonk_control.agent_jobs.evidence import (
+    _failure_result,  # pyright: ignore[reportPrivateUsage]
+)
+from vonk_control.agent_jobs.predicates import (
+    _document,  # pyright: ignore[reportPrivateUsage]
+)
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.recovery_policy import FailureKind
 
 Fenced = AgentClaim | AgentProgress | AgentResult | str
 
@@ -49,15 +57,6 @@ def park_for_operator(
     observed with the executor's "unknown" and its waiting result, and the parent
     aggregated from it.
     """
-
-    from vonk_control.agent_jobs.evidence import (
-        _failure_result,  # pyright: ignore[reportPrivateUsage]
-    )
-    from vonk_control.agent_jobs.predicates import (
-        _document,  # pyright: ignore[reportPrivateUsage]
-    )
-    from vonk_control.agent_jobs.service import AgentJobService
-    from vonk_control.recovery_policy import FailureKind
 
     assert isinstance(jobs, AgentJobService)
     with sessions.begin() as session:

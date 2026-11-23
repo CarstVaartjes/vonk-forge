@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from pydantic import ConfigDict, Field, RootModel, ValidationError
 
 from vonk_agent_protocol.grant_requests import HostHelperGrantResponse
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_control.library.contract import (
     FreshnessPolicy,
     LibraryFacetValues,
@@ -379,7 +380,6 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
 
 
 def test_unknown_mutation_ends_observation_and_fresh_request_succeeds() -> None:
-    from vonk_agent_protocol.outcome import UnknownOutcomeError
 
     class _Busy(UnknownOutcomeError):
         retry_after_seconds = 17

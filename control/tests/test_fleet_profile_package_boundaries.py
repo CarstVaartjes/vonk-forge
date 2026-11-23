@@ -1,14 +1,16 @@
 """Profile concerns cannot grow back into an exempted monolith."""
 
+import ast
+from enum import Enum
 from pathlib import Path
+
+import vonk_control.fleet_profiles as profiles
+from vonk_agent_protocol import agent_words
+
+from .untyped_mapping_boundaries import scan_source
 
 
 def test_profile_words_are_consumed_from_the_generated_contract_vocabulary() -> None:
-    import ast
-    from enum import Enum
-
-    import vonk_control.fleet_profiles as profiles
-    from vonk_agent_protocol import agent_words
 
     words = {
         member.value
@@ -55,9 +57,6 @@ def test_profile_words_are_consumed_from_the_generated_contract_vocabulary() -> 
 
 
 def test_profile_typing_cannot_borrow_an_untyped_mapping_allowance() -> None:
-    import vonk_control.fleet_profiles as profiles
-
-    from .untyped_mapping_boundaries import scan_source
 
     sites = [
         site

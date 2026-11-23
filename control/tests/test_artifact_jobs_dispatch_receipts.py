@@ -63,6 +63,7 @@ from .artifact_jobs_support import (
 from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
 from .recipe_operations_support import NOW
 from .runtime_identity_support import claim_agent
+from .test_artifact_job_recovery import recover_unknown_job_under_new_intent
 
 
 @pytest.mark.parametrize(
@@ -857,7 +858,6 @@ def test_artifact_cancel_stop_failure_ends_cancelled_with_residue(tmp_path) -> N
 
 
 def test_artifact_lease_expiry_is_observed_then_reconciled_under_new_intent(tmp_path):
-    from .test_artifact_job_recovery import recover_unknown_job_under_new_intent
 
     recover_unknown_job_under_new_intent(tmp_path, malformed=False)
 

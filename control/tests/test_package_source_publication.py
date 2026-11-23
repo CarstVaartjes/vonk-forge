@@ -19,18 +19,18 @@ sys.path[:0] = [
 import httpx2
 import yaml
 from agent_package_source_publication import package_source
+from test_agent_deb import (
+    PACKAGE_BINARIES,
+    _aarch64_fixture,
+    _build,
+    _release_key,
+)
 
 from vonk_control.agent_package_source import load_package_source
 
 
 class PackageSourcePublicationTests(unittest.TestCase):
     def test_signed_deb_producer_bytes_are_consumed_at_exact_binary_lookup(self):
-        from test_agent_deb import (
-            PACKAGE_BINARIES,
-            _aarch64_fixture,
-            _build,
-            _release_key,
-        )
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

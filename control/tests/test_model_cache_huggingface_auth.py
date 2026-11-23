@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 from vonk_control.model_cache.artifacts import ArtifactSpec
+from vonk_control.model_cache.errors import ModelCacheStorageRefused
 from vonk_control.model_cache.service import ModelCacheService
 
 SOURCE = "https://huggingface.co/acme/private/resolve/" + "a" * 40 + "/weights.bin"
@@ -295,7 +296,6 @@ def test_access_denial_names_gated_access_steps_and_truthful_recovery(
     tmp_path: Path, token: str | None, status: int
 ) -> None:
     """Catches vague denials and promises that licence acceptance requires a new token."""
-    from vonk_control.model_cache.errors import ModelCacheStorageRefused
 
     service, client = _service(tmp_path, lambda _: httpx2.Response(status), token=token)
     try:
@@ -323,7 +323,6 @@ def test_denial_records_the_token_used_even_when_file_changes_during_http(
     tmp_path: Path,
 ) -> None:
     """Catches a lost token-change wakeup when a denial is committed after rotation."""
-    from vonk_control.model_cache.errors import ModelCacheStorageRefused
 
     def handler(_: httpx2.Request) -> httpx2.Response:
         (tmp_path / "hf-token").write_text("hf_rotated_token\n")

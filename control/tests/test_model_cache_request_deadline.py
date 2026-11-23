@@ -1,5 +1,7 @@
 """Request deadlines survive restart and never poison exact fresh admission."""
 
+import fcntl
+from collections import namedtuple
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -12,7 +14,7 @@ from vonk_control.lifecycle.model_cache import RECOVERY_BUDGET
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.cache import ModelCacheOperation
 
-from .model_cache_support import _http_artifact, _http_cache_service
+from .model_cache_support import _artifact, _http_artifact, _http_cache_service
 from .model_cache_support import cache as cache  # noqa: PLC0414 -- pytest fixture
 
 
@@ -129,10 +131,6 @@ def test_dependency_wait_ends_and_fresh_exact_request_has_its_own_budget(
     cache, tmp_path: Path, monkeypatch, dependency: str
 ):
     """Catches waits that release a slot but renew their lifetime indefinitely."""
-    import fcntl
-    from collections import namedtuple
-
-    from .model_cache_support import _artifact
 
     service, sessions = cache
     now = [datetime(2026, 10, 9, tzinfo=UTC)]

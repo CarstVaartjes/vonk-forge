@@ -29,6 +29,9 @@ from vonk_control.models.fleet import (
 from vonk_control.models.jobs import Job
 from vonk_control.recipe_operations.observation_helpers import record_build_evidence
 from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.constants import (
+    _FINAL_VERIFICATION_MAX_SECONDS,
+)
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .fleet_profiles_support import (
@@ -120,9 +123,6 @@ def test_rebuilt_image_cannot_replace_persisted_profile_identity(
     # A stale content observation does not certify changed accepted bytes.
     # Let the existing child observer consume its immutable budget, across a
     # reconstructed parent service, before asserting its ending.
-    from vonk_control.run_switch_operations.constants import (
-        _FINAL_VERIFICATION_MAX_SECONDS,
-    )
 
     end_time = first.created_at + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
     adapter._run_switch._clock = lambda: end_time

@@ -41,6 +41,7 @@ from vonk_control.observation.transfer import (
 )
 
 from .observation_transfer_peer import observation_document
+from .test_fleet_profiles_canonical import _seed, _sessions
 
 ROOT = Path(__file__).resolve().parents[2]
 schema_path = Path(
@@ -288,7 +289,6 @@ def _profile_preview(profile: dict[str, Any]) -> dict[str, Any]:
 
 
 def _app() -> FastAPI:
-    from .test_fleet_profiles_canonical import _seed, _sessions
 
     app = FastAPI()
     profile = _profile()

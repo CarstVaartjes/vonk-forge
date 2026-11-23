@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from typing import Any, cast
 
 import pytest
+from fastapi.testclient import TestClient
 
+from vonk_control.agent_api import common
+from vonk_control.api import middleware
+from vonk_control.api.application import create_app
 from vonk_control.auth import (
     AgentIdentity,
     AgentSource,
     AuthError,
+    TokenCodec,
     TrustedProxyAgentIdentityMiddleware,
     agent_identity_from_scope,
     agent_source_from_scope,
@@ -269,14 +275,6 @@ def test_agent_identity_is_validated_once_and_handlers_reuse_it() -> None:
 def test_agent_handler_reuses_the_middleware_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from typing import Any, cast
-
-    from fastapi.testclient import TestClient
-
-    from vonk_control.agent_api import common
-    from vonk_control.api import middleware
-    from vonk_control.api.application import create_app
-    from vonk_control.auth import TokenCodec
 
     lookups: list[object] = []
 

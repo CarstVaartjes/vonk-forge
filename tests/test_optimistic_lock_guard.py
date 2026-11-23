@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
 
 from control.tests.added_line_guards.check import check_source
 from control.tests.optimistic_boundaries import scan_source as _locks
+from control.tests.optimistic_boundaries import scan_unwrapped_recipe_run_writes
 from control.tests.recipe_run_write_verdicts import (
     RECIPE_RUN_WRITE_VERDICTS,
     classified_write_lines,
@@ -283,7 +285,6 @@ def test_editing_an_existing_lock_predicate_is_not_a_new_lock() -> None:
 
 def test_remaining_recipe_run_lock_sites_have_a_verdict() -> None:
     """Catches new files AND unreviewed locks added to already classified files."""
-    import ast
 
     actual: dict[str, set[str]] = {}
     root = ROOT / "control/src/vonk_control"
@@ -328,9 +329,6 @@ def test_refresh_of_explicit_other_model_is_allowed(binding: str) -> None:
 
 def test_recipe_run_writes_outside_transition_have_a_verdict() -> None:
     """A new helper or result-consumer call cannot silently inherit a verdict."""
-    import ast
-
-    from control.tests.optimistic_boundaries import scan_unwrapped_recipe_run_writes
 
     actual: dict[str, set[str]] = {}
     root = ROOT / "control/src/vonk_control"

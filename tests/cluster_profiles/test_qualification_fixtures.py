@@ -12,7 +12,14 @@ from pathlib import Path
 
 import pytest
 
+from cluster_profiles import fleet_qualification, serving_execution
+from cluster_profiles.control_client.errors import ControlTransportError
+from cluster_profiles.control_client.schema import validate_control_document
 from cluster_profiles.fleet_qualification import ArtifactJobSmokeAdapter
+from cluster_profiles.generated_control.models.artifact_job_response import (
+    ArtifactJobResponse,
+)
+from cluster_profiles.qualification_fixtures import media, outputs
 from cluster_profiles.qualification_fixtures.assertions import _parse_assertion
 from cluster_profiles.qualification_fixtures.contracts import (
     Fixture,
@@ -474,10 +481,6 @@ class _ArtifactClient(_DownloadClient):
         self.accepted = {}
 
     def _response(self, job_id, *, state=None, preparation=None):
-        from cluster_profiles.control_client.schema import validate_control_document
-        from cluster_profiles.generated_control.models.artifact_job_response import (
-            ArtifactJobResponse,
-        )
 
         body = self.jobs[job_id]
         declared = [{**item, "media_type": "image/png"} for item in body["inputs"]]
@@ -606,7 +609,6 @@ def test_artifact_adapter_runs_each_digest_bound_case_as_its_own_job(tmp_path) -
 def test_artifact_smoke_reconciles_acceptance_and_missing_output_then_reuses_after_restart(
     tmp_path,
 ):
-    from cluster_profiles.control_client.errors import ControlTransportError
 
     class LostReply(_ArtifactClient):
         lost = False
@@ -719,9 +721,6 @@ def test_serving_unknown_reobserves_then_quality_is_measured_and_new_case_runs(
     monkeypatch,
     unreadable,
 ):
-    import io
-
-    from cluster_profiles import serving_execution
 
     ticks = [0.0]
     monkeypatch.setattr(serving_execution.time, "monotonic", lambda: ticks[0])
@@ -787,9 +786,6 @@ def test_serving_unknown_reobserves_then_quality_is_measured_and_new_case_runs(
 
 
 def test_service_quality_failure_is_scoped_and_unknown_reply_reobserves(monkeypatch):
-    import io
-
-    from cluster_profiles import fleet_qualification
 
     ticks = [0.0]
     monkeypatch.setattr(fleet_qualification.time, "monotonic", lambda: ticks[0])
@@ -824,9 +820,6 @@ def test_service_quality_failure_is_scoped_and_unknown_reply_reobserves(monkeypa
 
 
 def test_service_cases_share_remaining_budget_then_fresh_run_can_observe(monkeypatch):
-    import io
-
-    from cluster_profiles import fleet_qualification
 
     ticks = [0.0]
     monkeypatch.setattr(fleet_qualification.time, "monotonic", lambda: ticks[0])
@@ -929,7 +922,6 @@ def _show_entries(argv: list[str]) -> dict[str, set[str]]:
 
 
 def _validate_mp4(monkeypatch: pytest.MonkeyPatch, **ranges: float) -> list[list[str]]:
-    from cluster_profiles.qualification_fixtures import media, outputs
 
     calls: list[list[str]] = []
 

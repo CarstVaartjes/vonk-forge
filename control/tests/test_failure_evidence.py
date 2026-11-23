@@ -16,11 +16,18 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.failure_evidence import LOG_TAIL_BYTES, FailureDiagnostics
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    FailureCode,
+    LifecycleState,
+    OutcomeKind,
+)
 from vonk_agent_protocol.optional_evidence import EvidenceDrop
+from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeFailed, outcome_body
 from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.api.application import create_app
+from vonk_control.auth import Actor, TokenCodec
 from vonk_control.failure_evidence import (
     _OMISSION_MARKER,
     FailedAttempt,
@@ -38,7 +45,14 @@ from vonk_control.models.execution import ArtifactJob
 from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operation_api.contracts import (
+    OperationApiServices,
+    OperationListPage,
+    OperationPage,
+)
+from vonk_control.operations.contract import sanitize_failure_evidence
 from vonk_control.operations.item_contract import OperationResultFacts, operation_item
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 
 from .agent_fences import fenced_attempt
 from .agent_jobs_support import NODE_A, NODE_B, Clock, distribution_payload, parent
@@ -47,6 +61,7 @@ from .runtime_identity_support import (
     claim_agent,
     inventory_items_fixture,
 )
+from .test_api import Jobs
 
 NOW = datetime(2026, 9, 8, 12, tzinfo=UTC)
 COMMIT = "a" * 64
@@ -524,15 +539,6 @@ def test_evidence_download_is_authenticated_exact_attempt_and_stable(service):
 
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_composed_controller_exposes_exact_download_on_operation_projection(service):
-    from vonk_control.api.application import create_app
-    from vonk_control.auth import Actor, TokenCodec
-    from vonk_control.operation_api.contracts import (
-        OperationApiServices,
-        OperationListPage,
-        OperationPage,
-    )
-
-    from .test_api import Jobs
 
     value: dict[str, object] = {
         **item(),
@@ -1280,7 +1286,6 @@ def test_a_failed_run_switch_carries_the_stderr_of_its_phase_childs_spark_work(
     searched, so the download of a run-switch whose llama-server could not load
     its shared library showed empty stderr and ``agent-observations-unavailable``.
     """
-    from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 
     loader = (
         "/app/llama-server: error while loading shared libraries: "
@@ -1374,7 +1379,6 @@ def test_a_failed_run_switch_carries_the_stderr_of_its_phase_childs_spark_work(
 
 
 def test_oversized_failure_evidence_keeps_the_container_diagnostics():
-    from vonk_control.operations.contract import sanitize_failure_evidence
 
     document = _child_diagnostics_document("segfault\n")
     document["versions"] = [{"name": f"v{i}", "value": "x" * 256} for i in range(8)]
@@ -1394,8 +1398,6 @@ def test_oversized_failure_evidence_keeps_the_container_diagnostics():
 
 def test_subprocess_exit_and_final_stderr_survive_store_and_evidence_download(tmp_path):
     # A classifier label cannot replace the opaque command's own explanation.
-    from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, OutcomeKind
-    from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeFailed, outcome_body
 
     value = item(ProtocolAgentOperation.RECIPE_BUILD.value)
     diagnostics = collect_failure(

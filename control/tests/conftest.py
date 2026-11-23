@@ -20,9 +20,13 @@ from hypothesis import HealthCheck, settings
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
+from vonk_forge_contracts import read_model, read_recipe
 
+from vonk_control.bounded_json import require_mapping
+from vonk_control.catalog import revision_contract as contract
+from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
-from vonk_control.stored.json_values import install_write_guard
+from vonk_control.stored.json_values import install_write_guard, write_guard_mode
 
 from . import metadata_type_snapshot
 from .agent_api_support import (  # noqa: F401 - pytest fixtures
@@ -52,6 +56,7 @@ from .model_cache_support import (  # noqa: F401 - pytest fixtures
     cache,
     threaded_cache,
 )
+from .parsed_sources import parse_file, python_files
 from .pass_budget_clocks import (
     frozen_pass_budgets,  # noqa: F401 - inherited autouse fixture
 )
@@ -63,6 +68,7 @@ from .unused_storage_collection_support import (  # noqa: F401 - pytest fixtures
     squeezed,
     world,
 )
+from .vocabulary_literals import CODE_POSITION_ROOT, PYTHON_ROOTS, REPO_ROOT
 
 # A test that writes a JSON column its contract refuses fails where it writes;
 # one that damages a row on purpose says so with ``write_guard_mode(strict=False)``.
@@ -111,8 +117,6 @@ def load_tools_module(name: str):
 @pytest.fixture
 def damaged_json_rows() -> Iterator[None]:
     """Let a test write JSON documents its contract refuses (damaged or retired rows)."""
-
-    from vonk_control.stored.json_values import write_guard_mode
 
     with write_guard_mode(strict=False):
         yield
@@ -493,9 +497,6 @@ def parsed_repository() -> None:
     The repository scanners share the parse (``parsed_sources``); requesting this
     fixture makes the first scanner test pay nothing for it."""
 
-    from .parsed_sources import parse_file, python_files
-    from .vocabulary_literals import CODE_POSITION_ROOT, PYTHON_ROOTS, REPO_ROOT
-
     for root in {*PYTHON_ROOTS, CODE_POSITION_ROOT}:
         for module in python_files(REPO_ROOT / root):
             parse_file(module)
@@ -552,10 +553,6 @@ def shared_metadata_column_types_unchanged() -> Iterator[None]:
 def shared_catalog_parses_unchanged() -> Iterator[None]:
     """Readers share one parse per catalog content identity; none may mutate it."""
     yield
-    from vonk_forge_contracts import read_model, read_recipe
-
-    from vonk_control.bounded_json import require_mapping
-    from vonk_control.catalog import revision_contract as contract
 
     changed = [
         f"{kind} {digest}"
@@ -576,9 +573,6 @@ def no_model_object_io(monkeypatch: pytest.MonkeyPatch):
     under this fixture; ``model_cache`` is the ``ModelCacheService`` whose objects
     directory is guarded.
     """
-    from pathlib import Path
-
-    from vonk_control.model_cache.service import ModelCacheService
 
     real_lstat = Path.lstat
 

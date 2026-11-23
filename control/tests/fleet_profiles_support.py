@@ -50,7 +50,13 @@ from vonk_control.run_switch_contract.evidence import (
     SparkFitNode,
 )
 from vonk_control.run_switch_contract.plans import RunSwitchAssessment
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+from .recipe_operations_support import installed_recipe, setup_services
+from .run_switch_operations_support import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
+)
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_recipe_execution_contract import _installation_plan
 
@@ -608,14 +614,6 @@ def _follow_profile_retry(
 
 def _exact_cleanup_profile(tmp_path: Path, *, engine=None):
     """A production-wired profile that removes an unlisted installation."""
-
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
-
-    from .recipe_operations_support import installed_recipe, setup_services
-    from .run_switch_operations_support import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
-    )
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2, engine=engine

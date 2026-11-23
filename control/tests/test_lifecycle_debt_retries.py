@@ -7,13 +7,17 @@ continue to escape on their first attempt.
 
 from __future__ import annotations
 
+import asyncio
+import uuid
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from types import SimpleNamespace
 from typing import Any, cast
+from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
@@ -21,15 +25,43 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitReason,
 )
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control import agent_jobs, install_admission, run_admission
+from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.api import production as api
 from vonk_control.install_admission.contracts import InstallAdmissionBusy
 from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
+    RecipeInstallation,
+    RecipeRun,
+    ResourceReservation,
+)
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_builds.common import RecipeBuildPlan
 from vonk_control.recipe_operations import result_consumption
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionBusy, RunAdmissionService
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
+from vonk_control.run_switch_operations import cancellation_retry, stop_planning
+from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
+
+from .artifact_jobs_support import _configure_artifact_recipe
+from .recipe_image_availability_support import _recipe, _recipe_projection
+from .recipe_operations_support import NOW, installed_recipe, setup_services
+from .run_switch_operations_support import (
+    RecordingArtifactExecutor,
+    _request,
+    _service,
+)
+from .test_run_switch_lifecycle import _Harness
 
 
 @pytest.mark.parametrize(
@@ -163,8 +195,6 @@ def test_node_result_retries_the_same_evidence(monkeypatch):
 
 
 def test_cleanup_preview_reobserves_unknown_authority(monkeypatch):
-    from vonk_control.run_switch_operations import stop_planning
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     service = object.__new__(RunSwitchOperationService)
     calls = []
@@ -187,9 +217,6 @@ def test_cleanup_preview_reobserves_unknown_authority(monkeypatch):
 
 @pytest.mark.parametrize("refusals", [2, 99])
 def test_shutdown_retries_checkpointing_then_releases_lifespan(refusals, monkeypatch):
-    import asyncio
-
-    from vonk_control.api import production as api
 
     calls, pauses = [], []
 
@@ -219,7 +246,6 @@ def test_shutdown_retries_checkpointing_then_releases_lifespan(refusals, monkeyp
     ],
 )
 def test_recipe_request_retries_raw_admission_contention(method, once, monkeypatch):
-    from vonk_control.admission_locking import AdmissionLockBusy
 
     service = object.__new__(RecipeOperationService)
     calls = []
@@ -249,12 +275,6 @@ def test_recipe_request_retries_raw_admission_contention(method, once, monkeypat
 
 def test_unknown_builder_evidence_is_waiting_and_reobserved(monkeypatch):
     """Catches unknown builder evidence preventing the next exact preparation."""
-    from vonk_control.models.cache import RecipeBuild
-    from vonk_control.models.catalog import CatalogDocumentRevision
-    from vonk_control.recipe_builds.common import RecipeBuildPlan
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
-
-    from .recipe_image_availability_support import _recipe, _recipe_projection
 
     service: Any = object.__new__(RunSwitchOperationService)
     calls = []
@@ -314,20 +334,6 @@ def test_unknown_builder_evidence_is_waiting_and_reobserved(monkeypatch):
 
 def test_accepted_plan_refresh_records_unknown_cause_and_resumes(tmp_path, monkeypatch):
     """Catches swallowing the cause or forgetting the accepted intent on retry."""
-    import uuid
-    from datetime import timedelta
-
-    from sqlalchemy import select
-
-    from vonk_control.models.jobs import Job
-    from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
-
-    from .recipe_operations_support import NOW, setup_services
-    from .run_switch_operations_support import (
-        RecordingArtifactExecutor,
-        _request,
-        _service,
-    )
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(tmp_path)
     clock = [NOW]
@@ -406,19 +412,6 @@ def test_recipe_unknown_after_commit_replays_without_duplicate_effects(
     method, once, tmp_path, monkeypatch
 ):
     """A lost committed response must not reserve or dispatch the workload twice."""
-    from sqlalchemy import select
-
-    from vonk_control.models.execution import (
-        RecipeInstallation,
-        RecipeRun,
-        ResourceReservation,
-    )
-    from vonk_control.models.fleet import AgentNode
-    from vonk_control.models.jobs import Job
-    from vonk_control.models.operations import AgentOperation
-
-    from .artifact_jobs_support import _configure_artifact_recipe
-    from .recipe_operations_support import installed_recipe, setup_services
 
     sessions, service, queue, mapping_id, build_id, nodes = setup_services(
         tmp_path,
@@ -504,16 +497,6 @@ def test_run_switch_cancel_reports_exhausted_contention_then_can_progress(
     monkeypatch, refusals, tmp_path
 ):
     """A busy boundary cannot look completed or poison the next attempt."""
-    from uuid import uuid4
-
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
-    from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
-    from vonk_control.run_switch_operations import cancellation_retry
-    from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
-
-    from .run_switch_operations_support import RecordingArtifactExecutor, _request
-    from .test_run_switch_lifecycle import _Harness
 
     harness = _Harness(tmp_path, RecordingArtifactExecutor())
     service = harness.service

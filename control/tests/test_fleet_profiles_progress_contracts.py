@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import select, text, update
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
@@ -19,6 +20,7 @@ from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchChildState,
     FleetProfileVerificationResult,
 )
+from vonk_control.fleet_profiles import persistence
 from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.lifecycle.evidence import Residue
@@ -26,6 +28,7 @@ from vonk_control.models.fleet import (
     FleetProfile,
     FleetProfileApplication,
 )
+from vonk_control.operation_api.durable import durable_operation_services
 
 from .fleet_profiles_support import (
     NOW,
@@ -339,8 +342,6 @@ def test_profile_view_projects_the_loaded_assignment_state(monkeypatch) -> None:
 def test_an_endpoint_read_parses_a_first_loads_documents_once(monkeypatch) -> None:
     """A load that reviewed itself is its own root: no second parse of its documents."""
 
-    from vonk_control.fleet_profiles import persistence
-
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
     service = FleetProfileService(
@@ -485,8 +486,6 @@ def test_profile_observation_does_not_depend_on_damaged_bookkeeping(
     damage: str,
     tmp_path: Path,
 ) -> None:
-    from vonk_control.auth import TokenCodec
-    from vonk_control.operation_api.durable import durable_operation_services
 
     sessions = _database()
     _, revision_id = _seed(sessions)

@@ -15,6 +15,7 @@ from sqlalchemy import event, select
 
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.host_helper import ContainerRuntimeAction
+from vonk_control.admission_locking import AdmissionLockBusy as NodeLocksHeld
 from vonk_control.bounded_json import require_mapping
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
 from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
@@ -33,6 +34,8 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.models.routes import RoutePublicationOwner
+from vonk_control.owner_liveness import OWNER_SETTLE_GRACE
+from vonk_control.recipe_operations import start_cleanup
 from vonk_control.recipe_operations.errors import (
     RecipeRequestInvalid,
 )
@@ -129,9 +132,6 @@ def test_failed_start_result_commits_when_cleanup_admission_refuses(
 ) -> None:
     """A refused admission never rolls the failed Start's result back: the run is
     left ``stopping`` and the orphaned-run reaper queues its Stop after the grace."""
-    from vonk_control.admission_locking import AdmissionLockBusy as NodeLocksHeld
-    from vonk_control.owner_liveness import OWNER_SETTLE_GRACE
-    from vonk_control.recipe_operations import start_cleanup
 
     sessions, service, queue, mapping_id, build_id, nodes = setup_services(
         tmp_path,

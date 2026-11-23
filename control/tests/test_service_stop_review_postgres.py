@@ -6,20 +6,34 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    AgentResultState,
+    LifecycleState,
+    OutcomeKind,
+)
+from vonk_agent_protocol.outcome import OutcomeDone
+from vonk_agent_protocol.recipe_operations import RecipeStopResult
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
+from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
+from vonk_control.recipe_routes.service import RecipeRouteService
 
+from .agent_fences import fenced_operation
+from .profile_stop_readmission_support import start_on_released_gang
 from .recipe_operations_support import (
     NOW,
     ConcurrentPublisher,
+    _issue_exact_stop_grant,
     bind_route_publications,
     installed_recipe,
     mark_current_exact_observations,
@@ -574,19 +588,6 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
 def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
     published_service_run, tmp_path, monkeypatch
 ):
-    from vonk_agent_protocol.contracts import AgentResult
-    from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, OutcomeKind
-    from vonk_agent_protocol.outcome import OutcomeDone
-    from vonk_agent_protocol.recipe_operations import RecipeStopResult
-    from vonk_control.agent_jobs.service import AgentJobService
-    from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
-    from vonk_control.presence import ManagementAddressPolicy
-    from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
-    from vonk_control.recipe_routes.service import RecipeRouteService
-
-    from .agent_fences import fenced_operation
-    from .profile_stop_readmission_support import start_on_released_gang
-    from .recipe_operations_support import _issue_exact_stop_grant
 
     sessions, service, _jobs, _old_routes, _stand_in, run_id, nodes = (
         published_service_run

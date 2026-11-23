@@ -11,7 +11,10 @@ from sqlalchemy import create_engine, event, update
 from sqlalchemy.orm import sessionmaker
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.gpu_clock import default_gpu_clock
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_agent_protocol.swap import default_swap
+from vonk_agent_protocol.telemetry import TelemetrySample
 from vonk_control.agent_contacts import record_contact
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection.common import (
@@ -406,8 +409,6 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
             },
         ],
     }
-    from vonk_agent_protocol.gpu_clock import default_gpu_clock
-    from vonk_agent_protocol.swap import default_swap
 
     expected = FleetSnapshot.model_validate_json(json.dumps(expected_document))
     for node in expected.nodes:
@@ -640,7 +641,6 @@ def test_projection_schema_is_finite_for_states_items_and_task3_numbers() -> Non
         == "^spk_[0-9a-f]{32}$"
     )
     telemetry = definitions["TelemetryPoint"]["properties"]
-    from vonk_agent_protocol.telemetry import TelemetrySample
 
     assert (
         telemetry["boot_id"]["pattern"]

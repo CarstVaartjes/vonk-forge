@@ -28,11 +28,13 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitReason,
 )
 from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_control.agent_jobs import results as ingress
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.distribution_executor.durable import DurableDistributionPhaseExecutor
 from vonk_control.distribution_executor.receipts import RuntimeImagePull
+from vonk_control.jobs.documents import DistributionJobPayload
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
@@ -40,7 +42,9 @@ from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.recipe_routes.service import RecipeRouteService
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 from vonk_control.run_switch_operations.interfaces import PhaseExecution
+from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.strict_json import read_stored_model
 
 from .node_contacts import contact_row
 from .recipe_operations_support import (
@@ -56,11 +60,11 @@ from .run_switch_operations_support import (
     MODEL_ARTIFACT_SET,
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
+    _finish,
     _request,
     _service,
 )
 from .runtime_identity_support import claim_agent
-from .test_lifecycle_preflight import _finish
 
 
 @dataclass
@@ -406,7 +410,6 @@ def test_worker_reobserves_retained_success_after_controller_restart(
     transfer, tmp_path, monkeypatch
 ):
     """Catches a successful receipt stranded in SQL without a new agent report."""
-    from vonk_control.agent_jobs import results as ingress
 
     sessions, lifecycle, jobs, executor, _service, parent_id, claim, now = transfer
     peer = AgentPeer(jobs, tmp_path / "receipt.json")
@@ -467,10 +470,6 @@ def test_an_invalid_retained_receipt_cannot_starve_another_exact_transfer(
     transfer, monkeypatch
 ):
     """Catches a bounded sweep stuck examining the same unusable history row."""
-    from vonk_control.agent_jobs import results as ingress
-    from vonk_control.jobs.documents import DistributionJobPayload
-    from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
-    from vonk_control.strict_json import read_stored_model
 
     sessions, _lifecycle, jobs, executor, _service, parent_id, claim, now = transfer
     current = _lapse(transfer)

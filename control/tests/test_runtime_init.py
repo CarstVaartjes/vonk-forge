@@ -15,6 +15,7 @@ from vonk_control.runtime_init import (
     stage_private_key,
     stage_runtime_assets,
     stage_runtime_file,
+    write_runtime_asset_inventory,
 )
 
 
@@ -550,7 +551,6 @@ def test_direct_private_staging_ends_preserves_and_fresh_request_recovers(
 def test_kit_inventory_assembly_ends_preserves_and_fresh_assembly_stages(
     tmp_path, monkeypatch
 ):
-    from vonk_control.runtime_init import write_runtime_asset_inventory
 
     monkeypatch.setattr(os, "fchown", lambda *_args: None)
     kit = tmp_path / "kit"

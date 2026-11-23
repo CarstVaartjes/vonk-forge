@@ -8,7 +8,9 @@ from typing import cast
 import pytest
 from sqlalchemy import Table, create_engine, literal, select, text, update
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
+from cluster_profiles.cli_render.dispatch import render_payload
 from tests.observation_transfer_peer import observation_document
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
@@ -51,6 +53,7 @@ from .runtime_identity_support import (
     inventory_items_fixture,
     set_inventory_hostname,
 )
+from .test_operation_api import _client
 
 NON_RFC_BOOT_ID = "00000000-0000-0000-0000-000000000001"
 
@@ -378,7 +381,6 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
         )
 
     snapshot = FleetProjection(sessions, clock=lambda: NOW).read()
-    from cluster_profiles.cli_render.dispatch import render_payload
 
     render_payload(snapshot.model_dump(mode="json"), "fleet")
     rendered = capsys.readouterr()
@@ -551,7 +553,6 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
     inconsistent". An ineligible revision is different: it is simply not this
     node's business, so it disappears without an error.
     """
-    from sqlalchemy.pool import StaticPool
 
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
@@ -833,7 +834,6 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
         snapshot = projection.read()
         assert (snapshot.nodes[0].installed, snapshot.nodes[0].loaded) == ([], [])
         return
-    from .test_operation_api import _client
 
     client, operator, *_ = _client(fleet_projection=projection)
     snapshot = projection.read()

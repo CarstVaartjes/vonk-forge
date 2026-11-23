@@ -18,6 +18,9 @@ import jsonschema
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from cluster_profiles import cli
 from cluster_profiles.cli_json_contract import (
@@ -32,6 +35,7 @@ from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.jobs.queue import JobService
 from vonk_control.library.api import install_library_routes
+from vonk_control.model_primitives import Base
 from vonk_control.operation_api.durable import durable_operation_services
 
 from .conftest import load_tools_module
@@ -145,12 +149,6 @@ def _kind_of(argv: tuple[str, ...], document: dict) -> DocumentKind:
 
 def _world(tmp_path: Path) -> tuple[ControlClient, TestClient, dict]:
     """A real Controller API with one saved empty profile, and a CLI client for it."""
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    from sqlalchemy.pool import StaticPool
-
-    from vonk_control.model_primitives import Base
 
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",

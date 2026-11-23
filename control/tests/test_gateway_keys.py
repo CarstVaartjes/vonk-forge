@@ -1,24 +1,38 @@
 """Gateway client keys: the Controller drives LiteLLM's key admin API."""
 
+import asyncio
+import fcntl
 import hashlib
 import json
+import multiprocessing
+import os
 import stat
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import httpx2
 import pytest
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
+from vonk_agent_protocol.capability_reply import ControllerCapability
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_control.auth import Actor
+from vonk_control.capabilities import CapabilityRegistry, CapabilityUnavailableError
+from vonk_control.capability_contract import CapabilityAvailability
+from vonk_control.gateway import keys as gateway_keys
 from vonk_control.gateway.keys import (
     GatewayKeyCreated,
     GatewayKeyError,
     GatewayKeyService,
     install_gateway_key_routes,
+    keep_default_key,
 )
+from vonk_control.gateway.route_grants import GatewayInferenceRoute
 from vonk_control.strict_json import ControllerAPIRoute
+
+from .observed_actions import observe_action
 
 
 @pytest.fixture(autouse=True)
@@ -309,9 +323,6 @@ def test_default_key_is_created_once_and_heals(tmp_path):
 
 
 def test_the_default_key_is_asked_for_again_until_the_gateway_answers() -> None:
-    import asyncio
-
-    from vonk_control.gateway.keys import GatewayKeyError, keep_default_key
 
     class _Service:
         def __init__(self) -> None:
@@ -511,7 +522,6 @@ def test_damaged_roll_after_original_deletion_does_not_gate_new_mutation(replace
 
 
 def _create_crash_executor(root, sender):
-    import os
 
     litellm = FakeLiteLlm()
 
@@ -532,7 +542,6 @@ def _create_crash_executor(root, sender):
 @pytest.mark.slow(45)
 def test_process_death_preserves_create_secret_and_releases_mutation_claim(tmp_path):
     """Catches a memory-only secret or a claim surviving executor death."""
-    import multiprocessing
 
     root = tmp_path / "process-records"
     context = multiprocessing.get_context("spawn")
@@ -641,9 +650,6 @@ def test_revoke_supersedes_interrupted_rotation_and_releases_fresh_create(after)
 def test_busy_mutation_observes_unlock_or_ends_without_retained_lock(
     monkeypatch, release_during_request
 ):
-    import fcntl
-
-    from vonk_control.gateway import keys as gateway_keys
 
     peer = FakeLiteLlm()
     service = _service(peer)
@@ -688,7 +694,6 @@ def test_request_receipts_survive_retirement_and_new_rotation_changes_secret():
 def test_completed_archive_prevents_failed_retirement_from_reusing_rotation(
     monkeypatch,
 ):
-    from vonk_control.gateway import keys as gateway_keys
 
     peer = FakeLiteLlm()
     service = _service(peer)
@@ -747,7 +752,6 @@ def test_repeated_request_binds_content_before_effect_and_new_request_enters():
     peer = FakeLiteLlm()
     service = _service(peer)
     first = _created(service.create("client", models=["one"], request_id="bound"))
-    from .observed_actions import observe_action
 
     observe_action(lambda: service.create("client", models=["two"], request_id="bound"))
     assert peer.keys["client"]["key"] == first.key
@@ -758,7 +762,6 @@ def test_repeated_request_binds_content_before_effect_and_new_request_enters():
 
 
 def test_unavailable_capability_read_ends_without_http_refusal_and_recovers():
-    from fastapi import HTTPException
 
     peer = FakeLiteLlm()
 
@@ -791,11 +794,6 @@ def test_default_key_http_unavailable_reobserves_and_fresh_attempt_enters(
     exhausted, http_status
 ):
     """Catches treating HTTP 503 as a security denial or retaining a busy gate."""
-    import asyncio
-
-    from fastapi import HTTPException
-
-    from vonk_control.gateway.keys import keep_default_key
 
     class Service:
         def __init__(self):
@@ -839,7 +837,6 @@ def test_unreadable_default_secret_preserves_file_and_remote_effect(
     tmp_path, monkeypatch, damage
 ):
     """Catches replacing a working secret because local storage is temporarily unreadable."""
-    from pathlib import Path
 
     peer = FakeLiteLlm()
     service = _service(peer)
@@ -1084,11 +1081,6 @@ def test_unreadable_target_list_entry_preserves_working_key(damage):
 @pytest.mark.parametrize("http_status", [500, 502, 503, 504])
 def test_gateway_dependency_recovers_after_prolonged_outage(tmp_path, http_status):
     """Catches a healthy relay staying unavailable despite recurring observations."""
-    from datetime import UTC, datetime, timedelta
-
-    from vonk_agent_protocol.capability_reply import ControllerCapability
-    from vonk_control.capabilities import CapabilityRegistry, CapabilityUnavailableError
-    from vonk_control.capability_contract import CapabilityAvailability
 
     now = datetime(2026, 10, 10, tzinfo=UTC)
     restored_at = now + timedelta(minutes=10)
@@ -1141,7 +1133,6 @@ def test_gateway_dependency_recovers_after_prolonged_outage(tmp_path, http_statu
 
 
 def test_published_native_routes_reconcile_existing_scoped_keys_without_renewal():
-    from vonk_control.gateway.route_grants import GatewayInferenceRoute
 
     litellm = FakeLiteLlm()
     service = _service(litellm)
@@ -1186,7 +1177,6 @@ def test_published_native_routes_reconcile_existing_scoped_keys_without_renewal(
 
 
 def test_existing_inference_only_keys_converge_to_model_info_without_renewal():
-    from vonk_control.gateway.route_grants import GatewayInferenceRoute
 
     litellm = FakeLiteLlm()
     service = _service(litellm)
@@ -1203,7 +1193,6 @@ def test_existing_inference_only_keys_converge_to_model_info_without_renewal():
 
 
 def test_new_key_grants_native_route_only_inside_its_existing_model_scope():
-    from vonk_control.gateway.route_grants import GatewayInferenceRoute
 
     litellm = FakeLiteLlm()
     service = _service(litellm)

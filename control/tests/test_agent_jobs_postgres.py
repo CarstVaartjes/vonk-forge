@@ -7,20 +7,47 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.contracts import (
+    AgentClaim,
+    AgentFailureKind,
+    AgentResult,
+    ArtifactDistributionResult,
+    canonical_message,
+)
+from vonk_agent_protocol.contracts import AgentOperation as Operation
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol.helper_response import HostHelperResponse
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    AgentResultState,
+    FailureCode,
+    LifecycleState,
+    ObservationCause,
+    OutcomeKind,
+)
+from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeFailed
+from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationCheckpoint, OperationProgress
 from vonk_control import agent_operation_states as aos
 from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.agent_jobs.contracts import StaleAgentAttempt
+from vonk_control.agent_jobs.retry import abandon_idempotent_job_in_session
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.agent_operation_facts import (
+    AGENT_ORDER_RECOVERY_BUDGET,
+    order_recovery_deadline,
+)
 from vonk_control.auth import TokenCodec
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment.service import EnrollmentService
@@ -34,7 +61,9 @@ from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.operation_api.durable import durable_operation_services
+from vonk_control.operations.progress import stored_progress
 from vonk_control.pki import IssuedCertificate
+from vonk_control.recovery_policy import RECOVERY
 
 from .agent_fences import fenced_attempt, fenced_operation, park_for_operator
 from .agent_jobs_support import (
@@ -1104,16 +1133,6 @@ def test_postgres_terminal_request_stays_ended_and_fresh_request_has_one_claim_w
     service,
     exhausted,
 ):
-    from vonk_agent_protocol.contracts import AgentFailureKind
-    from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
-    from vonk_agent_protocol.lifecycle_vocabulary import (
-        AgentResultState,
-        FailureCode,
-        LifecycleState,
-        ObservationCause,
-        OutcomeKind,
-    )
-    from vonk_agent_protocol.outcome import OutcomeFailed
 
     sessions, clock = service
     first = AgentJobService(sessions, clock=clock)
@@ -1126,7 +1145,6 @@ def test_postgres_terminal_request_stays_ended_and_fresh_request_has_one_claim_w
     )
     original = claim_agent(first, NODE_A, "serial-a")
     assert original is not None
-    from vonk_control.recovery_policy import RECOVERY
 
     attempts = RECOVERY.max_failures + 1 if exhausted else 1
     original_deadline = None
@@ -1235,18 +1253,6 @@ def test_postgres_terminal_request_stays_ended_and_fresh_request_has_one_claim_w
 @pytest.mark.parametrize("security", [False, True])
 def test_helper_time_window_replans_but_bad_authority_ends(service, security):
     """A stale signed grant must re-plan; a bad signature must never retry."""
-    from pathlib import Path
-
-    from vonk_agent_protocol.contracts import AgentFailureKind
-    from vonk_agent_protocol.helper_response import HostHelperResponse
-    from vonk_agent_protocol.lifecycle_vocabulary import (
-        AgentResultState,
-        FailureCode,
-        LifecycleState,
-        OutcomeKind,
-    )
-    from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeFailed
-    from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
 
     sessions, clock = service
     jobs = AgentJobService(sessions, clock=clock)
@@ -1307,15 +1313,6 @@ def test_helper_time_window_replans_but_bad_authority_ends(service, security):
 
 def test_unlaunched_job_keeps_its_offline_owner_recovery_window(service):
     """Applying output retention before a job exits would expire this wait."""
-    from pathlib import Path
-
-    from vonk_agent_protocol.contracts import AgentClaim
-    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-    from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
-    from vonk_control.agent_operation_facts import (
-        AGENT_ORDER_RECOVERY_BUDGET,
-        order_recovery_deadline,
-    )
 
     sessions, clock = service
     jobs = AgentJobService(sessions, clock=clock)
@@ -1354,7 +1351,6 @@ def test_operator_wait_check_clock_does_not_authorize_another_attempt(service):
     """A persisted observation clock must not turn operator consent into a retry."""
     sessions, clock = service
     jobs = AgentJobService(sessions, clock=clock)
-    from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
 
     aos_agent_stop = ProtocolAgentOperation.RECIPE_STOP.value
     queued = jobs.enqueue(
@@ -1399,12 +1395,6 @@ def test_postgres_distribution_lower_receipt_settles_without_lease_retry(
     # Wrong implementation: heartbeats include Docker pull bytes, but the model
     # receipt is smaller; a high-water validation rolls back the whole result,
     # leaving a live agent's attempt to expire and repeat the copy forever.
-    from vonk_agent_protocol.agent_words import ProgressPhase
-    from vonk_agent_protocol.contracts import AgentOperation as Operation
-    from vonk_agent_protocol.contracts import ArtifactDistributionResult
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_agent_protocol.wire_model import OperationCheckpoint
-    from vonk_control.operations.progress import stored_progress
 
     sessions, clock = service
     jobs = AgentJobService(sessions, clock=clock)
@@ -1462,7 +1452,6 @@ _PROBE = {
 
 
 def _abandon(sessions, job_id, now) -> bool:
-    from vonk_control.agent_jobs.retry import abandon_idempotent_job_in_session
 
     with sessions.begin() as session:
         session.execute(text("SET LOCAL lock_timeout = '5s'"))

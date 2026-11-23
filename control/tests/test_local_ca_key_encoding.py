@@ -1,6 +1,7 @@
 """Old NAS keys remain usable without modifying signing secrets on upgrade."""
 
 import base64
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,16 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from sqlalchemy.orm import sessionmaker
 
+from vonk_agent_protocol.capability_reply import (
+    CapabilityReason,
+    ControllerCapability,
+)
+from vonk_control.capabilities import (
+    CapabilityConfigurationError,
+    CapabilityUnavailableError,
+    RecoveringService,
+)
+from vonk_control.capability_contract import CapabilityAvailability
 from vonk_control.local_ca import LocalCertificateAuthority
 
 from .ca_material import NOW, _csr, _der, _write_material
@@ -78,18 +89,6 @@ def test_key_encoding_signs_or_reports_typed_configuration_failure(
     tmp_path: Path, encoding: str
 ) -> None:
     """Catches accepting mismatches, decoding v2 in the Controller, or startup failure."""
-    from datetime import timedelta
-
-    from vonk_agent_protocol.capability_reply import (
-        CapabilityReason,
-        ControllerCapability,
-    )
-    from vonk_control.capabilities import (
-        CapabilityConfigurationError,
-        CapabilityUnavailableError,
-        RecoveringService,
-    )
-    from vonk_control.capability_contract import CapabilityAvailability
 
     material = _write_material(tmp_path)
     key = material["intermediate_key"]

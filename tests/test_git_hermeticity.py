@@ -8,7 +8,10 @@ This is a syntax guard, not a claim to prove arbitrary dynamic Python safe.
 from __future__ import annotations
 
 import ast
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -224,9 +227,6 @@ def test_guard_accepts_temporary_histories_and_workflow_assertions(source: str) 
 
 def test_added_line_guard_does_not_read_checkout_git_state(tmp_path: Path) -> None:
     """The executable guard consumes a patch even when Git is unavailable."""
-    import os
-    import subprocess
-    import sys
 
     marker = tmp_path / "git-invoked"
     git = tmp_path / "git"

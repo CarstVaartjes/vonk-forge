@@ -10,16 +10,15 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "agent_protocol/src"))
+from typing import Any
 
-if TYPE_CHECKING:
-    from vonk_agent_protocol.installer_release import (
-        InstallerAcceptanceBaselineRelease,
-        InstallerCandidateRelease,
-    )
+from vonk_agent_protocol.installer_release import (
+    InstallerAcceptanceBaselineRelease,
+    InstallerCandidateRelease,
+)
 
 PLATFORMS = ("linux-arm64",)
 GATES = {
@@ -235,10 +234,6 @@ def recompute_publication_graphs(
     generation: str,
 ) -> dict[str, dict[str, Any]]:
     """Verify immutable authority objects and return exact per-platform graphs."""
-    from vonk_agent_protocol.installer_release import (
-        InstallerAcceptanceBaselineRelease,
-        InstallerCandidateRelease,
-    )
 
     release_prefix = f"artifacts/{channel}/releases/{generation}"
     candidate_relative = f"{release_prefix}/release.json"

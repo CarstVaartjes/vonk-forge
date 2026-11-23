@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from cluster_profiles.control_client.errors import ControlTransportError
 from cluster_profiles.fleet_qualification_campaign_cli import (
     application as load_campaign_batch,
 )
@@ -393,7 +394,6 @@ def test_a_profile_owned_by_something_else_is_never_overwritten(
 def test_campaign_reconciles_lost_reply_and_restart_reuses_one_application(
     manifest, failing_smoke, monkeypatch
 ):
-    from cluster_profiles.control_client.errors import ControlTransportError
 
     class LostReply(FakeController):
         lost = False

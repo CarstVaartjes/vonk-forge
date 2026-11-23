@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import ssl
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -205,7 +206,6 @@ def test_startup_failure_reports_before_cleanup_and_allows_a_fresh_run(
 
 @pytest.mark.parametrize("failure", ["access", "tls"])
 def test_readiness_does_not_retry_security_failures(failure, monkeypatch):
-    import ssl
 
     module = _module()
     attempts = []

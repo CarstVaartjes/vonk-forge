@@ -1,5 +1,8 @@
 """Each fixture proves a new violation fails while untouched source is ignored."""
 
+from pathlib import Path
+from textwrap import indent
+
 import pytest
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
@@ -7,6 +10,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from .added_line_guards.check import check_source
 from .added_line_guards.patch import added_lines, changed_lines
 from .added_line_guards.scans import AGENT_REQUESTS
+from .deterministic_retries import scan_count_endings, scan_recovery_policy_users
 
 PATH = "control/src/vonk_control/example.py"
 
@@ -1033,15 +1037,11 @@ def test_count_cannot_end_standing_intent(ending: str) -> None:
 def test_count_guard_allows_evidence_backoff_cancel_and_request_local_retry(
     source: str,
 ) -> None:
-    from .deterministic_retries import scan_count_endings
 
     assert not scan_count_endings(source)
 
 
 def test_every_durable_recovery_policy_user_keeps_a_next_observation() -> None:
-    from pathlib import Path
-
-    from .deterministic_retries import scan_recovery_policy_users
 
     root = Path(__file__).resolve().parents[2]
     found = [
@@ -1074,13 +1074,11 @@ def test_guard_rejects_a_durable_policy_call_without_ongoing_intent() -> None:
 def test_count_guard_catches_aliases_and_does_not_treat_active_intent_as_cancelled(
     source: str,
 ) -> None:
-    from .deterministic_retries import scan_count_endings
 
     assert scan_count_endings(source)
 
 
 def test_request_local_retry_can_end_without_ending_durable_intent() -> None:
-    from .deterministic_retries import scan_count_endings
 
     assert not scan_count_endings(
         "for attempt in range(3):\n    if attempt == 2:\n        return None\n"
@@ -1091,7 +1089,6 @@ def test_request_local_retry_can_end_without_ending_durable_intent() -> None:
 
 
 def test_count_guard_does_not_exempt_the_uncancelled_else_branch() -> None:
-    from .deterministic_retries import scan_count_endings
 
     assert scan_count_endings(
         "if row.cancel_requested:\n    return cancelled(row)\n"
@@ -1285,7 +1282,6 @@ def test_visible_classified_wait_is_not_counted_as_repeated_failure(
         "log_event(logger, 'owner.wait', service='control-worker', "
         f"reason={reason}, retry_at=due)\n"
     )
-    from textwrap import indent
 
     source = "try:\n    work()\nexcept Exception as error:\n"
     if negative:

@@ -21,7 +21,12 @@ from vonk_forge_contracts import document_sha256
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.execution_plan_service import (
+    ControllerExecutionPlanService,
     compile_job_invocation,
+)
+from vonk_control.model_cache.errors import (
+    ModelCacheResolutionInvalid,
+    ModelCacheStorageUnknown,
 )
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild
@@ -186,9 +191,6 @@ def test_job_invocation_binds_the_accepted_reservation_instead_of_recipe_peak(
 def test_a_model_cache_refusal_is_a_compilation_verdict(installation):
     """A model set the catalog cannot resolve is a verdict, not a wait."""
 
-    from vonk_control.execution_plan_service import ControllerExecutionPlanService
-    from vonk_control.model_cache.errors import ModelCacheResolutionInvalid
-
     sessions, revision, _installed, _plan = installation
 
     class Cache:
@@ -210,9 +212,6 @@ def test_a_model_cache_refusal_is_a_compilation_verdict(installation):
 def test_unconfirmed_model_cache_evidence_keeps_its_type(installation):
     """A model receipt that cannot be read now is an unknown outcome the
     admitting owner observes again, not a compilation verdict."""
-
-    from vonk_control.execution_plan_service import ControllerExecutionPlanService
-    from vonk_control.model_cache.errors import ModelCacheStorageUnknown
 
     sessions, revision, _installed, _plan = installation
 

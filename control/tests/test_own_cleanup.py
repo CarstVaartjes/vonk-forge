@@ -34,6 +34,7 @@ from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 from vonk_agent_protocol.state_machines import ReservationState
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.artifact_jobs import states as ajs
 from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
@@ -64,6 +65,12 @@ from .agent_jobs_support import (
     canonical_start_payload,
     parent,
 )
+from .artifact_jobs_support import (
+    MutableClock,
+    running_artifact_service,
+    submitted_artifact_job,
+)
+from .recipe_operations_support import NOW as RECIPE_NOW
 from .recipe_operations_support import (
     ConcurrentPublisher,
     bind_route_publications,
@@ -652,14 +659,6 @@ def test_an_accepted_stop_stops_its_run_as_it_is_now(
 def _lost_job_run(tmp_path):
     """A one-shot run whose JobRun lost its lease and was cancelled by its
     operator: its container may remain, so the run's Stop must remove it."""
-    from vonk_control.artifact_jobs import states as ajs
-
-    from .artifact_jobs_support import (
-        MutableClock,
-        running_artifact_service,
-        submitted_artifact_job,
-    )
-    from .recipe_operations_support import NOW as RECIPE_NOW
 
     sessions, operations, _queue, artifacts, run_id, node_id = running_artifact_service(
         tmp_path

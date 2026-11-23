@@ -33,6 +33,10 @@ from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevi
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.telemetry import NodeInventorySnapshot
 
+from .recipe_operations_support import setup_services
+from .test_fleet_profile_api import _client, _headers
+from .test_profile_installed_execution import _profile_service
+
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
 from .test_fleet_profiles_canonical import NODE_1
@@ -327,9 +331,6 @@ def test_installed_remove_and_pin_save_ignore_unrelated_cache_evidence(
     action: str,
 ) -> None:
     """Catches a global removal-reference scan blocking ordinary profile edits."""
-    from .recipe_operations_support import setup_services
-    from .test_fleet_profile_api import _client, _headers
-    from .test_profile_installed_execution import _profile_service
 
     sessions, lifecycle, _, _, _, nodes = setup_services(
         tmp_path, engine=postgres_engine, nodes=2, mapping_node_count=1
@@ -489,9 +490,6 @@ def test_profile_save_reports_exact_model_damage_and_recovers(
     postgres_engine, tmp_path
 ):
     """Catches an untyped reference-scan exception escaping the save boundary."""
-    from .recipe_operations_support import setup_services
-    from .test_fleet_profile_api import _client, _headers
-    from .test_profile_installed_execution import _profile_service
 
     sessions, lifecycle, _, _, _, nodes = setup_services(
         tmp_path, engine=postgres_engine, nodes=2, mapping_node_count=1
@@ -549,7 +547,6 @@ def test_profile_save_reports_exact_model_damage_and_recovers(
     refused = api.put(
         "/api/profile/13", headers=headers, json=request.model_dump(mode="json")
     )
-    from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 
     assert refused.status_code == 503, refused.text
     assert (
