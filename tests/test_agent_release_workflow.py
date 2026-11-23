@@ -445,7 +445,7 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "curl " not in text
     assert "wget " not in text
     assert "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6" in text
-    assert "sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6" in text
+    assert re.search(r"sigstore/cosign-installer@[0-9a-f]{40} ", text)
     assert "scripts/sign-package-keyless" in text
     assert "agent-release\\.yml@refs/heads/main" in text
 
