@@ -20,11 +20,12 @@ import subprocess
 import sys
 import tarfile
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from importlib.machinery import SourceFileLoader
 from pathlib import Path, PurePosixPath
 from types import ModuleType
+from typing import Protocol, TypedDict
 
 sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
 
@@ -61,12 +62,114 @@ class PackageSnapshot:
         return tuple(sorted(self.files))
 
 
+# The library's contracts are imported at run time from the checkout under
+# qualification, so this script names only what it reads from them.
+type _Json = str | int | float | bool | list[_Json] | dict[str, _Json] | None
+
+
+class _Identity(Protocol):
+    publisher: str
+    slug: str
+
+
+class _ModelReference(Protocol):
+    publisher: str
+    slug: str
+    content_sha256: str
+
+
+class _ModelSelection(Protocol):
+    model: _ModelReference
+
+
+class _ModelFile(Protocol):
+    path: str
+    sha256: str
+    size_bytes: int
+
+
+class _Model(Protocol):
+    identity: _Identity
+    files: Sequence[_ModelFile]
+    dependencies: Sequence[_ModelReference]
+
+
+class _BuildContext(Protocol):
+    path: str
+
+
+class _BaseImage(Protocol):
+    repository: str
+    digest: str
+
+
+class _Build(Protocol):
+    context: _BuildContext
+    dockerfile: str
+    base_image: _BaseImage
+
+
+class _Execution(Protocol):
+    build: _Build
+
+
+class _ServingCheckRequest(TypedDict):
+    transport: str
+
+
+class _ServingCheckDocument(TypedDict):
+    name: str
+    request: _ServingCheckRequest
+
+
+class _ServingCheck(Protocol):
+    assertions: Sequence[str]
+
+    def fixture_paths(self) -> Iterable[str]: ...
+
+    def model_dump(self, *, mode: str, exclude_none: bool) -> _ServingCheckDocument: ...
+
+
+class _Serving(Protocol):
+    checks: Sequence[_ServingCheck]
+
+
+class _Validation(Protocol):
+    serving: _Serving
+
+
+class _RoleDeclaration(Protocol):
+    name: str
+    count: int
+
+
+class _Topology(Protocol):
+    roles: Sequence[_RoleDeclaration]
+
+
+class _Interface(Protocol):
+    adapter: str
+    model_aliases: Sequence[str]
+
+
+class _Recipe(Protocol):
+    identity: _Identity
+    models: Sequence[_ModelSelection]
+    execution: _Execution
+    validation: _Validation
+    topology: _Topology
+    interfaces: Sequence[_Interface]
+    settings: object
+
+    def with_option_choices(self, choices: Mapping[str, str]) -> _Recipe: ...
+
+
 @dataclass(frozen=True, slots=True)
 class QualificationInputs:
-    recipe: object
-    models: dict[str, object]
+    recipe: _Recipe
+    models: dict[str, _Model]
     package: PackageSnapshot
-    compiled: tuple[dict[str, object], ...]
+    compiled: tuple[dict[str, _Json], ...]
     source_digest: str
     independent_validator: dict[str, object]
 
@@ -119,7 +222,7 @@ def _safe_member(name: str) -> None:
         raise QualificationError(f"recipe package contains an unsafe member: {name}")
 
 
-def _read_package(path: Path, document: Mapping[str, object], contracts: ModuleType) -> PackageSnapshot:
+def _read_package(path: Path, document: object, contracts: ModuleType) -> PackageSnapshot:
     files: dict[str, bytes] = {}
     try:
         with tarfile.open(path, mode="r:gz") as archive:
@@ -174,7 +277,7 @@ def _read_package(path: Path, document: Mapping[str, object], contracts: ModuleT
     return PackageSnapshot(path, dict(manifest), files)
 
 
-def _catalog_package(library_root: Path, recipe: object, document: Mapping[str, object], contracts: ModuleType) -> Path:
+def _catalog_package(library_root: Path, recipe: _Recipe, document: object, contracts: ModuleType) -> Path:
     ensure_catalog(ROOT, library_root)
     index = _load_json(library_root / "catalog-index.json")
     rows = index.get("recipes") if isinstance(index, Mapping) else None
@@ -209,11 +312,11 @@ def _catalog_package(library_root: Path, recipe: object, document: Mapping[str, 
     raise QualificationError("recipe is not present in the canonical catalog index")
 
 
-def _resolve_models(library_root: Path, recipe: object, package: PackageSnapshot,
-                    contracts: ModuleType) -> dict[str, object]:
+def _resolve_models(library_root: Path, recipe: _Recipe, package: PackageSnapshot,
+                    contracts: ModuleType) -> dict[str, _Model]:
     resolver = contracts.resolver
-    models: dict[tuple[str, str], object] = {}
-    digests: dict[str, object] = {}
+    models: dict[tuple[str, str], _Model] = {}
+    digests: dict[str, _Model] = {}
     pending = [selection.model for selection in recipe.models]
     while pending:
         reference = pending.pop(0)
@@ -301,7 +404,7 @@ def _build_inputs(payload: bytes) -> list[dict[str, str]]:
     return result
 
 
-def _source_digest(recipe: object, package: PackageSnapshot) -> str:
+def _source_digest(recipe: _Recipe, package: PackageSnapshot) -> str:
     build = recipe.execution.build
     context = build.context.path
     context_files = {name.removeprefix(context + "/"): payload for name, payload in package.files.items() if name.startswith(context + "/")}
@@ -326,7 +429,7 @@ def _source_digest(recipe: object, package: PackageSnapshot) -> str:
     return digest.hexdigest()
 
 
-def _compile(recipe: object, recipe_digest: str, models: dict[str, object], package: PackageSnapshot, source_digest: str, platform_root: Path) -> tuple[dict[str, object], ...]:
+def _compile(recipe: _Recipe, recipe_digest: str, models: dict[str, _Model], package: PackageSnapshot, source_digest: str, platform_root: Path) -> tuple[dict[str, _Json], ...]:
     control_src = platform_root / "control" / "src"
     if not control_src.is_dir():
         raise QualificationError("platform compiler source is unavailable")
@@ -345,21 +448,21 @@ def _compile(recipe: object, recipe_digest: str, models: dict[str, object], pack
     roles: list[str] = []
     for declaration in recipe.topology.roles:
         roles.extend([declaration.name] * declaration.count)
-    compiled: list[dict[str, object]] = []
+    compiled: list[dict[str, _Json]] = []
     for rank, role in enumerate(roles):
         try:
-            spec = compile_runtime_spec(recipe, models=models, package_handle=package_handle, role=role, rank=rank, recipe_digest=recipe_digest)
+            spec = compile_runtime_spec(recipe, models=models, package_handle=package_handle, role=role, rank=rank, recipe_digest=recipe_digest)  # pyright: ignore[reportArgumentType]  # the library's RecipeDefinition/ModelDefinition, read through _Recipe/_Model
         except Exception as error:
             raise QualificationError(f"canonical runtime compiler rejected {role}[{rank}]: {error}") from error
         # The compiler returns the typed RuntimeSpec; qualification reads its wire document.
-        spec = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else spec
-        security = spec.get("security")
+        document: dict[str, _Json] = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else spec  # pyright: ignore[reportAssignmentType]  # an older platform compiler returns the wire document itself
+        security = document.get("security")
         # Privileges, capabilities and the read-only root are platform constants;
         # only the per-workload choices remain to be checked.
         user = security.get("user") if isinstance(security, Mapping) else None
         if not isinstance(user, str) or user.split(":")[0] in {"", "0", "root"}:
             raise QualificationError("compiled runtime security projection is unsafe")
-        compiled.append(spec)
+        compiled.append(document)
     checks = {
         assertion
         for check in recipe.validation.serving.checks
@@ -432,7 +535,7 @@ def _container(inputs: QualificationInputs, args: argparse.Namespace, architectu
     )
 
 
-def _serving_check_documents(recipe: object) -> tuple[dict[str, object], ...]:
+def _serving_check_documents(recipe: _Recipe) -> tuple[_ServingCheckDocument, ...]:
     return tuple(
         check.model_dump(mode="json", exclude_none=True)
         for check in recipe.validation.serving.checks
@@ -445,7 +548,7 @@ def _facts_unusable(path: Path, error: Exception) -> None:
         print(f"recipe API facts unusable; serving checks go as declared: {error}", file=sys.stderr)
 
 
-def _chat_api(recipe: object, library_root: Path) -> object | None:
+def _chat_api(recipe: _Recipe, library_root: Path) -> object | None:
     """The recipe's published chat facts (``api/recipes/<slug>.json``), when usable.
 
     Facts that are absent or unreadable change nothing: the check is sent as declared.
@@ -460,13 +563,13 @@ def _chat_api(recipe: object, library_root: Path) -> object | None:
 
     path = library_root / "api" / "recipes" / f"{recipe.identity.slug}.json"
     try:
-        block = read_recipe_api(_load_json(path)).for_choices(recipe)
+        block = read_recipe_api(_load_json(path)).for_choices(recipe)  # pyright: ignore[reportArgumentType]  # the library's RecipeDefinition, read through _Recipe; read_recipe_api validates the document
     except (OSError, QualificationError, ValueError) as error:
         return _facts_unusable(path, error)
     return block if isinstance(block, ChatApi) else None
 
 
-def _argument_value(recipe: object) -> Callable[[str], int | None] | None:
+def _argument_value(recipe: _Recipe) -> Callable[[str], int | None] | None:
     """The library contracts' integer reading of the recipe's runtime arguments, as launched.
 
     A library whose contracts predate it yields none: the check is sent as declared.
@@ -478,7 +581,7 @@ def _argument_value(recipe: object) -> Callable[[str], int | None] | None:
     except ImportError:
         return None
     resolved = recipe.with_option_choices({})
-    return lambda name: integer_argument(resolved, name, resolved.settings)
+    return lambda name: integer_argument(resolved, name, resolved.settings)  # pyright: ignore[reportArgumentType]  # the library's RecipeDefinition, read through _Recipe
 
 
 def _run_declared_serving_checks(inputs: QualificationInputs, args: argparse.Namespace) -> dict[str, object] | None:
@@ -508,7 +611,7 @@ def _run_declared_serving_checks(inputs: QualificationInputs, args: argparse.Nam
             raise EnvironmentLimited("job serving requires the Controller artifact-job adapter")
         started = time.monotonic()
         try:
-            result = execute_http_check(args.serving_url, check, timeout_seconds=args.timeout_seconds, model_alias=alias, chat_api=chat_api, argument_value=_argument_value(inputs.recipe), fixtures=inputs.package.files)
+            result = execute_http_check(args.serving_url, check, timeout_seconds=args.timeout_seconds, model_alias=alias, chat_api=chat_api, argument_value=_argument_value(inputs.recipe), fixtures=inputs.package.files)  # pyright: ignore[reportArgumentType]  # the library's check document and ChatApi, read through this script's types
         except ServingExecutionError as error:
             raise QualificationError(f"{step}: {error}") from error
         results.append({"check": check["name"], "elapsed_seconds": round(time.monotonic() - started, 6), **result})
