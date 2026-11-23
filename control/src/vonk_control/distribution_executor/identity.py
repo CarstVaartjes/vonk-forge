@@ -10,12 +10,12 @@ from typing import Any
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, sessionmaker
 
-from vonk_agent_protocol.agent_words import ProfileEffectState
 from vonk_agent_protocol.distribution import DistributionObject
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.wire_model import canonical_message
 
+from ..agent_jobs.service import AgentJobService
 from ..content_identity import ImageContent, same_image
 from ..distribution.service import DistributionService
 from ..distribution.types import content_objects, plan_objects
@@ -26,15 +26,12 @@ from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )
-from ..recipe_operations.interfaces import AgentJobQueue
 from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_contract.phase_results import (
     RunSwitchRuntimeImageResult,
     RunSwitchRuntimePlanResult,
 )
 from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.vocabulary import RunSwitchMemberState
-from ..run_switch_operations.constants import _MEMBER_STATE_ADAPTER
 from ..run_switch_operations.errors import RunSwitchRetryLater
 from ..run_switch_operations.image_receipts import effective_build_receipt
 from ..runtime_image_preparation.contracts import RuntimeImageStorage
@@ -47,7 +44,7 @@ class DistributionIdentity:
     def __init__(
         self,
         sessions: sessionmaker[Session],
-        operations: AgentJobQueue,
+        operations: AgentJobService,
         distribution: DistributionService,
         *,
         clock: Any,
@@ -298,17 +295,6 @@ class DistributionIdentity:
         model_bytes = getattr(preparation.model, "artifact_set_bytes", 0)
         image_bytes = getattr(preparation.runtime_image, "image_bytes", 0)
         return model_bytes + image_bytes
-
-    @staticmethod
-    def _member_state(value: str) -> RunSwitchMemberState:
-        return _MEMBER_STATE_ADAPTER.validate_python(
-            {
-                LifecycleState.QUEUED.value: ProfileEffectState.PENDING.value,
-                LifecycleState.RUNNING.value: LifecycleState.RUNNING.value,
-                LifecycleState.SUCCEEDED.value: LifecycleState.SUCCEEDED.value,
-                LifecycleState.FAILED.value: LifecycleState.FAILED.value,
-            }.get(value, ProfileEffectState.UNKNOWN.value)
-        )
 
     @staticmethod
     def _int(value: object) -> int | None:
