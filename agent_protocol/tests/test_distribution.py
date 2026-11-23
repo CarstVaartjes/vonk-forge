@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from pydantic import BaseModel
 
@@ -35,7 +37,7 @@ def test_distribution_assignment_import_and_round_trip_are_canonical() -> None:
 
 
 def test_distribution_assignment_rejects_unsafe_object_name() -> None:
-    wire = _assignment().to_mapping()
+    wire: dict[str, Any] = _assignment().to_mapping()
     wire["objects"][0]["name"] = "weights/../model.bin"
 
     with pytest.raises(AgentProtocolError):
@@ -89,12 +91,12 @@ def test_distribution_allows_only_the_canonical_empty_model_support_file() -> No
     ],
 )
 def test_distribution_preserves_safe_object_names(name: str) -> None:
-    wire = _assignment().to_mapping()
+    wire: dict[str, Any] = _assignment().to_mapping()
     wire["objects"][0]["name"] = name
     assert DistributionAssignment.parse(wire).objects[0].name == name
 
 
 def test_distribution_assignment_carries_only_the_object_set() -> None:
-    wire = _assignment().to_mapping()
+    wire: dict[str, Any] = _assignment().to_mapping()
     with pytest.raises(AgentProtocolError):
         DistributionAssignment.parse(wire | {"node_id": "spk_" + "b" * 32})

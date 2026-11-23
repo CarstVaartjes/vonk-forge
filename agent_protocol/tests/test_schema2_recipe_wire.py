@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -31,7 +32,7 @@ REVISION_ID = "00000000-0000-4000-8000-000000000002"
 MAPPING_ID = "00000000-0000-4000-8000-000000000007"
 
 
-def _install() -> dict[str, object]:
+def _install() -> dict[str, Any]:
     return {
         "installation_id": INSTALLATION_ID,
         "plan_digest": "b" * 64,

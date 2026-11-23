@@ -43,17 +43,17 @@ def _install(plan: dict[str, Any]) -> dict[str, Any]:
 
 
 def _start(plan: dict[str, Any] | None = None) -> dict[str, Any]:
-    plan = copy.deepcopy(plan or PLAN)
-    if plan["runtime"]["placement"]["world_size"] == 1:
-        plan["runtime"]["placement"]["endpoint_address"] = "100.100.20.30"
-        plan["security"]["network_mode"] = "bridge"
+    started: dict[str, Any] = copy.deepcopy(plan or PLAN)
+    if started["runtime"]["placement"]["world_size"] == 1:
+        started["runtime"]["placement"]["endpoint_address"] = "100.100.20.30"
+        started["security"]["network_mode"] = "bridge"
     return {
         "run_id": RUN_ID,
         "installation_id": INSTALLATION_ID,
         "recipe_revision_id": REVISION_ID,
         "mapping_id": MAPPING_ID,
         "plan_digest": "c" * 64,
-        "compiled_execution_plan": plan,
+        "compiled_execution_plan": started,
         "run_generation": 1,
     }
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from enum import Enum
+
 import pytest
 
 from vonk_agent_protocol.lifecycle_vocabulary import (
@@ -52,8 +54,14 @@ def _field(enum) -> str:
     )
 
 
+def _first_word(annotation: object) -> str:
+    assert isinstance(annotation, type)
+    assert issubclass(annotation, Enum)
+    return next(iter(annotation)).value
+
+
 def _sample() -> dict[str, str]:
     return {
-        name: next(iter(field.annotation)).value
+        name: _first_word(field.annotation)
         for name, field in LifecycleVocabulary.model_fields.items()
     }

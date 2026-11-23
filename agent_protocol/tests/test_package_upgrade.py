@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -10,12 +11,14 @@ from vonk_agent_protocol.host_helper import (
     InstallVonkDebOperation,
 )
 from vonk_agent_protocol.package_upgrade import (
+    PackageActivationOutcome,
+    PackageActivationPhase,
     PackageActivationReceipt,
     PackageRollbackAuthority,
 )
 
 
-def authority() -> dict[str, object]:
+def authority() -> dict[str, Any]:
     return {
         "source": {
             "package_sha256": "a" * 64,
@@ -82,10 +85,10 @@ def test_source_authority_rejects_arbitrary_path_and_root_receipt_is_current() -
         candidate_version="0.1.1~acceptance.2",
         candidate_binary_sha256="2" * 64,
         attempt_nonce="e" * 64,
-        phase="rolled_back",
+        phase=PackageActivationPhase.ROLLED_BACK,
         created_at=100,
         updated_at=130,
-        outcome="source_restored_and_restarted",
+        outcome=PackageActivationOutcome.SOURCE_RESTORED_AND_RESTARTED,
     )
     assert (
         PackageActivationReceipt.model_validate_json(receipt.model_dump_json())

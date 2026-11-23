@@ -290,7 +290,7 @@ def test_runtime_authority_grant_binds_plan_generation_and_both_run_ids(
     "model", [HostRuntimeRequest, ExecuteContainerRuntimeRequestOperation]
 )
 def test_runtime_cleanup_identity_is_required_only_for_cleanup(model) -> None:
-    document = {
+    document: dict[str, Any] = {
         "action": "installation-cleanup",
         "fence": "40000000-0000-4000-8000-000000000004",
     }
