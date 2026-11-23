@@ -265,7 +265,27 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
     ),
     (
-        "tests/cluster_profiles/test_controller_cli.py",
+        "tests/cluster_profiles/test_controller_cli_recipe_reconcile_cache.py",
+        "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
+    ),
+    (
+        "tests/cluster_profiles/test_controller_cli_remove_and_cancel.py",
+        "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
+    ),
+    (
+        "tests/cluster_profiles/test_controller_cli_profile_load_follow.py",
+        "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
+    ),
+    (
+        "tests/cluster_profiles/test_controller_cli_fleet_actions_upgrade.py",
+        "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
+    ),
+    (
+        "tests/cluster_profiles/test_controller_cli_run_and_library.py",
+        "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
+    ),
+    (
+        "tests/cluster_profiles/test_controller_cli_run_review_reads.py",
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
     ),
     (

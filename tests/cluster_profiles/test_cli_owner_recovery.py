@@ -7,7 +7,7 @@ import json
 from dataclasses import replace
 
 import pytest
-from test_controller_cli import FakeClient, run
+from controller_cli_support import FakeClient, run
 
 from cluster_profiles import cli, controller_cli
 from cluster_profiles.cli_states_generated import OBSERVING, QUEUED, SUCCEEDED
