@@ -56,10 +56,10 @@ GUARDS: tuple[str, ...] = (
     "tests/scripts/test_verify_ci_gate.py",
     "tests/scripts/test_build_control_wheel.py::test_every_job_that_builds_the_controller_image_builds_the_wheel_first",
     "tests/test_agent_release_workflow.py::test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped",
-    "tests/test_spark_lifecycle_runner_part2.py::test_every_fixture_import_in_the_lane_code_is_offered_once_more",
+    "tests/test_spark_lifecycle_runner.py::test_every_fixture_import_in_the_lane_code_is_offered_once_more",
     "tests/test_baseline_program_surface.py",
     "tests/test_guard_paths_exist.py",
-    "tests/test_spark_lifecycle_runner_part2.py::test_the_raw_profile_preview_request_lives_only_in_the_admitted_preview",
+    "tests/test_spark_lifecycle_runner.py::test_the_raw_profile_preview_request_lives_only_in_the_admitted_preview",
 )
 
 SCOPED: tuple[tuple[str, str], ...] = (
@@ -264,19 +264,7 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
     ),
     (
-        "tests/cluster_profiles/test_controller_cli_part1.py",
-        "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
-    ),
-    (
-        "tests/cluster_profiles/test_controller_cli_part2.py",
-        "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
-    ),
-    (
-        "tests/cluster_profiles/test_controller_cli_part3.py",
-        "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
-    ),
-    (
-        "tests/cluster_profiles/test_controller_cli_part4.py",
+        "tests/cluster_profiles/test_controller_cli.py",
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
     ),
     (
@@ -393,11 +381,7 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "hook environment: fixed entrypoint/fixture behavior. The cross-area scan is selected separately in GUARDS.",
     ),
     (
-        "tests/scripts/test_install_release_publication_part1.py",
-        "install release publication: fixed entrypoint/fixture behavior.",
-    ),
-    (
-        "tests/scripts/test_install_release_publication_part2.py",
+        "tests/scripts/test_install_release_publication.py",
         "install release publication: fixed entrypoint/fixture behavior.",
     ),
     (
@@ -630,11 +614,7 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "spark lifecycle diagnostics: fixed entrypoint/fixture behavior.",
     ),
     (
-        "tests/test_spark_lifecycle_runner_part1.py",
-        "spark lifecycle runner: fixed entrypoint/fixture behavior.",
-    ),
-    (
-        "tests/test_spark_lifecycle_runner_part2.py",
+        "tests/test_spark_lifecycle_runner.py",
         "spark lifecycle runner: fixed entrypoint/fixture behavior.",
     ),
     (

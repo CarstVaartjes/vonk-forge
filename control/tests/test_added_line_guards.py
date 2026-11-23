@@ -1628,7 +1628,7 @@ def test_the_storage_owner_and_other_packages_may_read_nas_space() -> None:
     for path in (
         "control/src/vonk_control/model_cache/storage.py",
         "control/src/vonk_control/unused_storage_collection/pressure.py",
-        "control/tests/test_model_cache_part1.py",
+        "control/tests/test_model_cache.py",
     ):
         assert not check_source(path, _SPACE_CHECK, {2}, modes=("nas-space",))
 

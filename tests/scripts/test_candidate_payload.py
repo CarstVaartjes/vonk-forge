@@ -11,9 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.scripts import install_release_publication_support as publication
-from tests.scripts import test_install_release_publication_part1 as publication_part1
-from tests.scripts import test_install_release_publication_part2 as publication_part2
+from tests.scripts import test_install_release_publication as publication
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/install-release-publication"
@@ -58,8 +56,8 @@ def _sealed_inputs(
     inputs = publication._inputs(root)
     # One accepted build: the fixture wheel's zip times follow the clock.
     shutil.copyfile(
-        publication_part2._input_path(fixtures, "nas_wheel"),
-        publication_part2._input_path(inputs, "nas_wheel"),
+        publication._input_path(fixtures, "nas_wheel"),
+        publication._input_path(inputs, "nas_wheel"),
     )
     sealed = root / "sealed"
     for group in ("packages", "baseline_packages"):
@@ -88,7 +86,7 @@ def _sealed_inputs(
             )
             mapping[platform] = package
     if source != publication.SOURCE_SHA:
-        wheel = publication_part2._input_path(inputs, "cli_wheel")
+        wheel = publication._input_path(inputs, "cli_wheel")
         with zipfile.ZipFile(wheel) as archive:
             members = {name: archive.read(name) for name in archive.namelist()}
         identity = json.loads(members["cluster_profiles/build-identity.json"])
@@ -187,12 +185,8 @@ def test_publication_identity_and_trust_material_are_not_payload(candidates) -> 
 
 
 def _pr_spark_report(path: Path, candidate: Path) -> Path:
-    publication_part1._spark_gate_report(
-        path,
-        candidate,
-        publication_part1.ARM64_SPARK_GATES,
-        "linux-arm64",
-        run_id=PR_RUN,
+    publication._spark_gate_report(
+        path, candidate, publication.ARM64_SPARK_GATES, "linux-arm64", run_id=PR_RUN
     )
     report = json.loads(path.read_text())
     report["source_sha"] = PR_SHA
@@ -201,16 +195,16 @@ def _pr_spark_report(path: Path, candidate: Path) -> Path:
 
 
 def _accept(tmp_path: Path, main: Path, reused: Path, spark_report: Path):
-    nas = publication_part1._gate_report(
+    nas = publication._gate_report(
         tmp_path / "nas.json",
         main,
-        publication.ACCEPTANCE_GATES - publication_part1.ARM64_SPARK_GATES,
+        publication.ACCEPTANCE_GATES - publication.ARM64_SPARK_GATES,
     )
     output = tmp_path / "acceptance"
     output.mkdir()
     plan = json.loads((reused / "publication-plan.json").read_text())
     release = _release(reused)
-    command = publication_part1._accept_command(main, output, [nas]) + [
+    command = publication._accept_command(main, output, [nas]) + [
         "--reuse-candidate-release",
         str(release),
         "--reuse-baseline-release",
@@ -261,10 +255,10 @@ def test_evidence_for_other_content_or_identity_is_refused(
         json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
     )
     if fault == "nas":
-        report = publication_part1._gate_report(
+        report = publication._gate_report(
             tmp_path / "pr-nas.json",
             candidates["pull-request"],
-            publication.ACCEPTANCE_GATES - publication_part1.ARM64_SPARK_GATES,
+            publication.ACCEPTANCE_GATES - publication.ARM64_SPARK_GATES,
         )
     output, result = _accept(tmp_path, candidates["main"], reused, report)
     assert result.returncode == 2
