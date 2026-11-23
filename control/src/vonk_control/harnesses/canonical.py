@@ -42,8 +42,9 @@ from .canonical_metadata import (
     CANONICAL_HARNESSES,
     canonical_harness,
 )
-from .common import HarnessCompileError, validate_projection
+from .common import validate_projection
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection
+from .errors import HarnessCompileError
 
 _BUILTINS = frozenset(metadata.slug for metadata in CANONICAL_HARNESSES)
 _JOB_INTERFACES = frozenset(

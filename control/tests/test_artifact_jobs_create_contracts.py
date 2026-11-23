@@ -27,7 +27,7 @@ from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
 from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
-from vonk_control.agent_jobs.contracts import (
+from vonk_control.agent_operation_facts import (
     _WORKLOAD_INTENT_OPERATIONS,
     fencing_intent,
 )

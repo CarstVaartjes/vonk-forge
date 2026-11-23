@@ -992,7 +992,7 @@ class ArtifactJobAdapter:
             if receipt is Effect.STOPPED:
                 return Effect.STOPPED
             # imported here: agent_jobs reads this package's lifecycle.
-            from ..agent_jobs.retry import job_attempt_did_not_launch
+            from ..agent_operation_facts import job_attempt_did_not_launch
 
             # An attempt that reported it stopped before launch left nothing
             # for the cancel to stop (a damaged report proves nothing).

@@ -16,9 +16,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, object_session
 
 from vonk_agent_protocol.agent_operations import AgentOperation
+from vonk_agent_protocol.agent_words import FailureStage
 from vonk_agent_protocol.contracts import AgentClaim
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
 
 from . import agent_operation_states
 from .models.jobs import Job
@@ -28,7 +29,6 @@ from .operations.progress import stored_progress
 from .stall_window import (
     last_progress_at,
     latest_progress,
-    progress_deadline,
     stall_deadline,
 )
 from .stored.json_values import read_row_column
@@ -361,42 +361,6 @@ def job_output_retention_expiry(receipt_observed_at: datetime) -> datetime:
     return aware(receipt_observed_at) + timedelta(hours=24)
 
 
-def order_recovery_deadline(
-    operation: StoredOperation, now: datetime
-) -> datetime | None:
-    """The order's recovery deadline: never reached while its Spark is away.
-
-    An order waiting for its Spark to come back waits on a live owner (an
-    enrolled Spark may return); the window then runs a whole budget from
-    ``now``. On a present Spark, an order that does not advance has stalled.
-    """
-
-    # owner_liveness reaches this module through the profile contracts.
-    from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
-
-    if operation.recovery_deadline is None:
-        return None
-    stored = aware(operation.recovery_deadline)
-    if operation.kind == AgentOperation.RECIPE_JOB_RUN.value:
-        payload = read_row_column(operation, "payload")
-        if isinstance(payload, RecipeJobRunRequest) and payload.output_delivery_only:
-            # Exited output bytes expire even while their Spark is offline.
-            return stored
-    session = object_session(operation)
-    if session is None:
-        return stored
-    window = progress_deadline(
-        started_at=stored - AGENT_ORDER_RECOVERY_BUDGET,
-        progressed_at=None,
-        window=AGENT_ORDER_RECOVERY_BUDGET,
-        now=now,
-        waiting_on=owner(
-            session, OwnerRef(OwnerKind.SPARK_RETURN, operation.node_id), now
-        ),
-    )
-    return max(stored, window, job_run_bound(session, operation) or stored)
-
-
 def job_run_bound(session: Session, operation: StoredOperation) -> datetime | None:
     """The end of a job run's own deadline and stop grace, from its lease.
 
@@ -418,8 +382,6 @@ def job_run_bound(session: Session, operation: StoredOperation) -> datetime | No
     if not isinstance(payload, RecipeJobRunRequest) or attempt is None:
         return None
     # imported here: agent_jobs reads this module's facts.
-    from .agent_jobs.retry import job_attempt_did_not_launch
-
     result = read_row_column(attempt, "result")
     if job_attempt_did_not_launch(result):
         # The attempt reported a wait before it dispatched the job: no job is
@@ -436,3 +398,69 @@ def job_run_bound(session: Session, operation: StoredOperation) -> datetime | No
         seconds=(0 if job is None else job.timeout_seconds)
         + plan.lifecycle.stop_timeout_seconds
     )
+
+
+#: The stages a job run reports only before it dispatches its process:
+#: delivering its artifacts and image, preparing its installation and model,
+#: and laying out its storage, inputs and launch. A failure reported there
+#: proves this attempt never launched the job. ``job-state``,
+#: ``output-storage``, the runtime adapter and the stop stages also occur after
+#: dispatch and are never in this set.
+JOB_PRE_LAUNCH_STAGES = frozenset(
+    stage.value
+    for stage in (
+        FailureStage.ARTIFACT_DISTRIBUTION,
+        FailureStage.IMAGE_VERIFICATION,
+        FailureStage.INSTALLATION_DIRECTORY,
+        FailureStage.INSTALLATION_METADATA,
+        FailureStage.INSTALLATION_PATH,
+        FailureStage.JOB_INPUTS,
+        FailureStage.LIFECYCLE_METADATA,
+        FailureStage.MODEL_MATERIALIZATION,
+        FailureStage.RUN_STORAGE,
+        FailureStage.RUNTIME_CACHE,
+        FailureStage.RUNTIME_METADATA,
+        FailureStage.RUNTIME_PROJECTION,
+    )
+)
+
+
+def job_attempt_did_not_launch(result: object) -> bool:
+    """A job run's failure report proves this attempt never ran the job: it
+    stopped at a pre-launch stage and carries no process receipt.  The report
+    is a typed result or its stored document."""
+    return (
+        isinstance(result, Mapping)
+        and not isinstance(result, RecipeJobRunResult)
+        and result.get("stage") in JOB_PRE_LAUNCH_STAGES
+    )
+
+
+#: Orders a Spark's workload intent fences. A JobRun is never one: it belongs
+#: to its run and is fenced by that run (RUNNING, its RunNode RUNNING, its
+#: generation), so a load or Stop of another run on the Spark never cancels it.
+#: The run's own Stop cancels exactly its jobs
+#: (``request_run_job_cancellation_in_session``).
+_WORKLOAD_INTENT_OPERATIONS = frozenset(
+    {
+        AgentOperation.RECIPE_INSTALL.value,
+        AgentOperation.ARTIFACT_DISTRIBUTION.value,
+        AgentOperation.RECIPE_START.value,
+        AgentOperation.RECIPE_STOP.value,
+        AgentOperation.RECIPE_UNINSTALL.value,
+        AgentOperation.RECIPE_RECONCILE.value,
+    }
+)
+
+
+def fencing_intent(operation: StoredOperation) -> int | None:
+    """The Spark workload intent that fences ``operation``, if any.
+
+    Decided by its kind, never by the ordinal column alone: an order of any
+    other kind is never superseded by an intent, whatever ordinal it carries
+    (a JobRun an older Controller stamped with one keeps running).
+    """
+
+    if operation.kind not in _WORKLOAD_INTENT_OPERATIONS:
+        return None
+    return operation.workload_intent_ordinal

@@ -39,9 +39,9 @@ from ..models.fleet import AgentNode
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
 from ..operations.blockers import make_blocker
-from ..prebuilt_images import PrebuiltDecision
 from ..recipe_builds.cancellation import BuildConsumerError, lock_build_dependency
 from ..recipe_builds.common import (
+    PrebuiltDecision,
     RecipeBuildAdmissionBusy,
     RecipeBuildResolution,
     RecipeSourcePolicyError,

@@ -22,6 +22,7 @@ from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states
+from ..agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
 from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import (
     operation_start_deadline as _operation_start_deadline,
@@ -39,7 +40,6 @@ from .contracts import (
     _CLAIM_NOTE_PREFIX,
     _CLAIM_REFUSAL_PREFIX,
     _MAX_CLAIM_REFUSAL_REASON,
-    _WORKLOAD_INTENT_OPERATIONS,
 )
 
 

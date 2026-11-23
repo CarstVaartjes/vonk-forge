@@ -24,6 +24,7 @@ from vonk_agent_protocol.state_machines import (
 from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states
+from ..agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
 from ..agent_operation_facts import (
     attempt_holds_open_launch_budget as _attempt_holds_open_launch_budget,
 )
@@ -46,7 +47,7 @@ from ..persisted_waits import schedule_wait
 from ..recipe_operations.lifecycle_contract import (
     RecipeOperationCancellationResult,
 )
-from .contracts import _WORKLOAD_INTENT_OPERATIONS, OperatorRetirementRefused
+from .contracts import OperatorRetirementRefused
 from .retry import _retry_authorized_for_current_attempt
 from .scope import _lock_target_scopes, _target_scope
 from .stored import column_field, column_is_document, column_value

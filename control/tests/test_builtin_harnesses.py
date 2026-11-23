@@ -19,7 +19,7 @@ from vonk_control.harnesses.canonical import (
     compile_canonical_harness,
 )
 from vonk_control.harnesses.canonical_metadata import CANONICAL_HARNESSES
-from vonk_control.harnesses.common import HarnessCompileError
+from vonk_control.harnesses.errors import HarnessCompileError
 from vonk_control.recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     compile_runtime_spec,

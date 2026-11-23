@@ -27,7 +27,9 @@ from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states
 from ..agent_operation_facts import (
+    _WORKLOAD_INTENT_OPERATIONS,
     aware,
+    fencing_intent,
 )
 from ..cancelled_runtime import cancellation_stop_current
 from ..disk_reservations import outstanding_disk_charges
@@ -59,11 +61,7 @@ from ..recipe_operations.execution_contract import (
 from ..recipe_operations.observation_helpers import reinstall_in_flight
 from ..recovery_policy import WAIT_STEP
 from ..spark_disk import spark_free_bytes
-from .contracts import (
-    _TERMINAL_PARENT_STATES,
-    _WORKLOAD_INTENT_OPERATIONS,
-    fencing_intent,
-)
+from .contracts import _TERMINAL_PARENT_STATES
 from .endings import end_unobserved_order
 from .evidence import _failure_result
 from .predicates import _claim_refusal_reason

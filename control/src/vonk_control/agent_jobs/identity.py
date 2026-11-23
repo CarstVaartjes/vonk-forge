@@ -21,6 +21,7 @@ from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdent
 from vonk_agent_protocol.wire_model import canonical_message
 
 from ..agent_contacts import record_contact
+from ..agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS, fencing_intent
 from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import lapsed_renewal_allowed as _lapsed_renewal_allowed
 from ..auth import AgentSource
@@ -35,13 +36,7 @@ from ..models.operations import AgentOperation as StoredOperation
 from ..models.operations import AgentOperationAttempt
 from ..offline_stops import is_deferred_stop
 from ..own_cleanup import CLEANUP_KINDS
-from .contracts import (
-    _WORKLOAD_INTENT_OPERATIONS,
-    AgentContactIdentityMismatch,
-    AgentFence,
-    StaleAgentFence,
-    fencing_intent,
-)
+from .contracts import AgentContactIdentityMismatch, AgentFence, StaleAgentFence
 from .stored import column_field, column_is_document, column_value
 
 if TYPE_CHECKING:

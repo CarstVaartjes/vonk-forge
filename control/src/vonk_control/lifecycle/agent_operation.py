@@ -88,7 +88,6 @@ from ..agent_operation_facts import (
     attempt_is_live,
     aware,
     operation_start_deadline,
-    order_recovery_deadline,
     stalled_interruptions,
     start_deadline,
 )
@@ -99,6 +98,7 @@ from ..models.operations import AgentOperation as StoredOperation
 from ..models.operations import AgentOperationAttempt
 from ..offline_stops import is_deferred_stop
 from ..operations.progress import progress_document
+from ..owner_liveness import order_recovery_deadline
 from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait
 from ..stall_window import stall_deadline
 from ..stored.json_values import read_row_column

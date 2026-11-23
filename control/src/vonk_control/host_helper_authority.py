@@ -52,7 +52,7 @@ from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdent
 from vonk_agent_protocol.wire_model import AgentProtocolError, canonical_message
 
 from . import agent_operation_states
-from .agent_jobs.contracts import _WORKLOAD_INTENT_OPERATIONS
+from .agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
 from .gpu.clock import selected_gpu_clock
 from .host_runtime_plan_authority import (
     RuntimePlanAuthorityError,

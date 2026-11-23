@@ -29,7 +29,7 @@ from vonk_agent_protocol.job_limits import MAX_TIMEOUT_SECONDS
 
 from ..catalog.revision_contract import read_model_set
 from ..harnesses.canonical import compile_canonical_harness
-from ..harnesses.common import HarnessCompileError
+from ..harnesses.errors import HarnessCompileError
 from ..models.catalog import CatalogDocumentRevision
 from ..platform_ports import serving_port
 from ..runtime.spec_contract import (

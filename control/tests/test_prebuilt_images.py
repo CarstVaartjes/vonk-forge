@@ -28,6 +28,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.images import ImageStoreCode, PrebuiltImageCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control import prebuilt_images
 from vonk_control.auth import TokenCodec
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,
@@ -58,7 +59,6 @@ from vonk_control.prebuilt_images import (
     PrebuiltImageImporter,
     write_library_image_plan,
 )
-from vonk_control.recipe_builds import common as recipe_builds
 from vonk_control.recipe_builds.cancellation import request_build_cancellation
 from vonk_control.recipe_builds.common import RecipeBuildUnknown
 from vonk_control.recipe_builds.service import RecipeBuildService
@@ -284,7 +284,7 @@ def test_a_recipe_the_controller_refuses_gets_no_image_and_says_why(
         )
         return SourcePolicyReport(False, bundle.sha256, "Dockerfile", (finding,))
 
-    monkeypatch.setattr(recipe_builds, "inspect_package_source_policy", refuse)
+    monkeypatch.setattr(prebuilt_images, "inspect_package_source_policy", refuse)
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     index["recipes"] = index["recipes"][:1]
     library = tmp_path / "library"

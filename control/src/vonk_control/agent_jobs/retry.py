@@ -12,14 +12,13 @@ from sqlalchemy.orm import Session, object_session
 from sqlalchemy.sql.elements import ColumnElement
 
 from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentOperation
-from vonk_agent_protocol.agent_words import Disposition, FailureStage
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.contracts import (
     canonical_payload,
     validate_result_for_operation,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, LifecycleState
 from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
-from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.state_machines import DistributionAssignmentState
 from vonk_agent_protocol.wire_model import WireModel
 
@@ -27,6 +26,7 @@ from .. import agent_operation_states
 from ..agent_operation_facts import (
     AGENT_UPGRADE_RECOVERY_FENCE,
     SUPERSEDED_CANCELLATION_SECONDS,
+    job_attempt_did_not_launch,
 )
 from ..agent_operation_facts import (
     RESTART_REISSUE_OPERATIONS as _RESTART_REISSUE_OPERATIONS,
@@ -74,42 +74,6 @@ def superseded_cancellation_deadline(result: object) -> datetime | None:
     if requested_at.tzinfo is None:
         return None
     return requested_at + timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS)
-
-
-#: The stages a job run reports only before it dispatches its process:
-#: delivering its artifacts and image, preparing its installation and model,
-#: and laying out its storage, inputs and launch. A failure reported there
-#: proves this attempt never launched the job. ``job-state``,
-#: ``output-storage``, the runtime adapter and the stop stages also occur after
-#: dispatch and are never in this set.
-JOB_PRE_LAUNCH_STAGES = frozenset(
-    stage.value
-    for stage in (
-        FailureStage.ARTIFACT_DISTRIBUTION,
-        FailureStage.IMAGE_VERIFICATION,
-        FailureStage.INSTALLATION_DIRECTORY,
-        FailureStage.INSTALLATION_METADATA,
-        FailureStage.INSTALLATION_PATH,
-        FailureStage.JOB_INPUTS,
-        FailureStage.LIFECYCLE_METADATA,
-        FailureStage.MODEL_MATERIALIZATION,
-        FailureStage.RUN_STORAGE,
-        FailureStage.RUNTIME_CACHE,
-        FailureStage.RUNTIME_METADATA,
-        FailureStage.RUNTIME_PROJECTION,
-    )
-)
-
-
-def job_attempt_did_not_launch(result: object) -> bool:
-    """A job run's failure report proves this attempt never ran the job: it
-    stopped at a pre-launch stage and carries no process receipt.  The report
-    is a typed result or its stored document."""
-    return (
-        isinstance(result, Mapping)
-        and not isinstance(result, RecipeJobRunResult)
-        and result.get("stage") in JOB_PRE_LAUNCH_STAGES
-    )
 
 
 def result_disposition(kind: str, state: str, result: WireModel) -> Disposition:

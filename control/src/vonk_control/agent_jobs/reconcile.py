@@ -22,6 +22,7 @@ from ..admission_locking import (
 )
 from ..agent_operation_facts import attempt_holds_order as _attempt_holds_order
 from ..agent_operation_facts import aware as _aware
+from ..agent_operation_facts import fencing_intent
 from ..cancelled_runtime import cancellation_stop_current
 from ..failure_classification import disposition, error_detail, wait_reason
 from ..lifecycle.agent_operation import AgentOperationAdapter, lapsed_running_orders
@@ -35,7 +36,6 @@ from ..models.operations import AgentOperation as StoredOperation
 from ..models.operations import AgentOperationAttempt
 from ..own_cleanup import CLEANUP_KINDS
 from ..recovery_policy import WAIT_STEP
-from .contracts import fencing_intent
 from .endings import end_unobserved_order
 from .observation_receipts import (
     OBSERVATION_KINDS,
