@@ -58,7 +58,7 @@ def test_retry_does_not_override_newer_direct_workload_intent(tmp_path):
     from vonk_control.models.cache import RecipeBuild
     from vonk_control.models.mapping import ClusterMapping
 
-    from .test_recipe_operations import installed_recipe, started_recipe
+    from .recipe_operations_support import installed_recipe, started_recipe
 
     sessions, lifecycle, service, _profile, _desired, original, _child, nodes = (
         _failed_profile(tmp_path)

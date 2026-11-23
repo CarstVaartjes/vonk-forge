@@ -572,8 +572,8 @@ def test_artifact_output_commit_fault_and_lost_response_reuse_attachment(
     from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
     from vonk_control.source_bundles import SourceBundleStore
 
+    from .recipe_operations_support import NOW
     from .test_artifact_jobs import running_artifact_service, submitted_artifact_job
-    from .test_recipe_operations import NOW
 
     sessions, operations, _queue, artifacts, run_id, node_id = running_artifact_service(
         tmp_path, engine=postgres_engine

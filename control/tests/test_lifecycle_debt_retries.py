@@ -318,12 +318,12 @@ def test_accepted_plan_refresh_records_unknown_cause_and_resumes(tmp_path, monke
     from vonk_control.models.jobs import Job
     from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 
+    from .recipe_operations_support import NOW, setup_services
     from .run_switch_operations_support import (
         RecordingArtifactExecutor,
         _request,
         _service,
     )
-    from .test_recipe_operations import NOW, setup_services
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(tmp_path)
     clock = [NOW]
@@ -409,8 +409,8 @@ def test_recipe_unknown_after_commit_replays_without_duplicate_effects(
     from vonk_control.models.jobs import Job
     from vonk_control.models.operations import AgentOperation
 
+    from .recipe_operations_support import installed_recipe, setup_services
     from .test_artifact_jobs import _configure_artifact_recipe
-    from .test_recipe_operations import installed_recipe, setup_services
 
     sessions, service, queue, mapping_id, build_id, nodes = setup_services(
         tmp_path,

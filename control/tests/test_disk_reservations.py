@@ -20,8 +20,8 @@ from vonk_control.models.execution import (
     ResourceReservation,
 )
 
+from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service
-from .test_recipe_operations import NOW, installed_recipe, setup_services
 
 
 def _record_disk(sessions, node_id, *, at, free, observed_at=None):

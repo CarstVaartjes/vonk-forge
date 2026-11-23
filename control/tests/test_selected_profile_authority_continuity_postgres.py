@@ -60,6 +60,12 @@ from vonk_control.runtime.preflight import mandatory_capabilities
 from vonk_control.terminal_history_collection import TerminalHistoryCollector
 
 from .preflight_fixtures import record_passing_preflight
+from .recipe_operations_support import (
+    NOW,
+    installed_recipe,
+    setup_services,
+    started_recipe,
+)
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
@@ -70,12 +76,6 @@ from .runtime_identity_support import (
     inventory_items_fixture,
 )
 from .test_fleet_profiles import _node_id, _uuid
-from .test_recipe_operations import (
-    NOW,
-    installed_recipe,
-    setup_services,
-    started_recipe,
-)
 from .test_terminal_history_collection import _job
 
 

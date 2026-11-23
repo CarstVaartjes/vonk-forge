@@ -41,6 +41,7 @@ from vonk_control.runtime_image_preparation.preparation import prepare_runtime_i
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .preflight_fixtures import record_passing_preflight
+from .recipe_operations_support import NOW, _CanonicalModelCache, setup_services
 from .run_switch_operations_support import (
     ColdStartPhaseExecutor,
     CompleteArtifactInspector,
@@ -56,11 +57,6 @@ from .runtime_identity_support import (
 )
 from .runtime_image_fixtures import place_test_image
 from .test_lifecycle_preflight import _clear, _finish
-from .test_recipe_operations import (
-    NOW,
-    _CanonicalModelCache,
-    setup_services,
-)
 
 
 def test_cold_model_and_image_plan_defers_compile_until_both_preparations(

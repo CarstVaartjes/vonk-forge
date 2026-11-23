@@ -21,9 +21,9 @@ from vonk_control.run_switch_contract.requests import (
 )
 from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
 
+from .recipe_operations_support import started_recipe
 from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service
 from .test_profile_port_claims import _ready_profile
-from .test_recipe_operations import started_recipe
 
 
 @pytest.mark.parametrize("node_count", [1, 2])

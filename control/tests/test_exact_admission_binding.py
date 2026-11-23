@@ -10,7 +10,7 @@ from vonk_control.models.execution import RecipeInstallation, RecipeRun
 from vonk_control.models.jobs import Job
 from vonk_control.run_admission import RunPlanInvalid
 
-from .test_recipe_operations import installed_recipe, setup_services
+from .recipe_operations_support import installed_recipe, setup_services
 
 
 @pytest.mark.parametrize("method", ["install", "start", "activate_job_run"])

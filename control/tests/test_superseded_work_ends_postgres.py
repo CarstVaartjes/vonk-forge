@@ -41,18 +41,18 @@ from vonk_control.run_switch_contract.requests import (
 )
 from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
 
+from .recipe_operations_support import (
+    ConcurrentPublisher,
+    bind_route_publications,
+    complete_started_recipe,
+    started_recipe,
+)
 from .recipe_stop_fixtures import recipe_stop_payload
 from .run_switch_operations_support import _request
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs import superseded_order_payload
 from .test_agent_jobs_postgres import COMMIT, NODE_B, parent, service  # noqa: F401
 from .test_profile_port_claims import _ready_profile
-from .test_recipe_operations import (
-    ConcurrentPublisher,
-    bind_route_publications,
-    complete_started_recipe,
-    started_recipe,
-)
 
 
 def _newer_parent(sessions, clock, ordinal: int) -> Job:

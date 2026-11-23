@@ -41,11 +41,11 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from tests.display_fixtures import reword
 
+from ..recipe_operations_support import ConcurrentPublisher, setup_services
 from ..run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )
-from ..test_recipe_operations import ConcurrentPublisher, setup_services
 
 #: The recipe that needs both Sparks, and two different ones that run on
 #: either Spark alone (so one load can place two recipes on one Spark).

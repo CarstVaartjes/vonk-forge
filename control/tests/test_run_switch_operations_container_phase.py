@@ -48,6 +48,7 @@ from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExec
 from vonk_control.run_switch_operations.result_helpers import _phase_result
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .run_switch_operations_support import (
     PendingBuilds,
     RecordingArtifactExecutor,
@@ -59,11 +60,6 @@ from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     inventory_items_fixture,
     set_inventory_identity,
-)
-from .test_recipe_operations import (
-    NOW,
-    installed_recipe,
-    setup_services,
 )
 
 

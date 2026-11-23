@@ -25,6 +25,7 @@ from vonk_control.run_switch_operations.interfaces import PhaseExecution
 from vonk_control.run_switch_operations.result_helpers import _phase_result
 
 from .non_blocking import assert_ended_without_blocking
+from .recipe_operations_support import installed_recipe, setup_services
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
@@ -33,7 +34,6 @@ from .run_switch_operations_support import (
     _request,
     _service,
 )
-from .test_recipe_operations import installed_recipe, setup_services
 from .test_run_switch_lifecycle import _Harness, _result, _retrying, _ScriptedExecutor
 
 

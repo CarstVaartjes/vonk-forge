@@ -37,6 +37,7 @@ from vonk_control.run_switch_contract.requests import (
 )
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .run_switch_operations_support import (
     RecordingArtifactExecutor,
     _child_operation_id,
@@ -46,11 +47,6 @@ from .run_switch_operations_support import (
     _record_successful_reconcile_member,
     _result,
     _service,
-)
-from .test_recipe_operations import (
-    NOW,
-    installed_recipe,
-    setup_services,
 )
 
 

@@ -12,8 +12,8 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.recipe_builds.service import RecipeBuildService
 
+from .recipe_operations_support import setup_services
 from .test_recipe_builds import setup as setup_build
-from .test_recipe_operations import setup_services
 
 
 def test_source_build_plan_writer_and_install_retry_share_builder_admission(

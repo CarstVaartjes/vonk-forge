@@ -23,9 +23,9 @@ from vonk_control.models.operations import AgentOperation
 from tests.wire_probes import prebuilt_probe
 
 from .agent_fences import fenced_operation
+from .recipe_operations_support import NOW
 from .runtime_identity_support import claim_agent
 from .test_artifact_jobs import running_artifact_service
-from .test_recipe_operations import NOW
 
 
 @pytest.fixture(scope="session")

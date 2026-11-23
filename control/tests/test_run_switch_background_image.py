@@ -56,6 +56,7 @@ from vonk_control.runtime_image_preparation.contracts import (
 from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
+from .recipe_operations_support import NOW, _CanonicalModelCache, setup_services
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
     _AdvancingClock,
@@ -64,7 +65,6 @@ from .run_switch_operations_support import (
 )
 from .runtime_image_fixtures import place_test_image
 from .test_lifecycle_preflight import _finish
-from .test_recipe_operations import NOW, _CanonicalModelCache, setup_services
 
 
 class _ColdInspector(CompleteArtifactInspector):

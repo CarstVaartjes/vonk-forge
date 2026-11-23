@@ -63,6 +63,12 @@ from vonk_control.run_switch_operations.image_receipts import (
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from .recipe_operations_support import (
+    NOW,
+    installed_recipe,
+    setup_services,
+    started_recipe,
+)
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
@@ -78,12 +84,6 @@ from .runtime_identity_support import (
     set_inventory_identity,
 )
 from .runtime_image_fixtures import install_image_of_replaced_source
-from .test_recipe_operations import (
-    NOW,
-    installed_recipe,
-    setup_services,
-    started_recipe,
-)
 
 
 def test_parked_switch_observes_recovered_child_after_controller_restart(

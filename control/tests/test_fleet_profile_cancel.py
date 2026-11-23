@@ -58,6 +58,12 @@ from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .agent_fences import fenced_operation
 from .profile_due_fixtures import next_profile_due
+from .recipe_operations_support import (
+    NOW,
+    installed_recipe,
+    setup_services,
+    started_recipe,
+)
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
@@ -66,12 +72,6 @@ from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 from .test_artifact_jobs import running_artifact_service, submitted_artifact_job
 from .test_fleet_profile_api import _client, _headers
 from .test_fleet_profiles import _uuid
-from .test_recipe_operations import (
-    NOW,
-    installed_recipe,
-    setup_services,
-    started_recipe,
-)
 
 
 class _IdleRoutes:

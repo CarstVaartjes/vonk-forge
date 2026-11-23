@@ -40,6 +40,7 @@ from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
 from cluster_profiles.cli_render import render_payload
 
 from .non_blocking import assert_ended_without_blocking
+from .recipe_operations_support import started_recipe
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profiles import (
     NOW,
@@ -52,7 +53,6 @@ from .test_fleet_profiles import (
     _seed,
     _SwitchAdapter,
 )
-from .test_recipe_operations import started_recipe
 
 
 def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
@@ -60,11 +60,11 @@ def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
 ):
     from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+    from .recipe_operations_support import setup_services
     from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
-    from .test_recipe_operations import setup_services
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(tmp_path)
     planner = RunSwitchOperationService(
@@ -684,11 +684,11 @@ def _recheck_world(tmp_path, postgres_engine):
     """A real planner and profile service over PostgreSQL, with a movable clock."""
     from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+    from .recipe_operations_support import setup_services
     from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
-    from .test_recipe_operations import setup_services
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
         tmp_path, engine=postgres_engine

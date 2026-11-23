@@ -65,6 +65,7 @@ from vonk_control.unused_storage_collection.service import UnusedStorageCollecto
 
 from cluster_profiles.control_client import validate_control_document
 
+from .recipe_operations_support import installed_recipe, setup_services, started_recipe
 from .run_switch_operations_support import (
     MODEL_ARTIFACT,
     CompleteArtifactInspector,
@@ -73,7 +74,6 @@ from .run_switch_operations_support import (
     _request,
 )
 from .runtime_image_fixtures import copy_as_another_recipe
-from .test_recipe_operations import installed_recipe, setup_services, started_recipe
 
 
 def _profile_service(sessions, lifecycle):

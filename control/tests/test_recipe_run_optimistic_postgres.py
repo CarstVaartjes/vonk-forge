@@ -419,16 +419,16 @@ def test_order_sweep_conflict_rolls_back_continues_and_resweeps(
     from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
     from .agent_fences import fenced_attempt
-    from .recipe_stop_fixtures import recipe_stop_payload
-    from .runtime_identity_support import claim_agent
-    from .test_agent_jobs import COMMIT, parent
-    from .test_recipe_operations import NOW as OPERATION_NOW
-    from .test_recipe_operations import (
+    from .recipe_operations_support import NOW as OPERATION_NOW
+    from .recipe_operations_support import (
         _issue_exact_stop_grant,
         installed_recipe,
         setup_services,
         started_recipe,
     )
+    from .recipe_stop_fixtures import recipe_stop_payload
+    from .runtime_identity_support import claim_agent
+    from .test_agent_jobs import COMMIT, parent
 
     sessions, operations, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2, mapping_node_count=1, engine=postgres_engine

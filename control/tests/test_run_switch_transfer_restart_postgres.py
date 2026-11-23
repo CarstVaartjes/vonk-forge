@@ -39,6 +39,14 @@ from vonk_control.run_switch_operations.interfaces import PhaseExecution
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .node_contacts import contact_row
+from .recipe_operations_support import (
+    NOW,
+    ConcurrentPublisher,
+    bind_route_publications,
+    complete_started_recipe,
+    installed_recipe,
+    setup_services,
+)
 from .run_switch_operations_support import (
     MODEL_ARTIFACT,
     MODEL_ARTIFACT_SET,
@@ -49,14 +57,6 @@ from .run_switch_operations_support import (
 )
 from .runtime_identity_support import claim_agent
 from .test_lifecycle_preflight import _finish
-from .test_recipe_operations import (
-    NOW,
-    ConcurrentPublisher,
-    bind_route_publications,
-    complete_started_recipe,
-    installed_recipe,
-    setup_services,
-)
 
 
 @dataclass

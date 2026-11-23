@@ -51,6 +51,7 @@ from .lifecycle_simulation.invariants import ENDED
 from .lifecycle_simulation.simulation import ROUND_SECONDS, Simulation
 from .lifecycle_simulation.sparks import Spark, Sparks
 from .lifecycle_simulation.world import SOLO, SOLO_B, World, build_world
+from .recipe_operations_support import installed_recipe, setup_services, start_evidence
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
@@ -58,7 +59,6 @@ from .run_switch_operations_support import (
 )
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 from .test_artifact_jobs import _configure_artifact_recipe, submitted_artifact_job
-from .test_recipe_operations import installed_recipe, setup_services, start_evidence
 
 _ACTIVATION = "recipe.job.activate.v1"
 

@@ -18,8 +18,8 @@ from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 from vonk_control.run_switch_operations.plan_persistence import _load_plan
 from vonk_control.run_switch_operations.results import _stored_result
 
+from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service
-from .test_recipe_operations import NOW, installed_recipe, setup_services
 
 
 def _accepted(tmp_path: Path):

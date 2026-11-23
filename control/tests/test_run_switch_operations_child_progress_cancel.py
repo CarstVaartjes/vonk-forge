@@ -56,6 +56,7 @@ from vonk_control.run_switch_operations.provider import RunSwitchOperationProvid
 from vonk_control.run_switch_operations.result_helpers import _phase_result
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .run_switch_operations_support import (
     ColdStartPhaseExecutor,
     CompleteArtifactInspector,
@@ -68,11 +69,6 @@ from .run_switch_operations_support import (
     _result,
     _service,
     _target_copy_evidence,
-)
-from .test_recipe_operations import (
-    NOW,
-    installed_recipe,
-    setup_services,
 )
 
 

@@ -29,9 +29,9 @@ from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.jobs import Job
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+from .recipe_operations_support import NOW
 from .test_profile_colocated_ports import _admitted, _promises, _two_on_one_spark
 from .test_profile_port_claims import _ready_profile
-from .test_recipe_operations import NOW
 
 
 def _unique_keys() -> dict[str, tuple[str, tuple[str, ...]]]:

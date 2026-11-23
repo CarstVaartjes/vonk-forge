@@ -57,6 +57,7 @@ from vonk_control.source_bundles import SourceBundleStore, generate_source_bundl
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .display_fixtures import reword
+from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
     ModelCacheManifestProvider,
@@ -71,11 +72,6 @@ from .run_switch_operations_support import (
 )
 from .runtime_identity_support import (
     set_inventory_identity,
-)
-from .test_recipe_operations import (
-    NOW,
-    installed_recipe,
-    setup_services,
 )
 
 

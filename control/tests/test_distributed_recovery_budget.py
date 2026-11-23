@@ -19,8 +19,7 @@ from vonk_control.models.operations import AgentOperation
 
 from .host_memory_guard_support import guard_diagnostics
 from .node_contacts import contact_row
-from .runtime_identity_support import claim_agent
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     ConcurrentPublisher,
     _queued_distributed_recovery_stop,
@@ -35,6 +34,7 @@ from .test_recipe_operations import (
     start_evidence,
     started_recipe,
 )
+from .runtime_identity_support import claim_agent
 
 
 class _AdvancingClock:

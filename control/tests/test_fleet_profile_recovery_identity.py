@@ -30,6 +30,7 @@ from vonk_control.recipe_operations.observation_helpers import record_build_evid
 from vonk_control.run_switch_contract.plans import RunSwitchPlan
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
+from .recipe_operations_support import installed_recipe, setup_services
 from .runtime_image_fixtures import (
     place_test_image,
     refresh_inventory,
@@ -44,7 +45,6 @@ from .test_fleet_profiles import (
     _SwitchAdapter,
     _uuid,
 )
-from .test_recipe_operations import installed_recipe, setup_services
 
 
 def _complete_rebuild(

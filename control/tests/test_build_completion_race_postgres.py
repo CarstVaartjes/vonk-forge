@@ -12,13 +12,13 @@ from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.recipe_builds.common import RecipeBuildPlan
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+from .recipe_operations_support import setup_services
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _request,
 )
 from .runtime_identity_support import set_inventory_identity
-from .test_recipe_operations import setup_services
 
 
 @pytest.mark.parametrize("inspection", [False, True])

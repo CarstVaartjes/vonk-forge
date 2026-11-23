@@ -30,15 +30,15 @@ from vonk_control.models.operations import AgentOperation
 from vonk_control.recipe_operations import run_transitions
 from vonk_control.recipe_operations.stop_payloads import RecipeStopAuthorityError
 
-from .test_absent_run_release import _report_absent
-from .test_agent_api import NODE_A, agent_headers, agent_system  # noqa: F401
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     complete_started_recipe,
     installed_recipe,
     setup_services,
     started_recipe,
 )
+from .test_absent_run_release import _report_absent
+from .test_agent_api import NODE_A, agent_headers, agent_system  # noqa: F401
 from .test_unused_storage_collection import _agents_succeed
 
 

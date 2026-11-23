@@ -46,6 +46,7 @@ from vonk_control.terminal_history_collection import TerminalHistoryCollector
 
 from .agent_fences import fenced_operation
 from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
+from .recipe_operations_support import _issue_exact_stop_grant
 from .runtime_identity_support import claim_agent
 from .test_artifact_job_lifecycle import _issued_job
 from .test_artifact_jobs import (
@@ -55,7 +56,6 @@ from .test_artifact_jobs import (
     running_artifact_service,
     submitted_artifact_job,
 )
-from .test_recipe_operations import _issue_exact_stop_grant
 
 
 @pytest.mark.parametrize("exhausted", [False, True])
@@ -485,8 +485,8 @@ def test_cancelled_job_evidence_survives_uncertain_stop_and_history_collection(
     exact cleanup and the artifact job's full terminal retention grace.
     """
 
+    from .recipe_operations_support import NOW
     from .test_artifact_jobs import MutableClock
-    from .test_recipe_operations import NOW
 
     sessions, operations, _queue, service, run_id, node_id = running_artifact_service(
         tmp_path, engine=postgres_engine

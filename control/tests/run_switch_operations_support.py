@@ -69,15 +69,11 @@ from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime.adapters import resolve_runtime_adapter
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .runtime_identity_support import (
     set_inventory_fingerprint,
 )
 from .test_lifecycle_preflight import _finish
-from .test_recipe_operations import (
-    NOW,
-    installed_recipe,
-    setup_services,
-)
 
 _FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 

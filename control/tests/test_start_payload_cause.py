@@ -19,8 +19,8 @@ from vonk_control.models.execution import RecipeRun
 from vonk_control.models.fleet import AgentNodeContact
 from vonk_control.models.jobs import Job
 
+from .recipe_operations_support import installed_recipe, setup_services
 from .test_artifact_jobs import _configure_artifact_recipe
-from .test_recipe_operations import installed_recipe, setup_services
 
 
 def test_unbuildable_start_payload_ends_with_node_and_cause(tmp_path):

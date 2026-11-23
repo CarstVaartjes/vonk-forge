@@ -38,6 +38,7 @@ from vonk_control.run_switch_contract.requests import (
 from vonk_control.run_switch_operations.result_helpers import _phase_result
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+from .recipe_operations_support import NOW, setup_services
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
     ModelCacheManifestProvider,
@@ -47,10 +48,6 @@ from .run_switch_operations_support import (
     _request,
     _result,
     _service,
-)
-from .test_recipe_operations import (
-    NOW,
-    setup_services,
 )
 
 

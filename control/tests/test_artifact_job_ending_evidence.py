@@ -66,6 +66,7 @@ from vonk_control.recipe_operations.errors import (
 )
 from vonk_control.workload_intent import allocate_workload_intent
 
+from .recipe_operations_support import NOW
 from .runtime_identity_support import claim_agent
 from .test_artifact_jobs import (
     MutableClock,
@@ -73,7 +74,6 @@ from .test_artifact_jobs import (
     running_artifact_service,
     submitted_artifact_job,
 )
-from .test_recipe_operations import NOW
 
 _REASON = "job output delivery remains unobserved"
 _CAUSE = "artifact output upload was refused: HTTP 409"

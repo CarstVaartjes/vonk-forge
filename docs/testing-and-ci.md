@@ -497,7 +497,7 @@ UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache uv run --project control 
   control/tests/test_agent_job_lock_order_postgres.py \
   control/tests/test_run_switch_postgres.py \
   control/tests/test_telemetry_postgres.py \
-  control/tests/test_recipe_operations.py \
+  'control/tests/test_recipe_operations_*.py' \
   control/tests/test_local_ca.py control/tests/security
 ```
 

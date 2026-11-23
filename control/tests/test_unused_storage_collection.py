@@ -1817,7 +1817,7 @@ def test_one_sweep_per_interval(world: Catalog) -> None:
 
 
 def _real_lifecycle(tmp_path: Path, *, nodes: int = 1, engine: Engine | None = None):
-    from .test_recipe_operations import installed_recipe, setup_services
+    from .recipe_operations_support import installed_recipe, setup_services
 
     sessions, service, _queue, mapping_id, build_id, node_ids = setup_services(
         tmp_path, nodes=nodes, engine=engine
@@ -1919,7 +1919,7 @@ def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load
         release_inactive_run_claims_in_session,
     )
 
-    from .test_recipe_operations import started_recipe
+    from .recipe_operations_support import started_recipe
 
     sessions, service, installation_id, nodes = _real_lifecycle(tmp_path, nodes=sparks)
     run_id = started_recipe(
@@ -2148,7 +2148,7 @@ def test_a_failed_run_is_stopped_while_its_recipe_revision_row_is_held(
         release_inactive_run_claims_in_session,
     )
 
-    from .test_recipe_operations import started_recipe
+    from .recipe_operations_support import started_recipe
 
     sessions, service, installation_id, nodes = _real_lifecycle(
         tmp_path, engine=postgres_engine

@@ -11,7 +11,7 @@ from vonk_control.reservation_owners import OwnerKind, OwnerRef, owner
 from vonk_control.stall_window import Verdict, Wait, progress_deadline, progress_verdict
 
 from .node_contacts import contact_row
-from .test_recipe_operations import setup_services
+from .recipe_operations_support import setup_services
 
 START = datetime(2026, 10, 13, 12, tzinfo=UTC)
 WINDOW = timedelta(minutes=30)

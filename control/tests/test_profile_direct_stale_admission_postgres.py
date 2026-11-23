@@ -18,10 +18,10 @@ from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.mapping import ClusterMapping
 
+from .recipe_operations_support import installed_recipe, started_recipe
 from .test_fleet_profile_review import _replace_run
 from .test_fleet_profiles import _exact_cleanup_profile
 from .test_profile_capacity_admission import _capacity_profile
-from .test_recipe_operations import installed_recipe, started_recipe
 
 
 def test_direct_load_replans_after_installation_finishes_during_admission(

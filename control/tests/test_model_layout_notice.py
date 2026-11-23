@@ -23,8 +23,8 @@ from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.fleet_projection.service import FleetProjection
 
 from .agent_fences import fenced_operation
+from .recipe_operations_support import NOW, setup_services
 from .runtime_identity_support import claim_agent
-from .test_recipe_operations import NOW, setup_services
 
 
 def _assert_layout_recovery(

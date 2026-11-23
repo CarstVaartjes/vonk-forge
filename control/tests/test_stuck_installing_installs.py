@@ -25,8 +25,8 @@ from vonk_control.models.jobs import Job
 from vonk_control.owner_liveness import OWNER_SETTLE_GRACE
 from vonk_control.reservation_owners import ADOPTION_WINDOW
 
+from .recipe_operations_support import setup_services
 from .test_attempt_residues import _leave_incomplete, _load, _reconciler, _uninstalls
-from .test_recipe_operations import setup_services
 
 SETTLED = OWNER_SETTLE_GRACE + timedelta(minutes=1)
 PAST_GRACE = SETTLED + LEFTOVER_GRACE + timedelta(minutes=1)

@@ -36,15 +36,7 @@ from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
 
 from .agent_fences import fenced_operation
 from .non_blocking import assert_ended_without_blocking
-from .run_switch_operations_support import (
-    CompleteArtifactInspector,
-    RecordingArtifactExecutor,
-    _replace_child,
-    _request,
-    _service,
-)
-from .test_lifecycle_preflight import _finish
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     ConcurrentPublisher,
     bind_route_publications,
@@ -54,6 +46,14 @@ from .test_recipe_operations import (
     start_evidence,
     started_recipe,
 )
+from .run_switch_operations_support import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
+    _replace_child,
+    _request,
+    _service,
+)
+from .test_lifecycle_preflight import _finish
 
 
 @pytest.fixture

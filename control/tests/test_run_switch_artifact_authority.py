@@ -37,13 +37,13 @@ from vonk_control.run_switch_operations.result_helpers import (
 )
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .run_switch_operations_support import (
     ModelCacheManifestProvider,
     RecordingArtifactExecutor,
     _request,
 )
 from .runtime_image_fixtures import hold_image_through_another_recipe
-from .test_recipe_operations import NOW, installed_recipe, setup_services
 
 
 def test_missing_artifact_authority_does_not_poison_repaired_inspection(

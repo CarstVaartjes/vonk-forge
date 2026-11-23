@@ -43,6 +43,12 @@ from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .agent_fences import fenced_operation
 from .node_contacts import contact_row
+from .recipe_operations_support import (
+    _issue_exact_stop_grant,
+    installed_recipe,
+    setup_services,
+    started_recipe,
+)
 from .run_switch_operations_support import RecordingArtifactExecutor, _service
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profiles import (
@@ -56,12 +62,6 @@ from .test_profile_adapter_continuity import _running_child
 from .test_profile_continuity_postgres import (
     _assessment_with_promises,
     _SQLCancellationAdapter,
-)
-from .test_recipe_operations import (
-    _issue_exact_stop_grant,
-    installed_recipe,
-    setup_services,
-    started_recipe,
 )
 
 

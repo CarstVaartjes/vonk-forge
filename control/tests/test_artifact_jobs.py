@@ -77,12 +77,8 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256
 from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
 from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
+from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .runtime_identity_support import claim_agent
-from .test_recipe_operations import (
-    NOW,
-    installed_recipe,
-    setup_services,
-)
 
 
 def _cancelling(view) -> bool:

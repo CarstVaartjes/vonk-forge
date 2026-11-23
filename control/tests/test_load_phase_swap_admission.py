@@ -480,13 +480,13 @@ def _set_swap(sessions, *, total_gib, used=0):
 
 def _switch_world(tmp_path, postgres_engine, *, rise, total_gib, used, loading=0):
     """A serving run on one Spark, then a switch to the same content rising ``rise``."""
+    from .recipe_operations_support import installed_recipe, setup_services
     from .run_switch_operations_support import (
         RecordingArtifactExecutor,
         SynchronousPhaseExecutor,
         _request,
         _service,
     )
-    from .test_recipe_operations import installed_recipe, setup_services
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine
@@ -622,8 +622,8 @@ def test_i_a_job_run_holds_its_rise_while_its_ranks_run_jobs(
     each job loads again while they run; two such runs counted on the same
     free swap.
     """
+    from .recipe_operations_support import NOW, installed_recipe, setup_services
     from .test_artifact_jobs import _configure_artifact_recipe
-    from .test_recipe_operations import NOW, installed_recipe, setup_services
 
     sessions, operations, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, recipe_transform=_configure_artifact_recipe, engine=postgres_engine

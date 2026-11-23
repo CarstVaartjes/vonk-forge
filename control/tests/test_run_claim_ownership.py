@@ -25,17 +25,17 @@ from vonk_control.recipe_operations.observation_helpers import (
 )
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
-from .run_switch_operations_support import (
-    CompleteArtifactInspector,
-    RecordingArtifactExecutor,
-)
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     ConcurrentPublisher,
     bind_route_publications,
     installed_recipe,
     setup_services,
     started_recipe,
+)
+from .run_switch_operations_support import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
 )
 
 _CLAIM_BLOCKERS = {

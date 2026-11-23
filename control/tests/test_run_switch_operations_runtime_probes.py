@@ -18,12 +18,9 @@ from vonk_control.run_switch_contract.requests import (
     RunSwitchApplyRequest,
 )
 
+from .recipe_operations_support import NOW, setup_services
 from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service
 from .test_lifecycle_preflight import _clear
-from .test_recipe_operations import (
-    NOW,
-    setup_services,
-)
 
 
 def _probing_switch(tmp_path, *, probe=True, engine=None):
