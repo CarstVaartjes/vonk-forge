@@ -195,9 +195,7 @@ def test_postgres_pending_lane_does_not_serialize_disjoint_work_after_restart(
     observed = {}
     issued = []
 
-    def dispatch(
-        application_id, item, _assignments, scope, _actor, _request, index, _ordinal
-    ):
+    def dispatch(application_id, item, _assignments, scope, _actor, index, _ordinal):
         request_key = profile_switch_child_request_key(
             application_id, index, item.kind, item.id
         )
@@ -266,9 +264,7 @@ def test_postgres_pending_gang_blocks_overlap_but_not_an_independent_lane(
     issued = []
     observed = {}
 
-    def dispatch(
-        _application_id, item, _assignments, scope, _actor, _request, index, _ordinal
-    ):
+    def dispatch(_application_id, item, _assignments, scope, _actor, index, _ordinal):
         issued.append((index, item.id, tuple(scope)))
         child = _running_child(_uuid(18710 + index), scope[0])
         child.node_ids = list(scope)
@@ -360,14 +356,12 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
     native_start = adapter._start_child
     native_observe = adapter._observed_child
 
-    def dispatch(
-        application_id, item, assignments, scope, actor, request, index, ordinal
-    ):
+    def dispatch(application_id, item, assignments, scope, actor, index, ordinal):
         if item.kind == "stop":
             # The exact Stop is created by the real Run/Switch producer and
             # lifecycle; only the healthy node's physical load is intercepted.
             return native_start(
-                application_id, item, assignments, scope, actor, request, index, ordinal
+                application_id, item, assignments, scope, actor, index, ordinal
             )
         assert item.kind == "run"
         assert tuple(scope) == (_node_id(2),)

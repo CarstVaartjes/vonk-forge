@@ -166,7 +166,7 @@ def test_partial_adoption_keeps_active_identity_and_skips_changed_queued_lane(
     issued = []
 
     def start(*args):
-        issued.append((args[1].id, args[3], args[6]))
+        issued.append((args[1].id, args[3], args[5]))
         return _running_child(_uuid(18104), _node_id(1))
 
     monkeypatch.setattr(restarted, "_start_child", start)

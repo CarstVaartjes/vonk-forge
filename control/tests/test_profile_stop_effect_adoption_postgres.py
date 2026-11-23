@@ -211,12 +211,10 @@ def _pending_stop(
     healthy_child = _running_child(_uuid(18703), _node_id(2))
     healthy_dispatches = []
 
-    def dispatch(
-        application_id, item, assignments, scope, actor, request, index, ordinal
-    ):
+    def dispatch(application_id, item, assignments, scope, actor, index, ordinal):
         if item.kind == "stop":
             return native_start(
-                application_id, item, assignments, scope, actor, request, index, ordinal
+                application_id, item, assignments, scope, actor, index, ordinal
             )
         assert item.kind == "run"
         assert tuple(scope) == (_node_id(2),)

@@ -199,8 +199,8 @@ def test_cleanup_preview_reobserves_unknown_authority(monkeypatch):
     service = object.__new__(RunSwitchOperationService)
     calls = []
 
-    def once(request, *, actor):
-        calls.append((request, actor))
+    def once(request):
+        calls.append(request)
         if len(calls) < 3:
             raise InstallAdmissionBusy("authority is being reconciled")
         return "exact-cleanup"
@@ -212,7 +212,7 @@ def test_cleanup_preview_reobserves_unknown_authority(monkeypatch):
     )
     monkeypatch.setattr(service, "_preview_cleanup_once", once, raising=False)
     assert service.preview_cleanup("installation") == "exact-cleanup"
-    assert calls == [("installation", "operator")] * 3
+    assert calls == ["installation"] * 3
 
 
 @pytest.mark.parametrize("refusals", [2, 99])
