@@ -278,9 +278,14 @@ def test_staged_files_outside_the_pyright_scope_are_not_type_checked() -> None:
     module = hook()
     assert module.type_checked(
         [
-            "agent_protocol/src/vonk_agent_protocol/telemetry.py",
+            "deploy/compose/image-janitor/janitor.py",
             "control/tests/test_api.py",
             "src/cluster_profiles/generated_control/client.py",
             "src/cluster_profiles/cli.py",
+            "scripts/check-python-types",
         ]
-    ) == ["control/tests/test_api.py", "src/cluster_profiles/cli.py"]
+    ) == [
+        "control/tests/test_api.py",
+        "src/cluster_profiles/cli.py",
+        "scripts/check-python-types",
+    ]
