@@ -5689,7 +5689,7 @@ def test_claim_stale_recipe_run_consumer_waits_then_admits(
     postgres_engine,
 ) -> None:
     """A lost run fence in the plain claim transaction must not become HTTP 500."""
-    from .recipe_routes_support import setup
+    from .test_recipe_routes import setup
 
     client, services, _, clock = make_agent_system(tmp_path, engine=postgres_engine)
     routes, _, _, run_id = setup(tmp_path / "routes", engine=postgres_engine)
@@ -5756,7 +5756,7 @@ def test_recipe_observation_contention_waits_then_redelivery_commits(
     postgres_engine,
 ) -> None:
     """Continued contention must roll back observations and acknowledge redelivery."""
-    from .recipe_routes_support import setup
+    from .test_recipe_routes import setup
 
     client, services, _, clock = make_agent_system(tmp_path, engine=postgres_engine)
     routes, _, _, run_id = setup(tmp_path / "routes", engine=postgres_engine)

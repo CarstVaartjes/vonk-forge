@@ -97,7 +97,7 @@ def test_latest_explicit_route_intent_wins_over_older_alias_owner(tmp_path):
     """Catches a persisted alias collision blocking the next authorized publication."""
     from vonk_agent_protocol import RouteState as RunRouteState
 
-    from .recipe_routes_support import (
+    from .test_recipe_routes import (
         NOW,
         MutableClock,
         add_running_run,

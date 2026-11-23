@@ -30,7 +30,7 @@ from vonk_control.recipe_routes import (
 )
 
 from .observed_actions import observe_action
-from .recipe_routes_support import (
+from .test_recipe_routes import (
     NOW,
     MutableClock,
     _publication,

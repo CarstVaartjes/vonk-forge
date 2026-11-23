@@ -3,7 +3,7 @@
 from vonk_agent_protocol import RouteState
 from vonk_control.gateway.route_grants import GatewayInferenceRoute, recipe_key_routes
 
-from .recipe_routes_support import _recipe_run, setup
+from .test_recipe_routes import _recipe_run, setup
 
 
 def test_native_grants_follow_published_accepted_recipe_and_public_alias(
@@ -126,7 +126,7 @@ def test_route_publication_waits_for_key_grants_then_heals(
     from vonk_control.api.production import _keep_recipe_routes
     from vonk_control.recipe_operation_worker import RecipeOperationWorker
 
-    from .recipe_routes_support import NOW
+    from .test_recipe_routes import NOW
 
     reconcile = gateway.reconcile_route_grants
 
@@ -181,7 +181,7 @@ def test_worker_waits_for_api_publication_without_gateway_authority(tmp_path):
     from vonk_control.recipe_operation_worker import RecipeOperationWorker
     from vonk_control.recipe_routes import RecipeRouteNotReady
 
-    from .recipe_routes_support import NOW
+    from .test_recipe_routes import NOW
 
     service, _, applied, run_id = setup(tmp_path)
     with service.sessions.begin() as session:
