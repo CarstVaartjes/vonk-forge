@@ -327,7 +327,7 @@ def sanitize_failure_evidence(value: Mapping[str, object]) -> dict[str, object]:
         # The container's own exit facts and log tails are the evidence that
         # explains the failure; the size guard may shed the surrounding
         # properties but never them.
-        diagnostics = full.get("diagnostics") if isinstance(full, dict) else None  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
+        diagnostics = full.get("diagnostics") if isinstance(full, dict) else None  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         if isinstance(diagnostics, dict):
             kept = dict(diagnostics)
             result["diagnostics"] = kept

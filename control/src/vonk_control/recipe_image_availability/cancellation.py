@@ -463,7 +463,7 @@ def _model_child_cancellation_pending(
         if getattr(error.orig, "sqlstate", None) == "55P03":
             return True, False
         raise
-    if cancelled_child_id is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+    if cancelled_child_id is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
         cache = cast(ModelCacheCancellationOwner, self._model_cache)
         cache.signal_cancelled_operation(cancelled_child_id)
         # The child may still hold an artifact lock in another process.

@@ -74,7 +74,7 @@ def record_queue_waits(
         .order_by(AgentOperation.created_at, AgentOperation.id)
     ):
         unconfirmed = running.state == agent_operation_states.OBSERVING or (
-            agent_operation_states.attempt_is_observing(attempt)
+            attempt is not None and agent_operation_states.attempt_is_observing(attempt)  # pyright: ignore[reportUnnecessaryComparison]  # outer-joined attempt rows can be missing
         )
         if (
             running.state != agent_operation_states.RUNNING

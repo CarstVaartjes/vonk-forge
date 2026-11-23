@@ -703,7 +703,7 @@ class AdvanceMixin:
                     # consumer of its set) can be ended by another consumer's
                     # cancel. This order did not cancel it: it asks again.
                     foreign_cancel = (
-                        child is not None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+                        child is not None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
                         and child.state == LifecycleState.CANCELLED.value
                         and not checkpoint_cancellation
                         and plan.phases[phase_index].kind
@@ -754,7 +754,7 @@ class AdvanceMixin:
                         checkpoint_guard=checkpoint_job,
                         definite=is_definite(kind)
                         or (
-                            child is not None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+                            child is not None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
                             and child.state == LifecycleState.FAILED.value
                             and plan.phases[phase_index].kind
                             in {

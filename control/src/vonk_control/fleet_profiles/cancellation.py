@@ -292,7 +292,7 @@ class FleetProfileService:
                 self._cancel_owned_preparations(application_id, plan, actor=actor)
             return self.application(application_id)
         adapter = self._switch_adapter
-        if adapter is not None and cancellation is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+        if adapter is not None and cancellation is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
             request_cancellation = getattr(adapter, "request_cancellation", None)
             if callable(request_cancellation):
                 request_cancellation(
@@ -355,7 +355,7 @@ class FleetProfileService:
                 select(FleetProfileApplication)
                 .where(
                     FleetProfileApplication.id == application_id
-                    if application_id is not None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+                    if application_id is not None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
                     else true()
                 )
                 .where(eligible, FleetProfileApplication.id == application_id)

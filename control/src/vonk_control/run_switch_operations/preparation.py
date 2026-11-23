@@ -95,11 +95,11 @@ class PreparationMixin:
         )
         model_controller_missing = (
             None
-            if model_controller_expected is None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+            if model_controller_expected is None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
             else model_controller_expected - model_controller_verified
         )
         model_controller_ready = (
-            model_controller_expected is not None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+            model_controller_expected is not None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
             and model_controller_missing == 0
             and inspection.nas_coverage == "complete"
         )
@@ -125,7 +125,7 @@ class PreparationMixin:
                 inspection.missing_spark_bytes,
                 len(group.nodes),
             )
-            target_ready = model_expected is not None and model_missing == 0  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+            target_ready = model_expected is not None and model_missing == 0  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
             model_targets.append(
                 TargetAssetState(
                     node_id=node.node_id,

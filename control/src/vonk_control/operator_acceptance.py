@@ -634,7 +634,7 @@ def _presence_policy_endpoint(
             response = result if isinstance(result, Response) else injected_response
             if not isinstance(response, Response):
                 response = Response(status_code=current.status_code or 200)
-            if response.status_code is None:  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+            if response.status_code is None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
                 response.status_code = current.status_code or 200
             checked = await run_in_threadpool(
                 apply_receipt,

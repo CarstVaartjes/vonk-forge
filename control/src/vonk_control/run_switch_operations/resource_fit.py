@@ -475,7 +475,7 @@ class ResourceFitMixin:
                         else disk.artifact_bytes
                     )
                     # An unstated payload size leaves the envelope incomplete.
-                    if image_size is not None and artifact_size is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+                    if image_size is not None and artifact_size is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
                         set_bytes = artifact_size
                         if (
                             artifact_set_sha256 is not None

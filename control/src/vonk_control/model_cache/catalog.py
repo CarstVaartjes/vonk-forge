@@ -188,7 +188,7 @@ class CatalogMixin:
         if (
             not isinstance(raw_digest, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             or not isinstance(raw_bytes, int)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-            or not isinstance(roles, list)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
+            or not isinstance(roles, list)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         ):
             raise ModelCacheResolutionInvalid(
                 ModelCacheCode.ARTIFACT_INVALID,
@@ -209,7 +209,7 @@ class CatalogMixin:
             artifact_id=raw_id,
             path=raw_path,
             kind=raw_kind,
-            repository=(None if value.repository is None else str(value.repository)),  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+            repository=(None if value.repository is None else str(value.repository)),  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
             source=source,
             revision=revision,
             sha256=raw_digest,

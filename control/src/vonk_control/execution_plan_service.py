@@ -227,7 +227,7 @@ class ControllerExecutionPlanService:
         if (
             revision.kind != "recipe"
             or revision.state != CatalogRevisionState.ACTIVE
-            or revision.content_digest is None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+            or revision.content_digest is None  # pyright: ignore[reportUnnecessaryComparison]  # NOT NULL column; removing it would re-add a guarded line
         ):
             raise ExecutionPlanCompilationError("recipe revision digest is unavailable")
         try:

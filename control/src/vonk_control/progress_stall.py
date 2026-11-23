@@ -372,12 +372,12 @@ def observe_application_progress(
         target.wait_evidence if isinstance(target.wait_evidence, WaitEvidence) else None
     )
     observed_at = target.updated_at or target.created_at
-    if observed_at is not None and wait is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+    if observed_at is not None and wait is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
         # A wait written without touching the row's time began when it says.
         observed_at = max(_aware(observed_at), _aware(wait.first_blocked_at))
     stall = (
         None
-        if observed_at is None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+        if observed_at is None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
         else next_stall(
             previous,
             progress,

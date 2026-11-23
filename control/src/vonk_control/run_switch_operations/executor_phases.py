@@ -700,7 +700,7 @@ class ExecutorPhasesMixin:
                     if isinstance(result, RunSwitchStartResult | RunSwitchStopResult):
                         run_id = result.run_id
                         break
-            if run_id is None or service._lifecycle is None:  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+            if run_id is None or service._lifecycle is None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
                 raise RunSwitchRetryLater(
                     RunSwitchCode.FINAL_VERIFICATION_UNAVAILABLE,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
