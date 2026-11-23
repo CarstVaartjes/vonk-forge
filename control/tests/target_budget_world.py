@@ -17,7 +17,7 @@ import hashlib
 import itertools
 import json
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -76,7 +76,7 @@ SPARK_OBJECTS = 20
 
 
 @contextmanager
-def ordered_ids() -> Iterator[None]:
+def ordered_ids() -> Generator[None]:
     """``uuid.uuid4`` hands out decreasing ids while the worlds exist.
 
     SQLite takes one step more when an index scan stops at a following entry

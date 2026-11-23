@@ -15,7 +15,7 @@ import ssl
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -64,7 +64,7 @@ def _https_api_peer(
     headers: dict[str, str],
     *,
     drop_load_answer: bool = False,
-) -> Iterator[tuple[str, Path, _PeerState]]:
+) -> Generator[tuple[str, Path, _PeerState]]:
     key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
     now = datetime.now(UTC)

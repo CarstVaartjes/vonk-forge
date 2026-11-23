@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -175,7 +175,7 @@ class Attempts:
 
 
 @contextmanager
-def watch_native_attempts() -> Iterator[Attempts]:
+def watch_native_attempts() -> Generator[Attempts]:
     attempts = Attempts()
     captured_connections: set[Connection] = set()
 

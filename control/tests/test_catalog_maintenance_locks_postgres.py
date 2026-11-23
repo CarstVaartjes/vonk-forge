@@ -9,7 +9,7 @@ session locks the row it is about to write with ``NOWAIT``.
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 
 import pytest
@@ -46,7 +46,7 @@ def catalog(postgres_engine: Engine) -> CatalogService:
 @contextmanager
 def _paused_check(
     monkeypatch: pytest.MonkeyPatch, name: str, run: Callable[[], object]
-) -> Iterator[None]:
+) -> Generator[None]:
     """Run ``run`` in a thread, paused inside its first call of ``name``."""
 
     check = getattr(entities, name)

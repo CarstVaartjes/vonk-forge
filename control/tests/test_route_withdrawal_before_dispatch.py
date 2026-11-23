@@ -9,7 +9,7 @@ while the withdrawal is still complete.
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import timedelta
@@ -139,7 +139,7 @@ def _owner_lock_is_free(routes: RecipeRouteService) -> None:
 
 
 @contextmanager
-def _route_owner_held_elsewhere(routes: RecipeRouteService) -> Iterator[None]:
+def _route_owner_held_elsewhere(routes: RecipeRouteService) -> Generator[None]:
     """Another Controller process holds the route publication owner meanwhile."""
 
     held, release = threading.Event(), threading.Event()

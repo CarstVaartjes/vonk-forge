@@ -4,7 +4,7 @@ import select
 import socket
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import replace
 
@@ -36,7 +36,7 @@ pytestmark = pytest.mark.postgres
 @contextmanager
 def silent_then_forwarding_peer(
     target: tuple[str, int],
-) -> Iterator[tuple[int, threading.Event, threading.Event]]:
+) -> Generator[tuple[int, threading.Event, threading.Event]]:
     """An actual TCP peer: accept a PG handshake silently, then forward retries."""
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.bind(("127.0.0.1", 0))

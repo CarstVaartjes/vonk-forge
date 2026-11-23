@@ -5,7 +5,7 @@ import json
 import sqlite3
 import time
 import uuid
-from collections.abc import Callable, Collection, Iterator
+from collections.abc import Callable, Collection, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -115,7 +115,7 @@ class NoRemoval:
 
 
 @contextmanager
-def _historical_mapper(engine: Engine) -> Iterator[Engine]:
+def _historical_mapper(engine: Engine) -> Generator[Engine]:
     """Yield a private engine whose dialect stores owning integers as BIGINT.
 
     Sequential historical producer fixtures run the real services against the
