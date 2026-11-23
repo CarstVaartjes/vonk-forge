@@ -41,6 +41,7 @@ def cli_words() -> str:
     )
     from vonk_agent_protocol.lifecycle_vocabulary import (
         LifecycleState,
+        OperatorActionName,
         OutcomeKind,
         StopOutcome,
     )
@@ -91,6 +92,8 @@ def cli_words() -> str:
         "ASSET_RETAIN_SHARED": CacheAssetDisposition.RETAIN_SHARED,
         "ASSET_RETAIN_REFERENCED": CacheAssetDisposition.RETAIN_REFERENCED,
         "ASSET_RETAIN_OBSERVATION_UNAVAILABLE": CacheAssetDisposition.RETAIN_OBSERVATION_UNAVAILABLE,
+        "ACTION_DOWNLOAD": OperatorActionName.DOWNLOAD,
+        "ACTION_REMOVE": OperatorActionName.REMOVE,
         "JOB_KIND_CLEANUP": ProfileChildJobKind.CLEANUP,
         "ASSET_VERIFIED": AssetAvailability.VERIFIED,
         **{

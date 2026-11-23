@@ -245,16 +245,15 @@ export function LibraryCacheAction({
       />
     );
 
-  if (state === "cached" || fleetOnly) {
+  if (fleetOnly) {
     // Confirmation accepts exactly the Controller review shown here.
     return (
       <div className="library-cache-action">
-        {!fleetOnly && <span className="library-cache-state is-ready">Cached</span>}
         {confirming ? (
           <>
             <button
               type="button"
-              className="button secondary"
+              className="button secondary compact"
               disabled={busy || !review || review.blockers.length > 0}
               onClick={() => void remove()}
             >
@@ -262,7 +261,7 @@ export function LibraryCacheAction({
             </button>
             <button
               type="button"
-              className="button secondary"
+              className="button secondary compact"
               disabled={busy}
               onClick={() => setConfirming(false)}
             >
@@ -272,17 +271,22 @@ export function LibraryCacheAction({
         ) : (
           <button
             type="button"
-            className="button secondary"
+            className="button secondary compact"
+            aria-label="Remove model from fleet"
             disabled={busy}
             onClick={() => void reviewRemoval()}
           >
-            {fleetOnly ? "Remove model from fleet" : "Remove from cache"}
+            Remove
           </button>
         )}
         {confirming && busy && <span role="status">Waiting for Controller…</span>}
         {confirming && review && <CacheRemovalReviewDetails review={review} />}
         {confirming && !review && !busy && (
-          <button type="button" className="button secondary" onClick={() => void reviewRemoval()}>
+          <button
+            type="button"
+            className="button secondary compact"
+            onClick={() => void reviewRemoval()}
+          >
             Review again
           </button>
         )}
@@ -298,7 +302,7 @@ export function LibraryCacheAction({
     <div className="library-cache-action">
       <button
         type="button"
-        className="button secondary"
+        className="button secondary compact"
         disabled={busy || state === "preparing"}
         onClick={() => void prepare()}
       >
@@ -306,7 +310,7 @@ export function LibraryCacheAction({
           ? "Downloading…"
           : state === "failed"
             ? "Retry download"
-            : "Download model"}
+            : "Download"}
       </button>
       {(busy || state === "preparing") && <span role="status">{phase || "queued"}</span>}
       {(busy || state === "preparing") && (

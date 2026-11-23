@@ -8,7 +8,13 @@ from enum import StrEnum
 from typing import Any
 from urllib.parse import quote
 
-from ..cli_states_generated import QualificationOutcome, QualificationStatus
+from ..cli_states_generated import (
+    ACTION_DOWNLOAD,
+    ACTION_REMOVE,
+    UNKNOWN,
+    QualificationOutcome,
+    QualificationStatus,
+)
 from ..cli_telemetry_render import size as _size
 from ..generated_control.models.library_resource_projection import (
     LibraryResourceProjection,
@@ -169,6 +175,18 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
             _field(
                 "Next",
                 f"vonkctl {noun} progress {shlex.quote(str(preparation['operation_id']))} --follow",
+            )
+    elif noun == LibraryNoun.MODEL and isinstance(selector, str):
+        # The Controller decides which actions apply; the web UI reads the same field.
+        raw_actions = item.get("actions")
+        actions = raw_actions if isinstance(raw_actions, list) else []
+        if ACTION_DOWNLOAD in actions:
+            _field("Next", f"vonkctl model download {shlex.quote(selector)}")
+        if ACTION_REMOVE in actions:
+            _field("Remove", f"vonkctl model remove {shlex.quote(selector)} --fleet")
+        if local.get("controller") == UNKNOWN:
+            print(
+                "Cache availability is unknown; inspect the Controller before preparing assets."
             )
     elif local.get("controller") in {"not_cached", "failed"} and isinstance(
         selector, str

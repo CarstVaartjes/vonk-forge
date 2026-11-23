@@ -15,6 +15,7 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName
 from vonk_agent_protocol.reason_codes.catalog import LibraryProjectionCode
 from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
 from vonk_agent_protocol.state_machines import (
@@ -234,6 +235,25 @@ class LibraryResourceProjection(StrictModel):
     image_bytes: int | None = Field(default=None, ge=0)
 
 
+def model_actions(
+    local: LibraryLocalState, usage: ModelCacheUsage | None
+) -> list[OperatorActionName]:
+    """What can apply to a model now, from its exact cache state and held bytes."""
+    controller = LibraryCacheState(local.controller)
+    if controller in (LibraryCacheState.PREPARING, LibraryCacheState.UNKNOWN):
+        return []
+    actions: list[OperatorActionName] = []
+    if controller != LibraryCacheState.CACHED:
+        actions.append(OperatorActionName.DOWNLOAD)
+    if (
+        controller == LibraryCacheState.CACHED
+        or local.running_on
+        or (usage and usage.disk_bytes > 0)
+    ):
+        actions.append(OperatorActionName.REMOVE)
+    return actions
+
+
 class LibraryModelProjection(StrictModel):
     """One exact canonical model variant with operator-facing projections."""
 
@@ -254,6 +274,11 @@ class LibraryModelProjection(StrictModel):
     resources: LibraryResourceProjection
     cache_usage: ModelCacheUsage | None = None
     local: LibraryLocalState
+    #: The one rule for what an operator can do with this model's files, shared
+    #: by the web UI and vonkctl: download when the exact revision is not fully
+    #: cached, remove when any of the lineage's files are held. Empty while a
+    #: preparation is in progress or the cache state is unknown.
+    actions: list[OperatorActionName] = Field(default_factory=list, max_length=2)
     updated_at: datetime
     # Alignment is declared by the recipes that serve this model, so a model
     # used by both a standard and an abliterated recipe reports both.

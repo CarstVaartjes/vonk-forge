@@ -1,3 +1,4 @@
+import { OperatorActionName } from "../api/vocabulary.generated";
 import type {
   ModelDefinition,
   RecipeDefinition,
@@ -126,6 +127,7 @@ function model(index: number, recipes: LibraryViewRecipe[]): ModelSeed {
       model_file_count: document.files.length,
       model_bytes: document.files.reduce((sum, file) => sum + Number(file.size_bytes), 0),
       local,
+      actions: [OperatorActionName.DOWNLOAD],
       ...facets,
       usage,
       alignment,
@@ -143,6 +145,7 @@ function model(index: number, recipes: LibraryViewRecipe[]): ModelSeed {
     model_file_count: document.files.length,
     model_bytes: document.files.reduce((sum, file) => sum + Number(file.size_bytes), 0),
     local,
+    actions: [OperatorActionName.DOWNLOAD],
     ...facets,
     usage,
     alignment,
