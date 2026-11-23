@@ -12457,6 +12457,32 @@
           "default": null,
           "title": "Eta Seconds"
         },
+        "fetch_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fetch Seconds"
+        },
+        "fetched_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fetched Bytes"
+        },
         "kind": {
           "anyOf": [
             {

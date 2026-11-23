@@ -41,7 +41,7 @@ from ..models.fleet import (
 )
 from ..models.mapping import ClusterMapping, ClusterMappingNode
 from ..models.telemetry import NodeInventorySnapshot
-from ..nas_transfer_rate import slow_nas_transfers
+from ..nas_transfer_rate import nas_link_ceilings, slow_nas_transfers
 from ..observation.capture import begin_observation_capture
 from ..operations.blockers import PHASE_RETRY_CODE, read_blockers
 from ..recipe_update_batches.notice import newest_active_revisions
@@ -206,6 +206,7 @@ class FleetProjection:
                     else profiles[node_id].display_name
                     for node_id in node_ids
                 },
+                nas_link_ceilings(inventories),
                 current,
             )
         return FleetSnapshot(

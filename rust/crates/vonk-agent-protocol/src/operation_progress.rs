@@ -96,6 +96,8 @@ impl OperationProgress {
             || !number(self.smoothed_bytes_per_second, 1e15)
             || !number(self.eta_seconds, 1e9)
             || !number(self.elapsed_seconds, f64::MAX)
+            || !number(self.fetch_seconds, f64::MAX)
+            || self.fetched_bytes.is_some() != self.fetch_seconds.is_some()
             || !timestamp(&self.observed_at)
             || !timestamp(&self.last_progress_at)
             || self.total_bytes_known != self.total_bytes.is_some()

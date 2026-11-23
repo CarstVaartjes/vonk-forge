@@ -2,18 +2,18 @@
 
 A slow link to the NAS is a wait nobody sees: every model copy to that Spark
 simply takes longer.  This module measures it from what the copies did.  A
-succeeded model transfer (``artifact.distribution.v1``) keeps the bytes it
-reported and the Controller's own receipt time over the attempt, so its rate is
-bytes over that elapsed time, over the whole order (it includes finishing
-steps), never a guessed link speed.  It is decided at read time from those
-rows; nothing is stored or counted.
+succeeded model transfer (``artifact.distribution.v1``) keeps what its agent
+measured: the bytes it received over the network and the time between its
+first and last received byte.  Its rate is those bytes over that time, never a
+guessed link speed.  Objects already present and the resumed part of an
+interrupted transfer are completed bytes, not fetched bytes, so a transfer that
+fetched nothing is no sample.  It is decided at read time from those rows;
+nothing is stored or counted.
 
-A transfer can claim bytes it did not move: an object already present, or the
-resumed part of an interrupted one, is reported as done before any byte
-arrives, so that order looks faster than the link is.  Each Spark is therefore
-judged by the median of its recent transfers of at least ``_MIN_BYTES``, and a
-Spark is slow only against another Spark's median.  An inflated sample can
-hide a slow Spark, never name a healthy one.  One Spark, no comparable
+The rate of fetched bytes cannot exceed the Spark's NAS-facing link speed.  A
+sample above it is misattributed and is dropped, never believed.  Each Spark is
+judged by the median of its recent samples of at least ``_MIN_BYTES``, and a
+Spark is slow only against another Spark's median.  One Spark, no comparable
 transfers, or an unreadable table shows nothing and never fails the read.
 """
 
@@ -35,6 +35,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, stored_word
 from .agent_operation_states import ORDER
 from .catalog.revision_collection import GRACE
 from .models.operations import AgentOperation, AgentOperationAttempt
+from .models.telemetry import NodeInventorySnapshot
 from .operations.progress import stored_progress
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,7 +63,28 @@ class _Rate:
     latest_seconds: float
 
 
-def _rate(session: Session, node_id: str, since: datetime) -> _Rate | None:
+def nas_link_ceilings(
+    inventories: Mapping[str, NodeInventorySnapshot],
+) -> dict[str, float]:
+    """Each Spark's NAS-facing link speed in bytes per second, where reported."""
+
+    ceilings: dict[str, float] = {}
+    for node_id, inventory in inventories.items():
+        interfaces = inventory.network_interfaces
+        if not isinstance(interfaces, list):
+            continue
+        link = next(
+            (item for item in interfaces if item.name == inventory.nas_route_interface),
+            None,
+        )
+        if link is not None and link.link_speed_mbps is not None:
+            ceilings[node_id] = link.link_speed_mbps * 1e6 / 8
+    return ceilings
+
+
+def _rate(
+    session: Session, node_id: str, since: datetime, ceiling: float | None
+) -> _Rate | None:
     attempts = session.scalars(
         select(AgentOperationAttempt)
         .join(
@@ -84,11 +106,20 @@ def _rate(session: Session, node_id: str, since: datetime) -> _Rate | None:
     samples: list[tuple[int, float]] = []
     for attempt in attempts:
         progress = stored_progress(attempt)
-        if progress is None or progress.completed_bytes < _MIN_BYTES:
+        if (
+            progress is None
+            or progress.fetched_bytes is None
+            or progress.fetched_bytes < _MIN_BYTES
+            or not progress.fetch_seconds
+        ):
             continue
-        if not progress.elapsed_seconds:
+        if (
+            ceiling is not None
+            and progress.fetched_bytes > ceiling * progress.fetch_seconds
+        ):
+            _LOGGER.warning("A NAS transfer rate above the link speed is dropped")
             continue
-        samples.append((progress.completed_bytes, progress.elapsed_seconds))
+        samples.append((progress.fetched_bytes, progress.fetch_seconds))
         if len(samples) == _RECENT:
             break
     if not samples:
@@ -106,7 +137,10 @@ def _mb(value: float) -> str:
 
 
 def slow_nas_transfers(
-    session: Session, names: Mapping[str, str], now: datetime
+    session: Session,
+    names: Mapping[str, str],
+    ceilings: Mapping[str, float],
+    now: datetime,
 ) -> dict[str, NasTransferNotice]:
     """Each Spark whose recent copies from the NAS are far below the fastest's."""
 
@@ -114,7 +148,8 @@ def slow_nas_transfers(
         rates = {
             node_id: rate
             for node_id in names
-            if (rate := _rate(session, node_id, now - _LOOKBACK)) is not None
+            if (rate := _rate(session, node_id, now - _LOOKBACK, ceilings.get(node_id)))
+            is not None
         }
     except SQLAlchemyError as error:
         _LOGGER.warning("NAS transfer rates are unavailable: %s", type(error).__name__)

@@ -60,6 +60,8 @@ fn operation_progress(phase: &str) -> OperationProgress {
         activity_sequence: None,
         completed_items: None,
         elapsed_seconds: None,
+        fetched_bytes: None,
+        fetch_seconds: None,
         eta_seconds: None,
         kind: None,
         last_progress_at: None,
