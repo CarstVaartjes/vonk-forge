@@ -37,14 +37,12 @@ from vonk_control.lifecycle.model_cache import (
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import ModelCacheOperation, ModelCacheSet
 
-from .model_cache_support import (  # noqa: F401 - the fixture  # noqa: F401 - independent connections for background workers
+from .non_blocking import assert_ended_without_blocking
+from .test_model_cache import (
     _artifact,
     _download,
-    cache,
-)
-from .non_blocking import assert_ended_without_blocking
-from .test_model_cache_part4 import (
-    threaded_cache,  # noqa: F401 - the fixture  # noqa: F401 - independent connections for background workers
+    cache,  # noqa: F401 - the fixture
+    threaded_cache,  # noqa: F401 - independent connections for background workers
 )
 from .test_model_cache_recovery_support import observe_unknown
 

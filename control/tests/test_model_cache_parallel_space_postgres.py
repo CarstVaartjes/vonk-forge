@@ -15,7 +15,7 @@ from vonk_control.model_cache.persistence import _store_operation_payload
 from vonk_control.models import Base, ModelCacheOperation
 from vonk_control.storage_demands import NAS_MODELS, StorageDemands
 
-from .model_cache_support import _artifact, _download
+from .test_model_cache import _artifact, _download
 
 SIZE = 4096
 _Usage = namedtuple("_Usage", "total used free")

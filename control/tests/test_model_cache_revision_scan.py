@@ -18,7 +18,7 @@ from vonk_control.model_cache.artifacts import _unique_artifacts
 from vonk_control.models import Base, CatalogDocumentRevision, ModelCacheSet
 from vonk_forge_contracts import document_sha256
 
-from .model_cache_support import _artifact, _canonical_model, _download
+from .test_model_cache import _artifact, _canonical_model, _download
 from .test_model_removal_reference_lifecycle import _register_model
 
 # Production carries about 300 current model heads, most of them not cached.

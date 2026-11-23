@@ -52,8 +52,8 @@ from vonk_control.unused_storage_collection import pressure as unused_storage_pr
 from vonk_control.unused_storage_collection.evidence import _Evidence
 
 from . import unused_storage_collection_support as _support
-from .model_cache_support import _artifact, _download
 from .test_catalog_revision_collection import NODE, NOW, OLD, Catalog
+from .test_model_cache import _artifact, _download
 from .unused_storage_collection_support import (
     _REAL_CLOCK,
     AN_IMAGE,

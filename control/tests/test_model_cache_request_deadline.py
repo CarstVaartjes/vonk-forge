@@ -11,8 +11,8 @@ from vonk_control.lifecycle.model_cache import RECOVERY_BUDGET
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import ModelCacheOperation
 
-from .model_cache_support import _http_artifact, _http_cache_service
-from .model_cache_support import cache as cache  # noqa: PLC0414 -- pytest fixture
+from .test_model_cache import _http_artifact, _http_cache_service
+from .test_model_cache import cache as cache  # noqa: PLC0414 -- pytest fixture
 
 
 def _start(service, artifact):
@@ -131,7 +131,7 @@ def test_dependency_wait_ends_and_fresh_exact_request_has_its_own_budget(
     import fcntl
     from collections import namedtuple
 
-    from .model_cache_support import _artifact
+    from .test_model_cache import _artifact
 
     service, sessions = cache
     now = [datetime(2026, 10, 9, tzinfo=UTC)]

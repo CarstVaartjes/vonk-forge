@@ -22,7 +22,7 @@ from vonk_control.operations.contract import (
 )
 from vonk_control.strict_json import read_stored_model
 
-from .model_cache_support import _http_artifact
+from .test_model_cache import _http_artifact
 from .test_model_cache_cancel_recovery import _api
 
 URL = "https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m"

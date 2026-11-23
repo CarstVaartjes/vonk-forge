@@ -17,7 +17,7 @@ from vonk_control.model_cache_streams import (
     StreamGovernor,
 )
 
-from .model_cache_support import (  # noqa: F401
+from .test_model_cache import (  # noqa: F401
     _download,
     _http_artifact,
     _http_cache_service,

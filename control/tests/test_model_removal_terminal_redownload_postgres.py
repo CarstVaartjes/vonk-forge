@@ -20,7 +20,7 @@ from vonk_control.models import (
     ModelCacheSetArtifact,
 )
 
-from .model_cache_support import _artifact
+from .test_model_cache import _artifact
 from .test_model_removal_reference_lifecycle import _removal_service
 from .test_model_removal_worker_postgres import (
     test_model_removal_process_death_before_batch_checkpoint_restarts_same_removal as _crash_unlink_and_recover,

@@ -42,7 +42,6 @@ from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from cluster_profiles.cli import main
 from cluster_profiles.control_client import ControlClient
 
-from .model_cache_support import _artifact
 from .recipe_image_availability_support import (
     Transport,
     _add_head,
@@ -51,6 +50,7 @@ from .recipe_image_availability_support import (
     _runtime,
     _service,
 )
+from .test_model_cache import _artifact
 
 
 def _start_together(

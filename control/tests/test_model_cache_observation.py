@@ -36,8 +36,8 @@ from vonk_control.profile_read_observation import profile_read
 from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
-from .model_cache_support import _artifact, _shared_connection_sessions
 from .pass_budget_clocks import completing_wait, expiring_wait
+from .test_model_cache import _artifact, _shared_connection_sessions
 
 
 @pytest.fixture

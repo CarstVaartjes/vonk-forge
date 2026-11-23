@@ -46,13 +46,11 @@ from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspecto
 from vonk_control.stored.json_values import write_guard_mode
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
-from .model_cache_support import (  # noqa: F401  (cache is a pytest fixture)
-    _canonical_model,
-    cache,
-)
 from .test_library_local_state_history import _cache_set, _operation
-from .test_model_cache_part1 import (
+from .test_model_cache import (  # noqa: F401  (cache is a pytest fixture)
+    _canonical_model,
     _canonical_recipe,
+    cache,
 )
 
 NOW = datetime(2026, 11, 5, 12, tzinfo=UTC)
