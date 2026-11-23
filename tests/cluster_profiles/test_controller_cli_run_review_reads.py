@@ -33,6 +33,7 @@ from cluster_profiles.controller_cli import common, profile_authoring, selection
 from cluster_profiles.controller_cli import observation as observation_module
 from cluster_profiles.controller_cli import run as run_module
 from cluster_profiles.controller_cli.selection import _read_concurrently, _skipped_read
+from control.tests.insert_collision_support import Rendezvous
 
 
 def test_run_review_leads_with_profile_sparks_and_what_stops(monkeypatch) -> None:
@@ -190,11 +191,11 @@ def test_profile_list_traverses_the_server_continuation():
 # flight together, so concurrency is proven by ordering, not by elapsed time.
 
 
-def _barrier(parties: int) -> threading.Barrier:
-    return threading.Barrier(parties, timeout=30)  # wall-clock: hang guard
+def _barrier(parties: int) -> Rendezvous:
+    return Rendezvous(parties, timeout=30)  # wall-clock: hang guard
 
 
-def _meeting(barrier: threading.Barrier, value: object, *, fail: bool = False):
+def _meeting(barrier: Rendezvous, value: object, *, fail: bool = False):
     def read() -> object:
         barrier.wait()
         if fail:

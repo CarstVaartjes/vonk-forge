@@ -2,13 +2,14 @@
 
 import subprocess
 import sys
-import threading
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+from control.tests.insert_collision_support import Rendezvous
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "validate_fabric.py"
@@ -338,11 +339,11 @@ def aggregate_hosts(validate_module):
 def test_aggregate_requires_concurrent_components(validate_module):
     """Two qualifying functions must actually overlap to prove physical-link bandwidth."""
     head, worker = aggregate_hosts(validate_module)
-    barrier = threading.Barrier(2)
+    barrier = Rendezvous(2, timeout=30)  # wall-clock: hang guard
     durations = []
 
     def component(*args, **kwargs):
-        barrier.wait(timeout=30)
+        barrier.wait()
         durations.append(kwargs.get("duration_seconds"))
         return {
             "name": f"component-{args[6]}",
