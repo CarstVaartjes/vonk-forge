@@ -97,7 +97,7 @@ def observation_clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
 
 
 @contextmanager
-def _not_adopted() -> Generator[list[Exception], None, None]:
+def _not_adopted() -> Generator[list[Exception]]:
     failures: list[Exception] = []
     try:
         yield failures

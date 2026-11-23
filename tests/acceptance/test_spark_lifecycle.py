@@ -422,7 +422,7 @@ class CanonicalCanaryFixture(NamedTuple):
 
 
 @contextmanager
-def _library_contracts(library_root: Path | None) -> Generator[Any, None, None]:
+def _library_contracts(library_root: Path | None) -> Generator[Any]:
     """Import ``vonk_forge_contracts`` as the given library ships it, for one block.
 
     The carry lane drives two releases whose libraries carry different
