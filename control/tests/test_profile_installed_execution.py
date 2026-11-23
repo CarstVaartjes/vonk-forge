@@ -1100,6 +1100,7 @@ def test_postgres_installed_profile_adopts_committed_child_after_crash(
 
         if completed_before_restart:
             # The already-authorized child can finish while its parent is down.
+            install = None
             for _ in range(8):
                 planner.tick()
                 with sessions() as session:
@@ -1584,6 +1585,7 @@ def test_live_copy_on_other_spark_does_not_prevent_eviction_and_load(
         for snapshot in session.scalars(select(NodeInventorySnapshot)):
             snapshot.observed_at = snapshot.received_at = later
             snapshot.disk_free_bytes = 10000
+    install = None
     for _ in range(8):
         _tick_profile_when_due(service, planner, lifecycle, accepted.id)
         with sessions() as session:

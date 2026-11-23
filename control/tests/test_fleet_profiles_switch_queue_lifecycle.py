@@ -375,6 +375,7 @@ def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(
         actor="admin",
     )
     completed_agent_operations: set[str] = set()
+    current = None
     for _ in range(30):
         _follow_profile_retry(service, application.id, now)
         run_switch.tick()
@@ -400,6 +401,7 @@ def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(
             )
             completed_agent_operations.add(operation_id)
     else:
+        assert current is not None
         pytest.fail(
             "profile cleanup did not converge: "
             + json.dumps(current.model_dump(mode="json"), default=str)

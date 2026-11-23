@@ -112,6 +112,7 @@ def test_waiting_install_with_conflicting_image_preparation_replans_and_loads(
 
     generations: set[int] = set()
     waits: set[str | None] = set()
+    view = None
     for _ in range(30):
         switch.drive()
         view = switch.service.get(switch.operation.operation_id)
@@ -123,6 +124,7 @@ def test_waiting_install_with_conflicting_image_preparation_replans_and_loads(
             break
     assert conflicts == [RecipeImageCode.IDENTITY_CONFLICT]
     assert not busy, "the install never waited"
+    assert view is not None
     assert view.progress.subphase == "runtime-install", view.status_reason
     assert max(generations) >= 1, "the conflict did not re-plan the load"
     # The wait keeps the refusal it came from as its evidence.
@@ -153,10 +155,12 @@ def test_waiting_install_with_a_deterministic_preparation_refusal_ends_the_load(
 
     switch.lifecycle.bind_install_preparation(prepare)
     _install_waits(switch, monkeypatch, times=1)
+    view = None
     for _ in range(30):
         switch.drive()
         view = switch.service.get(switch.operation.operation_id)
         if view.state != "running":
             break
+    assert view is not None
     assert view.state == "failed"
     assert view.status_reason

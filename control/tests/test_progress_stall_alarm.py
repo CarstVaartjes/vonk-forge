@@ -421,6 +421,8 @@ def test_a_copy_retried_through_phase_retries_is_stalled_one_window_later(
     copied: dict[str, int] = {}
     places: set[str] = set()
     codes: set[str] = set()
+    stall = None
+    application = None
     for _ in range(80):
         _loop(load, lambda: False, rounds=1)
         load.now[0] += timedelta(minutes=1)
@@ -435,6 +437,7 @@ def test_a_copy_retried_through_phase_retries_is_stalled_one_window_later(
         codes.update(item.code for item in application.blockers)
         if _alarm(load):
             break
+    assert application is not None
     assert _alarm(load), application.blockers
     assert application.state == LifecycleState.RUNNING.value  # still waiting
     assert len(places) == 1  # one place across the child's backoff and retry
@@ -445,6 +448,7 @@ def test_a_copy_retried_through_phase_retries_is_stalled_one_window_later(
     assert load.now[0] <= application.created_at + PROGRESS_STALL_WINDOW + timedelta(
         minutes=10
     )
+    assert stall is not None
     assert stall is not None
     assert stall.first_seen_at + PROGRESS_STALL_WINDOW <= load.now[0]
     (listed,) = _platform_stalled(load)

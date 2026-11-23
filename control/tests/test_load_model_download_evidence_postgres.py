@@ -174,6 +174,7 @@ class _Nas:
         return started.operation_id
 
     def settle(self, operation_id: str) -> RunSwitchModelDownloadResult:
+        child = None
         for _ in range(4):
             child = self.executor.get(operation_id)
             assert child is not None

@@ -119,11 +119,13 @@ def test_delete_while_loading_cancels_through_the_cancel_path() -> None:
     assert [item[0] for item in adapter.cancellation_requests] == [application.id]
     assert _count(sessions, FleetProfile) == 1
 
+    outcome = None
     for _ in range(12):
         service.tick()
         outcome = service.delete_number(profile.number, actor="admin").outcome
         if outcome == "deleted":
             break
+    assert outcome is not None
     assert outcome == "deleted"
     assert _count(sessions, FleetProfileApplication) == 0
     assert _selection(sessions).application_id is None

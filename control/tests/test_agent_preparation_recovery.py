@@ -57,6 +57,7 @@ def test_dependency_recovery_is_bounded_and_fresh_request_is_claimable(
     policy = RecoveryPolicy()
     original_deadline = None
     # A request-owned deadline permits retries beyond the fallback count budget.
+    claim = None
     for ordinal in range(1, policy.max_failures + 2):
         jobs = AgentJobService(sessions, clock=clock)
         claim = claim_agent(jobs, NODE_A, "serial-a")
@@ -89,6 +90,7 @@ def test_dependency_recovery_is_bounded_and_fresh_request_is_claimable(
         )
         clock.now = due + timedelta(seconds=1)
 
+    assert claim is not None
     failure = AgentFailureResult.model_validate_json(
         json.dumps(fenced_attempt(sessions, claim).result)
     )

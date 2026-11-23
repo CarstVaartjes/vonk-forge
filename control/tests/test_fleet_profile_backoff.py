@@ -124,6 +124,7 @@ def test_repeated_failure_recovers_without_a_new_load(tmp_path: Path) -> None:
     assert cause in (waiting.status_reason or "")
     # The runtime fault clears. The standing owner retries the same intent;
     # there is no second apply or explicit retry request.
+    succeeded = None
     for _ in range(12):
         clock["now"] += timedelta(hours=2)
         service.tick()

@@ -471,6 +471,7 @@ def test_busy_runtime_handoff_retries_the_original_claim_after_releasing_sql(
         )
         assert claim is not None
         claim_id = claim.id
+        operation = None
         for _ in range(12):
             planner.tick()
             profiles.tick()
@@ -480,6 +481,7 @@ def test_busy_runtime_handoff_retries_the_original_claim_after_releasing_sql(
                 and operation.result.retry_reason == "run.capacity_busy"
             ):
                 break
+        assert operation is not None
         assert operation.state == LifecycleState.RUNNING
         assert operation.result is not None
         assert operation.result.retry_reason == "run.capacity_busy"

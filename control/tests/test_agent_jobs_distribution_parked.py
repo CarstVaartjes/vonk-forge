@@ -700,6 +700,7 @@ def test_attempts_that_lapse_without_progress_slow_down_and_say_why(
     )
     operation = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
     delays: list[float] = []
+    reason = None
     for attempt_number in range(1, 6):
         claim = _claim_until_due(jobs, sessions, clock, operation.id, rounds=12)
         assert claim is not None
@@ -719,6 +720,7 @@ def test_attempts_that_lapse_without_progress_slow_down_and_say_why(
     assert max(delays[:2]) <= 5
     assert delays[3] >= 30
     assert delays[4] >= 60
+    assert reason is not None
     assert "interrupted 5 times in a row" in reason
 
 

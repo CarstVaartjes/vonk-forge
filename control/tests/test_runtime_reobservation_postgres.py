@@ -547,6 +547,7 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
 
     assert isinstance(grant.claims.operation, ExecuteContainerRuntimeRequestOperation)
     assert grant.claims.operation.runtime_target_id == stop.payload.target_runtime_id
+    operation = None
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
@@ -595,6 +596,7 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
             assert operation is not None
             if operation.state == LifecycleState.CANCELLED:
                 break
+    assert operation is not None
     assert operation.state == LifecycleState.CANCELLED
     evidence = artifacts.get(job.id).result_evidence
     assert evidence is not None

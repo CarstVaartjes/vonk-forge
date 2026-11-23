@@ -412,9 +412,12 @@ def test_bookkeeping_evidence_is_typed_temporary_and_repaired_in_place(tmp_path,
     """Bookkeeping damage cannot become a permanent publication refusal."""
 
     service, _publisher, _applied, run_id = setup(tmp_path)
+    old = None
+    field = None
     with service.sessions.begin() as session:
         run = _recipe_run(session, run_id)
         node = session.query(RunNode).filter_by(run_id=run_id, rank=0).one()
+        row = None
         if fault == "rank-gap":
             row, field, old = node, "rank", node.rank
             node.rank = 10
@@ -447,6 +450,7 @@ def test_bookkeeping_evidence_is_typed_temporary_and_repaired_in_place(tmp_path,
     with service.sessions.begin() as session:
         healed = session.get(model, key)
         assert healed is not None
+        assert field is not None
         setattr(healed, field, old)
     assert service.publish_run(run_id).generation > 0
 

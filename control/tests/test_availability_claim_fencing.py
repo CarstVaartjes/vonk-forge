@@ -174,6 +174,7 @@ def test_expired_callback_preserves_the_new_claim(claimed_image, monkeypatch, bo
         # Verified unassociated bytes can be adopted by the current executor;
         # the stale attempt cannot grant current-revision authorization itself.
         transferred_references: list[RuntimeImageReferenceIntent] = []
+        prior_reference = None
         if boundary == "receipt":
             with sessions() as session:
                 operation = session.get(Job, parent.id)
@@ -210,6 +211,7 @@ def test_expired_callback_preserves_the_new_claim(claimed_image, monkeypatch, bo
         if boundary == "receipt":
             assert len(transferred_references) == 1
             transferred_reference = transferred_references[0]
+            assert prior_reference is not None
             assert transferred_reference.oci_archive_sha256 == (
                 prior_reference.oci_archive_sha256
             )

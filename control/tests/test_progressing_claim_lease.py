@@ -113,9 +113,11 @@ def test_a_renewal_without_progress_earns_only_the_base_lease(agent_service) -> 
     # Renewals keep arriving, the bytes do not move: once the earned lease is
     # spent, each renewal adds only the base lease again.
     renewals = (PROGRESSING_LEASE + timedelta(minutes=1)) // timedelta(seconds=20)
+    stalled = None
     for _ in range(renewals):
         clock.advance(seconds=20)
         stalled = jobs.heartbeat(claim, _copying(40 * MIB), CLAIM_LEASE_SECONDS)
+    assert stalled is not None
     assert stalled.deadline == clock.now + timedelta(seconds=CLAIM_LEASE_SECONDS)
 
 

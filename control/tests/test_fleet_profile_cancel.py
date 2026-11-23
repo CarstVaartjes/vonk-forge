@@ -167,6 +167,7 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
         request_key=_uuid(116),
     )
 
+    stop = None
     for _ in range(8):
         profiles.tick()
         run_switch.tick()

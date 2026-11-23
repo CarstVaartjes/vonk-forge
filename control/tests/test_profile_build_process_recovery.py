@@ -316,6 +316,7 @@ def _worker_process(config: dict[str, Any], crash: str) -> None:
             return
         # One synchronous worker serves parents and their children. A parent
         # that blocks instead of returning to the loop hits the process timeout.
+        application = None
         for _ in range(80):
             if config.get("refresh_inventory"):
                 # Physical readings are deterministic fixture evidence; the
@@ -398,6 +399,7 @@ def _worker_process(config: dict[str, Any], crash: str) -> None:
                 (job.kind, job.state, job.status_reason, job.result)
                 for job in session.scalars(select(Job))
             ]
+        assert application is not None
         raise AssertionError(
             f"profile did not settle: {application.model_dump(mode='json')}; {pending}"
         )

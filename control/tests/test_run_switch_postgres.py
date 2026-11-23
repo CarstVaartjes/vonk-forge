@@ -246,6 +246,7 @@ def _awaiting_final_verification(
         actor="admin",
     )
     completed = set()
+    current = None
     for _ in range(20):
         if queued_distribution:
             before = service.get(operation.operation_id)
@@ -329,6 +330,7 @@ def _awaiting_final_verification(
         if current.current_phase == "final_verify":
             break
     else:
+        assert current is not None
         pytest.fail(f"Run did not reach final verification: {current.status_reason}")
     with sessions() as session:
         run = session.scalar(select(RecipeRun))

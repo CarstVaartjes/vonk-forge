@@ -140,6 +140,8 @@ def test_catalog_readers_parse_one_content_identity_once(monkeypatch, kind, exam
 
     monkeypatch.setattr(contract, f"read_{kind}", counting)
     monkeypatch.setattr(contract, "document_sha256", forbidden)
+    row = None
+    parsed = None
     for index in range(50):
         row = CatalogDocumentRevision(
             id=str(index), kind=kind, content_digest=digest, document=deepcopy(raw)
@@ -150,14 +152,17 @@ def test_catalog_readers_parse_one_content_identity_once(monkeypatch, kind, exam
             assert _stored_recipe(row) == parsed
     assert len(calls) == 1
     # A caller cannot poison another reader of this immutable content identity.
+    assert parsed is not None
     if isinstance(parsed, ModelDefinition):
         parsed.files[0].roles = ["caller-local"]
+        assert row is not None
         stored_model = read_catalog_document(row)
         assert isinstance(stored_model, ModelDefinition)
         assert stored_model.files[0].roles == raw["files"][0]["roles"]
     else:
         assert isinstance(parsed, RecipeDefinition)
         parsed.provenance.attribution = ["caller-local edit"]
+        assert row is not None
         stored = read_catalog_document(row)
         assert isinstance(stored, RecipeDefinition)
         assert stored.provenance.attribution == raw["provenance"]["attribution"]

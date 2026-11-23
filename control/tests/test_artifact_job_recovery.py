@@ -83,6 +83,7 @@ def test_create_unknown_observation_retries_and_never_blocks_fresh_intent(
 
     engine = sessions.kw["bind"]
     event.listen(engine, "before_cursor_execute", unavailable)
+    recovered = None
     try:
         if exhausted:
             with pytest.raises(ArtifactJobUnavailableError):
@@ -95,6 +96,7 @@ def test_create_unknown_observation_retries_and_never_blocks_fresh_intent(
         event.remove(engine, "before_cursor_execute", unavailable)
     replay = create_artifact_job(service, **request)
     if not exhausted:
+        assert recovered is not None
         assert replay.id == recovered.id
     assert service.get_by_request_id(request["request_id"]).id == replay.id
     fresh = submitted_artifact_job(service, run_id, request_suffix=1092)

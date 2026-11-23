@@ -144,6 +144,7 @@ def test_postgres_profile_adopts_child_committed_before_parent_checkpoint(
             clock=lifecycle._clock,
             run_switch_operations=run_switch_service(),
         )
+        resumed = None
         for _ in range(4):
             restarted.tick()
             resumed = restarted.application(application.id)
@@ -161,6 +162,7 @@ def test_postgres_profile_adopts_child_committed_before_parent_checkpoint(
                 break
             if child_disposition.startswith("wrong-") and resumed.state == "backoff":
                 break
+        assert resumed is not None
         assert resumed.progress.switch_adapter is not None
         with sessions() as session:
             children = tuple(

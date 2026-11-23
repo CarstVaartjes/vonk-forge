@@ -112,6 +112,7 @@ def test_superseded_replay_ends_and_selected_load_replans(
             ]
         assert all(count <= 1 for count in repeats)
 
+        selected = None
         for _ in range(60):
             world.advance(ROUND_SECONDS)
             world.tick()
@@ -122,6 +123,7 @@ def test_superseded_replay_ends_and_selected_load_replans(
                 selected = profiles.application(selection.application_id)
             if selected.state == LifecycleState.SUCCEEDED:
                 break
+        assert selected is not None
         assert selected.state == LifecycleState.SUCCEEDED, selected.blockers
         assert selected.profile_id == newer.profile_id
         assert selected.progress.intended_profile is not None

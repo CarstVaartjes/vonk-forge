@@ -176,12 +176,14 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
         )
 
     operation = fresh()
+    held = None
     for _ in range(10):
         service.tick()
         held = service.get(operation.operation_id)
         assert held.result is not None
         if held.result.retry_reason is not None:
             break
+    assert held is not None
     assert held.state in {LifecycleState.RUNNING, LifecycleState.OBSERVING}
     assert held.result is not None
     due = held.next_attempt_at
@@ -209,12 +211,14 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
             if fault == "transfer-bytes"
             else ProfileChildPhase.VERIFY
         )
+        resumed = None
         for _ in range(10):
             resumed = service.get(operation.operation_id)
             assert resumed.result is not None
             if wanted in resumed.result.completed_phases:
                 break
             service.tick()
+        assert resumed is not None
         assert resumed.result is not None
         assert wanted in resumed.result.completed_phases
     else:

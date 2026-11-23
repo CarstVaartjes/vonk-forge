@@ -411,6 +411,7 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
             raise OSError("supervisor acknowledgement lost")
 
     runtime = AtomicRouteBundlePublisher(root, await_supervisor_ack=acknowledge)
+    fail_activate = None
     if failure_point == "before-activation":
         activate = runtime._activate
         fail_activate = [True]
@@ -476,6 +477,7 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
     clock.now = due_at + timedelta(seconds=1)
     fail_ack[0] = False
     if failure_point == "before-activation":
+        assert fail_activate is not None
         fail_activate[0] = False
     restarted_runtime = AtomicRouteBundlePublisher(
         root, await_supervisor_ack=acknowledge

@@ -240,6 +240,7 @@ def test_package_preparation_dependency_retries_same_package_across_restart_then
     original_id = None
     original_package = None
     original_deadline = None
+    claim = None
     for number in range(1, 3):
         claim = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
         stored = fenced_operation(sessions, claim)
@@ -282,6 +283,7 @@ def test_package_preparation_dependency_retries_same_package_across_restart_then
         upgrades = AgentUpgradeService(sessions, operations, clock=clock)
         operations.set_result_consumer(upgrades.consume_agent_result)
         clock.advance(seconds=960)
+    assert claim is not None
     with sessions() as session:
         pending = session.get(AgentOperation, original_id)
         assert pending is not None

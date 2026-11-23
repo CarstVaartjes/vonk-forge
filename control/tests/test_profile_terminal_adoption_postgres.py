@@ -121,13 +121,16 @@ def test_terminal_owner_replans_unobservable_effects(
         profiles = world.controller.profiles
         # A bounded worker pass must leave the old continuing wait, with its
         # cause recorded, rather than merely increasing its retry timestamp.
+        ended = None
         for _ in range(8):
             tick()
             ended = profiles.application(successor.id)
             if ended.state != LifecycleState.RUNNING:
                 break
+        assert ended is not None
         assert ended.state in {LifecycleState.BACKOFF, LifecycleState.SUPERSEDED}
         assert any(b.code == ProfileReasonCode.STALE_PLAN for b in ended.blockers)
+        selected = None
         for _ in range(60):
             tick()
             with world.sessions() as session:
@@ -138,6 +141,7 @@ def test_terminal_owner_replans_unobservable_effects(
                 selected = profiles.application(application_id)
             if selected.state == LifecycleState.SUCCEEDED:
                 break
+        assert selected is not None
         assert selected.state == LifecycleState.SUCCEEDED, selected.blockers
         assert selected.profile_id == successor.profile_id
         assert selected.progress.intended_profile is not None

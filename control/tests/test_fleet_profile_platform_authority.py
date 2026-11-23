@@ -93,6 +93,8 @@ def test_accepted_preparation_survives_author_removal(update_env, maintenance):
     # implementation reauthorizes an accepted child or its profile cleanup.
     sessions, recipes, _now, fresh = update_env
     service = fresh()
+    revision_id = None
+    parent = None
     if maintenance == "batch-child":
         parent = _start(service, list(recipes))
         service.run_update_claim(service.claim_update(owner="worker"))
@@ -110,11 +112,13 @@ def test_accepted_preparation_survives_author_removal(update_env, maintenance):
         session.delete(author)
     if maintenance == "batch-child":
         service.run_update_claim(service.claim_update(owner="worker"))
+        assert parent is not None
         observed = service.get_operator_operation(parent.id)
         assert observed.children[0].operation_id == issued
         assert observed.children[1].operation_id is not None
         assert observed.children[1].failure is None
     else:
+        assert revision_id is not None
         cancelled = service.cancel_profile_preparation(
             revision_id, actor="operator", reason="Accepted profile was cancelled"
         )

@@ -416,6 +416,8 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
         run = session.get(RecipeRun, run_id)
         assert run is not None
         installation_id = run.installation_id
+    desired = None
+    selected = None
     for index in range(2):
         desired = profile(f"pre-dispatch-adoption-{index}")
         preview = profiles.preview(desired.id)
@@ -447,6 +449,8 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
             assert node is not None
             assert node.workload_intent_ordinal == ordinal
     if replacement == "cancel":
+        assert desired is not None
+        assert selected is not None
         profiles.cancel(
             selected.id,
             profile_number=desired.number,

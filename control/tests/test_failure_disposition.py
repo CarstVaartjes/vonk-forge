@@ -322,6 +322,7 @@ def test_only_a_recurring_uncertain_effect_spends_the_retry_count() -> None:
 def test_an_owner_outside_the_core_schedules_on_the_same_rule() -> None:
     policy = RecoveryPolicy(max_failures=3, base_delay_seconds=5, max_delay_seconds=60)
     failures = 0
+    step = None
     for _ in range(policy.max_failures * 4):
         step = schedule(policy, "route", failures, Disposition.WAIT, NOW)
         assert step.failures == failures == 0
@@ -333,6 +334,7 @@ def test_an_owner_outside_the_core_schedules_on_the_same_rule() -> None:
         step = schedule(policy, "route", failures, Disposition.OBSERVE, NOW)
         failures = step.failures
         assert failures == spent
+    assert step is not None
     assert step.next_at is not None
     assert NOW < step.next_at <= NOW + timedelta(seconds=policy.max_delay_seconds)
 

@@ -92,6 +92,7 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
         assert run is not None
         assert run.state == "stopped"
         assert run.stopped_at is not None
+    current = None
     for _ in range(20):
         planner.tick()
         current = planner.get(accepted.operation_id)
@@ -104,6 +105,7 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
         assert initial_starts == (old.id,), (
             "pre-stop inventory authorized a replacement start"
         )
+    assert current is not None
     assert current.state == LifecycleState.RUNNING
     assert current.result is not None
 
@@ -194,6 +196,7 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
     assert pending.result is not None
     assert pending.result.awaited_inventory is not None
     resumed = _service(sessions, now[0], lifecycle, RecordingArtifactExecutor())
+    starts = None
     for _ in range(10):
         resumed.tick()
         with sessions() as session:
@@ -202,6 +205,7 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
             )
         if len(starts) == 2:
             break
+    assert starts is not None
     assert len(starts) == 2
     replacement = next(job for job in starts if job.id != old.id)
     assert replacement.state == LifecycleState.RUNNING

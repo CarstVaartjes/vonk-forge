@@ -254,6 +254,7 @@ def test_only_an_explicit_request_fault_is_reported_as_the_callers_error() -> No
     refusals.
     """
 
+    stored = None
     try:
         EnrollmentGrantResponse.model_validate({})
     except ValidationError as corrupt:
@@ -264,6 +265,7 @@ def test_only_an_explicit_request_fault_is_reported_as_the_callers_error() -> No
         assert mapper(CursorError("model library cursor is invalid")).status_code == 422
         assert mapper(KeyError("missing")).status_code == 404
         # Deterministic server faults reach the central typed 500 boundary.
+        assert stored is not None
         with pytest.raises(ValidationError):
             mapper(stored)
         with pytest.raises(RuntimeError):

@@ -308,6 +308,7 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
         )
 
     now[0] += timedelta(seconds=10)
+    final = None
     for _ in range(3):
         restarted_recipe_service.advance_removals(limit=1)
         final = restarted_recipe_service.get_operator_request(
@@ -317,6 +318,7 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
         final = final.model_dump(mode="json", exclude_none=True)
         if final["state"] == "succeeded":
             break
+    assert final is not None
     assert final["operation_id"] == parent_id
     assert final["state"] == "succeeded"
     assert final["model_removals"] == [child_id]

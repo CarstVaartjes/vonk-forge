@@ -105,6 +105,7 @@ def test_identity_conflict_names_both_build_inputs_through_the_evidence_download
 
     monkeypatch.setattr(switch.admission, "refresh_install_receipts", refresh)
 
+    view = None
     for _ in range(30):
         switch.drive()
         view = switch.service.get(switch.operation.operation_id)
@@ -114,6 +115,7 @@ def test_identity_conflict_names_both_build_inputs_through_the_evidence_download
     assert refusals, "the image preparation never refused"
     assert refusals[0].code == RecipeImageCode.IDENTITY_CONFLICT
     assert [item.identity_conflict for item in refusals[0].blockers] == [expected]
+    assert view is not None
     assert [item.identity_conflict for item in view.result.refusal] == [expected]
 
     # Whether the conflict ended the load at once or kept it waiting, once the

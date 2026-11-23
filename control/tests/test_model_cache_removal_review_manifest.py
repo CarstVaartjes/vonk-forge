@@ -336,12 +336,14 @@ def test_model_removal_review_reports_exact_live_deletion_owner(
 
     # Scope observation may defer; follow its durable clock, rather than assuming
     # that one worker pass commits the deletion gates.
+    blocked = None
     for _attempt in range(10):
         advance_when_due()
         blocked = service.review_model_removal("a" * 64)
         if any(item.owner_id == accepted.id for item in blocked.active_work):
             break
 
+    assert blocked is not None
     assert any(item.owner_id == accepted.id for item in blocked.active_work)
     assert scope_attempts > 1
 

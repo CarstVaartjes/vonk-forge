@@ -144,6 +144,7 @@ def test_busy_disk_handoff_releases_transaction_and_resumes_original_claim(
         )
         assert claim is not None
         claim_id = claim.id
+        operation = None
         for _ in range(12):
             planner.tick()
             profiles.tick()
@@ -153,6 +154,7 @@ def test_busy_disk_handoff_releases_transaction_and_resumes_original_claim(
                 and operation.result.retry_reason == "install.capacity_busy"
             ):
                 break
+        assert operation is not None
         assert operation.state == LifecycleState.RUNNING
         assert operation.result is not None
         assert operation.result.retry_reason == "install.capacity_busy"
