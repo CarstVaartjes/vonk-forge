@@ -11,12 +11,9 @@ from pydantic import ConfigDict, StrictStr, TypeAdapter, ValidationError
 from sqlalchemy import String, and_, cast, false, func, or_, select, true
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement, SQLColumnExpression
-from vonk_agent_protocol import (
-    LifecycleState,
-    LifecycleSubject,
-    SecurityRefusalError,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
+from vonk_agent_protocol.outcome import SecurityRefusalError
 
 from ..auth import CursorCodec, CursorError, cursor_key
 from ..models.jobs import Job

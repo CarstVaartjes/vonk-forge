@@ -13,10 +13,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.state_machines import (
     DesiredAssignmentState,
     ObservedAssignmentState,
-    canonical_message,
 )
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec

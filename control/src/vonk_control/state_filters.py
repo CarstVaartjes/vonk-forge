@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from vonk_agent_protocol import LifecycleSubject, input_state, stored_words
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleSubject,
+    input_state,
+    stored_words,
+)
 
 
 def state_filter(column: Any, subject: LifecycleSubject, word: str) -> Any:

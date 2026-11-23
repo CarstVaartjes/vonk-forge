@@ -3,7 +3,8 @@
 from typing import Annotated
 
 from pydantic import Field
-from vonk_agent_protocol import Disposition, OperationReason
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
 
 from .lifecycle.evidence import Residue
 from .strict_json import StrictModel

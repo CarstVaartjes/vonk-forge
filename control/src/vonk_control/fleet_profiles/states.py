@@ -8,7 +8,7 @@ driven is ``observing``.  Every selection by state goes through :func:`words`.
 
 from __future__ import annotations
 
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     LifecycleSubject,
     is_state,

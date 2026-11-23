@@ -6,12 +6,12 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import delete, select, update
 from sqlalchemy import inspect as sa_inspect
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
     ResourceBlockerCode,
     RunAdmissionCode,
-    RunState,
-    canonical_message,
 )
+from vonk_agent_protocol.state_machines import RunState
 from vonk_agent_protocol.swap import GIB
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import (

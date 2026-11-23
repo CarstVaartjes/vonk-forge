@@ -279,6 +279,16 @@ and fails in CI. `scripts/test-local --with-image-build` builds the two images
 first and includes the checks; by default they are skipped. Prefer a static
 check of the Dockerfile or build inputs where that proves the property.
 
+The whole-corpus catalog acceptance
+(`test_fresh_postgres_imports_typed_canonical_model_recipe_api`) carries
+`@pytest.mark.corpus_acceptance`. It takes 96-105 s beside the shards' `-n 4`
+workers and about 71 s alone on a CI runner, against its 60 s budget, so the
+control shards deselect it (`-m "not corpus_acceptance"`) and the "Corpus
+acceptance" CI job runs only marked tests, alone, with PostgreSQL and the built
+recipe library (`scripts/test acceptance`). The budget is unchanged and the
+lane reports it without enforcing it (no `--test-budget-enforce`). The job is selected with
+the control area and the CI gate requires it.
+
 The protocol is an editable workspace member, so no test or
 `uv sync --project control` / `uv run --project control` command needs a wheel.
 `scripts/build-control-wheel` only builds the ignored protocol wheel under
@@ -780,10 +790,13 @@ passes when it matches at least one path. There is no allowlist. It cannot see a
 that is composed (`Path / "a" / "b"`, an f-string, a regex), so write a scope as a plain
 full-path literal; move or delete the literal with the code it guards.
 
-`tests/test_package_no_reexports.py` fails when a `control/src/vonk_control/**/__init__.py` binds
-imported names (`from .x import Y`, `from vonk_control.x import Y`) or declares `__all__`. Import
-from the module that defines the name. The only `__init__` that imports anything is `models/`,
-which imports modules (not names) so every mapped table registers on `Base.metadata`.
+`tests/test_package_no_reexports.py` fails when an `__init__.py` under `control/src/vonk_control`,
+`src/cluster_profiles` (not the generated `generated_control`) or
+`agent_protocol/src/vonk_agent_protocol` binds imported names (`from .x import Y`,
+`from vonk_control.x import Y`) or declares `__all__`. Import from the module that defines the
+name. The only `__init__` files that import anything import modules, not names: `models/`
+registers every mapped table on `Base.metadata`, and `vonk_agent_protocol` imports `contracts`
+first because the contracts, recipe operations and host helper modules import each other.
 
 A test module that grows past about 1,500 lines is split by topic into `test_<area>_<topic>.py`
 files next to it, never by line count. The helpers, constants and fixtures the files share live

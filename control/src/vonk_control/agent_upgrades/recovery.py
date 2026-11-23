@@ -7,11 +7,9 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import and_, or_, select, true
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    AgentResult,
-    Disposition,
-    LifecycleState,
-)
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.contracts import AgentResult
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
 from .. import agent_operation_states
 from ..admission_locking import (

@@ -1,9 +1,9 @@
 """Raisable error types of the three categories, beside the builtin they replace.
 
 A lifecycle or operation path raises one of the contract's three categories
-(:class:`~vonk_agent_protocol.SecurityRefusalError`,
-:class:`~vonk_agent_protocol.InvalidRequestError`,
-:class:`~vonk_agent_protocol.UnknownOutcomeError`).  A raise that used to be a
+(:class:`~vonk_agent_protocol.outcome.SecurityRefusalError`,
+:class:`~vonk_agent_protocol.outcome.InvalidRequestError`,
+:class:`~vonk_agent_protocol.outcome.UnknownOutcomeError`).  A raise that used to be a
 bare ``ValueError``, ``TypeError``, ``KeyError`` or ``RuntimeError`` takes the
 matching class here, which inherits the builtin beside the category, so no
 ``except`` clause changes.  Every class takes the closed ``reason`` of its
@@ -12,9 +12,9 @@ category as a keyword.
 
 from __future__ import annotations
 
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
+from vonk_agent_protocol.outcome import (
     InvalidRequestError,
-    InvalidRequestReason,
     SecurityRefusalError,
     UnknownOutcomeError,
 )

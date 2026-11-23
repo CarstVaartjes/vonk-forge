@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import ModelCacheCode
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_forge_contracts import ModelDefinition
 from vonk_forge_contracts.model import ModelReference
 

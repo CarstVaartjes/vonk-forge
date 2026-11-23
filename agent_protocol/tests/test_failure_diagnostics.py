@@ -3,14 +3,17 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
     AgentFailureResult,
     AgentResult,
-    FailureDiagnostics,
-    RecipeJobRunResult,
     canonical_message,
 )
-from vonk_agent_protocol.failure_evidence import LOG_TAIL_BYTES, FailureLogTail
+from vonk_agent_protocol.failure_evidence import (
+    LOG_TAIL_BYTES,
+    FailureDiagnostics,
+    FailureLogTail,
+)
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 
 VECTORS = Path(__file__).parents[1] / "src/vonk_agent_protocol/vectors"
 

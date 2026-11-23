@@ -11,11 +11,8 @@ from typing import cast
 from ..cli_files import read_json_document, write_private_document
 from ..cli_outcome import ObservationStatus
 from ..cli_select import SelectorError
-from ..control_client import (
-    ControlClientError,
-    ControlMalformedResponse,
-    validate_control_document,
-)
+from ..control_client.errors import ControlClientError, ControlMalformedResponse
+from ..control_client.schema import validate_control_document
 from .common import ControllerClient, _profile_number
 from .profile_options import _apply_option_choices, _configure_option_target
 from .selection import (

@@ -8,11 +8,9 @@ from typing import (
 )
 from typing import cast as typing_cast
 
-from vonk_agent_protocol import (
-    RunSwitchCode,
-    canonical_message,
-)
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
 from ..categorized_errors import (
     MissingRecord,

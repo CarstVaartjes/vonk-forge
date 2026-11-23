@@ -5,13 +5,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import event
-from vonk_agent_protocol import (
-    LibraryAssessmentCode,
-    LifecycleState,
-    ModelCacheBlockerCode,
-    RunSwitchCode,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.catalog import LibraryAssessmentCode
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheBlockerCode
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_control.disk_reservations import runtime_images_named_on_nodes
 from vonk_control.inventory.repository import (
     INVENTORY_MAX_AGE,
@@ -347,7 +345,7 @@ def test_scan_floor_reads_jobs_once_however_many_nodes(tmp_path) -> None:
 
 def test_covered_claims_read_each_newest_report_in_one_statement(tmp_path) -> None:
     """Catches one newest-report query per reservation."""
-    from vonk_agent_protocol import (
+    from vonk_agent_protocol.state_machines import (
         InstallationNodeState,
         InstallationState,
         ReservationState,

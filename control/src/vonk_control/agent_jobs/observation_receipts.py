@@ -7,23 +7,20 @@ from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
+from vonk_agent_protocol.agent_words import FailureStage
+from vonk_agent_protocol.contracts import (
     AgentFailureKind,
     AgentFailureResult,
     AgentOperation,
     AgentResult,
-    AgentResultState,
-    ArtifactDistributionResult,
-    FailureStage,
-    LifecycleState,
-    canonical_message,
-    validate_result_for_operation,
-)
-from vonk_agent_protocol.contracts import (
     AgentResultPayload,
     AgentUpgradePayload,
     AgentUpgradeResult,
+    ArtifactDistributionResult,
+    canonical_message,
+    validate_result_for_operation,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, LifecycleState
 from vonk_agent_protocol.package_upgrade import PackageActivationPhase
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
 from vonk_agent_protocol.state_machines import NodeIdentityState

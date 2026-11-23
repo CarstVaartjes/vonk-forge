@@ -5,12 +5,12 @@ from __future__ import annotations
 from typing import Annotated
 
 from pydantic import AwareDatetime, Field
-from vonk_agent_protocol import (
-    OperationReason,
+from vonk_agent_protocol.lifecycle_vocabulary import (
     OperatorActionName,
     WaitOwnerKind,
     WaitResumeCondition,
 )
+from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
 
 from .operations.blockers import BlockingOperation, OperationBlocker
 from .strict_json import StrictModel

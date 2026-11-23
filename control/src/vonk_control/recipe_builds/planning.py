@@ -10,12 +10,9 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    RecipeBuildCode,
-    SecurityRefusalError,
-    UnknownOutcomeError,
-    WaitReason,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_forge_contracts import PrebuiltImage
 
 from ..catalog.revision_contract import RecipeRevisionProjection

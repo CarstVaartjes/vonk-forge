@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import Job
 from vonk_control.oci_image_store import OciImageStore, StoredImage

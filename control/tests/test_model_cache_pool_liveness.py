@@ -21,7 +21,8 @@ from typing import cast
 
 import httpx2
 import pytest
-from vonk_agent_protocol import LifecycleState, ModelCacheCode
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.bounded_json import text
 from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
 from vonk_control.model_cache.views import _BackgroundTransfer

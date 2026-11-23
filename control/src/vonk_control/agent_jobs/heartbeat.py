@@ -6,17 +6,15 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    AgentDirective,
-    AgentEvidenceCode,
-    AgentOperation,
-    AgentProgress,
+from vonk_agent_protocol.contracts import AgentDirective, AgentOperation, AgentProgress
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
-    OperationProgress,
     WaitReason,
 )
+from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_agent_protocol.wire_model import OperationProgress
 
 from ..agent_operation_facts import aware as _aware
 from ..auth import AgentSource

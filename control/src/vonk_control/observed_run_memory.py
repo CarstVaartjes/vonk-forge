@@ -23,8 +23,8 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
-from vonk_agent_protocol import ReservationState
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+from vonk_agent_protocol.state_machines import ReservationState
 from vonk_agent_protocol.telemetry import HostResourceSample
 
 from .content_identity import RecipeExecution, runs_identically

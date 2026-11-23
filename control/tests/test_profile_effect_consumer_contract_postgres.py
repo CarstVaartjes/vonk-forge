@@ -23,13 +23,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
-from vonk_agent_protocol import (
-    AgentResult,
-    AgentResultState,
-    OutcomeDone,
-    OutcomeKind,
-    RecipeStopResult,
-)
+from vonk_agent_protocol.contracts import AgentResult
+from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, OutcomeKind
+from vonk_agent_protocol.outcome import OutcomeDone
+from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
 from vonk_control.models.jobs import Job

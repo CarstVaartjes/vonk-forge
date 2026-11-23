@@ -8,16 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from ..cli_states import FAILED, SUCCEEDED
-from ..control_client import (
-    ControlClientError,
-)
+from ..control_client.errors import ControlClientError
 from ..fleet_qualification import (
     ArtifactJobSmokeAdapter,
     QualificationError,
     QualificationObservationUnknown,
     ServiceSmokeAdapter,
 )
-from ..qualification_fixtures import FixtureError
+from ..qualification_fixtures.contracts import FixtureError
 from .contracts import Batch, Campaign, Lane, ResultsLog
 from .profiles import _wait_serving
 

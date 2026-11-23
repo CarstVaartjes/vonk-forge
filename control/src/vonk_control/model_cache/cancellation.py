@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, cast
 from pydantic import ValidationError
 from sqlalchemy import select, true
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import LifecycleState, ModelCacheCode
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 
 from ..agent_operation_facts import aware as _aware
 from ..lifecycle.evidence import Residue

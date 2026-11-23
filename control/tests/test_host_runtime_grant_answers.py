@@ -6,7 +6,7 @@ the work with; evidence that is not readable yet is a retry-later answer.
 
 from __future__ import annotations
 
-from vonk_agent_protocol import InvalidRequestReason
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_control.host_helper_authority import (
     HostRuntimeEvidenceUnavailable,
     HostRuntimeGrantUnsatisfiable,

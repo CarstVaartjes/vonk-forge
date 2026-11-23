@@ -6,15 +6,19 @@ import hashlib
 from datetime import datetime, timedelta
 from typing import TypedDict
 
-from vonk_agent_protocol import (
-    AgentResult,
-    AgentResultState,
+from vonk_agent_protocol.contracts import AgentResult
+from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState
+from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
     RecipeJobInputRequest,
     RecipeJobOutputLimits,
     RecipeJobRunResult,
-    recipe_job_manifest_document,
-    recipe_job_manifest_sha256,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_document as recipe_job_manifest_document,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_sha256 as recipe_job_manifest_sha256,
 )
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs import states as ajs

@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from sqlalchemy import Engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.fleet_profile_contract.applications import FleetProfileChildOperation
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.model_primitives import Base

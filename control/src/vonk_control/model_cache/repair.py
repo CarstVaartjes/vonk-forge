@@ -7,11 +7,11 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import func, select
-from vonk_agent_protocol import (
-    Disposition,
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import input_state
+from vonk_agent_protocol.reason_codes.model_cache import (
     ModelCacheBlockerCode,
     ModelCacheCode,
-    input_state,
 )
 
 from ..admission_locking import admitting

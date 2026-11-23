@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
 )
@@ -132,7 +132,7 @@ def test_stalled_ended_parent_cannot_monopolize_unrelated_preparation(
     )
     old_entered, fresh_entered, release = Event(), Event(), Event()
     old_key = accepted.operation.request_key
-    from vonk_agent_protocol import canonical_message
+    from vonk_agent_protocol.contracts import canonical_message
     from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 
     receipt = RuntimeImageReceipt.model_validate_json(

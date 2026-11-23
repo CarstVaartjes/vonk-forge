@@ -31,7 +31,8 @@ from sqlalchemy import (
     cast as sql_cast,
 )
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import Disposition, WaitOwnerKind
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import WaitOwnerKind
 
 from . import (
     models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata

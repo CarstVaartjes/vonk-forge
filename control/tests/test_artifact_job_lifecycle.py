@@ -15,13 +15,13 @@ from datetime import datetime
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     LifecycleState,
-    RunDegradedReason,
-    RunState,
     WaitReason,
 )
+from vonk_agent_protocol.reason_codes.evidence import RunDegradedReason
+from vonk_agent_protocol.state_machines import RunState
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs import states as ajs
 from vonk_control.artifact_jobs.contracts import ArtifactJobResponse, ArtifactJobView

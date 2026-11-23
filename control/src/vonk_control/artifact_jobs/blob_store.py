@@ -16,14 +16,16 @@ from pathlib import Path
 from typing import BinaryIO
 
 from pydantic import BaseModel, ConfigDict, Field
-from vonk_agent_protocol import (
-    Disposition,
-    InvalidRequestError,
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
-    SecurityRefusalError,
     SecurityRefusalReason,
-    UnknownOutcomeError,
     WaitReason,
+)
+from vonk_agent_protocol.outcome import (
+    InvalidRequestError,
+    SecurityRefusalError,
+    UnknownOutcomeError,
 )
 
 from ..bounded_retry import bounded_async_attempts

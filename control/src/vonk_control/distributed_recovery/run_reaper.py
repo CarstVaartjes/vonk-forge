@@ -26,8 +26,8 @@ from typing import Protocol
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import RunState
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.state_machines import RunState
 
 from ..logging import log_event
 from ..models.execution import IN_FLIGHT_RUN_STATES, RecipeRun, RunNode

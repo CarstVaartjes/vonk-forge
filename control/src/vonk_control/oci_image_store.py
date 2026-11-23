@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 
-from vonk_agent_protocol import ImageStoreCode
+from vonk_agent_protocol.reason_codes.images import ImageStoreCode
 
 from .logging import log_event
 from .stalled_process import run_until_stalled, tree_bytes

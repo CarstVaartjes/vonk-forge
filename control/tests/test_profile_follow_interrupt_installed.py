@@ -13,8 +13,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.agent_contacts import record_contact
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract.applications import (

@@ -9,10 +9,8 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from httpx2 import Response
 from pydantic import ValidationError
-from vonk_agent_protocol import (
-    LifecycleState,
-    OperationProgress,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.auth import Actor
 from vonk_control.cache_removal_review import (
     CacheRemovalReviewContent,

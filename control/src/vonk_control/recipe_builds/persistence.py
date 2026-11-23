@@ -9,11 +9,9 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    RecipeBuildCode,
-    ReservationState,
-    WaitReason,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
+from vonk_agent_protocol.state_machines import ReservationState
 
 from ..admission_locking import (
     AdmissionLockBusy,

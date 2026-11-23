@@ -1,7 +1,7 @@
 import json
 
 from cluster_profiles import cli
-from cluster_profiles.control_client import _request_contract
+from cluster_profiles.control_client.schema import _request_contract
 from cluster_profiles.generated_control.models.gateway_key_create_request import (
     GatewayKeyCreateRequest,
 )

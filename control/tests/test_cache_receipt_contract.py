@@ -3,7 +3,7 @@
 # ruff: noqa: F811 - pytest fixture is imported by name
 
 import pytest
-from vonk_agent_protocol import UnknownOutcomeError
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_control.compiled_execution_plan import (
     VerifiedRuntimeImage,
 )
@@ -73,7 +73,7 @@ def test_a_damaged_object_triggers_preparation_and_reuses_repaired_content(
     with pytest.raises(UnknownOutcomeError):
         ModelCacheObjectSource.from_service(cache).objects_for_set(digest)
     from sqlalchemy import select
-    from vonk_agent_protocol import LifecycleState
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
     from vonk_control.models.cache import ModelCacheOperation
 
     with sessions() as session:
@@ -158,7 +158,8 @@ def test_bad_ingress_digest_refuses_and_fresh_valid_ingress_is_admitted(
     controller, tmp_path
 ):
     """Local misses must not weaken verification when new bytes enter storage."""
-    from vonk_agent_protocol import Disposition, SecurityRefusalError
+    from vonk_agent_protocol.agent_words import Disposition
+    from vonk_agent_protocol.outcome import SecurityRefusalError
     from vonk_control.failure_classification import disposition
 
     from .test_nas_cache_acceptance import _artifact, _download

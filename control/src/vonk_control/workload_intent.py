@@ -20,13 +20,9 @@ from collections.abc import Mapping, Sequence
 
 from sqlalchemy import CursorResult, select, update
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    Disposition,
-    InvalidRequestError,
-    InvalidRequestReason,
-    UnknownOutcomeError,
-    WaitReason,
-)
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
+from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 
 from .models.fleet import AgentNode
 

@@ -10,15 +10,15 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    RecipeStopPayload,
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.outcome import UnknownError
+from vonk_agent_protocol.recipe_operations import RecipeStopPayload
+from vonk_agent_protocol.route_activation import SupervisorPhase
+from vonk_agent_protocol.state_machines import (
     RoutePublicationState,
     RouteState,
     RunState,
-    UnknownError,
-    canonical_message,
 )
-from vonk_agent_protocol.route_activation import SupervisorPhase
 from vonk_control.bounded_json import require_mapping
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator

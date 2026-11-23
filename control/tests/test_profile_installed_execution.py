@@ -11,15 +11,12 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select
-from vonk_agent_protocol import (
-    LifecycleState,
-    ResourceBlockerCode,
-    RunState,
-    RunSwitchCode,
-)
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.inventory import ModelStoreObject
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, ResourceBlockerCode
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.state_machines import RunState
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
@@ -63,7 +60,7 @@ from vonk_control.storage_demands import (
 from vonk_control.unused_storage_collection.common import _STORAGE_WAIT_CODES
 from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
-from cluster_profiles.control_client import validate_control_document
+from cluster_profiles.control_client.schema import validate_control_document
 
 from .recipe_operations_support import installed_recipe, setup_services, started_recipe
 from .run_switch_operations_support import (
@@ -863,7 +860,7 @@ def test_a_load_ends_with_typed_evidence_when_reclamation_cannot_make_room(
     tmp_path: Path,
 ) -> None:
     """Catches the real collector's fresh insufficient answer holding admission forever."""
-    from vonk_agent_protocol import StorageDemandCode
+    from vonk_agent_protocol.reason_codes.resources import StorageDemandCode
 
     sessions, lifecycle, service, planner, waiting, nodes = _disk_starved_load(tmp_path)
     with sessions.begin() as session:
@@ -1506,7 +1503,7 @@ def test_live_copy_on_other_spark_does_not_prevent_eviction_and_load(
     Keep the old application live while the second load's actual worker waits,
     uninstalls through the lifecycle, observes disk and issues its install.
     """
-    from vonk_agent_protocol import AgentOperation as OperationKind
+    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
     from vonk_control.fleet_profile_contract.applications import (
         FleetProfileApplicationProgress,
     )

@@ -10,7 +10,6 @@ from types import UnionType
 from typing import Literal, Protocol
 
 from pydantic import Field, model_serializer
-from vonk_agent_protocol import OperationProgress, UnknownOutcomeError, WaitReason
 from vonk_agent_protocol.capability_reply import CapabilityUnavailableReply
 from vonk_agent_protocol.error_response import (
     BoundedErrorResponse,
@@ -18,7 +17,9 @@ from vonk_agent_protocol.error_response import (
 )
 from vonk_agent_protocol.http_failure import HttpTransient
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
-from vonk_agent_protocol.wire_model import StrictJSONModel
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.wire_model import OperationProgress, StrictJSONModel
 
 from ..auth import CursorCodec
 from ..cursor_contract import MAX_CURSOR_LENGTH

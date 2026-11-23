@@ -19,13 +19,14 @@ from controller_cli_support import (
 )
 from library_route_fixtures import _recipe_projection
 
-from cluster_profiles import cli, controller_cli
-from cluster_profiles.control_client import (
+from cluster_profiles import cli
+from cluster_profiles.control_client.errors import (
     ControlConflict,
     ControlNotFound,
     ControlTransportError,
     ControlUnavailable,
 )
+from cluster_profiles.controller_cli import confirmation as confirmation_module
 
 
 def test_model_remove_reconciles_after_lost_acceptance() -> None:
@@ -418,8 +419,8 @@ def test_fleet_remove_resolves_and_confirms_stable_node_before_post(
 
     input_stream = TTYInput("yes\n")
     error_stream = TTYOutput()
-    monkeypatch.setattr(controller_cli.confirmation.sys, "stdin", input_stream)
-    monkeypatch.setattr(controller_cli.confirmation.sys, "stderr", error_stream)
+    monkeypatch.setattr(confirmation_module.sys, "stdin", input_stream)
+    monkeypatch.setattr(confirmation_module.sys, "stderr", error_stream)
     monkeypatch.setattr(cli, "begin_interactive_update_check", lambda: None)
 
     status = cli.main(

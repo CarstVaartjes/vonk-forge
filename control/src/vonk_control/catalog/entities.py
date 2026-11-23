@@ -14,13 +14,10 @@ from typing import TYPE_CHECKING, TypedDict
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    CatalogCode,
-    CatalogSyncCode,
-    InvalidRequestError,
-    InvalidRequestReason,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
+from vonk_agent_protocol.outcome import InvalidRequestError
+from vonk_agent_protocol.reason_codes.catalog import CatalogCode, CatalogSyncCode
 from vonk_forge_contracts import (
     ModelDefinition,
     ModelDisplay,

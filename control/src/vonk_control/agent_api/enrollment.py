@@ -8,13 +8,13 @@ import re
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
-from vonk_agent_protocol import UnknownError
 from vonk_agent_protocol.enrollment import (
     EnrollmentBootstrapResponse,
     EnrollmentObservationReply,
     EnrollmentSubmitRequest,
     IssuedCertificateResponse,
 )
+from vonk_agent_protocol.outcome import UnknownError
 
 from ..contract_graph import raw_json_body
 from ..enrollment.body import _bounded_enrollment_body, _scan_enrollment_grants

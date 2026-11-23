@@ -12,23 +12,23 @@ from typing import Literal, get_args
 from pydantic import Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    InvalidRequestError,
-    InvalidRequestReason,
-    LifecycleState,
-    ProjectionCode,
-    RunState,
-    WaitReason,
-    canonical_message,
-)
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.enrollment import NodeId
 from vonk_agent_protocol.integer_domains import (
     MAX_DATABASE_BIGINT,
     MAX_DATABASE_INTEGER,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    LifecycleState,
+    WaitReason,
+)
+from vonk_agent_protocol.outcome import InvalidRequestError
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
+from vonk_agent_protocol.state_machines import RunState
 
 from ..categorized_errors import BookkeepingUnknown
 from ..fleet_profile_contract.switch_state import FleetProfileSwitchChildKind

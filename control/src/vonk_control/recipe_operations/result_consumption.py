@@ -9,21 +9,24 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import (
-    InstallationNodeState,
-    InstallationState,
-    LifecycleState,
+from vonk_agent_protocol.build_import import (
     RecipeBuildCleanupEvidence,
     RecipeBuildCleanupRequest,
-    RecipeStartPayload,
-    RecipeStopPayload,
-    RouteState,
-    RunState,
-    UnknownOutcomeError,
+)
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
     WaitOwnerKind,
     WaitReason,
-    canonical_message,
+)
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
+from vonk_agent_protocol.state_machines import (
+    InstallationNodeState,
+    InstallationState,
+    RouteState,
+    RunState,
 )
 
 from .. import agent_operation_states

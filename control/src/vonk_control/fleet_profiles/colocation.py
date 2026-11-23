@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Collection, Sequence
 
-from vonk_agent_protocol import DesiredAssignmentState, RunSwitchCode
 from vonk_agent_protocol.agent_words import ProfileAction, ProfileReasonSeverity
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.state_machines import DesiredAssignmentState
 
 from ..fleet_profile_contract.assessment import (
     FleetProfileAssignmentAssessment,

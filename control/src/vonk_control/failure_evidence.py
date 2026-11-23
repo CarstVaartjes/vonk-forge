@@ -25,11 +25,6 @@ from pydantic import (
 )
 from sqlalchemy import String, and_, cast, or_, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    FailureCode,
-    LifecycleState,
-    SecurityRefusalReason,
-)
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.failure_evidence import (
     LOG_TAIL_BYTES,
@@ -38,6 +33,11 @@ from vonk_agent_protocol.failure_evidence import (
     add_known_dropped_bytes,
 )
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    FailureCode,
+    LifecycleState,
+    SecurityRefusalReason,
+)
 
 from . import agent_operation_states
 from .artifact_jobs import states as ajs

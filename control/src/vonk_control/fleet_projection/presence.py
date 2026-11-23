@@ -7,13 +7,9 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    InstallationState,
-    InstallDegradedReason,
-    RouteState,
-    RunDegradedReason,
-    RunState,
-)
+from vonk_agent_protocol.reason_codes.admission import InstallDegradedReason
+from vonk_agent_protocol.reason_codes.evidence import RunDegradedReason
+from vonk_agent_protocol.state_machines import InstallationState, RouteState, RunState
 
 from ..cluster_mappings import mapping_option_choices
 from ..load_swap import held_rise, readable_run_plan

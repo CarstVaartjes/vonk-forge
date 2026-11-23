@@ -23,7 +23,7 @@ from typing import Any
 import httpx2
 import pytest
 from sqlalchemy import Engine, select
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,

@@ -8,13 +8,10 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    Disposition,
-    RouteState,
-    RunState,
-    UnknownOutcomeError,
-    WaitReason,
-)
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_control.failure_classification import disposition
 from vonk_control.models.execution import RecipeRun, RunNode
 from vonk_control.models.routes import RoutePublicationOwner
@@ -336,7 +333,7 @@ def test_publication_deferral_contention_continues_without_traceback(
     import json
     import logging
 
-    from vonk_agent_protocol import SecurityRefusalError
+    from vonk_agent_protocol.outcome import SecurityRefusalError
     from vonk_control.recipe_routes.shared import RecipeRouteNotReady
 
     from .recipe_routes_support import add_running_run
@@ -403,11 +400,9 @@ def test_order_sweep_conflict_rolls_back_continues_and_resweeps(
     from datetime import datetime, timedelta
     from unittest.mock import Mock
 
-    from vonk_agent_protocol import (
-        AgentOperation as OperationKind,
-    )
-    from vonk_agent_protocol import (
-        AgentResult,
+    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+    from vonk_agent_protocol.contracts import AgentResult
+    from vonk_agent_protocol.lifecycle_vocabulary import (
         AgentResultState,
         LifecycleState,
     )
@@ -604,7 +599,7 @@ def test_due_route_recovery_contention_is_typed_wait_and_redrives(
     import logging
     from datetime import datetime, timedelta
 
-    from vonk_agent_protocol import WaitOwnerKind
+    from vonk_agent_protocol.lifecycle_vocabulary import WaitOwnerKind
     from vonk_control.due_waits import DueWaitBackstop, WaitSource
     from vonk_control.models.fleet import AgentNode
 

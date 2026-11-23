@@ -8,7 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import RouteState, RunState, RunSwitchCode
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_control.jobs.documents import RunSwitchJobPayload
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.jobs import Job
@@ -160,7 +161,7 @@ def test_a_stale_stop_preview_is_replanned_and_its_key_replays(tmp_path):
 
 def test_unknown_stop_expires_across_restart_without_blocking_fresh_request(tmp_path):
     """Catches retryable observation exceptions escaping the stop's time bound."""
-    from vonk_agent_protocol import LifecycleState
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
     from vonk_control.run_switch_operations.constants import (
         _FINAL_VERIFICATION_MAX_SECONDS,
     )
@@ -263,8 +264,8 @@ def test_disappeared_stop_target_ends_without_blocking_fresh_request(tmp_path):
 
 def test_observed_stop_settles_lost_child_acknowledgement_and_admits_fresh(tmp_path):
     """Catches a parked stop child blocking even after its exact ranks stopped."""
-    from vonk_agent_protocol import LifecycleState
     from vonk_agent_protocol.agent_words import ProfileChildPhase
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
     from vonk_control.models.execution import RunNode
     from vonk_control.reservation_owners import release_dead_owner_reservations
 

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import BaseModel
-from vonk_agent_protocol import LifecycleState, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
 
 from .non_blocking import assert_ended_without_blocking

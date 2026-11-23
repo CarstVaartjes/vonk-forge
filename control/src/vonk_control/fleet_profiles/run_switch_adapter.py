@@ -8,21 +8,20 @@ from datetime import datetime
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    DesiredAssignmentState,
-    Disposition,
-    InvalidRequestReason,
-    LifecycleState,
-    ReservationState,
-    RuntimeImageCode,
-    UnknownOutcomeError,
-)
 from vonk_agent_protocol.agent_words import (
+    Disposition,
     ProfileAction,
     ProfileChildPhase,
     ProfileProjectionKind,
     ProfileSwitchChildKind,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    LifecycleState,
+)
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
+from vonk_agent_protocol.state_machines import DesiredAssignmentState, ReservationState
 
 from ..categorized_errors import MissingRecord
 from ..failure_classification import is_definite, is_redownload, is_security_failure

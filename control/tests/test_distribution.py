@@ -4,11 +4,8 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from vonk_agent_protocol import (
-    DistributionAssignment,
-    DistributionCode,
-    DistributionObject,
-)
+from vonk_agent_protocol.distribution import DistributionAssignment, DistributionObject
+from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 from vonk_control.distribution.filesystem import FilesystemObjectSource
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.distribution.service import DistributionService
@@ -508,7 +505,8 @@ def test_denied_nas_source_cannot_fall_back_then_recovers_after_access_restored(
     agent_system, tmp_path, denial
 ):
     """Catch the composite source hiding an explicit NAS refusal with OCI bytes."""
-    from vonk_agent_protocol import SecurityRefusalError, SecurityRefusalReason
+    from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
+    from vonk_agent_protocol.outcome import SecurityRefusalError
 
     client, services, _, clock = agent_system
     fallback = MemoryObjectSource()
@@ -565,7 +563,7 @@ def test_denied_nas_source_cannot_fall_back_then_recovers_after_access_restored(
 
 
 def test_secondary_source_refusal_is_not_masked_by_primary_cache_miss():
-    from vonk_agent_protocol import SecurityRefusalReason
+    from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
     from vonk_control.distribution.types import DistributionRefused
 
     class DeniedSource(MemoryObjectSource):

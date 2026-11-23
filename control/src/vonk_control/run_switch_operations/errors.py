@@ -4,16 +4,15 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from vonk_agent_protocol import (
-    Disposition,
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, WaitReason
+from vonk_agent_protocol.outcome import (
     InvalidRequestError,
-    RunSwitchCode,
     SecurityRefusalError,
-    SecurityRefusalReason,
     UnknownOutcomeError,
-    WaitReason,
-    run_switch_code,
 )
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.reason_codes.vocabulary import run_switch_code
 
 from ..categorized_faults import security_reason
 from ..failure_classification import is_definite

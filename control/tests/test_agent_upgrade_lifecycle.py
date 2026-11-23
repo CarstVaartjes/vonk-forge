@@ -13,13 +13,13 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
     AgentFailureKind,
-    FailureCode,
-    HelperErrorCode,
-    LifecycleState,
+    AgentFailureResult,
+    AgentUpgradePayload,
 )
-from vonk_agent_protocol.contracts import AgentFailureResult, AgentUpgradePayload
+from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
+from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_upgrades.service import AgentUpgradeService
 from vonk_control.lifecycle.agent_upgrade import (

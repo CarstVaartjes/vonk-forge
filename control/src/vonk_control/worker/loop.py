@@ -7,11 +7,8 @@ import traceback
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 
-from vonk_agent_protocol import (
-    LifecycleEventKind,
-    UnknownOutcomeError,
-    WaitReason,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleEventKind, WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 
 from ..bounded_retry import bounded_attempts
 from ..coordinator_failures import CoordinatorFailures

@@ -13,7 +13,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from vonk_agent_protocol import AgentFailureResult, AgentResult, OutcomeUnknown
+from vonk_agent_protocol.contracts import AgentFailureResult, AgentResult
+from vonk_agent_protocol.outcome import OutcomeUnknown
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 
 VECTORS = Path(__file__).parents[1] / "src/vonk_agent_protocol/vectors"

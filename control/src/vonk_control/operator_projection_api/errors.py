@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 from fastapi import HTTPException
-from vonk_agent_protocol import (
-    ControllerErrorCode,
-    SecurityRefusalReason,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
+from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 
 from ..agent_upgrades.errors import AgentUpgradeConflict
 from ..api_availability import AVAILABILITY_ERRORS

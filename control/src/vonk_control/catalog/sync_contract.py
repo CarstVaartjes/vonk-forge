@@ -4,7 +4,7 @@ import hashlib
 from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BeforeValidator, Field, field_validator
-from vonk_agent_protocol import CatalogSyncState, machine_adopter
+from vonk_agent_protocol.state_machines import CatalogSyncState, machine_adopter
 from vonk_agent_protocol.wire_model import WireEnum
 
 from ..library.contract import UuidId

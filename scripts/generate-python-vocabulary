@@ -32,17 +32,19 @@ ROUTE_WORDS = ROOT / "agent_protocol/src/vonk_agent_protocol/route_activation_wo
 def cli_words() -> str:
     from typing import get_args
 
-    from vonk_agent_protocol import (
-        HTTP_STATUS_DISPOSITIONS,
+    from vonk_agent_protocol.agent_words import Disposition
+    from vonk_agent_protocol.disposition import HTTP_STATUS_DISPOSITIONS
+    from vonk_agent_protocol.state_machines import (
         AssetAvailability,
-        Disposition,
         EndpointState,
         EnrollmentGrantState,
+    )
+    from vonk_agent_protocol.lifecycle_vocabulary import (
         LifecycleState,
         OutcomeKind,
-        ProfileReasonCode,
         StopOutcome,
     )
+    from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
     from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileEffectState
     from vonk_agent_protocol.gpu_clock import GpuClockMetric
     from vonk_agent_protocol.lifecycle_vocabulary import ArtifactPreparation
@@ -153,7 +155,7 @@ def cli_words() -> str:
 
 
 def route_words() -> str:
-    from vonk_agent_protocol import GatewayRouteState
+    from vonk_agent_protocol.state_machines import GatewayRouteState
 
     states = ", ".join(
         f'"{state.value}"'
@@ -174,7 +176,7 @@ def route_words() -> str:
 
 
 def hook_words() -> str:
-    from vonk_agent_protocol import AgentFailureKind
+    from vonk_agent_protocol.contracts import AgentFailureKind
     from vonk_agent_protocol.lifecycle_vocabulary import FailureCode
 
     lines = [

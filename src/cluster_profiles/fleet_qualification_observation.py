@@ -13,8 +13,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .control_client import ControlClientError, ControlForbidden, ControlUnauthorized
-from .qualification_fixtures import FixtureError
+from .control_client.errors import (
+    ControlClientError,
+    ControlForbidden,
+    ControlUnauthorized,
+)
+from .qualification_fixtures.contracts import FixtureError
 
 
 def _request_root(directory: Path | None) -> Path:
@@ -157,7 +161,7 @@ class _BudgetClient:
     def upload_file(self, *args, **kwargs):
         # Transfers use a new client with the remaining deadline, never the
         # original normal timeout. Injected test peers implement this boundary.
-        from .control_client import ControlClient
+        from .control_client.transfers import ControlClient
 
         client = self.client
         if isinstance(client, ControlClient):
@@ -166,7 +170,7 @@ class _BudgetClient:
         return client.upload_file(*args, **kwargs)
 
     def download_file(self, *args, **kwargs):
-        from .control_client import ControlClient
+        from .control_client.transfers import ControlClient
 
         client = self.client
         if isinstance(client, ControlClient):

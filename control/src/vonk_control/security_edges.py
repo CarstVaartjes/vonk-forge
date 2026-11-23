@@ -1,15 +1,15 @@
 """The closed set of security edges a refusal may name.
 
-A :class:`~vonk_agent_protocol.SecurityRefusalError` is terminal and never
+A :class:`~vonk_agent_protocol.outcome.SecurityRefusalError` is terminal and never
 retried, so it is only for a real security boundary.  Each closed
-:class:`~vonk_agent_protocol.SecurityRefusalReason` names exactly one of the
+:class:`~vonk_agent_protocol.lifecycle_vocabulary.SecurityRefusalReason` names exactly one of the
 edges below; :mod:`failure_classification` treats a code as a security refusal
 only through this map.
 
 Bookkeeping drift is never a security edge.  An owner that is unavailable is a
-wait (:class:`~vonk_agent_protocol.UnknownOutcomeError`); stored state that
+wait (:class:`~vonk_agent_protocol.outcome.UnknownOutcomeError`); stored state that
 changed, was superseded or no longer agrees is a conflict the owner re-plans
-(an :class:`~vonk_agent_protocol.InvalidRequestError` with
+(an :class:`~vonk_agent_protocol.outcome.InvalidRequestError` with
 ``InvalidRequestReason.SUPERSEDED``); stored evidence that does not parse is an
 invalid request with its reason (``MALFORMED``).
 """
@@ -19,7 +19,7 @@ from __future__ import annotations
 from enum import StrEnum
 from types import MappingProxyType
 
-from vonk_agent_protocol import SecurityRefusalReason as Reason
+from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason as Reason
 
 
 class SecurityEdge(StrEnum):

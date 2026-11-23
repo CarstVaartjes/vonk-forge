@@ -11,16 +11,20 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import event, select
-from vonk_agent_protocol import AgentOperation as AgentOperationKind
-from vonk_agent_protocol import (
-    LifecycleState,
-    OperationProgress,
+from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
     RecipeJobOutputLimits,
-    canonical_message,
-    recipe_job_manifest_document,
-    recipe_job_manifest_sha256,
 )
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_document as recipe_job_manifest_document,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_sha256 as recipe_job_manifest_sha256,
+)
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.agent_jobs.contracts import (
     _WORKLOAD_INTENT_OPERATIONS,
     fencing_intent,

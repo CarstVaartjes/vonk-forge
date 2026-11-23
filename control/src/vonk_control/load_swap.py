@@ -14,8 +14,8 @@ from collections.abc import Collection
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import RunState
 from vonk_agent_protocol.inventory import HostSettings
+from vonk_agent_protocol.state_machines import RunState
 from vonk_agent_protocol.swap import GIB
 
 from .models.execution import RecipeRun, RunNode

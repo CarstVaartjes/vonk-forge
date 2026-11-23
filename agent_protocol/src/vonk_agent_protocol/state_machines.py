@@ -204,7 +204,7 @@ class ModelCacheOperatorStatus(WireEnum):
     """The operator-facing word of a model-cache operation that is not a stored state.
 
     ``accepted``: the request is recorded and not yet picked up.  Every other state
-    an operator sees is a :class:`~vonk_agent_protocol.LifecycleState` (a cancel
+    an operator sees is a :class:`~vonk_agent_protocol.lifecycle_vocabulary.LifecycleState` (a cancel
     under way is ``observing`` with its cancellation intent).
     """
 

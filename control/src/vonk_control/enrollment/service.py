@@ -11,8 +11,13 @@ from datetime import datetime, timedelta
 from cryptography import x509
 from sqlalchemy import select, true, update
 from sqlalchemy.exc import SQLAlchemyError
-from vonk_agent_protocol import ErrorCategory, LifecycleState, UnknownError, WaitReason
 from vonk_agent_protocol.enrollment import ExpiredRenewRequest
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    ErrorCategory,
+    LifecycleState,
+    WaitReason,
+)
+from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.state_machines import (
     CertificateRecordState,
     EnrollmentRecordState,

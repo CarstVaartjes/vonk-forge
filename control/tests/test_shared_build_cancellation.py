@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 import pytest
 import vonk_control.recipe_image_availability.requests as availability_requests
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.jobs import Job

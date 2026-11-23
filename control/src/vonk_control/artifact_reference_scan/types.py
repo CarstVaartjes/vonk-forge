@@ -6,9 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-from vonk_agent_protocol import (
-    RunState,
-)
+from vonk_agent_protocol.state_machines import RunState
 
 from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,

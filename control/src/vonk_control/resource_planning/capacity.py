@@ -5,11 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
-from vonk_agent_protocol import (
-    ResourceBlockerCode,
-    ResourcePlanningCode,
-)
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
+from vonk_agent_protocol.lifecycle_vocabulary import ResourceBlockerCode
+from vonk_agent_protocol.reason_codes.resources import ResourcePlanningCode
 from vonk_agent_protocol.swap import (
     GIB,
     SWAP_POLICY,

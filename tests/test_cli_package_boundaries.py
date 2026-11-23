@@ -44,7 +44,8 @@ def test_exported_renderer_uses_the_dispatch_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A test double on the real dispatch binding changes the public renderer."""
-    from cluster_profiles.cli_render import dispatch, render_payload
+    from cluster_profiles.cli_render import dispatch
+    from cluster_profiles.cli_render.dispatch import render_payload
 
     calls = []
 

@@ -10,13 +10,10 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    AgentResult,
-    JournalRepairCode,
-    LifecycleState,
-    OperationProgress,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.runs import JournalRepairCode
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.jobs.documents import RunSwitchRunIntent
 from vonk_control.journal_models import (

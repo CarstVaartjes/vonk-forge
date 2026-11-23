@@ -13,17 +13,19 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, object_session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import (
-    InstallAdmissionCode,
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
+    WaitReason,
+)
+from vonk_agent_protocol.reason_codes.admission import InstallAdmissionCode
+from vonk_agent_protocol.recipe_operations import (
     RecipeInstallPayload,
     RecipeStartPayload,
-    ReservationState,
-    WaitReason,
-    canonical_message,
 )
+from vonk_agent_protocol.state_machines import ReservationState
 
 from .. import agent_operation_states
 from ..admission_locking import (

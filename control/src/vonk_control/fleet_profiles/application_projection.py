@@ -7,18 +7,18 @@ from typing import cast as _typing_cast
 
 from pydantic import ValidationError
 from sqlalchemy.orm import Session, object_session
-from vonk_agent_protocol import (
-    InvalidRequestReason,
-    LifecycleState,
-    ProfileReasonCode,
-    ProgressAlarmCode,
-)
 from vonk_agent_protocol.agent_words import (
     ProfileCancellationCause,
     ProfileChildJobKind,
     ProfileChildPhase,
     ProfileEffectState,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    LifecycleState,
+    ProgressAlarmCode,
+)
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract.applications import (

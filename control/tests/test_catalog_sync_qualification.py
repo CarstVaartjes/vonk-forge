@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import CatalogSyncState
+from vonk_agent_protocol.state_machines import CatalogSyncState
 from vonk_control.auth import CursorCodec, TokenCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService

@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Protocol
 
-from vonk_agent_protocol import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress
 
 
 class Verdict(StrEnum):

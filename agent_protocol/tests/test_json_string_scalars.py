@@ -21,11 +21,11 @@ from typing import Any
 import pytest
 import vonk_agent_protocol
 from pydantic import BaseModel
-from vonk_agent_protocol import AgentFailureResult, AgentResult
+from vonk_agent_protocol.contracts import AgentFailureResult, AgentResult
 from vonk_agent_protocol.failure_evidence import FAILURE_LOG_POLICY, FailureDiagnostics
 from vonk_agent_protocol.optional_evidence import EvidenceDrop
 from vonk_agent_protocol.page_cache import PageCacheDropProblem, PageCacheDropReport
-from vonk_agent_protocol.reason_codes import AgentEvidenceCode
+from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 from vonk_agent_protocol.wire_model import JSON_STRING_BOUND, JSON_STRING_SCALARS
 
 VECTORS = Path(__file__).parents[1] / "src/vonk_agent_protocol/vectors"

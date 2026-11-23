@@ -11,11 +11,8 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import event, select
-from vonk_agent_protocol import (
-    LifecycleState,
-    RouteState,
-    RunState,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.model_primitives import Base

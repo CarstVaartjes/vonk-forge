@@ -12,10 +12,8 @@ from typing import Any
 
 import pytest
 from sqlalchemy import event, select
-from vonk_agent_protocol import (
-    ContainerRuntimeAction,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.host_helper import ContainerRuntimeAction
 from vonk_control.bounded_json import require_mapping
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
 from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding

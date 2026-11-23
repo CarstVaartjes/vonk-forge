@@ -24,17 +24,14 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    AgentFailureKind,
+from vonk_agent_protocol.contracts import AgentFailureKind, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     FailureCode,
-    HelperErrorCode,
-    OutcomeEvidence,
-    OutcomeFailed,
     OutcomeKind,
-    canonical_message,
-    outcome_body,
 )
+from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeFailed, outcome_body
+from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
 from vonk_control.agent_jobs.retry import result_disposition
 from vonk_control.inventory.repository import (
     InventoryRepository,

@@ -11,7 +11,7 @@ import httpx2
 import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.artifact_reference_scan.model_sets import model_set_objects
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService

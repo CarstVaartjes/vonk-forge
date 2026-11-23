@@ -14,7 +14,7 @@ import httpx2 as httpx
 from fastapi import FastAPI, Query
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, ValidationError
-from vonk_agent_protocol import UnknownOutcomeError
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 
 from ..auth import Actor
 from ..operation_api.constants import _ADMIN_OPERATION_IDS

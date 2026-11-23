@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.enrollment import (
     MAX_ENROLLMENT_RESPONSE_BYTES,
     EnrollmentBootstrapResponse,

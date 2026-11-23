@@ -11,7 +11,7 @@ from httpx import Response
 from httpx2 import Response as Response2
 from vonk_control.fleet_projection.common import FleetSnapshot
 
-from cluster_profiles.control_client import ControlClient
+from cluster_profiles.control_client.transfers import ControlClient
 
 type ObservationHTTPResponse = Response | Response2
 

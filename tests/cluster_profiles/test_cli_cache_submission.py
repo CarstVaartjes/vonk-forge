@@ -11,9 +11,8 @@ from urllib.error import HTTPError
 import pytest
 from controller_cli_support import FakeClient, run
 
-from cluster_profiles import cli, controller_cli
-from cluster_profiles.control_client import (
-    ControlClient,
+from cluster_profiles import cli
+from cluster_profiles.control_client.errors import (
     ControlConflict,
     ControlForbidden,
     ControlMalformedResponse,
@@ -21,6 +20,9 @@ from cluster_profiles.control_client import (
     ControlTransportError,
     ControlUnavailable,
 )
+from cluster_profiles.control_client.transfers import ControlClient
+from cluster_profiles.controller_cli import confirmation as confirmation_module
+from cluster_profiles.controller_cli import observation as observation_module
 
 KEY = "11111111-1111-4111-8111-111111111111"
 
@@ -275,7 +277,7 @@ def test_recovery_deadline_is_shared_across_all_three_network_calls(
             elapsed += (3.5, 2.5 if exhausted else 2, 0)[min(len(timeouts) - 1, 2)]
             return super().request(*args, **kwargs)
 
-    monkeypatch.setattr(controller_cli.observation.time, "monotonic", lambda: elapsed)
+    monkeypatch.setattr(observation_module.time, "monotonic", lambda: elapsed)
     client = DelayedClient(
         {
             ("POST", "/api/model/chosen/download"): [
@@ -304,8 +306,8 @@ def test_server_retry_delay_consumes_the_existing_submission_budget(monkeypatch,
         slept.append(seconds)
         elapsed += seconds
 
-    monkeypatch.setattr(controller_cli.observation.time, "monotonic", lambda: elapsed)
-    monkeypatch.setattr(controller_cli.observation.time, "sleep", sleep)
+    monkeypatch.setattr(observation_module.time, "monotonic", lambda: elapsed)
+    monkeypatch.setattr(observation_module.time, "sleep", sleep)
     client = SubmissionClient(
         {
             ("POST", "/api/model/chosen/download"): [
@@ -331,8 +333,8 @@ def test_observation_does_not_shorten_a_server_delay_to_poll_early(monkeypatch):
         nonlocal elapsed
         elapsed += seconds
 
-    monkeypatch.setattr(controller_cli.observation.time, "monotonic", lambda: elapsed)
-    monkeypatch.setattr(controller_cli.observation.time, "sleep", sleep)
+    monkeypatch.setattr(observation_module.time, "monotonic", lambda: elapsed)
+    monkeypatch.setattr(observation_module.time, "sleep", sleep)
     identity = {"operation_id": "original", "state": "running"}
     client = SubmissionClient(
         {
@@ -364,7 +366,7 @@ def test_observation_does_not_shorten_a_server_delay_to_poll_early(monkeypatch):
 def test_recipe_observer_keeps_terminal_residue_until_the_same_snapshot_repairs(
     monkeypatch,
 ):
-    monkeypatch.setattr(controller_cli.observation.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(observation_module.time, "sleep", lambda seconds: None)
     healthy = receipt("recipe") | {"state": "succeeded", "residue": None}
     damaged = healthy | {
         "progress": None,
@@ -466,8 +468,8 @@ def test_lost_server_error_body_preserves_its_retry_delay(
         sleeps.append(seconds)
         now[0] += seconds
 
-    monkeypatch.setattr(controller_cli.observation.time, "monotonic", lambda: now[0])
-    monkeypatch.setattr(controller_cli.observation.time, "sleep", bounded_sleep)
+    monkeypatch.setattr(observation_module.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(observation_module.time, "sleep", bounded_sleep)
     control = ControlClient("https://forge.example.test", token, opener=opener)
     assert (
         cli.main(
@@ -503,7 +505,7 @@ def test_human_key_is_flushed_before_the_post_and_interrupt_keeps_unknown(
             return super().flush()
 
     output = Stderr()
-    monkeypatch.setattr(controller_cli.confirmation.sys, "stderr", output)
+    monkeypatch.setattr(confirmation_module.sys, "stderr", output)
 
     class InterruptedClient(SubmissionClient):
         def request(self, *args, **kwargs):
@@ -525,7 +527,7 @@ def test_human_key_is_flushed_before_the_post_and_interrupt_keeps_unknown(
     assert not capsys.readouterr().out
 
     # JSON emits no preamble and still records uncertainty on interruption.
-    monkeypatch.setattr(controller_cli.confirmation.sys, "stderr", StringIO())
+    monkeypatch.setattr(confirmation_module.sys, "stderr", StringIO())
     client = SubmissionClient(
         {("POST", "/api/model/chosen/download"): KeyboardInterrupt()}
     )
@@ -584,11 +586,9 @@ def test_malformed_poll_keeps_original_snapshot_and_bounded_observation(
 ):
     """Unreadable peer data cannot replace identity or end observation early."""
     elapsed = [0.0]
+    monkeypatch.setattr(observation_module.time, "monotonic", lambda: elapsed[0])
     monkeypatch.setattr(
-        controller_cli.observation.time, "monotonic", lambda: elapsed[0]
-    )
-    monkeypatch.setattr(
-        controller_cli.observation.time,
+        observation_module.time,
         "sleep",
         lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds),
     )

@@ -15,13 +15,11 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    RunState,
-    canonical_message,
-)
 from vonk_agent_protocol.agent_words import (
     RecipeRunDispositionValue,
 )
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.state_machines import RunState
 from vonk_control import agent_operation_states as aos
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment.contract import EnrollmentGrant

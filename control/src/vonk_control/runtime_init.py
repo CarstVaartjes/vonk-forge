@@ -13,7 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from vonk_agent_protocol import WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 
 from .categorized_errors import UnsettledOutcome
 from .runtime.asset_contract import RuntimeAssetInventory

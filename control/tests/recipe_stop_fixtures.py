@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vonk_agent_protocol import CompiledExecutionPlan, RecipeStopPayload
+from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
+from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 
 _RUN_ID = "00000000-0000-4000-8000-000000000001"
 _INSTALLATION_ID = "00000000-0000-4000-8000-000000000002"

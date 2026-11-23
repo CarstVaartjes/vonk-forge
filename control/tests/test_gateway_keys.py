@@ -8,7 +8,7 @@ import httpx2
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from vonk_agent_protocol import UnknownError
+from vonk_agent_protocol.outcome import UnknownError
 from vonk_control.auth import Actor
 from vonk_control.gateway.keys import (
     GatewayKeyCreated,

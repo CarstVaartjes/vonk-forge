@@ -19,16 +19,15 @@ from sqlalchemy import create_engine, delete, event, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import (
-    AgentResult,
-    EnrollmentGrantState,
+from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
     ErrorCategory,
     SecurityRefusalReason,
-    canonical_message,
 )
 from vonk_agent_protocol.state_machines import (
     CertificateRecordState,
     CertificateRotationState,
+    EnrollmentGrantState,
     EnrollmentRecordState,
     NodeIdentityState,
 )

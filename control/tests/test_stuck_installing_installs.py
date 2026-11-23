@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select, update
-from vonk_agent_protocol import InstallationState
+from vonk_agent_protocol.state_machines import InstallationState
 from vonk_control import attempt_residues
 from vonk_control.attempt_residues import LEFTOVER_GRACE, AttemptResidueReconciler
 from vonk_control.installation_transitions import IN_FLIGHT

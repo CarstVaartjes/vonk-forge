@@ -12,7 +12,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from vonk_agent_protocol import ImageStoreCode
+from vonk_agent_protocol.reason_codes.images import ImageStoreCode
 from vonk_control.oci_image_store import (
     Collection,
     OciImageStore,

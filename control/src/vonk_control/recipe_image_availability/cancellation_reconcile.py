@@ -9,13 +9,10 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
-from vonk_agent_protocol import (
-    Disposition,
-    LifecycleState,
-    RuntimeImageCode,
-    SecurityRefusalError,
-    UnknownOutcomeError,
-)
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
 
 from ..jobs import states as job_states
 from ..jobs.documents import AvailabilityJobPayload

@@ -12,11 +12,11 @@ import statistics
 from pathlib import Path
 from typing import Any
 
-from vonk_agent_protocol import (
+from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan,
-    canonical_message,
     validate_compiled_execution_plan,
 )
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_forge_contracts import (
     ModelDefinition,
     document_sha256,

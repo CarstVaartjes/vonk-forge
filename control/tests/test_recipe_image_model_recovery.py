@@ -11,7 +11,7 @@ from typing import Any
 import httpx2
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.model_cache.service import ModelCacheService

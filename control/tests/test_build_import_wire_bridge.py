@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
+from vonk_agent_protocol.build_import import (
     RecipeBuildCleanupEvidence,
     RecipeBuildEvidence,
     RecipeBuildRequest,

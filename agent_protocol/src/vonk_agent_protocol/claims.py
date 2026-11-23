@@ -13,7 +13,7 @@ from .optional_evidence import (
     fail_open_on_optional_evidence,
 )
 from .package_upgrade import PackageActivationReceipt
-from .reason_codes import AgentEvidenceCode
+from .reason_codes.evidence import AgentEvidenceCode
 from .wire_model import Digest, WireModel
 
 

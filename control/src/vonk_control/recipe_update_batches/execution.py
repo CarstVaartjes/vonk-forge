@@ -8,13 +8,10 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select, true
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    LifecycleState,
-    ProgressPhase,
-    RecipeUpdateCode,
-    WaitReason,
-    canonical_message,
-)
+from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.reason_codes.recipes import RecipeUpdateCode
 
 from ..categorized_errors import InvalidValue
 from ..lifecycle.recipe_update_batch import CANCEL_BUDGET

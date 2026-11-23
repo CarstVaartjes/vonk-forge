@@ -14,13 +14,12 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.functions import FunctionElement
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
     AgentOperation,
-    LifecycleState,
-    WaitReason,
     canonical_message,
+    canonical_payload,
 )
-from vonk_agent_protocol.contracts import canonical_payload
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 
 from .. import agent_operation_states

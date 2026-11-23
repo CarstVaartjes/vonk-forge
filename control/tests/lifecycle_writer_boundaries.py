@@ -29,7 +29,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from vonk_agent_protocol import LifecycleSubject, StateWriteKind
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleSubject, StateWriteKind
 
 from .parsed_sources import memoized_scan, parsed_tree
 

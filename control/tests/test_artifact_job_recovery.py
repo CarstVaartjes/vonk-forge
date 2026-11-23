@@ -8,23 +8,28 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import event, select
-from vonk_agent_protocol import (
-    AgentResult,
+from vonk_agent_protocol.agent_words import FailureStage
+from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
-    FailureStage,
     InvalidRequestReason,
     LifecycleState,
     OutcomeKind,
-    RecipeJobFile,
-    RecipeJobRunResult,
-    RecipeStopResult,
-    RunState,
     WaitReason,
-    canonical_message,
-    recipe_job_manifest_document,
-    recipe_job_manifest_sha256,
 )
 from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeUnknown
+from vonk_agent_protocol.recipe_jobs import (
+    RecipeJobFile,
+    RecipeJobRunResult,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_document as recipe_job_manifest_document,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_sha256 as recipe_job_manifest_sha256,
+)
+from vonk_agent_protocol.recipe_operations import RecipeStopResult
+from vonk_agent_protocol.state_machines import RunState
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs import states as ajs
 from vonk_control.artifact_jobs.contracts import (

@@ -7,11 +7,8 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import Field, ValidationError, field_validator
-from vonk_agent_protocol import (
-    AgentProtocolError,
-    DistributionAssignment,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentProtocolError, canonical_message
+from vonk_agent_protocol.distribution import DistributionAssignment
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 
 

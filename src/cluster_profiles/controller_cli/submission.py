@@ -14,7 +14,7 @@ from ..cli_outcome import (
     SubmissionAcceptance,
 )
 from ..cli_states_generated import PROFILE_REFUSAL_CODES
-from ..control_client import (
+from ..control_client.errors import (
     ControlClientError,
     ControlConflict,
     ControlHTTPError,

@@ -10,18 +10,15 @@ import json
 from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
-from vonk_agent_protocol import (
-    AgentProgress,
-    AgentResult,
-    OperationProgress,
-    RecipeStartPayload,
-)
 from vonk_agent_protocol.build_import import RecipeBuildEnvironmentArgument
+from vonk_agent_protocol.contracts import AgentProgress, AgentResult
 from vonk_agent_protocol.error_response import (
     BoundedErrorResponse,
     RequestValidationProblem,
 )
 from vonk_agent_protocol.failure_evidence import LOG_TAIL_BYTES, FailureDiagnostics
+from vonk_agent_protocol.recipe_operations import RecipeStartPayload
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.catalog.sync import _empty_result
 from vonk_control.catalog.sync_contract import ManagedCatalogSyncResult
 from vonk_control.fleet_profile_contract.definitions import (

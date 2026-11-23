@@ -9,21 +9,22 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import (
-    InstallAdmissionCode,
-    InstallationNodeState,
-    InstallationState,
-    InvalidRequestError,
-    InvalidRequestReason,
-    LifecycleState,
-    SecurityRefusalError,
-    UnknownOutcomeError,
-    WaitReason,
-)
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    LifecycleState,
+    WaitReason,
+)
+from vonk_agent_protocol.outcome import (
+    InvalidRequestError,
+    SecurityRefusalError,
+    UnknownOutcomeError,
+)
+from vonk_agent_protocol.reason_codes.admission import InstallAdmissionCode
+from vonk_agent_protocol.state_machines import InstallationNodeState, InstallationState
 
 from ..admission_locking import admission_attempts, admission_wait_exhausted
 from ..failure_classification import error_detail

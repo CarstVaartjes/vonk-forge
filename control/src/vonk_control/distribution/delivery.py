@@ -8,22 +8,20 @@ from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from sqlalchemy import select, update
-from vonk_agent_protocol import (
-    AgentOperation as OperationKind,
-)
-from vonk_agent_protocol import (
-    DistributionAssignmentState,
-    DistributionCode,
-    DistributionObject,
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.distribution import DistributionObject
+from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
-    SecurityRefusalError,
     SecurityRefusalReason,
 )
+from vonk_agent_protocol.outcome import SecurityRefusalError
+from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import (
     RecipeInstallPayload,
     RecipeStartPayload,
 )
+from vonk_agent_protocol.state_machines import DistributionAssignmentState
 
 from ..distribution_assignment import NodeDistributionAssignment
 from ..models.fleet import AgentNode

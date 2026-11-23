@@ -19,7 +19,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from vonk_agent_protocol import RunSwitchCode
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.sparks import Memory

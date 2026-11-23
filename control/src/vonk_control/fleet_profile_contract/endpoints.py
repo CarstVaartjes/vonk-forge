@@ -11,12 +11,9 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
-from vonk_agent_protocol import (
-    DesiredAssignmentState,
-    EndpointState,
-    ProfileReasonCode,
-)
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_agent_protocol.state_machines import DesiredAssignmentState, EndpointState
 from vonk_forge_contracts import EndpointAlias
 
 from ..endpoint_contract import EndpointResponse

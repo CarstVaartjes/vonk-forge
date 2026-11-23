@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import (
     FailureCode,
     LifecycleEffect,
     LifecycleState,
+)
+from vonk_agent_protocol.wire_model import (
     OperationCheckpoint,
     OperationMemberProgress,
     OperationProgress,

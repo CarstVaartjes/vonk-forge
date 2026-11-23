@@ -4,10 +4,13 @@ import json
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol import PackageActivationReceipt, PackageRollbackAuthority
 from vonk_agent_protocol.host_helper import (
     ConfirmPackageActivationOperation,
     InstallVonkDebOperation,
+)
+from vonk_agent_protocol.package_upgrade import (
+    PackageActivationReceipt,
+    PackageRollbackAuthority,
 )
 
 

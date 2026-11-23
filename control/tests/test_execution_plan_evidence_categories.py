@@ -3,7 +3,7 @@
 from typing import cast
 
 import pytest
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.execution_plan_service import (
     _build_package,
     _image_digest,

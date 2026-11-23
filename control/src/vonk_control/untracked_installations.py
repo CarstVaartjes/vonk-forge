@@ -6,12 +6,12 @@ from collections.abc import Collection
 
 from sqlalchemy import Select, or_, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    InstallationState,
+from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     LifecycleSubject,
     stored_words,
 )
+from vonk_agent_protocol.state_machines import InstallationState
 
 from .models.execution import (
     STOPPABLE_RUN_STATES,

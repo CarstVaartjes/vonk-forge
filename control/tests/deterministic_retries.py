@@ -16,7 +16,10 @@ from __future__ import annotations
 import ast
 import re
 
-from vonk_agent_protocol import TERMINAL_LIFECYCLE_STATES, LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    TERMINAL_LIFECYCLE_STATES,
+    LifecycleState,
+)
 
 BROAD = frozenset(
     {

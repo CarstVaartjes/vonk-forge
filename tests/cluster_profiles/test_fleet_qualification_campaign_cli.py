@@ -8,12 +8,12 @@ from typing import Any
 
 import pytest
 
-from cluster_profiles import fleet_qualification_campaign_cli as campaign_cli
-from cluster_profiles.fleet_qualification import QualificationError
 from cluster_profiles.fleet_qualification_campaign_cli import (
     application as load_campaign_batch,
 )
+from cluster_profiles.fleet_qualification_campaign_cli import cli
 from cluster_profiles.fleet_qualification_campaign_cli import smoke as campaign_smoke
+from cluster_profiles.fleet_qualification_observation import QualificationError
 from control.tests.consumer_outcomes import not_adopted
 
 ALPHA = "vonk-forge/alpha"
@@ -199,7 +199,7 @@ class FakeController:
             return dict(self.profile)
         if path == "/api/profile/1" and method == "PUT":
             if payload["expected_revision"] != self.profile["revision"]:
-                from cluster_profiles.control_client import ControlConflict
+                from cluster_profiles.control_client.errors import ControlConflict
 
                 raise ControlConflict(409, "current owner revision is different")
             self.profile = {
@@ -289,7 +289,7 @@ def _run(
             notices.append(notice)
         controller.restart(list(notice["sparks"]))  # type: ignore[arg-type]
 
-    return campaign_cli.run(
+    return cli.run(
         [
             *args,
             "--manifest",
@@ -393,7 +393,7 @@ def test_a_profile_owned_by_something_else_is_never_overwritten(
 def test_campaign_reconciles_lost_reply_and_restart_reuses_one_application(
     manifest, failing_smoke, monkeypatch
 ):
-    from cluster_profiles.control_client import ControlTransportError
+    from cluster_profiles.control_client.errors import ControlTransportError
 
     class LostReply(FakeController):
         lost = False
@@ -410,7 +410,7 @@ def test_campaign_reconciles_lost_reply_and_restart_reuses_one_application(
             return value
 
     controller = LostReply()
-    smoke = campaign_cli._smoke_lanes
+    smoke = campaign_smoke._smoke_lanes
     crashed = False
 
     def crash_after_acceptance(*args, **kwargs):

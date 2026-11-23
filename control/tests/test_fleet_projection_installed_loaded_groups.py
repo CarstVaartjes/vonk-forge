@@ -8,10 +8,8 @@ from typing import cast
 import pytest
 from sqlalchemy import Table, create_engine, literal, select, text, update
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import (
-    canonical_message,
-)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.fleet_projection.common import (
     FleetSnapshot,
@@ -380,7 +378,7 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
         )
 
     snapshot = FleetProjection(sessions, clock=lambda: NOW).read()
-    from cluster_profiles.cli_render import render_payload
+    from cluster_profiles.cli_render.dispatch import render_payload
 
     render_payload(snapshot.model_dump(mode="json"), "fleet")
     rendered = capsys.readouterr()

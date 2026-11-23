@@ -7,7 +7,7 @@ from typing import Any, Literal, Protocol
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import Field
 from starlette.responses import JSONResponse
-from vonk_agent_protocol import CatalogSyncCode
+from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
 
 from ..auth import Actor
 from ..library.contract import UuidId

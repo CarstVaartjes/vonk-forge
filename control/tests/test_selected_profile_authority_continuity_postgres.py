@@ -7,21 +7,20 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    AgentResult,
-    AgentResultState,
-    InstallationState,
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState
+from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightFindingCode
+from vonk_agent_protocol.recipe_operations import (
     RecipeStopResult,
     RecipeUninstallResult,
-    RuntimePreflightFindingCode,
-    canonical_message,
 )
-from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightFinding,
     RuntimePreflightRequest,
     RuntimePreflightResult,
 )
+from vonk_agent_protocol.state_machines import InstallationState
 from vonk_control import terminal_history_collection
 from vonk_control.agent_contacts import record_contact
 from vonk_control.agent_jobs.service import AgentJobService

@@ -9,15 +9,15 @@ from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import (
+from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileSwitchChildKind
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
-    RouteState,
-    UnknownOutcomeError,
-    canonical_message,
 )
-from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileSwitchChildKind
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.state_machines import RouteState
 
 from ..admission_locking import (
     set_admission_timeout,

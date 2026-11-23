@@ -3,7 +3,7 @@
 The lifecycle core (``lifecycle/core.py``) owns the retry count of every
 lifecycle row.  An owner outside the core (route publication, distributed
 recovery) schedules through :func:`schedule`, which reads the failure's
-:class:`~vonk_agent_protocol.Disposition`: a ``WAIT`` keeps the count, a
+:class:`~vonk_agent_protocol.agent_words.Disposition`: a ``WAIT`` keeps the count, a
 ``FAIL`` ends at once, only an ``OBSERVE`` spends a retry.  A request-level
 HTTP retry is request-local. Standing owners bound their retry rate, never
 end authorized intent by a repetition count.
@@ -15,7 +15,9 @@ import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from vonk_agent_protocol import AgentFailureKind, Disposition, FailureCode
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.contracts import AgentFailureKind
+from vonk_agent_protocol.lifecycle_vocabulary import FailureCode
 
 FailureKind = AgentFailureKind
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from vonk_agent_protocol import WaitOwnerKind
+from vonk_agent_protocol.lifecycle_vocabulary import WaitOwnerKind
 
 from . import (
     models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata

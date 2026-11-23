@@ -14,13 +14,13 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import RunState
 from vonk_agent_protocol.failure_evidence import (
     FailureDiagnostics,
     FailureLogTail,
     FailureProperty,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import RunAdmissionCode
+from vonk_agent_protocol.state_machines import RunState
 from vonk_control.distributed_recovery.common import (
     release_inactive_run_claims_in_session,
     settle_observed_absent_runs_in_session,

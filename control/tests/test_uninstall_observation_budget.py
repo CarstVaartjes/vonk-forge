@@ -5,25 +5,27 @@ from datetime import timedelta
 from uuid import uuid4
 
 import pytest
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import AgentFailureKind, AgentOperation, AgentResult
+from vonk_agent_protocol.lifecycle_vocabulary import (
     TERMINAL_LIFECYCLE_STATES,
-    AgentFailureKind,
-    AgentOperation,
-    AgentResult,
     AgentResultState,
     FailureCode,
-    HelperErrorCode,
     LifecycleState,
+    OutcomeKind,
+    WaitReason,
+)
+from vonk_agent_protocol.outcome import (
     OutcomeDone,
     OutcomeEvidence,
     OutcomeFailed,
-    OutcomeKind,
     OutcomeUnknown,
+)
+from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
+from vonk_agent_protocol.recipe_operations import (
     RecipeStopPayload,
     RecipeStopResult,
     RecipeUninstallPayload,
     RecipeUninstallResult,
-    WaitReason,
 )
 from vonk_control.agent_jobs.contracts import _GRANT_LIFETIME
 from vonk_control.agent_jobs.service import AgentJobService

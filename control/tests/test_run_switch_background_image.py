@@ -24,7 +24,9 @@ from typing import Any, cast
 import pytest
 from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError
-from vonk_agent_protocol import ArtifactLifecycleCode, LifecycleState, canonical_message
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
 )

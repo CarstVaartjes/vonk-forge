@@ -11,14 +11,14 @@ from typing import Any
 
 import pytest
 from pydantic import BaseModel
-from vonk_agent_protocol import (
-    AgentOperation,
-    RecipeInstallPayload,
-    RecipeStartPayload,
-)
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledJob,
     CompiledSecurityMount,
+)
+from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.recipe_operations import (
+    RecipeInstallPayload,
+    RecipeStartPayload,
 )
 
 PLAN = json.loads(

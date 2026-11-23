@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import DistributionObject
+from vonk_agent_protocol.distribution import DistributionObject
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.distribution.filesystem import (
     FilesystemObjectSource,

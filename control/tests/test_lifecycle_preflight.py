@@ -4,16 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import delete, select
-from vonk_agent_protocol import (
-    AgentOperation as OperationKind,
-)
-from vonk_agent_protocol import (
-    LifecycleState,
-    RuntimePreflightCode,
-    WaitReason,
-    canonical_message,
-)
 from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
     RuntimePreflightResult,
@@ -326,12 +321,12 @@ def test_removed_node_is_a_terminal_preflight_blocker(tmp_path):
 
 def test_dispatched_preflight_claim_can_receive_its_signed_helper_grant(tmp_path):
     from cryptography.hazmat.primitives.asymmetric import ed25519
-    from vonk_agent_protocol import (
+    from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
+    from vonk_agent_protocol.host_helper import (
         ContainerRuntimeAction,
         ExecuteContainerRuntimeRequestOperation,
         host_helper_grant_signing_bytes,
     )
-    from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
     from vonk_control.agent_jobs.service import AgentJobService
     from vonk_control.host_helper_authority import (
         HostHelperGrantIssuer,

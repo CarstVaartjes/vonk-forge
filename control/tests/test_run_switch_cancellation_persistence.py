@@ -5,7 +5,8 @@ from uuid import uuid4
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState, OperationProgress
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import Job
 from vonk_control.run_switch_contract.identity import RunSwitchCancellation

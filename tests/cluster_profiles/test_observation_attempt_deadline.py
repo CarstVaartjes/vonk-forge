@@ -13,11 +13,9 @@ from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.model_primitives import Base
 
 from cluster_profiles import observation_transfer_reader
-from cluster_profiles.control_client import (
-    ControlClient,
-    ControlTransportError,
-)
 from cluster_profiles.control_client import client as control_client
+from cluster_profiles.control_client.errors import ControlTransportError
+from cluster_profiles.control_client.transfers import ControlClient
 from control.tests.observation_transfer_peer import ObservationHTTPPeer, fleet_authority
 from control.tests.test_observation_transfer import _peer
 

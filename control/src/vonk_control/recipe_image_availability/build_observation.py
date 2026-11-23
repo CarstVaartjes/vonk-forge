@@ -7,13 +7,10 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import (
-    LifecycleState,
-    RecipeBuildRequest,
-    SecurityRefusalError,
-    UnknownOutcomeError,
-)
+from vonk_agent_protocol.build_import import RecipeBuildRequest
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 
 from ..jobs import states as job_states
 from ..lifecycle.evidence import Residue

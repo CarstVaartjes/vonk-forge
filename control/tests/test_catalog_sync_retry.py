@@ -5,7 +5,8 @@ from concurrent.futures import Executor, Future
 import pytest
 from psycopg.errors import InFailedSqlTransaction
 from sqlalchemy.exc import InternalError
-from vonk_agent_protocol import CatalogSyncCode, RecipePackageCode
+from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
+from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
 from vonk_control.catalog.sync import (
     ManagedRecipeCatalogSyncService,
     catalog_sync_failure_reason,
@@ -146,7 +147,7 @@ def test_partial_receipts_back_off_then_success_resets_the_retry_episode(
 ):
     from dataclasses import replace
 
-    from vonk_agent_protocol import CatalogSyncState
+    from vonk_agent_protocol.state_machines import CatalogSyncState
     from vonk_control.catalog import sync as catalog_sync
 
     from .test_catalog_sync_topology import _Catalog, _example, _item, _sync

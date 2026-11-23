@@ -15,7 +15,11 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState, OperationProgress, SecurityRefusalReason
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    SecurityRefusalReason,
+)
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.artifact_reference_scan.image_references import (
     runtime_image_reference_findings,
     runtime_image_reference_reasons,

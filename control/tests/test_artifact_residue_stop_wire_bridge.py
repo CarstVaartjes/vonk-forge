@@ -4,7 +4,7 @@ import os
 import subprocess
 from datetime import datetime
 
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.host_helper import SignedHostHelperGrant
 
 from .test_artifact_residue_stop import (

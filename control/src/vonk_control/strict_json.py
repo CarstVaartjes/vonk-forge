@@ -15,7 +15,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.datastructures import DefaultPlaceholder
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, RootModel, ValidationError
-from vonk_agent_protocol import UnknownOutcomeError
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.wire_model import StrictJSONModel as ProtocolStrictJSONModel
 
 from .http_errors import MAX_RETRY_AFTER_SECONDS

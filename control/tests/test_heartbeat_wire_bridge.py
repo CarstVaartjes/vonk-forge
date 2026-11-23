@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import AgentDirective
+from vonk_agent_protocol.contracts import AgentDirective
 
 from tests.wire_probes import prebuilt_probe
 

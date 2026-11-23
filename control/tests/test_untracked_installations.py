@@ -11,7 +11,8 @@ import uuid
 from pathlib import Path
 
 from sqlalchemy import create_engine
-from vonk_agent_protocol import InstallationState, LifecycleState, RunState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.state_machines import InstallationState, RunState
 from vonk_control.model_primitives import Base
 from vonk_control.models.execution import ArtifactJob, RecipeInstallation
 from vonk_control.untracked_installations import untracked_installations, untracked_runs

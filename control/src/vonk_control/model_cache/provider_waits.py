@@ -15,8 +15,9 @@ from collections.abc import Iterable, Sequence
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Protocol, cast
 
-from vonk_agent_protocol import ModelCacheCode, OperatorActionName
 from vonk_agent_protocol.http_failure import TransientReason
+from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 
 from ..models.cache import ModelCacheOperation
 from .catalog_helpers import _datetime

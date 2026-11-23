@@ -14,8 +14,8 @@ from types import ModuleType
 
 import pytest
 
-from cluster_profiles import glb_validation
-from cluster_profiles.qualification_fixtures import _glb_metadata
+from cluster_profiles.glb_validation import validation
+from cluster_profiles.qualification_fixtures.media import _glb_metadata
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTEXTS = ("platform",)
@@ -236,7 +236,7 @@ class Glb:
 
 
 def load_validator(_context: str) -> ModuleType:
-    return glb_validation
+    return validation
 
 
 class ThreeDGlbValidationTests(unittest.TestCase):

@@ -8,14 +8,11 @@ import sys
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from vonk_agent_protocol import (
-    LifecycleState,
-    ProfileReasonCode,
-    RecipeImageCode,
-    WaitReason,
-)
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProgressPhase
 from vonk_agent_protocol.host_helper import ContainerRuntimeAction
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )

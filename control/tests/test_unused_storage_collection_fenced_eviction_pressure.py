@@ -14,12 +14,9 @@ from typing import Any
 import pytest
 from sqlalchemy import Engine, create_engine, event, select, update
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import (
-    InstallationState,
-    LifecycleState,
-    ModelCacheCode,
-    RunState,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
+from vonk_agent_protocol.state_machines import InstallationState, RunState
 from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleGate
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
@@ -276,11 +273,11 @@ def test_live_two_spark_owner_does_not_pin_unrelated_installations(
     Catches node ownership or a profile scope retaining every installation.
     Exact installation/run references and a running workload must still survive.
     """
-    from vonk_agent_protocol import AgentOperation as OperationKind
     from vonk_agent_protocol.agent_words import (
         ProfileEffectState,
         ProfileSwitchChildKind,
     )
+    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
     from vonk_agent_protocol.state_machines import NodeIdentityState
     from vonk_control.jobs.documents import RecipeInstallParent
 
@@ -461,7 +458,7 @@ def test_shared_file_does_not_pin_an_unrelated_installation(
     Catches retaining all of its gigabytes for one shared tokenizer file.
     Exact installation and aggregate model/image references still retain use.
     """
-    from vonk_agent_protocol import AgentOperation as OperationKind
+    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
     from vonk_agent_protocol.recipe_operations import RecipeInstallPayload
     from vonk_control.jobs.documents import InstallPhaseOperation, RecipeInstallParent
     from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec

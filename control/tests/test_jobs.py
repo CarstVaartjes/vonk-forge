@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.auth import TokenCodec
 from vonk_control.jobs.queue import JobService, StaleAttempt
 from vonk_control.model_primitives import Base
@@ -291,7 +291,7 @@ def test_generic_worker_claim_skips_coordinator_owned_jobs(service, kind) -> Non
 
 
 def test_job_refusals_are_invalid_requests_with_reasons(service) -> None:
-    from vonk_agent_protocol import InvalidRequestError
+    from vonk_agent_protocol.outcome import InvalidRequestError
 
     jobs, _ = service
     jobs.enqueue("probe", "admin", "abc", ["spk_1"], {"a": 1}, request_id="r1")

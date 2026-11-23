@@ -23,7 +23,7 @@ from vonk_control.observation.platform import PlatformObserver
 from vonk_control.worker.liveness import WorkerHeartbeatRecorder
 
 from cluster_profiles import cli
-from cluster_profiles.control_client import ControlClient
+from cluster_profiles.control_client.transfers import ControlClient
 
 
 class Jobs:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.jobs import states as job_states
 
 

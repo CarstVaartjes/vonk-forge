@@ -9,7 +9,7 @@ from enum import StrEnum
 from ..cli_json_contract import Word
 from ..cli_states import ARTIFACT_JOB_IN_FLIGHT, lifecycle_state
 from ..cli_states_generated import ENDPOINT_UNAVAILABLE, SUCCEEDED
-from ..control_client import ControlMalformedResponse
+from ..control_client.errors import ControlMalformedResponse
 from ..generated_control.models.artifact_job_contract_response import (
     ArtifactJobContractResponse,
 )

@@ -5,7 +5,7 @@ from __future__ import annotations
 import stat
 from typing import TYPE_CHECKING, cast
 
-from vonk_agent_protocol import AssetAvailability
+from vonk_agent_protocol.state_machines import AssetAvailability
 
 from ..cache_removal_review import (
     AssetDisposition,

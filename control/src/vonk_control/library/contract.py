@@ -15,10 +15,10 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
-from vonk_agent_protocol import (
+from vonk_agent_protocol.reason_codes.catalog import LibraryProjectionCode
+from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
+from vonk_agent_protocol.state_machines import (
     InstallationState,
-    LibraryProjectionCode,
-    OperationReason,
     PlacementInstallState,
     PlacementLoadState,
     RunState,

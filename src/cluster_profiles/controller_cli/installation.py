@@ -10,15 +10,15 @@ from typing import cast
 
 from ..cli_outcome import Submission, SubmissionAcceptance
 from ..cli_states_generated import JOB_KIND_CLEANUP
-from ..control_client import (
+from ..control_client.errors import (
     ControlClientError,
     ControlForbidden,
     ControlMalformedResponse,
     ControlNotFound,
     ControlUnauthorized,
     ControlUnavailable,
-    validate_control_document,
 )
+from ..control_client.schema import validate_control_document
 from .common import ControllerClient, _quoted, _request_key
 from .observation import _poll_path
 from .selection import _observe_selection, _selection_remaining

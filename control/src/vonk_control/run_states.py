@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from vonk_agent_protocol import RunState
+from vonk_agent_protocol.state_machines import RunState
 
 # Terminal states are candidates only: an ended run can be reopened by a Spark
 # that still reports its process, and may still hold reservations. Exact

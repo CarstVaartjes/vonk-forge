@@ -10,13 +10,10 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import (
-    LifecycleState,
-    RecipeBuildCleanupRequest,
-    RecipeBuildCode,
-    WaitReason,
-)
+from vonk_agent_protocol.build_import import RecipeBuildCleanupRequest
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 
 from ..admission_locking import (
     admission_attempts,

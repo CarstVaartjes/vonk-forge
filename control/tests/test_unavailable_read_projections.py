@@ -10,8 +10,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol import ProfileReasonCode
 from vonk_agent_protocol.agent_words import ProfileInstallationPolicy
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_control.auth import Actor
 from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileDefinitionView,
@@ -32,7 +32,7 @@ from vonk_control.recipe_image_availability.service import (
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
-from cluster_profiles.cli_render import render_payload
+from cluster_profiles.cli_render.dispatch import render_payload
 
 from .test_fleet_profile_api import _client, _headers
 from .test_operator_acceptance_postgres import DropFirstResponse

@@ -9,13 +9,17 @@ from collections.abc import Callable, Mapping
 
 import pytest
 
-from cluster_profiles import cli, controller_cli
-from cluster_profiles.cli_render import render_payload
-from cluster_profiles.control_client import (
+from cluster_profiles import cli
+from cluster_profiles.cli_render.dispatch import render_payload
+from cluster_profiles.control_client import schema
+from cluster_profiles.control_client.errors import (
     ControlForbidden,
     ControlNotFound,
     ControlTransportError,
 )
+from cluster_profiles.controller_cli import cache_removal as cache_removal_module
+from cluster_profiles.controller_cli import common as common_module
+from cluster_profiles.controller_cli import dispatch as dispatch_module
 
 from .consumer_outcomes import not_adopted
 
@@ -163,7 +167,7 @@ class _FakeController:
 
     def profile_endpoints(
         self, number: int, alias: str | None = None
-    ) -> controller_cli.common.FleetProfileEndpointsView:
+    ) -> common_module.FleetProfileEndpointsView:
         raise AssertionError(f"unexpected endpoint lookup: {number} {alias}")
 
 
@@ -193,7 +197,7 @@ def _parse(*argv: str):
 
 
 def _accept_response_contracts(monkeypatch: pytest.MonkeyPatch) -> None:
-    original = controller_cli.validate_control_document
+    original = schema.validate_control_document
 
     def validate(name: str, document: object) -> dict[str, object]:
         if name in {
@@ -205,9 +209,7 @@ def _accept_response_contracts(monkeypatch: pytest.MonkeyPatch) -> None:
             return document
         return original(name, document)
 
-    monkeypatch.setattr(
-        controller_cli.cache_removal, "validate_control_document", validate
-    )
+    monkeypatch.setattr(cache_removal_module, "validate_control_document", validate)
 
 
 @pytest.fixture(autouse=True)
@@ -215,7 +217,7 @@ def _fake_transport_reviews_are_contract_validated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """FakeController supplies reviews after the HTTP contract boundary."""
-    original = controller_cli.validate_control_document
+    original = schema.validate_control_document
 
     def validate(name: str, document: object) -> dict[str, object]:
         if name == "CacheRemovalReview":
@@ -223,9 +225,7 @@ def _fake_transport_reviews_are_contract_validated(
             return document
         return original(name, document)
 
-    monkeypatch.setattr(
-        controller_cli.cache_removal, "validate_control_document", validate
-    )
+    monkeypatch.setattr(cache_removal_module, "validate_control_document", validate)
 
 
 def test_json_review_command_is_read_only_and_returns_exact_owner_document(
@@ -253,7 +253,7 @@ def test_noninteractive_yes_uses_the_latest_controller_review(
     _accept_response_contracts(monkeypatch)
     args = _parse("--json", "model", "remove", "publisher/model", "--yes", "--detach")
 
-    result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    result = dispatch_module.run_controller(args, client, lambda: _REQUEST_KEY)
 
     assert "review_digest" not in result
     assert [path for _, path, _, _ in client.calls] == [
@@ -310,7 +310,7 @@ def test_interactive_review_is_rendered_before_prompt_and_post(
     _accept_response_contracts(monkeypatch)
     args = _parse("model", "remove", "publisher/model", "--detach")
 
-    result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    result = dispatch_module.run_controller(args, client, lambda: _REQUEST_KEY)
 
     assert result["model_content_sha256"] == _MODEL_DIGEST
     assert client.calls[-1][2] == {"request_key": _REQUEST_KEY}
@@ -349,7 +349,7 @@ def test_scripted_remove_uses_latest_review_without_digest_gate(
         "--detach",
     )
 
-    result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    result = dispatch_module.run_controller(args, client, lambda: _REQUEST_KEY)
 
     assert "review_digest" not in result
     assert [(method, path) for method, path, _, _ in client.calls][-2:] == [
@@ -362,14 +362,14 @@ def test_unreadable_review_cannot_veto_explicit_current_intent(monkeypatch):
     client = _FakeController(_review("model", "another/model"))
     _accept_response_contracts(monkeypatch)
     args = _parse("--json", "model", "remove", "publisher/model", "--yes", "--detach")
-    result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    result = dispatch_module.run_controller(args, client, lambda: _REQUEST_KEY)
     assert result == client.accepted
     assert [method for method, _, _, _ in client.calls] == ["GET", "GET", "GET", "POST"]
     assert client.calls[-1][1] == "/api/model/publisher%2Fmodel/remove"
     client.review = _review("model", "publisher/model")
     fresh = _parse("--json", "model", "remove", "publisher/model", "--yes", "--detach")
     assert (
-        controller_cli.run_controller(fresh, client, lambda: _REQUEST_KEY)
+        dispatch_module.run_controller(fresh, client, lambda: _REQUEST_KEY)
         == client.accepted
     )
 
@@ -420,7 +420,7 @@ def test_blocked_review_is_submitted_so_the_controller_can_park_it(
     _accept_response_contracts(monkeypatch)
     args = _parse("model", "remove", "publisher/model", "--detach")
 
-    result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    result = dispatch_module.run_controller(args, client, lambda: _REQUEST_KEY)
 
     assert result["operation_id"] == "model-operation-9"
     assert "[y/N]" in rendered.getvalue()
@@ -508,7 +508,7 @@ def test_same_key_replay_precedes_review_lookup(
     )
     _accept_response_contracts(monkeypatch)
 
-    result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    result = dispatch_module.run_controller(args, client, lambda: _REQUEST_KEY)
 
     assert result == receipt
     assert [(method, path) for method, path, _, _ in client.calls] == [
@@ -528,7 +528,7 @@ def test_recipe_review_passes_explicit_keep_choice_in_query() -> None:
         "--review",
     )
 
-    result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    result = dispatch_module.run_controller(args, client, lambda: _REQUEST_KEY)
 
     assert result == review
     assert client.calls == [
@@ -557,7 +557,7 @@ def test_scripted_recipe_remove_binds_explicit_model_choice(
         "--detach",
     )
 
-    result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    result = dispatch_module.run_controller(args, client, lambda: _REQUEST_KEY)
 
     assert result["operation_id"] == "recipe-operation-9"
     assert client.calls == [
@@ -595,7 +595,7 @@ def test_recipe_remove_accepts_owner_normalized_selector_receipt(
         "--detach",
     )
 
-    result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    result = dispatch_module.run_controller(args, client, lambda: _REQUEST_KEY)
 
     assert result["selector"] == "publisher/recipe"
     assert [path for _, path, _, _ in client.calls] == [
@@ -620,7 +620,7 @@ def test_unreadable_existing_removal_cannot_gate_owner_acceptance(monkeypatch):
         "--yes",
         "--detach",
     )
-    accepted = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    accepted = dispatch_module.run_controller(args, client, lambda: _REQUEST_KEY)
     assert accepted == client.accepted
     writes = [
         (path, body) for method, path, body, _ in client.calls if method == "POST"
@@ -640,7 +640,7 @@ def test_unreadable_existing_removal_cannot_gate_owner_acceptance(monkeypatch):
         "--detach",
     )
     assert (
-        controller_cli.run_controller(repeated, client, lambda: _REQUEST_KEY)
+        dispatch_module.run_controller(repeated, client, lambda: _REQUEST_KEY)
         == accepted
     )
     assert sum(method == "POST" for method, *_ in client.calls) == 1
@@ -655,7 +655,7 @@ def test_unreadable_existing_removal_cannot_gate_owner_acceptance(monkeypatch):
         "--yes",
         "--detach",
     )
-    fresh_result = controller_cli.run_controller(fresh, client, lambda: fresh_key)
+    fresh_result = dispatch_module.run_controller(fresh, client, lambda: fresh_key)
     assert fresh_result["request_key"] == fresh_key
     assert sum(method == "POST" for method, *_ in client.calls) == 2
 
@@ -705,7 +705,7 @@ def test_fleet_review_is_read_only_and_submission_binds_its_scope(
     args = _parse(
         "--json", "model", "remove", "publisher/model", "--fleet", "--yes", "--detach"
     )
-    result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    result = dispatch_module.run_controller(args, client, lambda: _REQUEST_KEY)
     assert result["operation_id"] == "model-operation-9"
     assert client.calls[-1][2] == {
         "request_key": _REQUEST_KEY,
@@ -714,6 +714,6 @@ def test_fleet_review_is_read_only_and_submission_binds_its_scope(
     }
     # A subsequent observation reconnects by request identity rather than
     # re-planning against a different catalog head.
-    replay = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    replay = dispatch_module.run_controller(args, client, lambda: _REQUEST_KEY)
     assert replay["operation_id"] == result["operation_id"]
     assert sum(method == "POST" for method, *_ in client.calls) == 1

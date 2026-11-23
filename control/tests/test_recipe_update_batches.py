@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
@@ -176,7 +176,8 @@ def test_unknown_child_admission_retries_even_without_retryable_hint(
     update_env, monkeypatch
 ):
     """Unknown evidence cannot permanently fail an exact frozen child."""
-    from vonk_agent_protocol import RecipeUpdateCode, WaitReason
+    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+    from vonk_agent_protocol.reason_codes.recipes import RecipeUpdateCode
     from vonk_control.recipe_image_availability.contracts import (
         RecipeImageAvailabilityUnknown,
     )
@@ -606,7 +607,7 @@ def test_registered_update_route_cli_recovers_lost_receipt_and_follows_same_pare
     )
 
     from cluster_profiles.cli import main
-    from cluster_profiles.control_client import ControlClient
+    from cluster_profiles.control_client.transfers import ControlClient
 
     _, recipes, now, fresh = update_env
     service = fresh()
@@ -1360,7 +1361,7 @@ def test_unreadable_child_failure_reobserves_exact_request_across_restart(
     update_env, monkeypatch, missing_field, repair
 ):
     """Missing peer failure fields cannot adopt terminal state or duplicate work."""
-    from vonk_agent_protocol import RecipeUpdateCode
+    from vonk_agent_protocol.reason_codes.recipes import RecipeUpdateCode
     from vonk_control.lifecycle.recipe_update_batch import CANCEL_BUDGET
     from vonk_control.operations.contract import AvailabilityOperationFailure
 

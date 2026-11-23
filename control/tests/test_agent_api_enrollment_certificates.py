@@ -12,11 +12,9 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from starlette.types import Message
-from vonk_agent_protocol import (
-    LifecycleState,
-    canonical_message,
-)
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.agent_api.common import (
     AgentApiServices,
     EnrollmentRateLimiter,
@@ -233,7 +231,7 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         assert attempt.result["status"] == "failed"
         assert attempt.result["error_code"] == result["result"]["error_code"]
         if with_diagnostics:
-            from vonk_agent_protocol import FailureDiagnostics
+            from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 
             typed = FailureDiagnostics.model_validate(attempt.result["diagnostics"])
             assert "/proc: permission denied" in typed.stderr.text

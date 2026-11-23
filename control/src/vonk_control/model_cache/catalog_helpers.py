@@ -9,7 +9,7 @@ from typing import assert_never
 from urllib.parse import quote, urlsplit
 
 from pydantic import ValidationError
-from vonk_agent_protocol import ModelCacheCode
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,

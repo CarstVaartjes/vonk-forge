@@ -12,16 +12,15 @@ from typing import (
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, defer
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import RunAdmissionCode
+from vonk_agent_protocol.reason_codes.admission import (
     AdmissionCode,
     InstallAdmissionCode,
-    RecipeBuildCode,
-    ReconcileCode,
-    RunAdmissionCode,
-    RunSwitchCode,
-    canonical_message,
-    run_switch_code,
 )
+from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode, ReconcileCode
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.reason_codes.vocabulary import run_switch_code
 
 from ..categorized_errors import (
     InvalidValue,

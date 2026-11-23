@@ -6,12 +6,10 @@ from collections.abc import Callable
 from threading import Lock
 from typing import TYPE_CHECKING, cast
 
-from vonk_agent_protocol import (
-    DistributionCode,
-    DistributionObject,
-    SecurityRefusalError,
-    SecurityRefusalReason,
-)
+from vonk_agent_protocol.distribution import DistributionObject
+from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
+from vonk_agent_protocol.outcome import SecurityRefusalError
+from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 
 from ..compiled_execution_plan import DistributionObjectReceipt, VerifiedModelObject
 from ..model_cache.errors import ModelCacheNotFound

@@ -9,13 +9,13 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    Disposition,
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
-    ModelCacheCode,
     SecurityRefusalReason,
     WaitReason,
 )
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 
 from ..agent_operation_facts import aware as _aware
 from ..failure_classification import disposition, is_definite

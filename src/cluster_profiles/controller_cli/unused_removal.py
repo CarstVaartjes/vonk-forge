@@ -18,9 +18,9 @@ from contextlib import redirect_stdout
 from dataclasses import asdict, dataclass, field
 
 from ..cli_outcome import SubmissionAcceptance
-from ..cli_render import render_payload
+from ..cli_render.dispatch import render_payload
 from ..cli_states import PARTIAL_FIELD
-from ..control_client import (
+from ..control_client.errors import (
     ControlClientError,
     ControlConflict,
     ControlMalformedResponse,

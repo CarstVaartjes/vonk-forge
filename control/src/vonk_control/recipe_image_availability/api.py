@@ -12,15 +12,14 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from vonk_agent_protocol import (
+from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
+from vonk_agent_protocol.lifecycle_vocabulary import (
     ErrorCategory,
     LifecycleState,
-    ProgressPhase,
-    UnknownError,
-    UnknownOutcomeError,
     WaitReason,
 )
-from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
+from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
 
 from ..auth import MUTATION_ROLES
 from ..bounded_json import require_integer, require_sequence

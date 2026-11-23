@@ -18,16 +18,12 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    InvalidRequestError,
-    LifecycleState,
-    RecipeBuildCleanupEvidence,
-    RecipeStartResult,
-    RecipeStopResult,
-    ReservationState,
-    UnknownOutcomeError,
-    canonical_message,
-)
+from vonk_agent_protocol.build_import import RecipeBuildCleanupEvidence
+from vonk_agent_protocol.contracts import RecipeStartResult, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
+from vonk_agent_protocol.recipe_operations import RecipeStopResult
+from vonk_agent_protocol.state_machines import ReservationState
 from vonk_control import recipe_operations
 from vonk_control.bounded_json import require_mapping
 from vonk_control.install_admission.contracts import InstallEvidenceChanged
@@ -1157,7 +1153,7 @@ def test_no_bookkeeping_class_is_raised_from_a_stored_read() -> None:
 
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_stop_works_without_start_jobs_and_with_unreadable_launch_plan(tmp_path):
-    from vonk_agent_protocol import ContainerRuntimeAction
+    from vonk_agent_protocol.host_helper import ContainerRuntimeAction
     from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
 
     sessions, service, _queue, _installation, started, _nodes = _running_recipe(
@@ -1317,7 +1313,8 @@ def test_failed_exact_cleanup_reissues_once_then_frees_a_fresh_run(tmp_path):
 
 
 def test_lost_install_history_completes_exact_cleanup_and_fresh_admission(tmp_path):
-    from vonk_agent_protocol import ContainerRuntimeAction, RecipeStopPayload
+    from vonk_agent_protocol.host_helper import ContainerRuntimeAction
+    from vonk_agent_protocol.recipe_operations import RecipeStopPayload
     from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
     from vonk_control.models.execution import ResourceReservation
 

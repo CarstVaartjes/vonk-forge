@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi import Depends, FastAPI
 from pydantic import ValidationError
-from vonk_agent_protocol import CatalogSyncState
+from vonk_agent_protocol.state_machines import CatalogSyncState
 from vonk_control.auth import Actor
 from vonk_control.catalog.api import (
     ManagedCatalogSyncProblem,

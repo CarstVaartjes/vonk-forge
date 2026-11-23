@@ -7,15 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Protocol
 
-from vonk_agent_protocol import (
-    CompiledExecutionPlan,
-    DistributionObject,
-    SecurityRefusalError,
-    SecurityRefusalReason,
-    UnknownOutcomeError,
-    WaitReason,
-    canonical_message,
-)
+from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.distribution import DistributionObject
+from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, WaitReason
+from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 
 
 class DistributionError(ValueError):

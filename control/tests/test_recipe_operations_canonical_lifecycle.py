@@ -17,9 +17,7 @@ from alembic.migration import MigrationContext
 from sqlalchemy import inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    RecipeInstallPayload,
-)
+from vonk_agent_protocol.recipe_operations import RecipeInstallPayload
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import (
     CatalogDocumentRevision,

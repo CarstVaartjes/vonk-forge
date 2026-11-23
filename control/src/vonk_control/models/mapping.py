@@ -19,7 +19,8 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.orm import Mapped, mapped_column
-from vonk_agent_protocol import ClusterMappingCode, machine_check
+from vonk_agent_protocol.reason_codes.fleet import ClusterMappingCode
+from vonk_agent_protocol.state_machines import machine_check
 
 from ..model_primitives import Base, _lower_hex
 from ..stored.states import ClusterMappingState

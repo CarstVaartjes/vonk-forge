@@ -18,17 +18,17 @@ from cryptography.hazmat.primitives import serialization
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentDirective,
+    AgentFailureResult,
     AgentOperation,
     AgentProgress,
     AgentResult,
-    OperationProgress,
     canonical_message,
 )
-from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.agent_jobs.stored import column_message
 from vonk_control.failure_evidence import safe_text
 from vonk_control.models.operations import AgentOperationAttempt

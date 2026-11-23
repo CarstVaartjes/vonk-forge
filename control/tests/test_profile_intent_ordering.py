@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select, text
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.models.catalog import CatalogDocumentRevision
@@ -214,7 +214,8 @@ def test_malformed_sibling_retry_root_does_not_block_new_pending_admission(
     assert node is not None and node.workload_intent_ordinal == 1
     from types import SimpleNamespace
 
-    from vonk_agent_protocol import LifecycleState, SupersedeCode
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+    from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 
     from .non_blocking import assert_ended_without_blocking
 

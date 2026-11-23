@@ -8,7 +8,7 @@ from typing import Never
 
 import httpx2
 import pytest
-from vonk_agent_protocol import InvalidRequestError
+from vonk_agent_protocol.outcome import InvalidRequestError
 from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
@@ -180,10 +180,8 @@ def test_unmatched_active_handoff_is_named_and_preserves_owners(monkeypatch):
     from unittest.mock import Mock
 
     from sqlalchemy.orm import Session
-    from vonk_agent_protocol import (
-        ReservationState,
-        UnknownOutcomeError,
-    )
+    from vonk_agent_protocol.outcome import UnknownOutcomeError
+    from vonk_agent_protocol.state_machines import ReservationState
     from vonk_control.fleet_profiles import capacity as profile_capacity
     from vonk_control.models.execution import ResourceReservation
 
@@ -226,7 +224,8 @@ def test_unknown_catalog_sync_ends_and_admits_a_fresh_request(tmp_path):
 
     from sqlalchemy import create_engine, select
     from sqlalchemy.orm import sessionmaker
-    from vonk_agent_protocol import LifecycleState, SourceBundleCode
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+    from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
     from vonk_control.auth import CursorCodec
     from vonk_control.catalog.service import CatalogService
     from vonk_control.catalog.sync import (
@@ -313,7 +312,7 @@ def test_catalog_source_storage_absence_recovers_on_the_next_request(tmp_path):
 
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
-    from vonk_agent_protocol import UnknownOutcomeError
+    from vonk_agent_protocol.outcome import UnknownOutcomeError
     from vonk_control.auth import CursorCodec
     from vonk_control.catalog.service import CatalogService
     from vonk_control.model_primitives import Base

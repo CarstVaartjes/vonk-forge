@@ -10,14 +10,11 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import event, select
-from vonk_agent_protocol import (
-    AgentInstallResult,
-    InstallAdmissionCode,
-    LifecycleState,
-    RuntimePreflightCode,
-    canonical_message,
-)
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.contracts import AgentInstallResult, canonical_message
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.admission import InstallAdmissionCode
+from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from vonk_control.install_admission.contracts import (
     AdmissionReason,
@@ -1050,7 +1047,8 @@ def test_installation_requests_exact_receipt_repair_before_any_agent_effect(
         path.write_text("{")
     with sessions() as session:
         previous_jobs = set(session.scalars(select(Job.id)))
-    from vonk_agent_protocol import RecipeImageCode, WaitReason
+    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+    from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
     from vonk_control.recipe_image_availability.contracts import (
         OPERATION_KIND,
         BuildUnsettled,

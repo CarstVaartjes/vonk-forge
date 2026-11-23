@@ -14,9 +14,9 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
-from vonk_agent_protocol import ContainerRuntimeAction, canonical_message
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
-from vonk_agent_protocol.host_helper import HostRuntimeRequest
+from vonk_agent_protocol.host_helper import ContainerRuntimeAction, HostRuntimeRequest
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import (
     RecipeStartPayload,

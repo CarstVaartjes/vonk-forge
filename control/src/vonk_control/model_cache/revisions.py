@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, defer
-from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
 from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
 from ..artifact_reference_scan.model_references import model_set_reference_reasons

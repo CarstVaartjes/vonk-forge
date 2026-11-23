@@ -362,12 +362,12 @@ def run_update(
     )
     if not apply or equal_content:
         return result
-    from .control_client import (
-        ControlClient,
+    from .control_client.errors import (
         ControlClientError,
         ControlForbidden,
         ControlUnauthorized,
     )
+    from .control_client.transfers import ControlClient
 
     # This is an authority observation, not a second compatibility planner.
     # Signed wheel ingress already verified the exact installed bytes. Source

@@ -24,11 +24,11 @@ import uuid
 from datetime import timedelta
 
 import pytest
-from vonk_agent_protocol import (
-    InvalidRequestError,
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
 )
+from vonk_agent_protocol.outcome import InvalidRequestError
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,

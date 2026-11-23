@@ -11,12 +11,10 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import event, select
-from vonk_agent_protocol import (
-    LifecycleState,
-    RunSwitchCode,
-    RuntimePreflightCode,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
 from vonk_agent_protocol.state_machines import RouteState
 from vonk_control.logging import configure_controller_logging
 from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode

@@ -10,8 +10,9 @@ the server never imports vonkctl (`cluster_profiles`). Facts reach the CLI only
 through the generated client (`scripts/generate-control-clients`);
 `tests/test_package_import_direction.py` enforces it, function-level imports
 included.
-`tests/test_package_no_reexports.py` keeps every `vonk_control` package `__init__` to a
-docstring, `__version__` and module-only `from . import x`: import a name from the module that
+`tests/test_package_no_reexports.py` keeps every `vonk_control`, `cluster_profiles` and
+`vonk_agent_protocol` package `__init__` to a docstring, `__version__` and module-only
+`from . import x` (`vonk_agent_protocol` imports `contracts` first, to order its import cycle): import a name from the module that
 defines it, never through its package.
 
 Every model an `/agent/` route takes or returns (grant requests and replies, the

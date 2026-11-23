@@ -156,7 +156,7 @@ def test_fleet_ambiguity_preserves_every_candidate_through_the_cli(tmp_path, cap
     import json
 
     from cluster_profiles import cli
-    from cluster_profiles.control_client import ControlClient
+    from cluster_profiles.control_client.transfers import ControlClient
 
     from .test_metrics import _fleet_snapshot
 
@@ -272,7 +272,7 @@ def test_request_boundary_admits_large_recipe_images_only_on_exact_put_route() -
 
     # Method and path are both part of the authority boundary. Near-matches
     # retain the ordinary one-MiB API ceiling.
-    from vonk_agent_protocol import ControllerErrorCode
+    from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 
     refused = client.post(route, content=body)
     assert refused.status_code == 413

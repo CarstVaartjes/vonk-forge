@@ -10,7 +10,8 @@ import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState, UnknownOutcomeError, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_control.jobs.queue import JobService, StaleAttempt
 from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import Job, JobAttempt
@@ -274,7 +275,7 @@ def test_guarded_lifecycle_write_cannot_bypass_the_version_fence(
     postgres_engine,
 ) -> None:
     """Catches bulk state CAS overwriting a same-state but newer operator decision."""
-    from vonk_agent_protocol import OperatorActionName
+    from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName
     from vonk_control.lifecycle.job import JobAdapter
     from vonk_control.lifecycle.types import CancelRequested
 

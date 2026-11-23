@@ -27,7 +27,8 @@ from typing import Any, cast
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import CompiledExecutionPlan, DistributionObject
+from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
+from vonk_agent_protocol.distribution import DistributionObject
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService

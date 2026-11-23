@@ -6,20 +6,22 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
     AgentOperation,
     AgentResult,
+    AgentResultPayload,
+    canonical_message,
+    validate_result_for_operation,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     FailureCode,
     InvalidRequestReason,
     LifecycleState,
     SecurityRefusalReason,
-    UnknownOutcomeError,
     WaitReason,
-    canonical_message,
-    validate_result_for_operation,
 )
-from vonk_agent_protocol.contracts import AgentResultPayload
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.state_machines import NodeIdentityState
 

@@ -13,10 +13,10 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
 from pydantic import ValidationError
-from vonk_agent_protocol import InvalidRequestReason
 from vonk_agent_protocol.enrollment import (
     EnrollmentEvidence,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 
 
 def _load_csr(node_id: str | None, csr: bytes) -> tuple[bytes, bytes, str, str]:

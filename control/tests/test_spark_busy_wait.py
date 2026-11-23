@@ -15,17 +15,17 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentOperation as OperationKind
-from vonk_agent_protocol import (
+from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     LifecycleState,
-    OperationProgress,
-    ProgressPhase,
     WaitReason,
-    canonical_message,
 )
-from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_jobs.waits import refresh_queue_waits
@@ -42,7 +42,7 @@ from vonk_control.operation_api.responses import (
 from vonk_control.operations.blockers import ProgressAlarmCode
 from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
-from cluster_profiles.cli_render import progress_line
+from cluster_profiles.cli_render.progress import progress_line
 
 from .agent_fences import fenced_operation
 from .package_upgrade_fixtures import source_transport

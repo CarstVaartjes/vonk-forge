@@ -15,14 +15,11 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from vonk_agent_protocol import (
-    LifecycleEffect,
-    LifecycleState,
-    ModelCacheBlockerCode,
-    ModelCacheOperatorStatus,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleEffect, LifecycleState
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheBlockerCode
+from vonk_agent_protocol.state_machines import ModelCacheOperatorStatus
 from vonk_forge_contracts.model import ModelReference
 
 from ..cursor_contract import MAX_CURSOR_LENGTH

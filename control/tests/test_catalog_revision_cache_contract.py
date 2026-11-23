@@ -175,7 +175,7 @@ def test_catalog_readers_parse_one_content_identity_once(monkeypatch, kind, exam
 
 def test_import_refuses_a_mismatched_digest_even_when_content_was_cached(tmp_path):
     """The process cache cannot bypass the signed ingress content identity check."""
-    from vonk_agent_protocol import CatalogCode
+    from vonk_agent_protocol.reason_codes.catalog import CatalogCode
     from vonk_control.auth import TokenCodec
     from vonk_control.catalog.entities import CatalogValidationError
     from vonk_control.catalog.service import CatalogService

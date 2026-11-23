@@ -16,7 +16,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, RootModel, field_validator
 from starlette.responses import StreamingResponse
-from vonk_agent_protocol.reason_codes import ProjectionCode
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 

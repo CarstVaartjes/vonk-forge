@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from ..cli_json_contract import Word
 from ..cli_platform_render import render_platform
 from ..cli_states_generated import ENDPOINT_UNAVAILABLE, SUCCEEDED
-from ..control_client import ControlMalformedResponse
+from ..control_client.errors import ControlMalformedResponse
 from ..generated_control.models.artifact_job_response import ArtifactJobResponse
 from ..generated_control.models.metric_spec import MetricSpec
 from ..generated_control.models.metrics_series_response import MetricsSeriesResponse

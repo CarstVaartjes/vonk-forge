@@ -16,7 +16,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from vonk_agent_protocol import WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_control.lifecycle.adapter import Dispatch
 from vonk_control.lifecycle.core import (
     LOST_OBSERVATION_BOUND,
@@ -337,7 +337,7 @@ def test_safe_current_intent_recovers_after_repeated_faults(
 ) -> None:
     # Wrong implementation: a repetition count ends still-authorized intent,
     # so clearing the fault cannot recover the same operation.
-    from vonk_agent_protocol import AgentFailureKind
+    from vonk_agent_protocol.contracts import AgentFailureKind
     from vonk_control.lifecycle.core import RECOVERY
 
     adapter = FakeAdapter(is_irreversible=irreversible)

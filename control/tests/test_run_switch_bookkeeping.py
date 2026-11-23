@@ -168,7 +168,7 @@ def test_fresh_retry_keeps_verified_progress_but_has_independent_clocks(
     """Catches a fresh authorized request inheriting an exhausted predecessor deadline."""
     from datetime import timedelta
 
-    from vonk_agent_protocol import LifecycleState
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
     from vonk_control.strict_json import serialize_json_value
 
     accepted = _accepted(tmp_path)
@@ -197,7 +197,10 @@ def test_a_retry_over_a_revoked_spark_is_refused_not_waited_on(tmp_path: Path) -
     """Revocation never clears, so the retry ends as a definite CONFLICT refusal."""
     from datetime import timedelta
 
-    from vonk_agent_protocol import InvalidRequestReason, LifecycleState
+    from vonk_agent_protocol.lifecycle_vocabulary import (
+        InvalidRequestReason,
+        LifecycleState,
+    )
     from vonk_control.models.fleet import AgentNode
     from vonk_control.run_switch_operations.errors import RunSwitchRequestInvalid
     from vonk_control.strict_json import serialize_json_value

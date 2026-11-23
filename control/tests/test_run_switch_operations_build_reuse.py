@@ -11,9 +11,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import event, func, select, update
-from vonk_agent_protocol import (
-    InstallationState,
-)
+from vonk_agent_protocol.state_machines import InstallationState
 from vonk_control.catalog.revision_contract import (
     read_recipe_projection,
     write_catalog_projection,

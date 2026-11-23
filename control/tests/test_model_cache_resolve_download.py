@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
 from vonk_control.model_cache.contract import (
     ModelCacheDownloadResult,

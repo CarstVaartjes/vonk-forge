@@ -1,7 +1,7 @@
 """One inventory observation drives admission and fleet health explanations."""
 
-from vonk_agent_protocol import ProjectionCode
 from vonk_agent_protocol.inventory import GPU_RESET_RECOVERY, GpuHealth
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 
 
 def gpu_health_reason(health: GpuHealth | None) -> tuple[ProjectionCode, str] | None:

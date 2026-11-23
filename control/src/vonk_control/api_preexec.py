@@ -8,7 +8,7 @@ import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from vonk_agent_protocol import UnknownOutcomeError
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 
 from .browser_auth import bootstrap_administrator
 from .db.connections import (

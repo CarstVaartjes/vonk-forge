@@ -5,12 +5,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import (
-    AgentEvidenceCode,
-    AgentProtocolError,
-    TelemetryRequest,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentProtocolError, canonical_message
+from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
+from vonk_agent_protocol.telemetry import TelemetryRequest
 
 BOOT_ID = "00000000-0000-4000-8000-000000000001"
 

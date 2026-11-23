@@ -21,8 +21,8 @@ from typing import get_args
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import ReservationState
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
+from vonk_agent_protocol.state_machines import ReservationState
 
 from ..admission_locking import (
     AdmissionRowLock,

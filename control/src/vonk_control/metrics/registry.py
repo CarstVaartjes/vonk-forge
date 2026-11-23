@@ -12,15 +12,15 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    CertificateState,
-    GatewayRouteState,
-    LifecycleState,
-    OperationProgress,
-)
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
-from vonk_agent_protocol.state_machines import CertificateRecordState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.state_machines import (
+    CertificateRecordState,
+    CertificateState,
+    GatewayRouteState,
+)
+from vonk_agent_protocol.wire_model import OperationProgress
 
 from .. import agent_operation_states
 from ..compose_bundle import ComposeBundle

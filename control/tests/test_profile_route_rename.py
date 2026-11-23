@@ -589,7 +589,7 @@ def test_a_wait_remembered_by_an_older_reader_is_cleared_and_recovery_resumes(
 
     from hashlib import sha256
 
-    from vonk_agent_protocol import canonical_message
+    from vonk_agent_protocol.contracts import canonical_message
     from vonk_control.distributed_recovery import common
     from vonk_control.persisted_waits import read_wait
 

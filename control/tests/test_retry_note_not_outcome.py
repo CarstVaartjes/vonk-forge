@@ -10,14 +10,13 @@ the job ended carrying the stale retry note, so the run-switch reported
 
 from __future__ import annotations
 
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
     AgentFailureKind,
     AgentResult,
-    FailureCode,
-    LifecycleState,
     canonical_message,
 )
-from vonk_agent_protocol import AgentOperation as WireOperation
+from vonk_agent_protocol.contracts import AgentOperation as WireOperation
+from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
 from vonk_control.models.operations import AgentOperation
 from vonk_control.run_switch_operations.result_helpers import _child_progress_payload
 

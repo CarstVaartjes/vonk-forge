@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.distribution_executor.durable import DurableDistributionPhaseExecutor
 from vonk_control.distribution_executor.receipts import _phase_receipt
 from vonk_control.run_switch_contract.evidence import RunSwitchPhase

@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.host_helper import (
     ConfirmPackageActivationOperation,
     ContainerRuntimeAction,

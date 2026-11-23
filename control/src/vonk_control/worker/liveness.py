@@ -11,10 +11,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from vonk_agent_protocol import (
-    UnknownOutcomeError,
-    WaitReason,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 
 from ..logging import log_event
 from ..stall_window import Verdict

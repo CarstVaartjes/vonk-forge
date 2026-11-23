@@ -272,6 +272,7 @@ def test_frozen_corpus_closure_is_dynamic() -> None:
 # corpus into fresh PostgreSQL, validates every API page and restarts the cache.
 # Import plus every canonical detail round-trip takes about 55s in the local
 # Linux container; allow 60s for this whole-corpus acceptance.
+@pytest.mark.corpus_acceptance
 @pytest.mark.slow(60)
 def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     postgres_engine: Engine, tmp_path: Path

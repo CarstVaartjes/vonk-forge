@@ -11,8 +11,12 @@ from typing import cast as _typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import InvalidRequestReason, LifecycleState, ProfileReasonCode
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    LifecycleState,
+)
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 
 from ..admission_locking import ConstraintReplay, admitting
 from ..categorized_errors import MissingRecord

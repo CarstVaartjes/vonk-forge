@@ -18,13 +18,10 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import (
-    RecipeStopPayload,
-    RouteState,
-    RunState,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.recipe_operations import RecipeStopPayload
+from vonk_agent_protocol.state_machines import RouteState, RunState
 
 from ..distributed_recovery.common import ended_run_state
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown

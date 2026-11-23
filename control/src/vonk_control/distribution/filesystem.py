@@ -7,11 +7,9 @@ import stat
 from pathlib import Path
 
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    DistributionCode,
-    DistributionObject,
-    SecurityRefusalReason,
-)
+from vonk_agent_protocol.distribution import DistributionObject
+from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
+from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 
 from ..oci_image_store import IMAGE_CACHE_DIRECTORY
 from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
