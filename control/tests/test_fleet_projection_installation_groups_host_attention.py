@@ -833,6 +833,7 @@ def test_fleet_names_the_spark_that_copies_from_the_nas_far_slower(
                         "completed_bytes": size,
                         "total_bytes_known": False,
                         "elapsed_seconds": seconds,
+                        "fetched": {"bytes": size, "seconds": seconds},
                     },
                 )
             )
