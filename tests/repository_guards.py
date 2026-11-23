@@ -57,10 +57,10 @@ GUARDS: tuple[str, ...] = (
     "tests/scripts/test_verify_ci_gate.py",
     "tests/scripts/test_build_control_wheel.py::test_every_job_that_builds_the_controller_image_builds_the_wheel_first",
     "tests/test_agent_release_workflow.py::test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped",
-    "tests/test_spark_lifecycle_runner.py::test_every_fixture_import_in_the_lane_code_is_offered_once_more",
+    "tests/test_spark_lifecycle_runner_preview_probes.py::test_every_fixture_import_in_the_lane_code_is_offered_once_more",
     "tests/test_baseline_program_surface.py",
     "tests/test_guard_paths_exist.py",
-    "tests/test_spark_lifecycle_runner.py::test_the_raw_profile_preview_request_lives_only_in_the_admitted_preview",
+    "tests/test_spark_lifecycle_runner_preview_probes.py::test_the_raw_profile_preview_request_lives_only_in_the_admitted_preview",
 )
 
 SCOPED: tuple[tuple[str, str], ...] = (
@@ -643,7 +643,15 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "spark lifecycle diagnostics: fixed entrypoint/fixture behavior.",
     ),
     (
-        "tests/test_spark_lifecycle_runner.py",
+        "tests/test_spark_lifecycle_runner_bootstrap_canary.py",
+        "spark lifecycle runner: fixed entrypoint/fixture behavior.",
+    ),
+    (
+        "tests/test_spark_lifecycle_runner_identity_install_failures.py",
+        "spark lifecycle runner: fixed entrypoint/fixture behavior.",
+    ),
+    (
+        "tests/test_spark_lifecycle_runner_preview_probes.py",
         "spark lifecycle runner: fixed entrypoint/fixture behavior.",
     ),
     (
