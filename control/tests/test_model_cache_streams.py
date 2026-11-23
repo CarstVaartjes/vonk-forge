@@ -17,12 +17,7 @@ from vonk_control.model_cache.streams import (
     StreamGovernor,
 )
 
-from .test_model_cache import (  # noqa: F401
-    _download,
-    _http_artifact,
-    _http_cache_service,
-    cache,
-)
+from .model_cache_support import _download, _http_artifact, _http_cache_service
 from .test_model_cache_recovery_support import observe_unknown
 
 
@@ -180,7 +175,7 @@ def test_range_streams_respect_the_gate(tmp_path) -> None:
     assert peak <= 2
 
 
-def test_provider_429_and_5xx_back_off_the_streams(cache, tmp_path) -> None:  # noqa: F811
+def test_provider_429_and_5xx_back_off_the_streams(cache, tmp_path) -> None:
     _existing, sessions = cache
     # The 5xx first: a hinted 429 holds the provider, so nothing is asked after it.
     statuses = iter([503, 429])
@@ -212,7 +207,7 @@ def test_provider_429_and_5xx_back_off_the_streams(cache, tmp_path) -> None:  # 
         client.close()
 
 
-def test_ranged_download_scans_the_bytes_once(cache, tmp_path, monkeypatch) -> None:  # noqa: F811
+def test_ranged_download_scans_the_bytes_once(cache, tmp_path, monkeypatch) -> None:
 
     _existing, sessions = cache
     payload = bytes(range(256)) * 256
@@ -259,7 +254,7 @@ def test_ranged_download_scans_the_bytes_once(cache, tmp_path, monkeypatch) -> N
 
 @pytest.mark.parametrize("corrupt", [False, True])
 def test_ranged_ingress_has_no_post_assembly_read(
-    cache,  # noqa: F811
+    cache,
     tmp_path,
     monkeypatch,
     corrupt,

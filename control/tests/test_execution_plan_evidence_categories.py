@@ -30,7 +30,7 @@ def test_unavailable_receipt_is_observed_without_entering_a_launch_plan() -> Non
     with pytest.raises(Exception):  # noqa: B017 -- effects and subsequent admission witness rejection
         _runtime_image_receipt(cast(RuntimeImageReceipt, object()))
     # A fresh compilation can consume repaired evidence immediately.
-    from .test_recipe_image_availability import _reference_receipt
+    from .recipe_image_availability_support import _reference_receipt
 
     assert (
         _runtime_image_receipt(_reference_receipt()).image_digest

@@ -57,20 +57,20 @@ from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_bundles import SourceBundleStore
 
-from .runtime_image_fixtures import place_test_image, remove_test_image
-from .test_lifecycle_preflight import _finish as complete_preflight
-from .test_profile_build_memory import _accepted_build_profile
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     ConcurrentPublisher,
     RecordingQueue,
     _CanonicalModelCache,
     complete_started_recipe,
 )
-from .test_run_switch_operations import (
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _target_copy_evidence,
 )
+from .runtime_image_fixtures import place_test_image, remove_test_image
+from .test_lifecycle_preflight import _finish as complete_preflight
+from .test_profile_build_memory import _accepted_build_profile
 
 
 class _PreparedArtifactExecutor(RecordingArtifactExecutor):

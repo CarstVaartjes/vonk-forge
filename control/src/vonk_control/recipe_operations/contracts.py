@@ -8,13 +8,16 @@ from typing import Literal
 from pydantic import ConfigDict
 from vonk_agent_protocol import WireModel
 
+from ..fleet_profiles.stop_authority import (
+    JobRunStopScope,
+    ProfileJobRunStopAuthorization,
+)
 from ..jobs.documents import (
     DistributedRecoveryMarker,
     ProfilePartialStop,
     ServiceRunStopReview,
 )
 from ..library.contract import UuidId
-from ..profile_stop_authority import JobRunStopScope, ProfileJobRunStopAuthorization
 from ..recipe_builds.cancellation import RecipeBuildIntent
 from ..run_switch_contract.requests import RunSwitchReconciliationAuthority
 from ..strict_json import StrictJSONModel

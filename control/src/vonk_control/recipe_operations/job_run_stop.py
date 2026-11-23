@@ -26,14 +26,7 @@ from vonk_agent_protocol import (
 
 from ..admission_locking import is_admission_contention
 from ..agent_jobs.service import AgentJobService
-from ..jobs.documents import RecipeStopParent, controller_recipe_document
-from ..lifecycle.artifact_job import ArtifactJobAdapter
-from ..lifecycle.evidence import Residue
-from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..models.execution import ArtifactJob, RecipeInstallation, RecipeRun, RunNode
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..profile_stop_authority import (
+from ..fleet_profiles.stop_authority import (
     JobRunStopScope,
     ProfileJobRunStopJob,
     ProfileJobRunStopTarget,
@@ -43,6 +36,13 @@ from ..profile_stop_authority import (
     validate_profile_jobrun_stop_target,
     validate_profile_stop_owner,
 )
+from ..jobs.documents import RecipeStopParent, controller_recipe_document
+from ..lifecycle.artifact_job import ArtifactJobAdapter
+from ..lifecycle.evidence import Residue
+from ..lifecycle.recipe_operation import RecipeOperationAdapter
+from ..models.execution import ArtifactJob, RecipeInstallation, RecipeRun, RunNode
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
 from ..run_admission import RunAdmissionBusy
 from ..stored.json_values import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value

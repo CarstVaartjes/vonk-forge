@@ -2700,8 +2700,8 @@ def test_a_run_alias_compared_by_hand_is_flagged(source: str) -> None:
     assert not check_source(_ALIAS_PATH, source, set(), modes=("alias-rules",))
     # Only the rename module reads and compares the name.
     for site in (
-        "control/src/vonk_control/profile_capacity.py",
-        "control/src/vonk_control/profile_stop_authority.py",
+        "control/src/vonk_control/fleet_profiles/capacity.py",
+        "control/src/vonk_control/fleet_profiles/stop_authority.py",
     ):
         assert check_source(site, source, lines, modes=("alias-rules",))
     assert not check_source(

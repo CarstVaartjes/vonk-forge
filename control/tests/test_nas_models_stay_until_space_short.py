@@ -15,12 +15,12 @@ from vonk_control.models.execution import RecipeRun
 from vonk_control.storage_demands import StorageDemands
 from vonk_forge_contracts import document_sha256
 
+from .model_cache_support import _artifact, _canonical_model, _download
 from .test_catalog_revision_collection import Catalog
-from .test_model_cache import _artifact, _canonical_model, _download
 from .test_model_cache_revisions import _contains, _revision
 from .test_model_removal_decided_by_evidence import _installation
 from .test_model_removal_reference_lifecycle import _register_model, _removal_service
-from .test_unused_storage_collection import TOTAL, _models, _settle
+from .unused_storage_collection_support import TOTAL, _models, _settle
 
 TICKS = 5
 ALL = {"a": True, "n": True, "l": True}

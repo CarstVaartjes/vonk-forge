@@ -527,10 +527,8 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
     from vonk_control.presence import ManagementAddressPolicy
     from vonk_control.worker.assembly import assemble_production_worker
 
-    from .test_recipe_operations import (
-        NOW as RECIPE_NOW,
-    )
-    from .test_recipe_operations import (
+    from .recipe_operations_support import NOW as RECIPE_NOW
+    from .recipe_operations_support import (
         _job_phases,
         installed_recipe,
         setup_services,

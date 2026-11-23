@@ -28,8 +28,8 @@ from ..fleet_profile_contract.applications import FleetProfileApplicationProgres
 from ..lifecycle.evidence import Damaged, Residue, read_or_rebuild
 from ..models.fleet import FleetProfileApplication, FleetProfileSelection, User
 from ..persisted_waits import read_wait
-from ..profile_capacity import release_unassigned_profile_claims
 from ..settings import DATABASE_WAIT_BUDGETS
+from .capacity import release_unassigned_profile_claims
 from .contracts import (
     FleetProfileAdmissionBusy,
     FleetProfileAdmissionDefect,

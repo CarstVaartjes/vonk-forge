@@ -20,8 +20,8 @@ from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_cache.split_transfer import REPAIR_PARTIALS_PREFIX
 from vonk_control.models.cache import ModelCacheOperation
 
+from .model_cache_support import _artifact, _download, _remove_model, cache
 from .removal_settle import advance_until_ended
-from .test_model_cache import _artifact, _download, _remove_model, cache
 
 __all__ = ["cache"]
 

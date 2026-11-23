@@ -22,6 +22,11 @@ from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileSwitchCh
 from ..admission_locking import (
     set_admission_timeout,
 )
+from ..fleet_profiles.stop_authority import (
+    ProfileStopAuthorityError,
+    ProfileStopOwnerBinding,
+    validate_profile_stop_owner,
+)
 from ..jobs.documents import (
     RecipeStopParent,
     RunSwitchJobPayload,
@@ -32,11 +37,6 @@ from ..logging import redact_text
 from ..models.execution import RecipeInstallation, RecipeRun
 from ..models.fleet import FleetProfileApplication
 from ..models.jobs import Job
-from ..profile_stop_authority import (
-    ProfileStopAuthorityError,
-    ProfileStopOwnerBinding,
-    validate_profile_stop_owner,
-)
 from ..stored.json_values import read_row_column
 from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .impact_plans import (

@@ -943,7 +943,7 @@ _ONE_SPARK_ORDINAL_ORDERS = {
     # The source JobRun ran on ``target.node_id`` alone, the Spark whose
     # ordinal the Stop carries (checked in the same predicate).
     (
-        "control/src/vonk_control/profile_stop_authority.py",
+        "control/src/vonk_control/fleet_profiles/stop_authority.py",
         "validate_jobrun_stop_source",
     ),
 }

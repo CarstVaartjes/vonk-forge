@@ -52,8 +52,8 @@ from vonk_control.recipe_operations.observation_helpers import (
 )
 
 from ..node_contacts import contact_row
+from ..recipe_operations_support import start_evidence
 from ..test_lifecycle_preflight import _finish as complete_preflight
-from ..test_recipe_operations import start_evidence
 from .world import World
 
 ANSWERED_KINDS = (

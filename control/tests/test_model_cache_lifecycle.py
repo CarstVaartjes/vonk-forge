@@ -8,7 +8,6 @@ without an action, a cancel completes, a restart in the middle of a transfer is
 harmless, and a missing object or a full disk is a wait that heals, never an end.
 """
 
-# ruff: noqa: F811 - tests take the imported ``cache`` fixture by name
 from __future__ import annotations
 
 import fcntl
@@ -36,13 +35,8 @@ from vonk_control.lifecycle.types import (
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
 
+from .model_cache_support import _artifact, _download
 from .non_blocking import assert_ended_without_blocking
-from .test_model_cache import (
-    _artifact,
-    _download,
-    cache,  # noqa: F401 - the fixture
-    threaded_cache,  # noqa: F401 - independent connections for background workers
-)
 from .test_model_cache_recovery_support import observe_unknown
 
 MODEL = "a" * 64

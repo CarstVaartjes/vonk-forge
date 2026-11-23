@@ -13,7 +13,7 @@ from vonk_control.models.fleet import AgentCertificate
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.recipe_routes.service import RecipeRecoveryDeadlineError
 
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     _queued_distributed_recovery_restart,
     _recovery_deadline,
     _required,

@@ -90,7 +90,7 @@ assignment, never whether a test is selected.
 ```sh
 scripts/verify-supply-chain --json
 uv run --project control --frozen \
-  pytest -q tests/scripts/test_install_release_publication.py
+  pytest -q 'tests/scripts/test_install_release_publication_*.py'
 ```
 
 Publication is performed by CI. Operators consume the stable or development

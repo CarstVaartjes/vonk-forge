@@ -43,7 +43,7 @@ from vonk_control.run_switch_operations.artifact_validation import (
 )
 from vonk_forge_contracts import document_sha256
 
-from .test_recipe_operations import setup_services
+from .recipe_operations_support import setup_services
 
 WEIGHTS = bytes(range(256)) * 4
 SELECTOR = "vonk-forge/synthetic-tiny-fp16"

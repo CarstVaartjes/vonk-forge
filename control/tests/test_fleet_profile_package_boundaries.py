@@ -27,12 +27,28 @@ def test_profile_words_are_consumed_from_the_generated_contract_vocabulary() -> 
             if isinstance(node, ast.Dict)
             for key in node.keys
         }
+        # Words typed by a Literal field of another contract (run-switch plans,
+        # effects, reservations) are checked by the type checker; only a
+        # constant that is not part of such a field's type, a comparison or an annotated value is a
+        # spelled-out profile word.
+        typed = {
+            id(inner)
+            for node in ast.walk(tree)
+            if (
+                isinstance(node, ast.Subscript)
+                and ast.unparse(node.value).endswith("Literal")
+            )
+            or isinstance(node, ast.Compare)
+            or (isinstance(node, ast.AnnAssign) and node.value is not None)
+            for inner in ast.walk(node)
+        }
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Constant)
                 and isinstance(node.value, str)
                 and node.value in words
                 and id(node) not in keys
+                and id(node) not in typed
             ):
                 violations.append((path.name, node.lineno, node.value))
     assert not violations, f"use the canonical profile enum: {violations}"
