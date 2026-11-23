@@ -1,0 +1,5941 @@
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import re
+import signal
+import threading
+import uuid
+from collections.abc import Mapping
+from contextlib import redirect_stdout
+from datetime import UTC, datetime, timedelta
+from importlib.resources import files
+from io import StringIO
+from pathlib import Path
+from typing import cast
+
+import pytest
+from library_route_fixtures import _recipe_projection
+from vonk_agent_protocol import LifecycleState, OperatorActionName
+from vonk_forge_contracts import ModelDefinition, document_sha256
+
+from cluster_profiles import cli, controller_cli
+from cluster_profiles.cli_render import progress_line, render_payload
+from cluster_profiles.control_client import (
+    ControlConflict,
+    ControlForbidden,
+    ControlHTTPError,
+    ControlMalformedResponse,
+    ControlNotFound,
+    ControlTransportError,
+    ControlUnavailable,
+    _operation,
+    validate_control_document,
+)
+from cluster_profiles.controller_cli import profile_authoring, selection
+from cluster_profiles.controller_cli.selection import _read_concurrently
+from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
+    FleetProfileEndpointsView,
+)
+from cluster_profiles.generated_control.models.job_operator_receipt import (
+    JobOperatorReceipt,
+)
+from cluster_profiles.generated_control.models.job_operator_receipt_action import (
+    check_job_operator_receipt_action,
+)
+from control.tests.consumer_outcomes import not_adopted
+
+_REVIEW_DIGEST = "b" * 64
+
+
+def _subparser_choices(
+    parser: argparse.ArgumentParser,
+) -> dict[str, argparse.ArgumentParser]:
+    """Return the parser's subcommands through the argparse group it created."""
+
+    group = parser._subparsers
+    assert group is not None, "parser has no subcommands"
+    action = group._group_actions[0]
+    assert isinstance(action, argparse._SubParsersAction), (
+        "parser subcommands are unavailable"
+    )
+    return action.choices
+
+
+class FakeClient:
+    """Strict in-process adapter for the current operator wire contracts."""
+
+    request_timeout_seconds = 15.0
+
+    def __init__(self, responses: dict[tuple[str, str], object]):
+        self.responses = responses
+        self.calls: list[tuple[str, str, dict[str, object] | None, object]] = []
+
+    def request(
+        self,
+        method,
+        path,
+        payload=None,
+        *,
+        extra_headers=None,
+        query=None,
+        timeout_seconds=None,
+        retry=True,
+    ):
+        self._validate_request(method, path, payload, query)
+        if path == "/api/library/vocabulary" and (method, path) not in self.responses:
+            # The release words are informative and fetched aside by the
+            # library commands; a release without them answers 404.
+            raise ControlNotFound(404, "the synced release publishes no vocabulary")
+        self.calls.append((method, path, payload, query))
+        response = self.responses.get((method, path), {})
+        if method == "POST" and path.endswith("/preview") and not response:
+            response = {"allowed": True, "plan_digest": "c" * 64}
+        if isinstance(response, list):
+            # The final entry is sticky so a caller can describe a dependency
+            # that keeps answering the same way, including one that stays
+            # unavailable for the whole bounded observation.
+            response = response.pop(0) if len(response) > 1 else response[0]
+        if isinstance(response, BaseException):
+            raise response
+        return response
+
+    def metrics_catalogue(self):
+        raise AssertionError("the metric catalogue is not read here")
+
+    def profile_endpoints(self, number, alias=None):
+        payload = self.request(
+            "GET",
+            f"/api/profile/{number}/endpoints",
+            query={"alias": alias} if alias is not None else None,
+        )
+        if not isinstance(payload, dict):
+            raise TypeError("profile endpoints response must be an object")
+        return FleetProfileEndpointsView.from_dict(payload)
+
+    def _validate_request(self, method, path, payload, query):
+        profile_path = re.fullmatch(
+            r"/api/profile/(\d+)(?:/(definition|preview|load|delete|progress|endpoints))?",
+            path,
+        )
+        application_path = re.fullmatch(
+            r"/api/profile/applications/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            path,
+        )
+        application_cancel_path = re.fullmatch(
+            r"/api/profile/applications/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}/cancel",
+            path,
+        )
+        application_cancel_receipt_path = re.fullmatch(
+            r"/api/profile/applications/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}/cancellations/[0-9a-f]{8}-"
+            r"[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            path,
+        )
+        request_path = re.fullmatch(
+            r"/api/profile/\d+/requests/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            path,
+        )
+        selector_path = re.fullmatch(
+            r"/api/(model|recipe)/[^/]+(?:/(download|remove|remove-review))?", path
+        )
+        operation_path = re.fullmatch(
+            r"/api/(model|recipe)/(operations|requests)/[^/]+(?:/(?:cancel|resume-access))?",
+            path,
+        )
+        model_cancel_path = re.fullmatch(
+            r"/api/model/operations/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}/cancel",
+            path,
+        )
+        installation_reconcile_path = re.fullmatch(
+            r"/api/recipe/installations/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}/reconcile(?:/preview)?",
+            path,
+        )
+        run_switch_operation_path = re.fullmatch(
+            r"/api/run-switch/operations/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            path,
+        )
+        known_get = {
+            "/api/fleet",
+            "/api/model/library",
+            "/api/recipe/library",
+            "/api/profile",
+            "/api/operations",
+        }
+        job_path = re.fullmatch(r"/api/jobs/[^/]+", path)
+        resume_path = re.fullmatch(r"/api/jobs/[^/]+/resume", path)
+        job_request_path = re.fullmatch(r"/api/jobs/[^/]+/requests/[^/]+", path)
+        known = (
+            path in known_get
+            or job_path is not None
+            or resume_path is not None
+            or job_request_path is not None
+            or profile_path is not None
+            or application_path is not None
+            or application_cancel_path is not None
+            or application_cancel_receipt_path is not None
+            or request_path is not None
+            or selector_path is not None
+            or operation_path is not None
+            or model_cancel_path is not None
+            or installation_reconcile_path is not None
+            or run_switch_operation_path is not None
+        )
+        known = (
+            known or re.fullmatch(r"/api/fleet/[^/]+(?:/loginfo)?", path) is not None
+        )
+        known = known or path in {
+            "/api/fleet/enroll",
+            "/api/fleet/upgrade",
+            "/api/recipe/update",
+            "/api/recipe/operations/op-cancel/cancel",
+            "/api/library/vocabulary",
+        }
+        known = known or re.fullmatch(r"/api/jobs/[^/]+", path) is not None
+        known = (
+            known
+            or re.fullmatch(r"/api/operations/[^/]+(?:/evidence)?", path) is not None
+        )
+        known = (
+            known
+            or re.fullmatch(r"/api/fleet/[^/]+/(rename|re-enroll|remove)", path)
+            is not None
+        )
+        if not known:
+            raise AssertionError(
+                f"CLI emitted retired or invented route: {method} {path}"
+            )
+
+        if method == "GET":
+            if path.endswith("/library") or path == "/api/profile":
+                parameters = _operation(path, method)["parameters"]
+                assert isinstance(parameters, list)
+                assert query is None or set(query) <= {
+                    item["name"] for item in parameters if item["in"] == "query"
+                }
+            elif path.startswith("/api/fleet/") and not path.endswith("/loginfo"):
+                assert query is None or set(query) <= {"technical"}
+            elif path.endswith("/loginfo"):
+                assert query is None or set(query) <= {
+                    "since",
+                    "lines",
+                    "recipe",
+                    "source",
+                    "follow",
+                }
+            elif selector_path is not None and selector_path.group(2) is None:
+                assert query is None or set(query) <= {"technical"}
+            elif (
+                selector_path is not None and selector_path.group(2) == "remove-review"
+            ):
+                if selector_path.group(1) == "recipe":
+                    assert query is not None and set(query) == {"with_model"}
+                    assert type(query["with_model"]) is bool
+                else:
+                    assert query in (None, {"fleet": True})
+            elif operation_path is not None:
+                assert query is None
+            elif path.startswith("/api/jobs/"):
+                assert query is None or set(query) <= {"limit"}
+            elif path.endswith("/endpoints"):
+                assert query is None or set(query) <= {"alias"}
+            elif path == "/api/operations":
+                assert query is None or set(query) <= {
+                    "cursor",
+                    "limit",
+                    "state",
+                    "node_id",
+                    "request_id",
+                }
+            elif path.endswith("/evidence"):
+                assert query == {"attempt": 2}
+            elif run_switch_operation_path is not None:
+                assert query is None
+            else:
+                assert query is None
+            return
+
+        if method == "PUT":
+            assert profile_path is not None and profile_path.group(2) is None
+            validate_control_document("FleetProfileInput", payload)
+            return
+
+        if method != "POST":
+            raise AssertionError(f"unexpected method: {method}")
+        if resume_path is not None:
+            assert payload == {"disposition": "resume"}
+            return
+        if path.endswith("/preview"):
+            if payload is not None:
+                validate_control_document("FleetProfilePreviewRequest", payload)
+            assert installation_reconcile_path is not None or profile_path is not None
+        elif path.endswith("/delete"):
+            assert profile_path is not None
+            validate_control_document("FleetProfileDeleteRequest", payload)
+        elif path.endswith("/load"):
+            assert profile_path is not None
+            validate_control_document("FleetProfileLoadRequest", payload)
+        elif application_cancel_path is not None:
+            assert isinstance(payload, dict)
+            assert set(payload) == {"profile_number", "request_key"}
+            assert (
+                type(payload["profile_number"]) is int and payload["profile_number"] > 0
+            )
+            uuid.UUID(payload["request_key"])
+        elif installation_reconcile_path is not None and path.endswith("/reconcile"):
+            assert isinstance(payload, dict) and set(payload) == {"request_key"}
+            uuid.UUID(payload["request_key"])
+        elif selector_path is not None and selector_path.group(2) in {
+            "download",
+            "remove",
+        }:
+            assert isinstance(payload, dict)
+            if selector_path.group(1) == "model" and selector_path.group(2) == "remove":
+                assert set(payload) in (
+                    {"request_key"},
+                    {"request_key", "fleet", "review_digest"},
+                )
+                uuid.UUID(payload["request_key"])
+            else:
+                assert set(payload) <= {"request_key", "with_model"}
+                uuid.UUID(payload["request_key"])
+                if selector_path.group(2) == "remove":
+                    assert set(payload) == {
+                        "request_key",
+                        "with_model",
+                    }
+            if selector_path.group(1) == "model":
+                assert "with_model" not in payload
+            if selector_path.group(2) == "download":
+                assert "yes" not in payload and "with_model" not in payload
+        elif path == "/api/recipe/update":
+            assert isinstance(payload, dict)
+            assert set(payload) == {"request_key", "selectors", "all"}
+            uuid.UUID(payload["request_key"])
+            assert isinstance(payload["selectors"], list)
+            assert isinstance(payload["all"], bool)
+        elif path.endswith("/resume-access"):
+            validate_control_document("ModelCacheOperatorRequest", payload)
+        elif model_cancel_path is not None:
+            validate_control_document("ModelCacheCancellationRequest", payload)
+        elif re.fullmatch(r"/api/recipe/operations/[^/]+/cancel", path):
+            assert isinstance(payload, dict)
+            validate_control_document("RecipeCancellationRequest", payload)
+        elif path == "/api/fleet/upgrade":
+            assert (
+                {"all", "request_key"}
+                <= set(payload)
+                <= {
+                    "selectors",
+                    "all",
+                    "request_key",
+                }
+            )
+            uuid.UUID(payload["request_key"])
+            if "selectors" in payload:
+                assert isinstance(payload["selectors"], list) and payload["selectors"]
+        elif path == "/api/fleet/enroll":
+            assert set(payload) == {"name"}
+        elif path.endswith("/rename"):
+            assert set(payload) == {"display_name"}
+        elif path.endswith(("/re-enroll", "/remove")):
+            assert payload is None
+        else:
+            raise AssertionError(f"invented mutation payload route: {path}")
+
+
+def run(argv: tuple[str, ...], client: FakeClient) -> tuple[int, dict[str, object]]:
+    output = StringIO()
+    with redirect_stdout(output):
+        status = cli.main(
+            argv,
+            control_client=client,
+            request_id_factory=lambda: "11111111-1111-4111-8111-111111111111",
+        )
+    document = json.loads(output.getvalue())
+    # The client-contract stamp is proven by test_vonkctl_json_contract; these
+    # tests compare the Controller's content.
+    document.pop("schema_version", None)
+    if "result_kind" in document:
+        document.pop("result_kind")
+        document["result"].pop("schema_version", None)
+    return status, document
+
+
+def _reconciliation_plan(
+    installation_id: str = "22222222-2222-4222-8222-222222222222",
+    digest: str = _REVIEW_DIGEST,
+    *,
+    allowed: bool = True,
+) -> dict[str, object]:
+    return {
+        "action": "cleanup",
+        "allowed": allowed,
+        "blockers": [],
+        "cleanup_mode": "reconcile",
+        "installation_id": installation_id,
+        "plan_digest": digest,
+    }
+
+
+def _reconciliation_operation(
+    request_key: str,
+    installation_id: str = "22222222-2222-4222-8222-222222222222",
+    digest: str = _REVIEW_DIGEST,
+) -> dict[str, object]:
+    node_id = "spk_" + "2" * 32
+    return {
+        "operation_id": "33333333-3333-4333-8333-333333333333",
+        "kind": "recipe.cleanup.v2",
+        "action": "cleanup",
+        "state": "queued",
+        "plan_digest": digest,
+        "request_key": request_key,
+        "cleanup_mode": "reconcile",
+        "installation_id": installation_id,
+        "node_ids": [node_id],
+        "current_phase": None,
+        "completed_phases": [],
+        "progress": {
+            "operation": None,
+            "startup_budget_seconds": None,
+            "start_deadline": None,
+            "phase_index": 0,
+            "phase_count": 2,
+            "phase": None,
+            "state": "queued",
+            "completed_bytes": 0,
+            "total_bytes": None,
+            "total_bytes_known": False,
+            "subphase": None,
+            "members": [
+                {
+                    "node_id": node_id,
+                    "phase": None,
+                    "state": "pending",
+                    "completed_bytes": 0,
+                    "total_bytes": None,
+                    "error": None,
+                }
+            ],
+        },
+        "status_reason": None,
+        "result": None,
+    }
+
+
+def _operation_owner_page(request_key: str) -> dict[str, object]:
+    operation_id = "33333333-3333-4333-8333-333333333333"
+    node_id = "spk_" + "2" * 32
+    owner = {"kind": "job", "id": operation_id, "request_id": request_key}
+    return {
+        "operations": [
+            {
+                "id": operation_id,
+                "node_ids": [node_id],
+                "kind": "recipe.cleanup.v2",
+                "state": "queued",
+                "summary": "Recipe cleanup queued",
+                "attempt": 1,
+                "created_at": "2026-09-25T09:00:00Z",
+                "owner": owner,
+            },
+            {
+                "id": "44444444-4444-4444-8444-444444444444",
+                "parent_id": operation_id,
+                "node_ids": [node_id],
+                "kind": "recipe.reconcile",
+                "state": "running",
+                "summary": "Recipe check running",
+                "attempt": 1,
+                "created_at": "2026-09-25T09:00:01Z",
+                "owner": owner,
+            },
+        ],
+        "next_cursor": None,
+        "total": 2,
+    }
+
+
+def _allow_minimal_reconciliation_plan(monkeypatch) -> None:
+    original = controller_cli.validate_control_document
+
+    def validate(contract: str, value: object) -> dict[str, object]:
+        if contract == "RunSwitchPlan":
+            assert isinstance(value, dict)
+            return value
+        return original(contract, value)
+
+    monkeypatch.setattr(
+        controller_cli.installation, "validate_control_document", validate
+    )
+
+
+def test_recipe_installation_reconcile_review_uses_typed_preview_route(
+    monkeypatch,
+) -> None:
+    installation_id = "22222222-2222-4222-8222-222222222222"
+    path = f"/api/recipe/installations/{installation_id}/reconcile/preview"
+    plan = _reconciliation_plan(installation_id)
+    client = FakeClient({("POST", path): plan})
+
+    _allow_minimal_reconciliation_plan(monkeypatch)
+    status, result = run(
+        (
+            "recipe",
+            "installation",
+            "reconcile",
+            installation_id,
+            "--review",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and result == plan
+    assert client.calls == [("POST", path, None, None)]
+
+
+def test_recipe_installation_reconcile_submits_without_a_preview() -> None:
+    installation_id = "22222222-2222-4222-8222-222222222222"
+    key = "11111111-1111-4111-8111-111111111111"
+    apply = f"/api/recipe/installations/{installation_id}/reconcile"
+    empty = {"operations": [], "next_cursor": None, "total": 0}
+    client = FakeClient(
+        {
+            ("GET", "/api/operations"): empty,
+            ("POST", apply): ControlConflict(409, "installation is busy"),
+        }
+    )
+
+    status, _result = run(
+        (
+            "recipe",
+            "installation",
+            "reconcile",
+            installation_id,
+            "--request-key",
+            key,
+            "--yes",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 2
+    assert isinstance(_result["observation"], dict)
+    assert sum(call[0] == "POST" for call in client.calls) == 1
+    assert all(call[0] == "GET" for call in client.calls[2:])
+    assert client.calls[1][2] == {"request_key": key}
+
+    client.responses[("POST", apply)] = _reconciliation_operation(key, installation_id)
+    assert (
+        run(
+            (
+                "recipe",
+                "installation",
+                "reconcile",
+                installation_id,
+                "--request-key",
+                key,
+                "--yes",
+                "--detach",
+                "--json",
+            ),
+            client,
+        )[0]
+        == 0
+    )
+
+
+def test_recipe_installation_reconcile_reconnects_parent_from_realistic_activity_rows(
+    monkeypatch,
+) -> None:
+    installation_id = "22222222-2222-4222-8222-222222222222"
+    key = "11111111-1111-4111-8111-111111111111"
+    operation_id = "33333333-3333-4333-8333-333333333333"
+    operation_path = f"/api/run-switch/operations/{operation_id}"
+    operation = _reconciliation_operation(key, installation_id)
+    client = FakeClient(
+        {
+            ("GET", "/api/operations"): _operation_owner_page(key),
+            ("GET", operation_path): operation,
+        }
+    )
+
+    status, result = run(
+        (
+            "recipe",
+            "installation",
+            "reconcile",
+            installation_id,
+            "--request-key",
+            key,
+            "--yes",
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and result["operation_id"] == operation_id
+    assert [(call[0], call[1]) for call in client.calls] == [
+        ("GET", "/api/operations"),
+        ("GET", operation_path),
+    ]
+    assert client.calls[0][3] == {"request_id": key, "limit": 100}
+    assert all(call[0] != "POST" for call in client.calls)
+
+
+def test_recipe_installation_reconcile_bounds_request_lookup_under_submission_deadline(
+    monkeypatch,
+) -> None:
+    installation_id = "22222222-2222-4222-8222-222222222222"
+    key = "11111111-1111-4111-8111-111111111111"
+    operation_id = "33333333-3333-4333-8333-333333333333"
+
+    clock = [100.0]
+
+    class BoundedClient(FakeClient):
+        def __init__(self):
+            super().__init__(
+                {
+                    ("GET", "/api/operations"): _operation_owner_page(key),
+                    (
+                        "GET",
+                        f"/api/run-switch/operations/{operation_id}",
+                    ): _reconciliation_operation(key, installation_id),
+                }
+            )
+            self.timeouts: list[float | None] = []
+
+        def request(
+            self,
+            method,
+            path,
+            payload=None,
+            *,
+            extra_headers=None,
+            query=None,
+            timeout_seconds=None,
+            retry=True,
+        ):
+            self.timeouts.append(timeout_seconds)
+            if len(self.timeouts) == 1:
+                clock[0] += 35
+            return super().request(
+                method,
+                path,
+                payload,
+                extra_headers=extra_headers,
+                query=query,
+                timeout_seconds=timeout_seconds,
+            )
+
+    monkeypatch.setattr(controller_cli.observation.time, "monotonic", lambda: clock[0])
+    client = BoundedClient()
+
+    status, result = run(
+        (
+            "recipe",
+            "installation",
+            "reconcile",
+            installation_id,
+            "--request-key",
+            key,
+            "--yes",
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and result["operation_id"] == operation_id
+    assert client.timeouts == [15.0, 10.0]
+
+
+def test_recipe_installation_reconcile_owner_accepts_after_bounded_unknown_lookup() -> (
+    None
+):
+    installation_id = "22222222-2222-4222-8222-222222222222"
+    key = "11111111-1111-4111-8111-111111111111"
+    client = FakeClient(
+        {
+            ("GET", "/api/operations"): ControlUnavailable(503, "temporary outage"),
+            (
+                "POST",
+                f"/api/recipe/installations/{installation_id}/reconcile",
+            ): _reconciliation_operation(key, installation_id),
+        }
+    )
+
+    status, _result = run(
+        (
+            "recipe",
+            "installation",
+            "reconcile",
+            installation_id,
+            "--request-key",
+            key,
+            "--yes",
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0
+    assert [call[0] for call in client.calls] == ["GET", "GET", "GET", "POST"]
+    client.responses[("GET", "/api/operations")] = {
+        "operations": [],
+        "next_cursor": None,
+        "total": 0,
+    }
+    client.responses[
+        ("POST", f"/api/recipe/installations/{installation_id}/reconcile")
+    ] = _reconciliation_operation(key, installation_id)
+    assert (
+        run(
+            (
+                "recipe",
+                "installation",
+                "reconcile",
+                installation_id,
+                "--request-key",
+                key,
+                "--yes",
+                "--detach",
+                "--json",
+            ),
+            client,
+        )[0]
+        == 0
+    )
+
+
+def test_recipe_installation_reconcile_replays_lost_acceptance_with_same_identity() -> (
+    None
+):
+    installation_id = "22222222-2222-4222-8222-222222222222"
+    key = "11111111-1111-4111-8111-111111111111"
+    apply = f"/api/recipe/installations/{installation_id}/reconcile"
+    empty = {"operations": [], "next_cursor": None, "total": 0}
+    operation = _reconciliation_operation(key, installation_id)
+    client = FakeClient(
+        {
+            ("GET", "/api/operations"): [empty, empty],
+            ("POST", apply): [
+                ControlTransportError("acceptance response was lost"),
+                operation,
+            ],
+        }
+    )
+
+    status, result = run(
+        (
+            "recipe",
+            "installation",
+            "reconcile",
+            installation_id,
+            "--request-key",
+            key,
+            "--yes",
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and result["operation_id"] == operation["operation_id"]
+    posts = [call[2] for call in client.calls if call[0] == "POST" and call[1] == apply]
+    assert len(posts) == 2 and posts[0] == posts[1]
+    assert posts[0] == {"request_key": key}
+
+
+def _model_detail(selector: str = "qwen") -> tuple[dict[str, object], str]:
+    document_path = files("vonk_forge_contracts").joinpath(
+        "examples", "model-definition.json"
+    )
+    model = ModelDefinition.model_validate(json.loads(document_path.read_text()))
+    identity = model.identity
+    digest = document_sha256(model.model_dump(mode="json"))
+    return (
+        {
+            "selector": selector,
+            "identity": {
+                "kind": "model",
+                "publisher": identity.publisher,
+                "slug": identity.slug,
+                "content_sha256": digest,
+            },
+            "document": model.model_dump(mode="json"),
+            "family": "synthetic",
+            "version": identity.version,
+            "variant": identity.variant,
+            "quantization": model.format.quantization,
+            "usage": [],
+            "resources": {"disk_bytes": model.download_bytes},
+            "local": {"controller": "not_cached", "running_on": []},
+            "updated_at": "2026-09-24T00:00:00Z",
+            "alignment": [],
+        },
+        digest,
+    )
+
+
+def _recipe_removal_receipt(
+    selector: str, request_key: str, *, with_model: bool
+) -> dict[str, object]:
+    return {
+        "action": "remove",
+        "selector": selector,
+        "request_key": request_key,
+        "operation_id": "11111111-1111-4111-8111-111111111121",
+        "recipe_revision_id": "revision-1",
+        "with_model": with_model,
+        "progress": {"phase": "queued"},
+        "reclaimed_bytes": 0,
+        "state": "queued",
+    }
+
+
+def _removal_review(
+    noun: str,
+    selector: str,
+    *,
+    model_digest: str | None = None,
+    with_model: bool | None = None,
+) -> dict[str, object]:
+    return {
+        "schema_version": 2,
+        "action": "remove",
+        "resource_kind": noun,
+        "selector": selector,
+        "target_identity": model_digest or "revision-1",
+        "with_model": with_model,
+        "assets": [],
+        "references": [],
+        "active_work": [],
+        "blockers": [],
+        "observed_at": "2026-09-24T10:00:00Z",
+        "review_digest": "b" * 64,
+    }
+
+
+def test_parser_exposes_current_singular_operator_roots_and_update() -> None:
+    parser = cli._parser()
+    assert set(_subparser_choices(parser)) == {
+        "fleet",
+        "job",
+        "model",
+        "recipe",
+        "profile",
+        "platform",
+        "metrics",
+        "key",
+        "run",
+        "update",
+        "auth",
+        "completion",
+    }
+    for argv in (
+        ("models", "list"),
+        ("recipes", "list"),
+        ("profiles", "list"),
+        ("admin", "fleet"),
+        ("fleet", "profile"),
+    ):
+        try:
+            parser.parse_args(argv)
+        except cli._UsageError:
+            pass
+        else:
+            raise AssertionError(f"retired command accepted: {argv}")
+
+
+def test_fleet_activity_passes_all_filters_to_one_canonical_page() -> None:
+    request_id = "33333333-3333-4333-8333-333333333333"
+    target = "spk_" + "1" * 32
+    cursor = "opaque-continuation"
+    response = {"operations": [], "next_cursor": None, "total": 0}
+    client = FakeClient({("GET", "/api/operations"): response})
+
+    status, payload = run(
+        (
+            "fleet",
+            "activity",
+            "--limit",
+            "7",
+            "--cursor",
+            cursor,
+            "--state",
+            "backoff",
+            "--target",
+            target,
+            "--request-id",
+            request_id,
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and payload == response
+    assert client.calls == [
+        (
+            "GET",
+            "/api/operations",
+            None,
+            {
+                "cursor": cursor,
+                "limit": 7,
+                "state": "backoff",
+                "node_id": target,
+                "request_id": request_id,
+            },
+        )
+    ]
+
+
+def test_fleet_locks_reads_the_admission_lock_report() -> None:
+    response = {
+        "held": [
+            {
+                "node_id": "spk_" + "1" * 32,
+                "namespace": "node",
+                "holder": "run-admission",
+                "state": "idle in transaction",
+                "transaction_age_seconds": 12.5,
+                "query": "SELECT 1",
+            }
+        ],
+        "open_transactions": [],
+    }
+    client = FakeClient({("GET", "/api/fleet/locks"): response})
+
+    status, payload = run(("fleet", "locks", "--json"), client)
+
+    assert status == 0 and payload == response
+    assert client.calls == [("GET", "/api/fleet/locks", None, None)]
+
+
+def test_fleet_evidence_downloads_the_current_attempt_to_a_private_file(
+    tmp_path: Path,
+) -> None:
+    bundle = {"schema": "evidence"}
+    client = FakeClient(
+        {
+            ("GET", "/api/operations/op-1"): {"attempt": 2},
+            ("GET", "/api/operations/op-1/evidence"): bundle,
+        }
+    )
+    output = tmp_path / "evidence.json"
+
+    status, payload = run(
+        ("fleet", "evidence", "op-1", "--output", str(output), "--json"), client
+    )
+
+    assert status == 0 and payload["attempt"] == 2
+    assert json.loads(output.read_text()) == bundle
+    assert output.stat().st_mode & 0o077 == 0
+    assert client.calls[-1][3] == {"attempt": 2}
+
+
+def test_fleet_evidence_falls_back_to_the_job_attempt_for_an_unprojected_job(
+    tmp_path: Path,
+) -> None:
+    """A job Activity does not project still has its evidence downloaded.
+
+    Wrong implementation caught: the default attempt came only from the
+    operation projection, so a recipe image build or run/switch parent answered
+    "operation not found" and its stored failure evidence was unreachable.
+    """
+    bundle = {"schema": "evidence"}
+    job_id = "11111111-1111-4111-8111-111111111111"
+    client = FakeClient(
+        {
+            ("GET", f"/api/operations/{job_id}"): ControlNotFound(
+                404, "operation not found"
+            ),
+            ("GET", f"/api/jobs/{job_id}"): {"current_attempt": 2},
+            ("GET", f"/api/operations/{job_id}/evidence"): bundle,
+        }
+    )
+    output = tmp_path / "evidence.json"
+
+    status, payload = run(
+        ("fleet", "evidence", job_id, "--output", str(output), "--json"), client
+    )
+
+    assert status == 0 and payload["attempt"] == 2
+    assert json.loads(output.read_text()) == bundle
+
+
+def test_recipe_sync_status_treats_a_missing_sync_as_never_run() -> None:
+    class NeverSynced(FakeClient):
+        def request(self, method, path, *args, **kwargs):
+            raise ControlHTTPError(404, "not found")
+
+    status, payload = run(("recipe", "sync-status", "--json"), NeverSynced({}))
+
+    assert status == 0 and payload == {"state": "never-run"}
+
+
+def test_fleet_resume_forwards_explicit_intent_without_projection_gate() -> None:
+    job_id = "11111111-1111-4111-8111-111111111111"
+    detail = {
+        "id": job_id,
+        "state": "needs-operator",
+        "recovery": {"actions": ["inspect", "resume"]},
+    }
+    accepted = {"id": job_id, "state": "queued"}
+    client = FakeClient(
+        {
+            ("GET", f"/api/jobs/{job_id}"): detail,
+            ("POST", f"/api/jobs/{job_id}/resume"): accepted,
+        }
+    )
+
+    status, payload = run(("fleet", "resume", job_id, "--yes", "--json"), client)
+
+    assert status == 0 and payload == accepted
+    assert client.calls == [
+        ("POST", f"/api/jobs/{job_id}/resume", {"disposition": "resume"}, None),
+    ]
+
+
+def test_fleet_resume_asks_in_a_terminal_and_refuses_without_input(monkeypatch) -> None:
+    class Terminal(StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    job_id = "11111111-1111-4111-8111-111111111111"
+    monkeypatch.setattr(cli.sys, "stderr", Terminal())
+    monkeypatch.setattr(cli.sys, "stdin", Terminal("n\n"))
+    client = FakeClient({})
+    assert cli.main(("fleet", "resume", job_id), control_client=client) != 0
+    assert client.calls == []
+
+    monkeypatch.setattr(cli.sys, "stdin", Terminal("y\n"))
+    client = FakeClient(
+        {("POST", f"/api/jobs/{job_id}/resume"): {"id": job_id, "state": "queued"}}
+    )
+    assert cli.main(("fleet", "resume", job_id), control_client=client) == 0
+    assert [call[:2] for call in client.calls[:1]] == [
+        ("POST", f"/api/jobs/{job_id}/resume")
+    ]
+
+    status, _ = run(("--no-input", "fleet", "resume", job_id, "--json"), client)
+    assert status == 2 and len(client.calls) == 1
+
+
+def test_a_confirmed_fleet_resume_posts_the_resume_and_exits_zero() -> None:
+    job_id = "11111111-1111-4111-8111-111111111111"
+    client = FakeClient(
+        {
+            ("GET", f"/api/jobs/{job_id}"): {
+                "id": job_id,
+                "state": "needs-operator",
+                "recovery": {"actions": ["inspect", "resume"]},
+            },
+            ("POST", f"/api/jobs/{job_id}/resume"): {"id": job_id, "state": "queued"},
+        }
+    )
+
+    status = cli.main(("fleet", "resume", job_id, "--yes"), control_client=client)
+
+    assert status == 0
+    assert [(call[0], call[1]) for call in client.calls][-1] == (
+        "POST",
+        f"/api/jobs/{job_id}/resume",
+    )
+
+
+@pytest.mark.parametrize("receipt_matches", [True, False])
+def test_fleet_resume_rejects_a_receipt_for_another_job(receipt_matches: bool) -> None:
+    job_id = "11111111-1111-4111-8111-111111111111"
+    other_job_id = "22222222-2222-4222-8222-222222222222"
+    lookup = f"/api/jobs/{job_id}/requests/{job_id}"
+    client = FakeClient(
+        {
+            ("GET", lookup): JobOperatorReceipt(
+                action=check_job_operator_receipt_action(OperatorActionName.RESUME),
+                actor="operator",
+                content_digest="a" * 64,
+                job_id=job_id if receipt_matches else other_job_id,
+                request_id=job_id,
+            ).to_dict(),
+            ("GET", f"/api/jobs/{job_id}"): {
+                "id": job_id,
+                "state": LifecycleState.RUNNING.value,
+                "recovery": {"actions": ["resume"]},
+            },
+            ("POST", f"/api/jobs/{job_id}/resume"): {
+                "id": other_job_id,
+                "state": "queued",
+            },
+        }
+    )
+
+    status, payload = run(("fleet", "resume", job_id, "--yes", "--json"), client)
+
+    if receipt_matches:
+        assert status == 0, payload
+        assert payload["id"] == job_id
+        assert other_job_id not in json.dumps(payload)
+        assert [(method, path) for method, path, *_ in client.calls] == [
+            ("POST", f"/api/jobs/{job_id}/resume"),
+            ("GET", lookup),
+            ("GET", f"/api/jobs/{job_id}"),
+        ]
+    else:
+        assert status != 0
+        assert not any(path == f"/api/jobs/{job_id}" for _, path, *_ in client.calls)
+    client.responses[("POST", f"/api/jobs/{job_id}/resume")] = {
+        "id": job_id,
+        "state": "queued",
+    }
+    assert run(("fleet", "resume", job_id, "--yes", "--json"), client)[0] == 0
+
+
+def test_fleet_resume_submits_even_after_advertised_action_disappears() -> None:
+    job_id = "11111111-1111-4111-8111-111111111111"
+    client = FakeClient(
+        {
+            ("GET", f"/api/jobs/{job_id}"): {
+                "id": job_id,
+                "state": "needs-operator",
+                "recovery": {"actions": ["inspect"]},
+            },
+            ("POST", f"/api/jobs/{job_id}/resume"): {"id": job_id, "state": "queued"},
+        }
+    )
+    status, payload = run(("fleet", "resume", job_id, "--yes", "--json"), client)
+    assert status == 0 and payload["id"] == job_id
+    assert [call[0] for call in client.calls] == ["POST"]
+    assert run(("fleet", "resume", job_id, "--yes", "--json"), client)[0] == 0
+
+
+def test_activity_presentation_keeps_exact_reconnect_and_complete_continuation() -> (
+    None
+):
+    request_id = "33333333-3333-4333-8333-333333333333"
+    target = "spk_" + "1" * 32
+    operation = {
+        "id": "operation-1",
+        "kind": "recipe.stop",
+        "state": "needs-operator",
+        "attempt": 3,
+        "created_at": "2026-08-05T12:00:00Z",
+        "node_ids": [target],
+        "owner": {
+            "kind": "job",
+            "id": "job-owner-1",
+            "request_id": request_id,
+        },
+        "recovery": {"actions": ["inspect"]},
+    }
+    output = StringIO()
+    with redirect_stdout(output):
+        render_payload(
+            {
+                "operations": [operation],
+                "total": 3,
+                "next_cursor": "opaque+token",
+            },
+            "fleet",
+            action="activity",
+            activity_filters={
+                "limit": 1,
+                "state": "needs-operator",
+                "target": target,
+                "request_id": request_id,
+            },
+        )
+
+    rendered = output.getvalue()
+    assert "vonkctl fleet progress job-owner-1 --follow" in rendered
+    assert (
+        "vonkctl fleet activity --limit 1 --cursor opaque+token --state "
+        f"needs-operator --target {target} --request-id {request_id}"
+    ) in rendered
+
+
+def test_fleet_loginfo_line_count_is_bounded_without_enumerating_choices() -> None:
+    parser = cli._parser()
+    fleet = _subparser_choices(parser)["fleet"]
+    loginfo = _subparser_choices(fleet)["loginfo"]
+
+    for accepted in ("1", "1000"):
+        assert loginfo.parse_args(["Atlas", "--lines", accepted]).lines == int(accepted)
+    for rejected in ("0", "1001", "not-a-number"):
+        with not_adopted():
+            loginfo.parse_args(["Atlas", "--lines", rejected])
+        status = cli.main(("fleet", "loginfo", "Atlas", "--lines", rejected, "--json"))
+        assert status == 2
+
+    help_text = loginfo.format_help()
+    assert "{1,2," not in help_text
+
+
+def test_model_and_recipe_library_use_final_singular_routes_and_facets() -> None:
+    model = FakeClient({("GET", "/api/model/library"): {"models": []}})
+    status, payload = run(
+        ("model", "library", "--usage", "code", "--family", "Qwen", "--json"),
+        model,
+    )
+    assert status == 0 and payload == {"models": []}
+    assert model.calls == [
+        (
+            "GET",
+            "/api/model/library",
+            None,
+            {"usage": ["code"], "family": ["Qwen"], "sort": "updated", "limit": 100},
+        )
+    ]
+
+    recipe = FakeClient({("GET", "/api/recipe/library"): {"recipes": []}})
+    status, _ = run(
+        ("recipe", "library", "--cached", "--model", "vision", "--json"),
+        recipe,
+    )
+    assert status == 0
+    assert recipe.calls[0][1] == "/api/recipe/library"
+    assert recipe.calls[0][3] == {
+        "sort": "updated",
+        "limit": 100,
+        "model": ["vision"],
+        "cached": True,
+    }
+
+
+def test_download_is_one_step_and_repeated_calls_keep_server_operation_states() -> None:
+    client = FakeClient(
+        {
+            ("POST", "/api/model/qwen/download"): {
+                "state": "accepted",
+                "action": "download",
+                "operation_id": "model-download",
+                "request_key": "11111111-1111-4111-8111-111111111111",
+                "selector": "qwen",
+            },
+            ("POST", "/api/recipe/qwen-code/download"): {
+                "state": "running",
+                "kind": "recipe.image.availability.v2",
+                "id": "recipe-download",
+                "request_id": "11111111-1111-4111-8111-111111111111",
+                "request": {
+                    "kind": "selector",
+                    "selector": "qwen-code",
+                    "force": False,
+                },
+            },
+        }
+    )
+    assert (
+        run(("model", "download", "qwen", "--detach", "--json"), client)[1]["action"]
+        == "download"
+    )
+    assert run(("model", "download", "qwen", "--detach", "--json"), client)[0] == 0
+    assert (
+        run(("recipe", "download", "qwen-code", "--detach", "--json"), client)[0] == 0
+    )
+    assert (
+        client.calls[0][2]
+        == client.calls[1][2]
+        == {
+            "request_key": "11111111-1111-4111-8111-111111111111",
+        }
+    )
+    assert client.calls[2][2] == {
+        "request_key": "11111111-1111-4111-8111-111111111111",
+    }
+
+
+def test_recipe_download_rejects_a_forced_selector_intent_receipt() -> None:
+    selector = "qwen-code"
+    request_key = "11111111-1111-4111-8111-111111111111"
+    path = f"/api/recipe/{selector}/download"
+    lookup = f"/api/recipe/requests/{request_key}"
+    receipt = {
+        "id": "recipe-download",
+        "request_id": request_key,
+        "kind": "recipe.image.availability.v2",
+        "request": {"kind": "selector", "selector": selector, "force": True},
+        "state": "running",
+    }
+    client = FakeClient({("POST", path): receipt, ("GET", lookup): receipt})
+
+    status, payload = run(
+        (
+            "recipe",
+            "download",
+            selector,
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 2
+    observation = payload["observation"]
+    assert isinstance(observation, dict) and observation["status"] == "timed_out"
+    assert payload["result"] == {}
+    assert [call[:2] for call in client.calls] == [
+        ("POST", path),
+        *[("GET", lookup)] * 4,
+    ]
+    repaired = receipt | {
+        "request_id": "22222222-2222-4222-8222-222222222222",
+        "request": {"kind": "selector", "selector": selector, "force": False},
+    }
+    client.responses[("POST", path)] = repaired
+    status, result = run(
+        (
+            "recipe",
+            "download",
+            selector,
+            "--request-key",
+            repaired["request_id"],
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0 and result["id"] == repaired["id"]
+    assert [call[0] for call in client.calls].count("POST") == 2
+
+
+def test_recipe_detail_reads_the_vocabulary_only_for_the_human_detail() -> None:
+    recipes = json.loads(
+        (Path(__file__).parents[1] / "fixtures/library-list.json").read_text()
+    )["recipes"]
+    vocabulary = json.loads(
+        (
+            Path(__file__).parents[1] / "fixtures/library-vocabulary-wording.json"
+        ).read_text()
+    )["vocabulary"]
+    client = FakeClient(
+        {
+            ("GET", "/api/recipe/qwen"): recipes[0] | {"usage": ["chat"]},
+            ("GET", "/api/library/vocabulary"): vocabulary,
+        }
+    )
+    assert cli.main(("recipe", "detail", "qwen"), control_client=client) == 0
+    assert "/api/library/vocabulary" in [call[1] for call in client.calls]
+
+    client.calls.clear()
+    assert run(("recipe", "detail", "qwen", "--json"), client)[0] == 0
+    assert [call[1] for call in client.calls] == ["/api/recipe/qwen"]
+
+    # The plain table never needs the words.
+    client.calls.clear()
+    cli.main(("recipe", "library"), control_client=client)
+    assert "/api/library/vocabulary" not in [call[1] for call in client.calls]
+
+
+def test_detail_supports_technical_query_and_nested_typed_table_fields() -> None:
+    detail = FakeClient(
+        {
+            ("GET", "/api/model/qwen"): {
+                "selector": "qwen",
+                "identity": {"slug": "Qwen 3.8", "content_sha256": "digest"},
+                "local": {"controller": "not_cached", "running_on": []},
+                "resources": {},
+                "document": {},
+            },
+            ("GET", "/api/model/library"): {
+                "models": [
+                    {
+                        "selector": "qwen",
+                        "identity": {"slug": "Qwen 3.8"},
+                        "local": {"controller": "cached", "running_on": ["Atlas"]},
+                        "resources": {"disk_bytes": 42},
+                    }
+                ],
+            },
+        }
+    )
+    status, payload = run(("model", "detail", "qwen", "--technical", "--json"), detail)
+    technical = payload["identity"]
+    assert isinstance(technical, dict)
+    assert status == 0 and technical["content_sha256"] == "digest"
+    assert detail.calls[0][3] == {"technical": True}
+
+
+def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
+    model_operation_id = "11111111-1111-4111-8111-111111111121"
+    recipe_operation_id = "11111111-1111-4111-8111-111111111122"
+    request_key = "11111111-1111-4111-8111-111111111111"
+    model_detail, model_digest = _model_detail()
+    client = FakeClient(
+        {
+            ("GET", "/api/model/qwen"): model_detail,
+            ("GET", "/api/model/qwen/remove-review"): _removal_review(
+                "model", "qwen", model_digest=model_digest
+            ),
+            ("POST", "/api/model/qwen/remove"): {
+                "action": "remove",
+                "selector": "qwen",
+                "request_key": request_key,
+                "model_content_sha256": model_digest,
+                "state": "cancelled",
+                "operation_id": model_operation_id,
+                "phase": "completed",
+                "progress": {"phase": "completed"},
+                "transferred_bytes": 0,
+            },
+            ("GET", "/api/recipe/vision/remove-review"): _removal_review(
+                "recipe", "vision", with_model=True
+            ),
+            ("POST", "/api/recipe/vision/remove"): {
+                "state": "accepted",
+                "action": "remove",
+                "selector": "vision",
+                "request_key": request_key,
+                "operation_id": recipe_operation_id,
+                "recipe_revision_id": "revision-1",
+                "with_model": True,
+                "progress": {"phase": "completed"},
+                "reclaimed_bytes": 0,
+            },
+            ("GET", f"/api/recipe/operations/{recipe_operation_id}"): {
+                "state": "succeeded",
+                "action": "remove",
+                "selector": "vision",
+                "request_key": request_key,
+                "operation_id": recipe_operation_id,
+                "recipe_revision_id": "revision-1",
+                "with_model": True,
+                "progress": {"phase": "completed"},
+                "reclaimed_bytes": 0,
+            },
+        }
+    )
+    model_status, model_receipt = run(
+        (
+            "model",
+            "remove",
+            "qwen",
+            "--yes",
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+    assert model_status == 2 and model_receipt["model_content_sha256"] == model_digest
+    assert [call[:2] for call in client.calls[:2]] == [
+        ("GET", "/api/model/qwen/remove-review"),
+        ("POST", "/api/model/qwen/remove"),
+    ]
+    assert client.calls[1][2] == {
+        "request_key": "11111111-1111-4111-8111-111111111111",
+    }
+    assert (
+        run(
+            (
+                "recipe",
+                "remove",
+                "vision",
+                "--with-model",
+                "--yes",
+                "--json",
+            ),
+            client,
+        )[0]
+        == 0
+    )
+    assert client.calls[2][1] == "/api/recipe/vision/remove-review"
+    assert client.calls[3][1] == "/api/recipe/vision/remove"
+    recipe_remove = client.calls[3][2]
+    assert recipe_remove is not None
+    assert recipe_remove["with_model"] is True
+
+
+def test_model_remove_reconciles_after_lost_acceptance() -> None:
+    selector = "qwen"
+    request_key = "11111111-1111-4111-8111-111111111111"
+    operation_id = "11111111-1111-4111-8111-111111111121"
+    _detail, digest = _model_detail(selector)
+    receipt = {
+        "action": "remove",
+        "selector": selector,
+        "request_key": request_key,
+        "model_content_sha256": digest,
+        "operation_id": operation_id,
+        "state": "queued",
+        "phase": "queued",
+        "progress": {"phase": "queued"},
+        "transferred_bytes": 0,
+    }
+    lookup = f"/api/model/requests/{request_key}"
+    remove = f"/api/model/{selector}/remove"
+    client = FakeClient(
+        {
+            ("GET", lookup): [
+                ControlNotFound(404, "request was not accepted"),
+                receipt,
+            ],
+            (
+                "GET",
+                f"/api/model/{selector}/remove-review",
+            ): _removal_review("model", selector, model_digest=digest),
+            ("POST", remove): ControlTransportError("accepted response was lost"),
+        }
+    )
+
+    status, result = run(
+        (
+            "model",
+            "remove",
+            selector,
+            "--yes",
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and result == receipt
+    assert [call[:2] for call in client.calls] == [
+        ("GET", lookup),
+        ("GET", f"/api/model/{selector}/remove-review"),
+        ("POST", remove),
+        ("GET", lookup),
+    ]
+    body = client.calls[2][2]
+    assert body == {
+        "request_key": request_key,
+    }
+
+
+def test_model_remove_reconnects_to_existing_key_before_resolving_current_head() -> (
+    None
+):
+    selector = "qwen"
+    request_key = "11111111-1111-4111-8111-111111111111"
+    receipt = {
+        "action": "remove",
+        "selector": selector,
+        "request_key": request_key,
+        "model_content_sha256": "a" * 64,
+        "operation_id": "11111111-1111-4111-8111-111111111121",
+        "state": "succeeded",
+        "phase": "completed",
+        "progress": {"phase": "completed"},
+        "transferred_bytes": 0,
+    }
+    lookup = f"/api/model/requests/{request_key}"
+    client = FakeClient({("GET", lookup): receipt})
+
+    status, result = run(
+        (
+            "model",
+            "remove",
+            selector,
+            "--yes",
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and result == receipt
+    assert [call[:2] for call in client.calls] == [("GET", lookup)]
+
+
+def test_recipe_remove_reconciles_lost_acceptance_with_the_same_request_key() -> None:
+    selector = "vision"
+    request_key = "11111111-1111-4111-8111-111111111111"
+    receipt = _recipe_removal_receipt(selector, request_key, with_model=False)
+    lookup = f"/api/recipe/requests/{request_key}"
+    remove = f"/api/recipe/{selector}/remove"
+    client = FakeClient(
+        {
+            ("GET", lookup): [
+                ControlNotFound(404, "request was not accepted"),
+                receipt,
+            ],
+            (
+                "GET",
+                f"/api/recipe/{selector}/remove-review",
+            ): _removal_review("recipe", selector, with_model=False),
+            ("POST", remove): ControlTransportError("accepted response was lost"),
+        }
+    )
+
+    status, result = run(
+        (
+            "recipe",
+            "remove",
+            selector,
+            "--keep-model",
+            "--yes",
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and result == receipt
+    assert [call[:2] for call in client.calls] == [
+        ("GET", lookup),
+        ("GET", f"/api/recipe/{selector}/remove-review"),
+        ("POST", remove),
+        ("GET", lookup),
+    ]
+    assert client.calls[2][2] == {
+        "request_key": request_key,
+        "with_model": False,
+    }
+
+
+def test_recipe_remove_reconnects_to_existing_key_without_posting() -> None:
+    selector = "vision"
+    request_key = "11111111-1111-4111-8111-111111111111"
+    receipt = _recipe_removal_receipt(selector, request_key, with_model=True)
+    lookup = f"/api/recipe/requests/{request_key}"
+    client = FakeClient({("GET", lookup): receipt})
+
+    status, result = run(
+        (
+            "recipe",
+            "remove",
+            selector,
+            "--with-model",
+            "--yes",
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and result == receipt
+    assert [call[:2] for call in client.calls] == [("GET", lookup)]
+
+
+@pytest.mark.parametrize(
+    ("bad_selector", "bad_with_model"),
+    [("another-recipe", False), ("vision", True)],
+)
+def test_recipe_remove_reconnect_rejects_foreign_selector_or_retention(
+    bad_selector: str, bad_with_model: bool
+) -> None:
+    selector = "vision"
+    request_key = "11111111-1111-4111-8111-111111111111"
+    receipt = _recipe_removal_receipt(
+        bad_selector, request_key, with_model=bad_with_model
+    )
+    lookup = f"/api/recipe/requests/{request_key}"
+    repaired = _recipe_removal_receipt(selector, request_key, with_model=False)
+    client = FakeClient({("GET", lookup): [receipt, repaired]})
+
+    status, payload = run(
+        (
+            "recipe",
+            "remove",
+            selector,
+            "--keep-model",
+            "--yes",
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and payload == repaired
+    assert [call[:2] for call in client.calls] == [("GET", lookup), ("GET", lookup)]
+
+
+@pytest.mark.parametrize(
+    ("noun", "selector", "bad_field", "bad_value"),
+    [
+        ("model", "qwen", "action", "download"),
+        ("model", "qwen", "selector", "other-model"),
+        (
+            "model",
+            "qwen",
+            "request_key",
+            "22222222-2222-4222-8222-222222222222",
+        ),
+        ("recipe", "vision", "selector", "other-recipe"),
+        (
+            "recipe",
+            "vision",
+            "request_key",
+            "22222222-2222-4222-8222-222222222222",
+        ),
+        ("recipe", "vision", "with_model", True),
+    ],
+)
+def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
+    noun: str, selector: str, bad_field: str, bad_value: object
+) -> None:
+    request_key = "11111111-1111-4111-8111-111111111111"
+    operation_id = "11111111-1111-4111-8111-111111111121"
+    if noun == "model":
+        model_detail, model_digest = _model_detail(selector)
+        receipt: dict[str, object] = {
+            "action": "remove",
+            "selector": selector,
+            "request_key": request_key,
+            "model_content_sha256": model_digest,
+            "operation_id": operation_id,
+            "state": "succeeded",
+            "phase": "completed",
+            "progress": {"phase": "completed"},
+            "transferred_bytes": 0,
+        }
+    else:
+        receipt = {
+            "action": "remove",
+            "selector": selector,
+            "request_key": request_key,
+            "operation_id": operation_id,
+            "recipe_revision_id": "revision-1",
+            "with_model": False,
+            "state": "succeeded",
+            "progress": {"phase": "completed"},
+            "reclaimed_bytes": 0,
+        }
+    receipt[bad_field] = bad_value
+    path = f"/api/{noun}/{selector}/remove"
+    model_receipt_only_reconnect = (
+        noun == "model" and bad_field != "model_content_sha256"
+    )
+    if noun == "model":
+        args = (
+            (
+                noun,
+                "remove",
+                selector,
+                "--yes",
+                "--request-key",
+                request_key,
+                "--json",
+            )
+            if model_receipt_only_reconnect
+            else (
+                noun,
+                "remove",
+                selector,
+                "--yes",
+                "--json",
+            )
+        )
+    else:
+        args = (
+            noun,
+            "remove",
+            selector,
+            "--keep-model",
+            "--yes",
+            "--json",
+        )
+    client = FakeClient({("POST", path): receipt})
+    if noun == "model":
+        client.responses[("GET", f"/api/model/{selector}")] = model_detail
+        client.responses[("GET", f"/api/model/requests/{request_key}")] = receipt
+        if not model_receipt_only_reconnect:
+            client.responses[("GET", f"/api/model/{selector}/remove-review")] = (
+                _removal_review("model", selector, model_digest=model_digest)
+            )
+    else:
+        client.responses[("GET", f"/api/recipe/{selector}/remove-review")] = (
+            _removal_review("recipe", selector, with_model=False)
+        )
+        client.responses[("GET", f"/api/recipe/requests/{request_key}")] = receipt
+
+    status, payload = run(args, client)
+
+    assert status == 2
+    observation = payload["observation"]
+    assert isinstance(observation, dict) and observation["status"] == "timed_out"
+    assert payload["result"] == {}
+    methods = [call[0] for call in client.calls]
+    assert methods.count("POST") == 1
+    if model_receipt_only_reconnect:
+        # Damaged lookup bookkeeping replays the same keyed owner request.
+        assert next(call[2] for call in client.calls if call[0] == "POST") == {
+            "request_key": request_key
+        }
+    assert methods.count("GET") >= 4
+    # A distinct request is admitted immediately after the bounded observer ends.
+    repaired = receipt | {
+        "action": "remove",
+        "selector": selector,
+        "request_key": "33333333-3333-4333-8333-333333333333",
+    }
+    if noun == "recipe":
+        repaired["with_model"] = False
+    client.responses[("POST", path)] = repaired
+    client.responses[("GET", f"/api/{noun}/{selector}/remove-review")] = (
+        _removal_review(noun, selector, model_digest=str(model_digest))
+        if noun == "model"
+        else _removal_review(noun, selector, with_model=False)
+    )
+    fresh_args = (
+        noun,
+        "remove",
+        selector,
+        *(("--keep-model",) if noun == "recipe" else ()),
+        "--yes",
+        "--detach",
+        "--json",
+    )
+    client.responses[("GET", f"/api/{noun}/requests/{repaired['request_key']}")] = (
+        ControlNotFound(404, "No accepted request")
+    )
+    status, result = run(
+        (*fresh_args, "--request-key", str(repaired["request_key"])), client
+    )
+    assert status == 0 and result["operation_id"] == operation_id
+
+
+def test_fleet_remove_resolves_and_confirms_stable_node_before_post(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    node_id = "spk_" + "a" * 32
+    client = FakeClient(
+        {
+            ("GET", "/api/fleet"): {
+                "nodes": [{"id": node_id, "display_name": "Atlas"}]
+            },
+            ("GET", f"/api/fleet/{node_id}"): {
+                "id": node_id,
+                "display_name": "Atlas",
+            },
+            ("POST", f"/api/fleet/{node_id}/remove"): {
+                "action": "remove",
+                "state": "accepted",
+                "node_id": node_id,
+            },
+        }
+    )
+    error_stream = StringIO()
+
+    class TTYInput(StringIO):
+        def isatty(self) -> bool:
+            return True
+
+        def readline(self, size: int = -1) -> str:
+            assert [call[:2] for call in client.calls] == [
+                ("GET", "/api/fleet"),
+                ("GET", f"/api/fleet/{node_id}"),
+            ]
+            assert node_id in error_stream.getvalue()
+            return super().readline(size)
+
+    class TTYOutput(StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    input_stream = TTYInput("yes\n")
+    error_stream = TTYOutput()
+    monkeypatch.setattr(controller_cli.confirmation.sys, "stdin", input_stream)
+    monkeypatch.setattr(controller_cli.confirmation.sys, "stderr", error_stream)
+    monkeypatch.setattr(cli, "begin_interactive_update_check", lambda: None)
+
+    status = cli.main(
+        ("fleet", "remove", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: "11111111-1111-4111-8111-111111111111",
+    )
+
+    assert status == 0
+    assert [call[:2] for call in client.calls] == [
+        ("GET", "/api/fleet"),
+        ("GET", f"/api/fleet/{node_id}"),
+        ("POST", f"/api/fleet/{node_id}/remove"),
+    ]
+
+
+def test_fleet_remove_requires_yes_for_noninteractive_json() -> None:
+    node_id = "spk_" + "b" * 32
+    client = FakeClient(
+        {
+            ("GET", "/api/fleet"): {
+                "nodes": [{"id": node_id, "display_name": "Studio Spark"}]
+            },
+            ("GET", f"/api/fleet/{node_id}"): {
+                "id": node_id,
+                "display_name": "Studio Spark",
+            },
+        }
+    )
+
+    status, payload = run(
+        ("--no-input", "fleet", "remove", "Studio Spark", "--json"), client
+    )
+
+    error = payload.get("error")
+    assert status == 2
+    assert isinstance(error, str) and "Pass --yes" in error and node_id in error
+    assert [call[:2] for call in client.calls] == [
+        ("GET", "/api/fleet"),
+        ("GET", f"/api/fleet/{node_id}"),
+    ]
+
+
+def test_fleet_remove_yes_posts_to_the_resolved_stable_identity() -> None:
+    node_id = "spk_" + "c" * 32
+    client = FakeClient(
+        {
+            ("GET", "/api/fleet"): {
+                "nodes": [{"id": node_id, "display_name": "Lab Spark"}]
+            },
+            ("GET", f"/api/fleet/{node_id}"): {
+                "id": node_id,
+                "display_name": "Lab Spark",
+            },
+            ("POST", f"/api/fleet/{node_id}/remove"): {
+                "action": "remove",
+                "state": "accepted",
+                "node_id": node_id,
+            },
+        }
+    )
+
+    status, payload = run(
+        ("--no-input", "fleet", "remove", "Lab Spark", "--yes", "--json"),
+        client,
+    )
+
+    assert status == 0 and payload["node_id"] == node_id
+    assert [call[:2] for call in client.calls] == [
+        ("GET", "/api/fleet"),
+        ("GET", f"/api/fleet/{node_id}"),
+        ("POST", f"/api/fleet/{node_id}/remove"),
+    ]
+
+
+def test_model_cancel_requires_consent_and_reuses_its_stable_identity() -> None:
+    operation_id = "11111111-1111-4111-8111-111111111121"
+    cancel_key = "11111111-1111-4111-8111-111111111122"
+    path = f"/api/model/operations/{operation_id}/cancel"
+    response = {
+        "state": "observing",
+        "action": "download",
+        "operation_id": operation_id,
+        "request_key": "11111111-1111-4111-8111-111111111123",
+        "selector": "qwen",
+        "cancellation": {
+            "request_key": cancel_key,
+            "actor": "operator",
+            "reason": "switching to another model",
+            "requested_at": "2026-09-10T10:00:00+00:00",
+        },
+    }
+    client = FakeClient({("POST", path): response})
+    assert run(("model", "cancel", operation_id, "--json"), client)[0] == 2
+    assert client.calls == []
+
+    status, payload = run(
+        (
+            "model",
+            "cancel",
+            operation_id,
+            "--yes",
+            "--request-key",
+            cancel_key,
+            "--reason",
+            "switching to another model",
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0 and payload["state"] == "observing"
+    assert client.calls == [
+        (
+            "POST",
+            path,
+            {
+                "request_key": cancel_key,
+                "reason": "switching to another model",
+            },
+            None,
+        )
+    ]
+
+
+def test_model_cancel_reconciles_a_lost_acceptance_before_replay() -> None:
+    operation_id = "11111111-1111-4111-8111-111111111131"
+    cancel_key = "11111111-1111-4111-8111-111111111132"
+    path = f"/api/model/operations/{operation_id}/cancel"
+    lookup = f"/api/model/operations/{operation_id}"
+    receipt = {
+        "state": "cancelled",
+        "action": "download",
+        "operation_id": operation_id,
+        "request_key": "11111111-1111-4111-8111-111111111133",
+        "selector": "qwen",
+        "cancellation": {
+            "request_key": cancel_key,
+            "actor": "operator",
+            "reason": "operator request",
+            "requested_at": "2026-09-10T10:00:00+00:00",
+        },
+    }
+    client = FakeClient(
+        {
+            ("POST", path): [
+                ControlTransportError("response lost"),
+                receipt,
+            ],
+            ("GET", lookup): receipt,
+        }
+    )
+    status, payload = run(
+        (
+            "model",
+            "cancel",
+            operation_id,
+            "--yes",
+            "--request-key",
+            cancel_key,
+            "--reason",
+            "operator request",
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0 and payload["state"] == "cancelled", payload
+    assert [call[0] for call in client.calls] == ["POST", "GET"]
+    assert client.calls[0][2] == {
+        "request_key": cancel_key,
+        "reason": "operator request",
+    }
+
+
+def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/2/definition"): {
+                "id": "11111111-1111-4111-8111-111111111111",
+                "number": 2,
+                "revision": 7,
+                "definition": {"name": "Coding", "assignments": []},
+            },
+            ("GET", "/api/recipe/library"): {
+                "recipes": [
+                    _recipe_projection("vonk-forge/recipe-uuid", "Recipe UUID")
+                ],
+                "next_cursor": None,
+            },
+            ("GET", "/api/fleet"): {
+                "nodes": [
+                    {
+                        "id": "spk_" + "a" * 32,
+                        "display_name": "Atlas",
+                        "hostname": "atlas",
+                    },
+                    {
+                        "id": "spk_" + "b" * 32,
+                        "display_name": "Boreal",
+                        "hostname": "boreal",
+                    },
+                ]
+            },
+            ("PUT", "/api/profile/2"): {
+                "number": 2,
+                "revision": 8,
+                "warnings": ["incomplete group"],
+            },
+        }
+    )
+    status, payload = run(
+        (
+            "--profile",
+            "2",
+            "profile",
+            "add",
+            "Recipe UUID",
+            "--spark",
+            "Boreal",
+            "--spark",
+            "Atlas",
+            "--state",
+            "running",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0
+    assert payload["revision"] == 8
+    # The definition, recipe and Spark reads are independent and run at once.
+    reads, writes = client.calls[:3], client.calls[3:]
+    assert sorted(reads, key=lambda call: call[1]) == sorted(
+        [
+            ("GET", "/api/profile/2/definition", None, None),
+            (
+                "GET",
+                "/api/recipe/library",
+                None,
+                {"limit": 512, "sort": "name", "assess": False},
+            ),
+            ("GET", "/api/fleet", None, None),
+        ],
+        key=lambda call: call[1],
+    )
+    assert writes == [
+        (
+            "PUT",
+            "/api/profile/2",
+            {
+                "assignments": [
+                    {
+                        "recipe_selector": "vonk-forge/recipe-uuid",
+                        "spark_ids": ["spk_" + "a" * 32, "spk_" + "b" * 32],
+                        "desired_state": "running",
+                    }
+                ],
+                "name": "Coding",
+                "expected_revision": 7,
+            },
+            None,
+        ),
+    ]
+
+
+def test_profile_add_rejects_an_ambiguous_spark_name() -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/1/definition"): {
+                "id": "11111111-1111-4111-8111-111111111111",
+                "number": 1,
+                "revision": 1,
+                "definition": {"name": "Default", "assignments": []},
+            },
+            ("GET", "/api/recipe/library"): {
+                "recipes": [_recipe_projection("vonk-forge/qwen-code", "Qwen Code")],
+                "next_cursor": None,
+            },
+            ("GET", "/api/fleet"): {
+                "nodes": [
+                    {
+                        "id": "spk_" + "a" * 32,
+                        "display_name": "Atlas",
+                        "hostname": "atlas-a",
+                    },
+                    {
+                        "id": "spk_" + "b" * 32,
+                        "display_name": "Atlas",
+                        "hostname": "atlas-b",
+                    },
+                ]
+            },
+        }
+    )
+
+    status, payload = run(
+        (
+            "--profile",
+            "1",
+            "profile",
+            "add",
+            "vonk-forge/qwen-code",
+            "--spark",
+            "Atlas",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 2
+    ambiguous_error = payload["error"]
+    assert isinstance(ambiguous_error, str)
+    assert "ambiguous spark selector" in ambiguous_error
+    assert {call[1] for call in client.calls} == {
+        "/api/profile/1/definition",
+        "/api/fleet",
+    }
+
+
+def test_profile_remove_resolves_recipe_title_to_canonical_selector() -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/1/definition"): {
+                "id": "11111111-1111-4111-8111-111111111111",
+                "number": 1,
+                "revision": 3,
+                "definition": {
+                    "name": "Default",
+                    "assignments": [
+                        {
+                            "recipe_selector": "vonk-forge/recipe-uuid",
+                            "assignment_name": None,
+                            "spark_ids": ["spk_" + "a" * 32],
+                        }
+                    ],
+                },
+            },
+            ("GET", "/api/recipe/library"): {
+                "recipes": [
+                    _recipe_projection("vonk-forge/recipe-uuid", "Recipe UUID")
+                ],
+                "next_cursor": None,
+            },
+            ("PUT", "/api/profile/1"): {"number": 1, "revision": 4},
+        }
+    )
+
+    status, payload = run(
+        ("--profile", "1", "profile", "remove", "Recipe UUID", "--json"), client
+    )
+
+    assert status == 0
+    assert payload["revision"] == 4
+    profile_write = client.calls[-1][2]
+    assert profile_write is not None
+    assert profile_write["assignments"] == []
+
+
+def _accepted_profile_load(identity: str, state: str) -> dict[str, object]:
+    return {
+        "id": identity,
+        "state": state,
+        "request_key": "11111111-1111-4111-8111-111111111111",
+        "progress": {"intended_profile": {"reviewed_plan_digest": "c" * 64}},
+    }
+
+
+def _accepted_profile_cancellation(
+    identity: str, request_key: str
+) -> dict[str, object]:
+    return {
+        "id": identity,
+        "state": "running",
+        "cancellation": {
+            "request_key": request_key,
+            "actor": "administrator",
+            "cause": "operator",
+            "state": "observing",
+        },
+    }
+
+
+def test_profile_cancel_targets_one_application_with_replayable_request_identity() -> (
+    None
+):
+    application_id = "11111111-1111-4111-8111-111111111111"
+    request_key = "22222222-2222-4222-8222-222222222222"
+    unconfirmed = FakeClient({})
+    status, _ = run(
+        (
+            "--profile",
+            "4",
+            "profile",
+            "cancel",
+            application_id,
+            "--request-key",
+            request_key,
+            "--json",
+        ),
+        unconfirmed,
+    )
+    assert status == 2
+    assert unconfirmed.calls == []
+
+    client = FakeClient(
+        {
+            (
+                "POST",
+                f"/api/profile/applications/{application_id}/cancel",
+            ): {
+                **_accepted_profile_cancellation(application_id, request_key),
+            }
+        }
+    )
+
+    status, result = run(
+        (
+            "--profile",
+            "4",
+            "profile",
+            "cancel",
+            application_id,
+            "--yes",
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0
+    assert result["id"] == application_id
+    assert client.calls == [
+        (
+            "POST",
+            f"/api/profile/applications/{application_id}/cancel",
+            {"profile_number": 4, "request_key": request_key},
+            None,
+        )
+    ]
+
+
+def test_profile_delete_confirms_then_repeats_while_the_cancel_finishes() -> None:
+    path = "/api/profile/4/delete"
+    refused = FakeClient({})
+    status, _ = run(("--profile", "4", "profile", "delete", "--json"), refused)
+    assert status == 2
+    assert refused.calls == []
+
+    client = FakeClient(
+        {
+            ("POST", path): [
+                {"number": 4, "outcome": "cancelling"},
+                {"number": 4, "outcome": "deleted"},
+            ]
+        }
+    )
+    status, result = run(
+        (
+            "--profile",
+            "4",
+            "profile",
+            "delete",
+            "--yes",
+            "--expected-revision",
+            "2",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0
+    assert result["outcome"] == "deleted"
+    assert [call[:3] for call in client.calls] == [
+        ("POST", path, {"expected_revision": 2})
+    ] * 2
+
+
+_CANCEL_ARGV = (
+    "--profile",
+    "4",
+    "profile",
+    "cancel",
+    "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    "--yes",
+    "--request-key",
+    "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+    "--detach",
+    "--json",
+)
+
+
+@pytest.mark.parametrize(
+    ("code", "refused"),
+    [
+        ("profile.request_invalid", True),
+        # An older Controller answers every profile conflict 409 with its
+        # generic code: acceptance stays unknown and is looked up.
+        ("controller.conflict", False),
+        (None, False),
+    ],
+)
+def test_profile_cancel_fails_fast_only_on_a_typed_refusal(code, refused) -> None:
+    application_id, request_key = _CANCEL_ARGV[4], _CANCEL_ARGV[7]
+    path = f"/api/profile/applications/{application_id}/cancel"
+    lookup = f"/api/profile/applications/{application_id}/cancellations/{request_key}"
+    client = FakeClient(
+        {
+            ("POST", path): ControlConflict(
+                409, "request key belongs to another actor", code=code
+            ),
+            ("GET", lookup): _accepted_profile_cancellation(
+                application_id, request_key
+            ),
+        }
+    )
+
+    status, result = run(_CANCEL_ARGV, client)
+
+    if refused:
+        assert status == 2
+        assert result["detail"] == "request key belongs to another actor"
+        assert [call[:2] for call in client.calls] == [("POST", path)]
+    else:
+        assert status == 0
+        assert ("GET", lookup) in [call[:2] for call in client.calls]
+
+
+def test_profile_cancel_waits_out_a_busy_controller_and_replays() -> None:
+    application_id, request_key = _CANCEL_ARGV[4], _CANCEL_ARGV[7]
+    path = f"/api/profile/applications/{application_id}/cancel"
+    lookup = f"/api/profile/applications/{application_id}/cancellations/{request_key}"
+    client = FakeClient(
+        {
+            ("POST", path): [
+                ControlUnavailable(503, "profile admission is busy", 0),
+                _accepted_profile_cancellation(application_id, request_key),
+            ],
+            ("GET", lookup): ControlNotFound(404, "not committed"),
+        }
+    )
+
+    status, result = run(_CANCEL_ARGV, client)
+
+    assert status == 0
+    assert result["id"] == application_id
+    assert [call[:2] for call in client.calls] == [
+        ("POST", path),
+        ("GET", lookup),
+        ("POST", path),
+    ]
+
+
+@pytest.mark.parametrize("review", [False, True])
+def test_profile_load_fails_fast_on_a_typed_refusal(review, monkeypatch) -> None:
+    refusal = ControlConflict(
+        409, "Profile fleet scope changed during admission", code="profile.stale_plan"
+    )
+    client = FakeClient(
+        {
+            ("POST", "/api/profile/1/preview"): _run_preview("b" * 64, _RUN_DIGEST),
+            ("POST", "/api/profile/1/load"): refusal,
+        }
+    )
+    _Prompt(monkeypatch, "yes")
+    argv = ("--profile", "1", "profile", "load", "--detach")
+
+    status = cli.main(
+        argv if review else (*argv, "--yes"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 2
+    assert not [call for call in client.calls if call[0] == "GET"]
+    assert [call[1] for call in client.calls].count("/api/profile/1/load") == 1
+
+
+def test_lost_profile_cancel_response_resolves_exact_owner_receipt() -> None:
+    application_id = "55555555-5555-4555-8555-555555555555"
+    request_key = "66666666-6666-4666-8666-666666666666"
+    path = f"/api/profile/applications/{application_id}/cancel"
+    lookup = f"/api/profile/applications/{application_id}/cancellations/{request_key}"
+    client = FakeClient(
+        {
+            ("POST", path): ControlTransportError("connection reset after commit"),
+            ("GET", lookup): _accepted_profile_cancellation(
+                application_id, request_key
+            ),
+        }
+    )
+
+    status, result = run(
+        (
+            "--profile",
+            "4",
+            "profile",
+            "cancel",
+            application_id,
+            "--yes",
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0
+    cancellation = result["cancellation"]
+    assert isinstance(cancellation, dict)
+    assert cancellation["request_key"] == request_key
+    assert [call[:2] for call in client.calls] == [("POST", path), ("GET", lookup)]
+    assert client.calls[0][2] == {"profile_number": 4, "request_key": request_key}
+
+
+def test_lost_profile_cancel_replays_only_after_exact_owner_is_absent() -> None:
+    application_id = "77777777-7777-4777-8777-777777777777"
+    request_key = "88888888-8888-4888-8888-888888888888"
+    path = f"/api/profile/applications/{application_id}/cancel"
+    lookup = f"/api/profile/applications/{application_id}/cancellations/{request_key}"
+    receipt = _accepted_profile_cancellation(application_id, request_key)
+    client = FakeClient(
+        {
+            ("POST", path): [
+                ControlTransportError("connection reset"),
+                receipt,
+            ],
+            ("GET", lookup): ControlNotFound(404, "not committed"),
+        }
+    )
+
+    status, result = run(
+        (
+            "--profile",
+            "4",
+            "profile",
+            "cancel",
+            application_id,
+            "--yes",
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0
+    assert result["id"] == application_id
+    posts = [call for call in client.calls if call[0] == "POST"]
+    assert len(posts) == 2
+    assert (
+        posts[0][2]
+        == posts[1][2]
+        == {
+            "profile_number": 4,
+            "request_key": request_key,
+        }
+    )
+    assert [call[:2] for call in client.calls] == [
+        ("POST", path),
+        ("GET", lookup),
+        ("POST", path),
+    ]
+
+
+@pytest.mark.parametrize("repair", [True, False])
+def test_lost_profile_cancel_reconciles_without_replaying_an_effect(repair) -> None:
+    application_id = "99999999-9999-4999-8999-999999999999"
+    request_key = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    path = f"/api/profile/applications/{application_id}/cancel"
+    lookup = f"/api/profile/applications/{application_id}/cancellations/{request_key}"
+    client = FakeClient(
+        {
+            ("POST", path): ControlTransportError("connection reset"),
+            ("GET", lookup): [
+                _accepted_profile_cancellation(
+                    application_id, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+                ),
+                _accepted_profile_cancellation(
+                    application_id,
+                    request_key if repair else "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                ),
+            ],
+        }
+    )
+
+    status, result = run(
+        (
+            "--profile",
+            "4",
+            "profile",
+            "cancel",
+            application_id,
+            "--yes",
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == (0 if repair else 2)
+    assert [call[0] for call in client.calls].count("POST") == 1
+    assert all(call[:2] == ("GET", lookup) for call in client.calls[1:])
+    if repair:
+        assert result["id"] == application_id
+    else:
+        observation = result["observation"]
+        assert isinstance(observation, dict) and observation["status"] == "timed_out"
+    fresh_key = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    client.responses[("POST", path)] = _accepted_profile_cancellation(
+        application_id, fresh_key
+    )
+    status, result = run(
+        (
+            "--profile",
+            "4",
+            "profile",
+            "cancel",
+            application_id,
+            "--yes",
+            "--request-key",
+            fresh_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0 and result["id"] == application_id
+
+
+def test_profile_load_follows_the_application_it_submitted() -> None:
+    """A load is followed by its own durable application identity.
+
+    The numbered progress route answers with whichever application is latest,
+    so following it would report a later load's progress and could report a
+    success this invocation never produced.
+    """
+
+    application_id = "33333333-3333-4333-8333-333333333333"
+    other_application = "44444444-4444-4444-8444-444444444444"
+    client = FakeClient(
+        {
+            ("POST", "/api/profile/1/load"): _accepted_profile_load(
+                application_id, "queued"
+            ),
+            (
+                "GET",
+                f"/api/profile/applications/{application_id}",
+            ): _accepted_profile_load(application_id, "succeeded"),
+            ("GET", "/api/profile/1/progress"): _accepted_profile_load(
+                other_application, "failed"
+            ),
+        }
+    )
+    status, payload = run(
+        (
+            "--profile",
+            "1",
+            "profile",
+            "load",
+            "--yes",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and payload["state"] == "succeeded"
+    assert [call[1] for call in client.calls] == [
+        "/api/profile/1/load",
+        f"/api/profile/applications/{application_id}",
+    ]
+    assert client.calls[0][2] == {
+        "request_key": "11111111-1111-4111-8111-111111111111",
+    }
+
+
+def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route() -> (
+    None
+):
+    client = FakeClient(
+        {
+            ("POST", "/api/profile/1/load"): {"state": "queued"},
+            ("GET", "/api/profile/1/progress"): {"state": "succeeded"},
+        }
+    )
+    status, payload = run(
+        (
+            "--profile",
+            "1",
+            "profile",
+            "load",
+            "--yes",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status != 0
+    assert [call[0] for call in client.calls] == ["POST", "GET", "GET", "GET", "GET"]
+    observation = payload["observation"]
+    assert isinstance(observation, dict) and observation["status"] == "timed_out"
+    assert not any(call[1].endswith("/progress") for call in client.calls)
+
+    fresh_key = "22222222-2222-4222-8222-222222222222"
+    client.responses[("POST", "/api/profile/1/load")] = {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "request_key": fresh_key,
+        "state": "succeeded",
+    }
+    status, result = run(
+        (
+            "--profile",
+            "1",
+            "profile",
+            "load",
+            "--yes",
+            "--request-key",
+            fresh_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0 and result["request_key"] == fresh_key
+
+
+def test_profile_progress_follow_stops_at_current_terminal_state() -> None:
+    identity = "33333333-3333-4333-8333-333333333333"
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/1/progress"): {
+                "id": identity,
+                "state": "running",
+                "progress": {"step": 1, "steps": 2},
+            },
+            ("GET", f"/api/profile/applications/{identity}"): {
+                "id": identity,
+                "state": "succeeded",
+                "progress": {"step": 2, "steps": 2},
+            },
+        }
+    )
+    status, payload = run(
+        ("profile", "progress", "--follow", "--interval-seconds", "0.1", "--json"),
+        client,
+    )
+    assert status == 0 and payload["state"] == "succeeded"
+    assert len(client.calls) == 2
+
+
+def test_profile_application_selector_uses_owner_without_a_second_profile_gate() -> (
+    None
+):
+    application_id = "33333333-3333-4333-8333-333333333333"
+    selected_profile_id = "11111111-1111-4111-8111-111111111111"
+    other_profile_id = "22222222-2222-4222-8222-222222222222"
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/4"): {
+                "id": selected_profile_id,
+                "number": 4,
+            },
+            ("GET", f"/api/profile/applications/{application_id}"): {
+                "id": application_id,
+                "profile_id": other_profile_id,
+                "state": "running",
+            },
+        }
+    )
+
+    status, payload = run(
+        (
+            "--profile",
+            "4",
+            "profile",
+            "progress",
+            "--load",
+            application_id,
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and payload["id"] == application_id
+    assert payload["profile_id"] == other_profile_id
+    assert [call[1] for call in client.calls] == [
+        f"/api/profile/applications/{application_id}",
+    ]
+
+
+def test_global_profile_application_selector_needs_no_profile_selection() -> None:
+    application_id = "33333333-3333-4333-8333-333333333333"
+    client = FakeClient(
+        {
+            ("GET", f"/api/profile/applications/{application_id}"): {
+                "id": application_id,
+                "profile_id": "22222222-2222-4222-8222-222222222222",
+                "state": "failed",
+            }
+        }
+    )
+
+    status, payload = run(
+        ("profile", "progress", "--load", application_id, "--json"),
+        client,
+    )
+
+    assert status == 0 and payload["id"] == application_id
+    assert [call[1] for call in client.calls] == [
+        f"/api/profile/applications/{application_id}"
+    ]
+
+
+def test_profile_application_selector_accepts_selected_profile_owner() -> None:
+    application_id = "33333333-3333-4333-8333-333333333333"
+    selected_profile_id = "11111111-1111-4111-8111-111111111111"
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/4"): {
+                "id": selected_profile_id,
+                "number": 4,
+            },
+            ("GET", f"/api/profile/applications/{application_id}"): {
+                "id": application_id,
+                "profile_id": selected_profile_id,
+                "state": "failed",
+            },
+        }
+    )
+
+    status, payload = run(
+        (
+            "--profile",
+            "4",
+            "profile",
+            "progress",
+            "--load",
+            application_id,
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and payload["id"] == application_id
+
+
+def test_profile_progress_follow_discards_wrong_identity_until_original_repairs() -> (
+    None
+):
+    selected_application = "33333333-3333-4333-8333-333333333333"
+    replacement_application = "44444444-4444-4444-8444-444444444444"
+    path = f"/api/profile/applications/{selected_application}"
+    client = FakeClient(
+        {
+            ("GET", path): [
+                {"id": selected_application, "state": "running"},
+                {"id": replacement_application, "state": "succeeded"},
+                {"id": selected_application, "state": "succeeded"},
+            ]
+        }
+    )
+
+    status, payload = run(
+        (
+            "profile",
+            "progress",
+            "--load",
+            selected_application,
+            "--follow",
+            "--interval-seconds",
+            "0.01",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and payload["id"] == selected_application
+    assert [call[1] for call in client.calls] == [path, path, path]
+
+
+def test_initial_application_identity_is_reobserved_until_original_repairs() -> None:
+    requested_application = "33333333-3333-4333-8333-333333333333"
+    returned_application = "44444444-4444-4444-8444-444444444444"
+    client = FakeClient(
+        {
+            (
+                "GET",
+                f"/api/profile/applications/{requested_application}",
+            ): [
+                {"id": returned_application, "state": "succeeded"},
+                {"id": requested_application, "state": "succeeded"},
+            ]
+        }
+    )
+
+    status, payload = run(
+        (
+            "profile",
+            "progress",
+            "--load",
+            requested_application,
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and payload["id"] == requested_application
+    assert [call[0] for call in client.calls] == ["GET", "GET"]
+
+
+def test_follow_survives_lost_connections_and_reports_the_durable_outcome() -> None:
+    """A dropped observation must not discard the operation's real result.
+
+    The last confirmed snapshot stays authoritative across two consecutive
+    transport failures, and the durable success is still the reported outcome.
+    """
+
+    identity = "33333333-3333-4333-8333-333333333333"
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/1/progress"): {"id": identity, "state": "running"},
+            ("GET", f"/api/profile/applications/{identity}"): [
+                ControlTransportError("connection reset"),
+                ControlTransportError("connection reset"),
+                {"id": identity, "state": "succeeded"},
+            ],
+        }
+    )
+    status, payload = run(
+        ("profile", "progress", "--follow", "--interval-seconds", "0.01", "--json"),
+        client,
+    )
+
+    assert status == 0 and payload["state"] == "succeeded"
+    assert "reconnecting" not in payload
+    assert len(client.calls) == 4
+
+
+def test_follow_adopts_the_successor_of_a_superseded_application() -> None:
+    """A load the Controller replaced (its own retry) is followed, not reported failed."""
+
+    first = "33333333-3333-4333-8333-333333333333"
+    second = "44444444-4444-4444-8444-444444444444"
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/1/progress"): {
+                "id": first,
+                "request_key": "same-request",
+                "state": "running",
+            },
+            ("GET", f"/api/profile/applications/{first}"): {
+                "id": first,
+                "state": "superseded",
+                "superseded_by": second,
+                "request_key": "same-request",
+            },
+            ("GET", f"/api/profile/applications/{second}"): [
+                {"id": second, "retry_of_application_id": first, "state": "running"},
+                {"id": second, "retry_of_application_id": first, "state": "succeeded"},
+            ],
+        }
+    )
+    status, payload = run(
+        ("profile", "progress", "--follow", "--interval-seconds", "0.01", "--json"),
+        client,
+    )
+
+    assert status == 0
+    assert payload["id"] == second and payload["state"] == "succeeded"
+    assert payload["supersedes_chain"] == [first]
+
+
+def test_observation_timeout_names_the_connection_it_lost() -> None:
+    """An unreachable Controller is an observation failure, not a run failure."""
+
+    identity = "33333333-3333-4333-8333-333333333333"
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/1/progress"): {"id": identity, "state": "running"},
+            ("GET", f"/api/profile/applications/{identity}"): ControlUnavailable(
+                503, "control API unavailable"
+            ),
+        }
+    )
+    status, payload = run(
+        (
+            "profile",
+            "progress",
+            "--follow",
+            "--timeout-seconds",
+            "1",
+            "--interval-seconds",
+            "0.05",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 2
+    observation = payload["observation"]
+    assert isinstance(observation, dict)
+    assert observation["status"] == "timed_out"
+    assert observation["reconnecting"] is True
+    # The durable operation kept its last observed state; only the observation
+    # is reported as incomplete.
+    assert payload["result"] == {"id": identity, "state": "running"}
+
+
+def test_authorization_failure_is_not_retried_as_an_observation() -> None:
+    """A permission answer is actionable immediately, not a reconnect."""
+
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/1/progress"): ControlForbidden(
+                403, "insufficient role"
+            ),
+        }
+    )
+    status, _payload = run(("profile", "progress", "--follow", "--json"), client)
+
+    assert status != 0
+    assert len(client.calls) == 1
+
+
+def test_lost_mutation_response_still_names_the_request_key() -> None:
+    """A submission accepted without a visible answer stays reconcilable.
+
+    The key is created before the request is sent and retained, so the error
+    output identifies the one durable operation the operator must inspect.
+    """
+
+    client = FakeClient(
+        {
+            ("POST", "/api/profile/1/load"): ControlTransportError("connection reset"),
+        }
+    )
+    status, payload = run(
+        (
+            "--profile",
+            "1",
+            "profile",
+            "load",
+            "--yes",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status != 0
+    observation = payload["observation"]
+    assert isinstance(observation, dict)
+    key = "11111111-1111-4111-8111-111111111111"
+    assert observation["path"] == f"/api/profile/1/requests/{key}"
+    assert (
+        observation["reconnect_command"]
+        == f"vonkctl --profile 1 profile progress --request-key {key} --follow"
+    )
+    assert [call[0] for call in client.calls].count("POST") == 1
+    fresh_key = "22222222-2222-4222-8222-222222222222"
+    client.responses[("POST", "/api/profile/1/load")] = {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "request_key": fresh_key,
+        "state": "succeeded",
+    }
+    status, result = run(
+        (
+            "--profile",
+            "1",
+            "profile",
+            "load",
+            "--yes",
+            "--request-key",
+            fresh_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0 and result["request_key"] == fresh_key
+
+
+def test_accepted_load_with_lost_response_is_reconciled_by_request_key() -> None:
+    key = "11111111-1111-4111-8111-111111111111"
+    operation = "33333333-3333-4333-8333-333333333333"
+    client = FakeClient(
+        {
+            ("POST", "/api/profile/1/load"): ControlTransportError("connection reset"),
+            ("GET", f"/api/profile/1/requests/{key}"): _accepted_profile_load(
+                operation, "succeeded"
+            ),
+        }
+    )
+
+    status, payload = run(
+        (
+            "--profile",
+            "1",
+            "profile",
+            "load",
+            "--yes",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0
+    assert payload["id"] == operation
+    assert [call[0] for call in client.calls] == ["POST", "GET"]
+
+
+def test_accepted_load_recovers_after_missing_observation() -> None:
+    key = "11111111-1111-4111-8111-111111111111"
+    operation = "33333333-3333-4333-8333-333333333333"
+    client = FakeClient(
+        {
+            ("POST", "/api/profile/1/load"): _accepted_profile_load(
+                operation, "queued"
+            ),
+            (
+                "GET",
+                f"/api/profile/applications/{operation}",
+            ): [
+                ControlUnavailable(503, "application observation is unavailable"),
+                {"id": operation, "state": "succeeded"},
+            ],
+        }
+    )
+
+    status, payload = run(
+        (
+            "--profile",
+            "1",
+            "profile",
+            "load",
+            "--yes",
+            "--request-key",
+            key,
+            "--timeout-seconds",
+            "1",
+            "--interval-seconds",
+            "0.01",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0
+    assert payload["id"] == operation
+    assert payload["state"] == "succeeded"
+    assert [call[:2] for call in client.calls] == [
+        ("POST", "/api/profile/1/load"),
+        ("GET", f"/api/profile/applications/{operation}"),
+        ("GET", f"/api/profile/applications/{operation}"),
+    ]
+
+
+def test_lost_load_response_retries_only_with_original_request_key() -> None:
+    key = "11111111-1111-4111-8111-111111111111"
+    operation = "33333333-3333-4333-8333-333333333333"
+    client = FakeClient(
+        {
+            ("POST", "/api/profile/1/load"): [
+                ControlTransportError("connection reset"),
+                _accepted_profile_load(operation, "succeeded"),
+            ],
+            ("GET", f"/api/profile/1/requests/{key}"): ControlNotFound(
+                404, "not committed"
+            ),
+        }
+    )
+
+    status, payload = run(
+        (
+            "--profile",
+            "1",
+            "profile",
+            "load",
+            "--yes",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0
+    assert payload["id"] == operation
+    post_keys = [
+        call[2]["request_key"]
+        for call in client.calls
+        if call[0] == "POST" and call[2] is not None
+    ]
+    assert post_keys == [key, key]
+
+
+def test_progress_does_not_invent_percentage_for_unknown_total() -> None:
+    assert (
+        progress_line(
+            {
+                "state": "running",
+                "progress": {
+                    "phase": "building",
+                    "completed_items": 4,
+                    "total_items": 7,
+                },
+            }
+        )
+        == "building | items 4 / 7"
+    )
+    assert (
+        progress_line(
+            {
+                "state": "running",
+                "progress": {
+                    "phase": "copying",
+                    "completed_bytes": 20,
+                    "total_bytes_known": False,
+                },
+            }
+        )
+        == "copying | 20 B; total unknown"
+    )
+
+
+def test_removal_flags_are_scoped_to_recipe_model_dependency() -> None:
+    parser = cli._parser()
+    for argv in (
+        ("fleet", "remove", "Atlas", "--with-model"),
+        ("model", "remove", "qwen", "--with-model"),
+    ):
+        try:
+            parser.parse_args(argv)
+        except cli._UsageError:
+            pass
+        else:
+            raise AssertionError(f"invalid dependency flag accepted: {argv}")
+    assert (
+        parser.parse_args(("recipe", "remove", "qwen-code", "--keep-model")).keep_model
+        is True
+    )
+    for argv in (
+        ("model", "download", "qwen", "--force"),
+        ("recipe", "download", "qwen-code", "--force"),
+    ):
+        try:
+            parser.parse_args(argv)
+        except cli._UsageError:
+            pass
+        else:
+            raise AssertionError(f"redundant refresh flag accepted: {argv}")
+
+
+def test_explicit_request_key_is_forwarded_for_retry_reconciliation() -> None:
+    client = FakeClient(
+        {
+            ("POST", "/api/model/qwen/download"): {
+                "state": "running",
+                "operation_id": "download",
+                "request_key": "22222222-2222-4222-8222-222222222222",
+                "action": "download",
+                "selector": "qwen",
+            }
+        }
+    )
+    status, _ = run(
+        (
+            "model",
+            "download",
+            "qwen",
+            "--request-key",
+            "22222222-2222-4222-8222-222222222222",
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0
+    download_request = client.calls[0][2]
+    assert download_request is not None
+    assert download_request["request_key"] == "22222222-2222-4222-8222-222222222222"
+
+
+def test_profile_revision_conflict_is_reported_without_a_second_write() -> None:
+    class ConflictClient(FakeClient):
+        def request(
+            self,
+            method,
+            path,
+            payload=None,
+            *,
+            extra_headers=None,
+            query=None,
+            timeout_seconds=None,
+            retry=True,
+        ):
+            self._validate_request(method, path, payload, query)
+            self.calls.append((method, path, payload, query))
+            if method == "PUT":
+                raise ValueError("profile revision conflict")
+            if path == "/api/recipe/library":
+                return {
+                    "recipes": [
+                        _recipe_projection("vonk-forge/qwen-code", "Qwen Code")
+                    ],
+                    "next_cursor": None,
+                }
+            if path == "/api/fleet":
+                return {
+                    "nodes": [
+                        {
+                            "id": "spk_" + "a" * 32,
+                            "display_name": "Atlas",
+                            "hostname": "atlas",
+                        }
+                    ]
+                }
+            return {
+                "id": "11111111-1111-4111-8111-111111111111",
+                "number": 1,
+                "revision": 4,
+                "definition": {"assignments": []},
+            }
+
+    client = ConflictClient({})
+    status, _payload = run(
+        (
+            "--profile",
+            "1",
+            "profile",
+            "add",
+            "vonk-forge/qwen-code",
+            "--spark",
+            "Atlas",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 2
+    assert [call[0] for call in client.calls] == ["GET", "GET", "PUT"]
+
+
+def test_ambiguous_mutation_error_is_not_retried_or_fuzzily_resolved() -> None:
+    class AmbiguousClient(FakeClient):
+        def request(
+            self,
+            method,
+            path,
+            payload=None,
+            *,
+            extra_headers=None,
+            query=None,
+            timeout_seconds=None,
+            retry=True,
+        ):
+            self._validate_request(method, path, payload, query)
+            self.calls.append((method, path, payload, query))
+            raise ControlHTTPError(
+                422, "ambiguous model selector; choose an exact selector"
+            )
+
+    client = AmbiguousClient({})
+    status, payload = run(("model", "download", "qwen", "--json"), client)
+    assert status == 2
+    ambiguous_model_error = payload["error"]
+    assert isinstance(ambiguous_model_error, str)
+    assert "ambiguous model selector" in ambiguous_model_error
+    assert len(client.calls) == 1
+
+
+def test_profile_selection_and_progress_use_numbered_current_routes() -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/profile"): {"profiles": [{"number": 1, "name": "Default"}]},
+            ("GET", "/api/profile/3"): {
+                "number": 3,
+                "state": "running",
+                "operation_id": "load-3",
+            },
+            ("GET", "/api/profile/3/progress"): {
+                "id": "33333333-3333-4333-8333-333333333333",
+                "profile_id": "11111111-1111-4111-8111-111111111111",
+                "state": "succeeded",
+            },
+        }
+    )
+    assert run(("--profile", "3", "profile", "list", "--json"), client)[0] == 0
+    assert run(("--profile", "3", "profile", "progress", "--json"), client)[0] == 0
+    assert [call[1] for call in client.calls] == [
+        "/api/profile",
+        "/api/profile/3/progress",
+    ]
+
+
+def test_profile_endpoint_uses_scoped_current_controller_projection() -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/3/endpoints"): {
+                "number": 3,
+                "profile_id": "11111111-1111-4111-8111-111111111111",
+                "application_id": "22222222-2222-4222-8222-222222222222",
+                "application_state": "succeeded",
+                "observed_at": "2026-09-23T12:59:31Z",
+                "assignments": [
+                    {
+                        "assignment_id": "33333333-3333-4333-8333-333333333333",
+                        "recipe_title": "Example Model",
+                        "desired_state": "running",
+                        "alias": "example-model",
+                        "state": "published",
+                        "endpoint": {
+                            "alias": "example-model",
+                            "api_base": "https://vonk-forge.example.ts.net/v1",
+                            "backend_api_base": "http://10.0.0.10:8000/v1",
+                            "generation": 8,
+                            "node_id": "spk_" + "a" * 32,
+                            "observed_at": "2026-09-23T12:59:30Z",
+                            "plan_digest": "a" * 64,
+                        },
+                    },
+                    {
+                        "assignment_id": "44444444-4444-4444-8444-444444444444",
+                        "recipe_title": "Installed Tool",
+                        "desired_state": "installed",
+                        "alias": None,
+                        "state": "installed-only",
+                        "endpoint": None,
+                    },
+                ],
+            }
+        }
+    )
+
+    assert (
+        cli.main(("--profile", "3", "profile", "endpoint"), control_client=client) == 0
+    )
+    assert client.calls == [("GET", "/api/profile/3/endpoints", None, None)]
+
+
+def test_profile_endpoint_without_a_profile_answers_for_the_loaded_one() -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/profile"): {
+                "profiles": [
+                    {"number": 1, "name": "Default", "loaded_revision": None},
+                    {"number": 42, "name": "Video", "loaded_revision": 3},
+                ]
+            },
+            ("GET", "/api/profile/42/endpoints"): {
+                "number": 42,
+                "observed_at": "2026-09-23T12:59:31Z",
+                "assignments": [],
+            },
+        }
+    )
+
+    status, payload = run(("profile", "endpoint", "--json"), client)
+
+    assert status == 0
+    assert payload["number"] == 42
+    assert client.calls[-1][1] == "/api/profile/42/endpoints"
+
+
+def test_profile_endpoint_survives_one_transient_failure_listing_profiles() -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/profile"): [
+                ControlHTTPError(503, "unavailable"),
+                {"profiles": [{"number": 42, "name": "Video", "loaded_revision": 3}]},
+            ],
+            ("GET", "/api/profile/42/endpoints"): {
+                "number": 42,
+                "observed_at": "2026-09-23T12:59:31Z",
+                "assignments": [],
+            },
+        }
+    )
+
+    status, payload = run(("profile", "endpoint", "--json"), client)
+
+    assert status == 0
+    assert payload["number"] == 42
+
+
+def test_profile_endpoint_alias_uses_controller_membership_query_and_json() -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/3/endpoints"): {
+                "number": 3,
+                "profile_id": "11111111-1111-4111-8111-111111111111",
+                "application_id": "22222222-2222-4222-8222-222222222222",
+                "application_state": "succeeded",
+                "observed_at": "2026-09-23T12:59:31Z",
+                "assignments": [],
+            }
+        }
+    )
+
+    status, payload = run(
+        ("--profile", "3", "profile", "endpoint", "missing", "--json"), client
+    )
+
+    assert status == 0
+    assert payload["assignments"] == []
+    assert client.calls == [
+        ("GET", "/api/profile/3/endpoints", None, {"alias": "missing"})
+    ]
+
+
+def test_fleet_actions_use_readable_selectors_and_avoid_legacy_agent_routes() -> None:
+    node_id = "spk_" + "1" * 32
+    log_path = f"/api/fleet/{node_id}/loginfo"
+    client = FakeClient(
+        {
+            ("GET", "/api/fleet/Atlas"): {"display_name": "Atlas", "state": "live"},
+            ("POST", "/api/fleet/Atlas/rename"): {"display_name": "Studio"},
+            ("GET", "/api/fleet"): {
+                "nodes": [{"id": node_id, "display_name": "Atlas"}]
+            },
+            ("GET", log_path): _fleet_log_response(node_id, follow=False),
+        }
+    )
+    assert run(("fleet", "detail", "Atlas", "--json"), client)[0] == 0
+    assert run(("fleet", "rename", "Atlas", "Studio", "--json"), client)[0] == 0
+    assert (
+        run(
+            (
+                "fleet",
+                "loginfo",
+                "Atlas",
+                "--since",
+                "1h",
+                "--source",
+                "runtime",
+                "--json",
+            ),
+            client,
+        )[0]
+        == 0
+    )
+    assert [call[1] for call in client.calls] == [
+        "/api/fleet/Atlas",
+        "/api/fleet/Atlas/rename",
+        "/api/fleet",
+        log_path,
+    ]
+    assert all("/agent" not in call[1] for call in client.calls)
+
+
+def test_error_output_redacts_request_secrets_and_keeps_json_clean() -> None:
+    class FailingClient(FakeClient):
+        def request(
+            self, method, path, payload=None, *, extra_headers=None, query=None
+        ):
+            raise ValueError("authorization: Bearer secret-value")
+
+    status, payload = run(("model", "detail", "qwen", "--json"), FailingClient({}))
+    assert status == 2
+    assert "secret-value" not in json.dumps(payload)
+
+
+def test_async_mutations_follow_the_noun_operation_until_terminal() -> None:
+    client = FakeClient(
+        {
+            ("POST", "/api/model/qwen/download"): {
+                "state": "accepted",
+                "operation_id": "download-1",
+                "request_key": "11111111-1111-4111-8111-111111111111",
+                "action": "download",
+                "selector": "qwen",
+            },
+            ("GET", "/api/model/operations/download-1"): [
+                {"state": "running", "operation_id": "download-1"},
+                {"state": "succeeded", "operation_id": "download-1"},
+            ],
+        }
+    )
+    status, payload = run(
+        ("model", "download", "qwen", "--interval-seconds", "0.01", "--json"),
+        client,
+    )
+    assert status == 0 and payload["state"] == "succeeded"
+    assert [call[1] for call in client.calls] == [
+        "/api/model/qwen/download",
+        "/api/model/operations/download-1",
+        "/api/model/operations/download-1",
+    ]
+
+
+@pytest.mark.parametrize("noun", ["model", "recipe"])
+def test_cache_request_lookup_pins_following_to_its_original_operation(
+    noun: str,
+) -> None:
+    key = "11111111-1111-4111-8111-111111111111"
+    identity = (
+        {"operation_id": "original", "request_key": key, "action": "download"}
+        if noun == "model"
+        else {
+            "id": "original",
+            "request_id": key,
+            "kind": "recipe.image.availability.v2",
+        }
+    )
+    lookup = f"/api/{noun}/requests/{key}"
+    target = f"/api/{noun}/operations/original"
+    client = FakeClient(
+        {
+            ("GET", lookup): identity | {"state": "running"},
+            ("GET", target): identity | {"state": "succeeded"},
+        }
+    )
+    status, result = run(
+        (
+            noun,
+            "progress",
+            "--request-key",
+            key,
+            "--follow",
+            "--interval-seconds",
+            "0.01",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0 and result["state"] == "succeeded"
+    assert [(call[0], call[1]) for call in client.calls] == [
+        ("GET", lookup),
+        ("GET", target),
+    ]
+
+
+def test_recipe_download_follows_its_canonical_receipt_id() -> None:
+    receipt = {
+        "id": "recipe-download",
+        "request_id": "11111111-1111-4111-8111-111111111111",
+        "kind": "recipe.image.availability.v2",
+        "state": "queued",
+        "request": {"kind": "selector", "selector": "qwen-code", "force": False},
+    }
+    client = FakeClient(
+        {
+            ("POST", "/api/recipe/qwen-code/download"): receipt,
+            ("GET", "/api/recipe/operations/recipe-download"): receipt
+            | {"state": "succeeded"},
+        }
+    )
+    status, result = run(
+        (
+            "recipe",
+            "download",
+            "qwen-code",
+            "--interval-seconds",
+            "0.01",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0 and result["state"] == "succeeded"
+    assert [call[1] for call in client.calls] == [
+        "/api/recipe/qwen-code/download",
+        "/api/recipe/operations/recipe-download",
+    ]
+
+
+def test_recipe_cancel_recovers_accepted_request_after_lost_response() -> None:
+    key = "11111111-1111-4111-8111-111111111111"
+    receipt = {
+        "id": "recipe-operation",
+        "request_id": "22222222-2222-4222-8222-222222222222",
+        "kind": "recipe.image.availability.v2",
+        "state": "observing",
+        "request": {"kind": "selector", "selector": "qwen-code", "force": False},
+        "cancellation": {
+            "cancel_requested": True,
+            "cancel_requested_at": "2026-09-23T12:00:00+00:00",
+            "cancel_request_id": key,
+            "cancel_actor": "operator",
+            "reason": "stop preparation",
+        },
+    }
+    client = FakeClient(
+        {
+            (
+                "POST",
+                "/api/recipe/operations/recipe-operation/cancel",
+            ): ControlTransportError("response was lost"),
+            ("GET", "/api/recipe/operations/recipe-operation"): receipt,
+        }
+    )
+    status, result = run(
+        (
+            "recipe",
+            "cancel",
+            "recipe-operation",
+            "--yes",
+            "--detach",
+            "--request-key",
+            key,
+            "--reason",
+            "stop preparation",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0 and result["state"] == "observing"
+    assert [(method, path) for method, path, _, _ in client.calls] == [
+        ("POST", "/api/recipe/operations/recipe-operation/cancel"),
+        ("GET", "/api/recipe/operations/recipe-operation"),
+    ]
+    assert client.calls[0][2] == {
+        "request_key": key,
+        "reason": "stop preparation",
+    }
+
+
+def test_recipe_cancel_requires_explicit_yes_before_mutation() -> None:
+    client = FakeClient({})
+    status, result = run(("recipe", "cancel", "operation", "--json"), client)
+    assert status == 2 and "requires --yes" in str(result["error"])
+    assert client.calls == []
+
+
+def test_interrupted_submission_retains_reconnect_without_claiming_acceptance() -> None:
+    client = FakeClient({("POST", "/api/model/qwen/download"): KeyboardInterrupt()})
+    status, result = run(("model", "download", "qwen", "--json"), client)
+    assert status == 130
+    assert isinstance(result["error"], str)
+    assert isinstance(result["reconcile"], dict)
+    assert "accepted work continues" not in result["error"]
+    assert result["reconcile"]["operation"] == (
+        "vonkctl model progress --request-key 11111111-1111-4111-8111-111111111111 --follow"
+    )
+    assert len(client.calls) == 1
+
+
+@pytest.mark.parametrize("changed_binding", ["request", "operation"])
+def test_cache_reconnection_discards_wrong_binding_until_exact_owner_repairs(
+    changed_binding: str,
+) -> None:
+    key = "11111111-1111-4111-8111-111111111111"
+    initial = {"operation_id": "original", "request_key": key, "state": "running"}
+    if changed_binding == "request":
+        initial["request_key"] = "22222222-2222-4222-8222-222222222222"
+    client = FakeClient(
+        {
+            ("GET", f"/api/model/requests/{key}"): [
+                initial,
+                initial | {"request_key": key},
+            ],
+            ("GET", "/api/model/operations/original"): [
+                initial | {"operation_id": "different", "state": "succeeded"},
+                initial | {"request_key": key, "state": "succeeded"},
+            ],
+        }
+    )
+    status, result = run(
+        (
+            "model",
+            "progress",
+            "--request-key",
+            key,
+            "--follow",
+            "--interval-seconds",
+            "0.01",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0
+    assert result["operation_id"] == "original" and result["request_key"] == key
+    assert all(call[0] == "GET" for call in client.calls)
+
+
+def test_detach_returns_acceptance_without_observing_operation() -> None:
+    client = FakeClient(
+        {
+            ("POST", "/api/recipe/qwen-code/download"): {
+                "state": "queued",
+                "id": "download-2",
+                "kind": "recipe.image.availability.v2",
+                "request_id": "11111111-1111-4111-8111-111111111111",
+                "request": {
+                    "kind": "selector",
+                    "selector": "qwen-code",
+                    "force": False,
+                },
+            }
+        }
+    )
+    status, payload = run(
+        ("recipe", "download", "qwen-code", "--detach", "--json"), client
+    )
+    assert status == 0 and payload["state"] == "queued"
+    assert [call[1] for call in client.calls] == ["/api/recipe/qwen-code/download"]
+
+
+def test_watch_shows_updated_resource_and_retains_final_snapshot(
+    capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The watch must retain the last observed snapshot at its deadline; renderer
+    # and scheduler latency must not decide whether the second snapshot is read.
+    class WatchClock:
+        now = 0.0
+
+        def monotonic(self) -> float:
+            return self.now
+
+        def sleep(self, delay: float) -> None:
+            self.now += delay
+
+    clock = WatchClock()
+    monkeypatch.setattr(controller_cli.observation, "time", clock)
+    common = {
+        "identity": {"slug": "Qwen"},
+        "selector": "qwen",
+        "usage": [],
+        "resources": {"disk_bytes": 42},
+    }
+    client = FakeClient(
+        {
+            ("GET", "/api/model/qwen"): [
+                {**common, "local": {"controller": "preparing", "running_on": []}},
+                {**common, "local": {"controller": "cached", "running_on": []}},
+            ]
+        }
+    )
+    status = cli.main(
+        (
+            "model",
+            "detail",
+            "qwen",
+            "--watch",
+            "--interval-seconds",
+            "0.01",
+            "--timeout-seconds",
+            "0.04",
+        ),
+        control_client=client,
+    )
+    captured = capsys.readouterr()
+    assert status == 2  # A resource watch has a deadline, not an execution outcome.
+    assert clock.now == pytest.approx(0.04)
+    assert len(client.calls) >= 2
+    assert "preparing" in captured.err and "cached" in captured.err
+    assert "preparing" not in captured.out and "cached" in captured.out
+    assert "accepted work" not in captured.err
+
+
+def test_noninteractive_removals_fail_closed_and_recipe_requires_model_choice() -> None:
+    model = FakeClient({})
+    status, payload = run(("model", "remove", "qwen", "--json"), model)
+    removal_error = payload["error"]
+    assert isinstance(removal_error, str)
+    assert status == 2 and "--yes" in removal_error
+    assert model.calls == []
+
+    recipe = FakeClient({})
+    status, payload = run(("recipe", "remove", "qwen-code", "--yes", "--json"), recipe)
+    model_choice_error = payload["error"]
+    assert isinstance(model_choice_error, str)
+    assert status == 2 and "--with-model or --keep-model" in model_choice_error
+    assert recipe.calls == []
+
+
+def test_a_terminal_failure_state_has_a_nonzero_exit_code() -> None:
+    failed = FakeClient(
+        {
+            ("POST", "/api/model/qwen/download"): {
+                "state": "failed",
+                "operation_id": "download",
+                "request_key": "11111111-1111-4111-8111-111111111111",
+                "action": "download",
+                "selector": "qwen",
+            }
+        }
+    )
+    assert run(("model", "download", "qwen", "--json"), failed)[0] == 2
+
+
+def test_default_log_window_is_an_api_timestamp_and_all_upgrade_omits_selectors() -> (
+    None
+):
+    job_id = "upgrade-job"
+    request_key = "11111111-1111-4111-8111-111111111111"
+    node_id = "spk_" + "1" * 32
+    path = f"/api/fleet/{node_id}/loginfo"
+    client = FakeClient(
+        {
+            ("GET", "/api/fleet"): {
+                "nodes": [{"id": node_id, "display_name": "Atlas"}]
+            },
+            ("GET", path): _fleet_log_response(node_id, follow=False),
+            ("POST", "/api/fleet/upgrade"): {
+                "action": "upgrade",
+                "state": "queued",
+                "operation_id": job_id,
+                "plan_digest": "a" * 64,
+                "request_key": request_key,
+                "targets": [],
+            },
+            ("GET", f"/api/jobs/{job_id}"): {
+                "id": job_id,
+                "state": "succeeded",
+                "kind": "agent-upgrade",
+                "targets": [],
+                "operations": [],
+                "progress": {"running": 0, "completed": 0, "failed": 0, "total": 0},
+            },
+        }
+    )
+    before = datetime.now(UTC) - timedelta(minutes=15)
+    assert run(("fleet", "loginfo", "Atlas", "--json"), client)[0] == 0
+    after = datetime.now(UTC) - timedelta(minutes=15)
+    query = client.calls[-1][3]
+    assert isinstance(query, dict)
+    since = datetime.fromisoformat(query["since"])
+    assert before <= since <= after
+    assert (
+        run(
+            (
+                "fleet",
+                "upgrade",
+                "--all",
+                "--yes",
+                "--request-key",
+                request_key,
+                "--json",
+                "--interval-seconds",
+                "0.01",
+            ),
+            client,
+        )[0]
+        == 0
+    )
+    post = next(
+        call for call in client.calls if call[0:2] == ("POST", "/api/fleet/upgrade")
+    )
+    payload = post[2]
+    assert isinstance(payload, dict)
+    assert "selectors" not in payload
+
+
+def test_fleet_upgrade_refuses_noninteractive_submission_without_consent() -> None:
+    client = FakeClient(
+        {
+            ("POST", "/api/fleet/upgrade"): {
+                "action": "upgrade",
+                "state": "queued",
+                "operation_id": "upgrade-job",
+                "plan_digest": "a" * 64,
+                "request_key": "11111111-1111-4111-8111-111111111111",
+                "targets": [],
+            }
+        }
+    )
+
+    status, result = run(("--no-input", "fleet", "upgrade", "--all", "--json"), client)
+
+    assert status == 2
+    assert not any(call[0:2] == ("POST", "/api/fleet/upgrade") for call in client.calls)
+    assert "--yes" in str(result.get("error"))
+
+
+def test_fleet_upgrade_resolves_friendly_scope_before_explicit_consent() -> None:
+    node_id = "spk_" + "a" * 32
+    request_key = "33333333-3333-4333-8333-333333333333"
+    client = FakeClient(
+        {
+            ("GET", "/api/fleet"): {
+                "nodes": [{"id": node_id, "display_name": "Atlas"}]
+            },
+            ("POST", "/api/fleet/upgrade"): {
+                "action": "upgrade",
+                "state": "queued",
+                "operation_id": "upgrade-job",
+                "plan_digest": "b" * 64,
+                "request_key": request_key,
+                "targets": [node_id],
+            },
+        }
+    )
+
+    status, _result = run(
+        (
+            "--no-input",
+            "fleet",
+            "upgrade",
+            "Atlas",
+            "--yes",
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0
+    assert [call[0:2] for call in client.calls] == [
+        ("GET", "/api/fleet"),
+        ("POST", "/api/fleet/upgrade"),
+    ]
+    body = client.calls[-1][2]
+    assert body == {
+        "all": False,
+        "request_key": request_key,
+        "selectors": [node_id],
+    }
+
+
+def test_fleet_upgrade_prompts_for_resolved_scope_in_a_terminal(monkeypatch) -> None:
+    class TerminalInput(StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    class TerminalOutput(StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    node_id = "spk_" + "c" * 32
+    terminal_input = TerminalInput("y\n")
+    terminal_output = TerminalOutput()
+    monkeypatch.setattr(cli.sys, "stdin", terminal_input)
+    monkeypatch.setattr(cli.sys, "stderr", terminal_output)
+    client = FakeClient(
+        {
+            ("GET", "/api/fleet"): {
+                "nodes": [{"id": node_id, "display_name": "Atlas"}]
+            },
+            ("POST", "/api/fleet/upgrade"): {
+                "action": "upgrade",
+                "state": "queued",
+                "operation_id": "upgrade-job",
+                "plan_digest": "c" * 64,
+                "request_key": "44444444-4444-4444-8444-444444444444",
+                "targets": [node_id],
+            },
+        }
+    )
+
+    status = cli.main(
+        ("fleet", "upgrade", "Atlas", "--detach"),
+        control_client=client,
+        request_id_factory=lambda: "44444444-4444-4444-8444-444444444444",
+    )
+
+    assert status == 0
+    assert client.calls[-1][0:2] == ("POST", "/api/fleet/upgrade")
+    assert terminal_input.read() == ""
+
+
+def _fleet_log_response(node_id: str, *, follow: bool) -> dict[str, object]:
+    return {
+        "node_id": node_id,
+        "since": "2026-09-24T10:00:00Z",
+        "lines": 100,
+        "entries": [],
+        "retained": True,
+        "follow": follow,
+    }
+
+
+def test_fleet_log_follow_resolves_alias_once_and_pins_every_poll_to_node_id() -> None:
+    node_id = "spk_" + "1" * 32
+    other_node_id = "spk_" + "2" * 32
+    path = f"/api/fleet/{node_id}/loginfo"
+    client = FakeClient(
+        {
+            ("GET", "/api/fleet"): {
+                "nodes": [
+                    {
+                        "id": node_id,
+                        "display_name": "Atlas",
+                        "hostname": "spark-1",
+                    }
+                ]
+            },
+            ("GET", path): [
+                _fleet_log_response(node_id, follow=True),
+                _fleet_log_response(other_node_id, follow=True),
+                _fleet_log_response(node_id, follow=False),
+            ],
+        }
+    )
+
+    status, payload = run(
+        (
+            "fleet",
+            "loginfo",
+            "Atlas",
+            "--recipe",
+            "vllm",
+            "--source",
+            "job",
+            "--follow",
+            "--timeout-seconds",
+            "0.2",
+            "--interval-seconds",
+            "0.01",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and payload["node_id"] == node_id
+    assert [call[1] for call in client.calls] == ["/api/fleet", path, path, path]
+    first_query = client.calls[-2][3]
+    second_query = client.calls[-1][3]
+    assert isinstance(first_query, dict) and isinstance(second_query, dict)
+    assert second_query == first_query
+    assert second_query["recipe"] == "vllm"
+    assert second_query["source"] == "job"
+
+
+def test_fleet_loginfo_validates_identity_even_for_a_canonical_selector() -> None:
+    node_id = "spk_" + "1" * 32
+    other_node_id = "spk_" + "2" * 32
+    path = f"/api/fleet/{node_id}/loginfo"
+    client = FakeClient(
+        {
+            ("GET", path): [
+                _fleet_log_response(other_node_id, follow=False),
+                _fleet_log_response(node_id, follow=False),
+            ]
+        }
+    )
+
+    status, payload = run(("fleet", "loginfo", node_id, "--json"), client)
+
+    assert status == 0 and payload["node_id"] == node_id
+    assert [call[1] for call in client.calls] == [path, path]
+
+
+def test_fleet_log_follow_false_returns_the_retained_snapshot_without_timeout() -> None:
+    node_id = "spk_" + "1" * 32
+    path = f"/api/fleet/{node_id}/loginfo"
+    response = _fleet_log_response(node_id, follow=False)
+    client = FakeClient({("GET", path): response})
+
+    status, payload = run(
+        (
+            "fleet",
+            "loginfo",
+            node_id,
+            "--follow",
+            "--timeout-seconds",
+            "0.05",
+            "--interval-seconds",
+            "0.01",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0
+    assert payload == response
+    assert [call[1] for call in client.calls] == [path]
+
+
+def test_fleet_log_follow_stops_when_owner_changes_to_retained_snapshot() -> None:
+    node_id = "spk_" + "1" * 32
+    path = f"/api/fleet/{node_id}/loginfo"
+    retained = _fleet_log_response(node_id, follow=False)
+    client = FakeClient(
+        {
+            ("GET", path): [
+                _fleet_log_response(node_id, follow=True),
+                retained,
+            ]
+        }
+    )
+
+    status, payload = run(
+        (
+            "fleet",
+            "loginfo",
+            node_id,
+            "--follow",
+            "--timeout-seconds",
+            "0.5",
+            "--interval-seconds",
+            "0.01",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0
+    assert payload == retained
+    assert [call[1] for call in client.calls] == [path, path]
+
+
+def test_fleet_log_reconnect_uses_resolved_node_id_and_keeps_log_scope() -> None:
+    node_id = "spk_" + "1" * 32
+    path = f"/api/fleet/{node_id}/loginfo"
+    client = FakeClient(
+        {
+            ("GET", "/api/fleet"): {
+                "nodes": [{"id": node_id, "display_name": "Atlas"}]
+            },
+            ("GET", path): _fleet_log_response(node_id, follow=True),
+        }
+    )
+
+    status, payload = run(
+        (
+            "fleet",
+            "loginfo",
+            "Atlas",
+            "--since",
+            "1h",
+            "--recipe",
+            "vllm",
+            "--source",
+            "job",
+            "--follow",
+            "--timeout-seconds",
+            "0",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 2
+    observation = payload["observation"]
+    assert isinstance(observation, dict)
+    assert observation["path"] == path
+    reconnect = str(observation["reconnect_command"])
+    assert f"fleet loginfo {node_id}" in reconnect
+    assert "Atlas" not in reconnect
+    assert "--since 1h" in reconnect
+    assert "--recipe vllm" in reconnect
+    assert "--source job" in reconnect
+    assert observation["timeout_seconds"] == 0
+
+
+def _fleet_log_with_entries(node_id: str) -> dict[str, object]:
+    response = _fleet_log_response(node_id, follow=False)
+    response["entries"] = [
+        {
+            "observed_at": "2026-09-24T10:00:01Z",
+            "level": "info",
+            "source": "agent",
+            "message": "first retained line",
+        },
+        {
+            "observed_at": "2026-09-24T10:00:02Z",
+            "level": "warning",
+            "source": "job",
+            "message": "second retained line",
+        },
+    ]
+    return response
+
+
+def test_fleet_loginfo_without_follow_prints_each_line_once_on_stdout(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    node_id = "spk_" + "1" * 32
+    path = f"/api/fleet/{node_id}/loginfo"
+    client = FakeClient({("GET", path): _fleet_log_with_entries(node_id)})
+
+    status = cli.main(("fleet", "loginfo", node_id), control_client=client)
+
+    captured = capsys.readouterr()
+    assert status == 0
+    for line in ("first retained line", "second retained line"):
+        assert captured.out.count(line) == 1
+        assert line not in captured.err
+
+
+def test_fleet_upgrade_follows_exact_job_and_stops_at_operator_blocker() -> None:
+    job_id = "upgrade-job"
+    request_key = "11111111-1111-4111-8111-111111111111"
+    node_a = "spk_" + "a" * 32
+    node_b = "spk_" + "b" * 32
+    client = FakeClient(
+        {
+            ("POST", "/api/fleet/upgrade"): {
+                "action": "upgrade",
+                "state": "queued",
+                "operation_id": job_id,
+                "plan_digest": "a" * 64,
+                "request_key": request_key,
+                "targets": [node_a, node_b],
+            },
+            ("GET", f"/api/jobs/{job_id}"): {
+                "id": job_id,
+                "state": "needs-operator",
+                "kind": "agent-upgrade",
+                "targets": [node_a, node_b],
+                "status_reason": f"Spark {node_a} requires operator review",
+                "operations": [
+                    {
+                        "id": "operation-a",
+                        "node_id": node_a,
+                        "state": "needs-operator",
+                    }
+                ],
+                "progress": {"running": 0, "completed": 0, "failed": 1, "total": 1},
+            },
+        }
+    )
+
+    status, result = run(
+        (
+            "fleet",
+            "upgrade",
+            "--all",
+            "--yes",
+            "--request-key",
+            request_key,
+            "--json",
+            "--interval-seconds",
+            "0.01",
+        ),
+        client,
+    )
+
+    assert status == 2
+    assert result["status_reason"] == f"Spark {node_a} requires operator review"
+    assert [call[1] for call in client.calls] == [
+        "/api/fleet/upgrade",
+        f"/api/jobs/{job_id}",
+    ]
+    assert client.calls[-1][3] == {"limit": 100}
+    assert isinstance(result["operations"], list)
+    assert len(result["operations"]) == 1
+
+
+def _sticky_upgrade_follow(
+    snapshot_overrides: dict[str, object], monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(controller_cli.observation, "time", _InjectedClock())
+    job_id = "upgrade-job"
+    request_key = "44444444-4444-4444-8444-444444444444"
+    nodes = ["spk_" + letter * 32 for letter in "abcd"]
+    states = ("running", "queued", "queued", "needs-operator")
+    client = FakeClient(
+        {
+            ("POST", "/api/fleet/upgrade"): {
+                "action": "upgrade",
+                "state": "queued",
+                "operation_id": job_id,
+                "plan_digest": "a" * 64,
+                "request_key": request_key,
+                "targets": nodes,
+            },
+            ("GET", f"/api/jobs/{job_id}"): {
+                "id": job_id,
+                "state": "queued",
+                "kind": "agent-upgrade",
+                "targets": nodes,
+                "operations": [
+                    {"id": f"operation-{node[4]}", "node_id": node, "state": state}
+                    for node, state in zip(nodes, states, strict=True)
+                ],
+                # The Controller counts queued and running work as running.
+                "progress": {"running": 3, "completed": 0, "failed": 0, "total": 4},
+                **snapshot_overrides,
+            },
+        }
+    )
+    return run(
+        (
+            "fleet",
+            "upgrade",
+            "--all",
+            "--yes",
+            "--request-key",
+            request_key,
+            "--json",
+            "--interval-seconds",
+            "0.01",
+            "--timeout-seconds",
+            "1",
+        ),
+        client,
+    )
+
+
+def test_fleet_upgrade_follows_parallel_sparks_without_a_validation_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches a follow validator that counts operations: every Spark upgrades
+    at once, so 2 queued and 1 running operation is the normal mid-rollout view.
+    It must be adopted; rejecting it left the receipt and an observation error."""
+    _status, result = _sticky_upgrade_follow({}, monkeypatch)
+
+    observation = result["observation"]
+    assert isinstance(observation, dict)
+    assert observation["status"] == "timed_out"
+    assert "error" not in observation
+    inner = result["result"]
+    assert isinstance(inner, dict) and len(inner["operations"]) == 4
+
+
+def test_fleet_upgrade_timeout_reports_the_job_as_still_running(
+    vonkctl_json, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches a timed-out watch that shows a finished Spark as the outcome:
+    one Spark succeeded, one is still queued, so the job is not done."""
+    monkeypatch.setattr(controller_cli.observation, "time", _InjectedClock())
+    job_id = "upgrade-job"
+    request_key = "55555555-5555-4555-8555-555555555555"
+    nodes = ["spk_" + letter * 32 for letter in "ab"]
+    client = FakeClient(
+        {
+            ("POST", "/api/fleet/upgrade"): {
+                "action": "upgrade",
+                "state": "queued",
+                "operation_id": job_id,
+                "plan_digest": "a" * 64,
+                "request_key": request_key,
+                "targets": nodes,
+            },
+            ("GET", f"/api/jobs/{job_id}"): {
+                "id": job_id,
+                "state": "queued",
+                "kind": "agent-upgrade",
+                "targets": nodes,
+                "operations": [
+                    {"id": "operation-a", "node_id": nodes[0], "state": "queued"},
+                    {"id": "operation-b", "node_id": nodes[1], "state": "succeeded"},
+                ],
+                "progress": {"running": 1, "completed": 1, "failed": 0, "total": 2},
+            },
+        }
+    )
+
+    status, document = vonkctl_json(
+        "fleet",
+        "upgrade",
+        "--all",
+        "--yes",
+        "--request-key",
+        request_key,
+        "--interval-seconds",
+        "0.01",
+        "--timeout-seconds",
+        "1",
+        control_client=client,
+    )
+
+    assert status == 2
+    assert document["observation"]["status"] == "timed_out"
+    assert document["result"]["state"] == "queued"
+
+
+def test_fleet_upgrade_follow_still_refuses_another_jobs_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The job, kind and target identity checks stay."""
+    _status, result = _sticky_upgrade_follow(
+        {"targets": ["spk_" + "f" * 32]}, monkeypatch
+    )
+
+    observation = result["observation"]
+    assert isinstance(observation, dict)
+    assert observation["error"]
+    inner = result["result"]
+    assert isinstance(inner, dict) and "operations" not in inner
+
+
+def test_fleet_upgrade_replays_lost_post_with_same_request_key() -> None:
+    request_key = "22222222-2222-4222-8222-222222222222"
+    client = FakeClient(
+        {
+            ("POST", "/api/fleet/upgrade"): [
+                OSError("response lost after acceptance"),
+                {
+                    "action": "upgrade",
+                    "state": "queued",
+                    "operation_id": "upgrade-job",
+                    "plan_digest": "a" * 64,
+                    "request_key": request_key,
+                    "targets": [],
+                },
+            ]
+        }
+    )
+
+    status, _result = run(
+        (
+            "fleet",
+            "upgrade",
+            "--all",
+            "--yes",
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0
+    assert [call[0:2] for call in client.calls] == [
+        ("POST", "/api/fleet/upgrade"),
+        ("POST", "/api/fleet/upgrade"),
+    ]
+    assert client.calls[0][2] == client.calls[1][2]
+    request_body = client.calls[0][2]
+    assert request_body is not None
+    assert request_body["request_key"] == request_key
+
+
+@pytest.mark.parametrize("unreadable", [False, True])
+def test_fleet_upgrade_unknown_acceptance_keeps_exact_request_for_fresh_observer(
+    unreadable: bool,
+) -> None:
+    request_key = "22222222-2222-4222-8222-222222222222"
+    client = FakeClient(
+        {
+            ("POST", "/api/fleet/upgrade"): (
+                ControlMalformedResponse("unreadable receipt")
+                if unreadable
+                else [
+                    OSError("connection reset after acceptance"),
+                    OSError("connection reset after replay"),
+                ]
+            )
+        }
+    )
+
+    status, result = run(
+        (
+            "fleet",
+            "upgrade",
+            "--all",
+            "--yes",
+            "--request-key",
+            request_key,
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 2
+    assert result["result"] == {}
+    observation = result["observation"]
+    assert isinstance(observation, dict)
+    assert request_key in observation["reconnect_command"]
+    assert len(client.calls) == 2
+    assert all(call[2] == client.calls[0][2] for call in client.calls)
+
+    client.responses[("POST", "/api/fleet/upgrade")] = {
+        "action": "upgrade",
+        "operation_id": "original-job",
+        "plan_digest": "a" * 64,
+        "request_key": request_key,
+        "targets": [],
+    }
+    status, fresh = run(
+        (
+            "fleet",
+            "upgrade",
+            "--all",
+            "--yes",
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0 and fresh["operation_id"] == "original-job"
+
+
+@pytest.mark.parametrize("since", ["yesterday", "15", "-1m", "2026-09-13T08:00:00"])
+def test_log_since_rejects_ambiguous_windows_before_request(since: str) -> None:
+    client = FakeClient({})
+    assert (
+        run(("fleet", "loginfo", "Atlas", "--since", since, "--json"), client)[0] == 2
+    )
+    assert not client.calls
+
+
+@pytest.mark.parametrize("follow", [False, True])
+def test_fleet_progress_never_reports_another_job(follow: bool) -> None:
+    expected = "33333333-3333-4333-8333-333333333333"
+    other = "44444444-4444-4444-8444-444444444444"
+    path = f"/api/jobs/{expected}"
+    wrong = {"id": other, "state": "succeeded"}
+    repaired = {"id": expected, "state": "succeeded"}
+    responses = (
+        [{"id": expected, "state": "running"}, wrong, repaired]
+        if follow
+        else [wrong, repaired]
+    )
+    client = FakeClient({("GET", path): responses})
+    arguments = ["fleet", "progress", expected, "--json"]
+    if follow:
+        arguments += ["--follow", "--interval-seconds", "0.01"]
+
+    status, payload = run(tuple(arguments), client)
+
+    assert status == 0 and payload == repaired
+    assert [call[1] for call in client.calls] == [path] * (3 if follow else 2)
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected"),
+    [
+        ("vonk-forge/qwen-code", "vonk-forge/qwen-code"),
+        ("Qwen 3", "vonk-forge/qwen-code"),
+    ],
+)
+def test_run_resolves_a_recipe_or_its_model_to_one_catalog_recipe(
+    requested: str, expected: str
+) -> None:
+    display = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "model-display.json")
+        .read_text()
+    )
+    display["model_title"] = "Qwen 3"
+    client = FakeClient(
+        {
+            ("GET", "/api/model/library"): {
+                "models": [{"selector": "Qwen/qwen3", "model_display": display}],
+                "next_cursor": None,
+            },
+            ("GET", "/api/recipe/library"): {
+                "recipes": [
+                    _recipe_projection(
+                        "vonk-forge/qwen-code", "Qwen Code", model_selector="Qwen/qwen3"
+                    )
+                ],
+                "next_cursor": None,
+            },
+        }
+    )
+    assert (
+        controller_cli._resolve_run_recipe(
+            cast(controller_cli.ControllerClient, client),
+            requested,
+            deadline=controller_cli.observation.time.monotonic() + 30,
+        )
+        == expected
+    )
+
+
+def test_run_title_resolution_reads_the_model_library_in_pages_not_per_model() -> None:
+    display = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "model-display.json")
+        .read_text()
+    )
+    total, page_size = 150, 50
+    pages = [
+        {
+            "models": [
+                {
+                    "selector": f"Org/model-{index}",
+                    "model_display": {**display, "model_title": f"Title {index}"},
+                }
+                for index in range(start, start + page_size)
+            ],
+            "next_cursor": f"c{start + page_size}"
+            if start + page_size < total
+            else None,
+        }
+        for start in range(0, total, page_size)
+    ]
+    client = FakeClient(
+        {
+            ("GET", "/api/model/library"): pages,
+            ("GET", "/api/recipe/library"): {
+                "recipes": [
+                    _recipe_projection(
+                        f"vonk-forge/recipe-{index}",
+                        f"Recipe {index}",
+                        model_selector=f"Org/model-{index}",
+                    )
+                    for index in range(total)
+                ],
+                "next_cursor": None,
+            },
+        }
+    )
+    assert (
+        controller_cli._resolve_run_recipe(
+            cast(controller_cli.ControllerClient, client),
+            "title 120",
+            deadline=controller_cli.observation.time.monotonic() + 30,
+        )
+        == "vonk-forge/recipe-120"
+    )
+    model_reads = [call for call in client.calls if call[1].startswith("/api/model")]
+    assert len(model_reads) == total // page_size
+    assert {call[1] for call in model_reads} == {"/api/model/library"}
+
+
+class _PagedClient(FakeClient):
+    """A library peer answering each page from ``page_for(call_number)``."""
+
+    def __init__(self, page_for, on_request=lambda: None):
+        super().__init__({})
+        self.page_for = page_for
+        self.on_request = on_request
+        self.queries: list[dict[str, object]] = []
+
+    def request(self, method, path, payload=None, **kwargs):
+        self.on_request()
+        self.calls.append((method, path, payload, kwargs.get("query")))
+        self.queries.append(dict(kwargs.get("query") or {}))
+        return self.page_for(len(self.queries))
+
+
+def _read_pages(client, deadline=1e9):
+    return list(
+        controller_cli.selection._library_pages(
+            cast(controller_cli.ControllerClient, client),
+            "/api/model/library",
+            "models",
+            {"sort": "name"},
+            deadline=deadline,
+        )
+    )
+
+
+def test_library_pages_follow_cursors_to_the_last_page_with_the_shared_page_size():
+    pages = {
+        None: {"models": [1], "next_cursor": "a"},
+        "a": {"models": [2], "next_cursor": "b"},
+        "b": {"models": [3], "next_cursor": None},
+    }
+    client = _PagedClient(lambda n: pages[client.queries[-1].get("cursor")])
+    assert _read_pages(client) == [[1], [2], [3]]
+    assert {query["limit"] for query in client.queries} == {512}
+    assert [query.get("cursor") for query in client.queries] == [None, "a", "b"]
+
+
+@pytest.mark.parametrize(
+    ("second", "message"),
+    [
+        ({"models": [], "next_cursor": "a"}, "cursor repeated"),
+        ({"models": [], "next_cursor": ""}, "invalid cursor"),
+        ({"models": [], "next_cursor": 7}, "invalid cursor"),
+        ({"items": [], "next_cursor": None}, "does not contain models"),
+        ({"models": {}, "next_cursor": None}, "does not contain models"),
+    ],
+)
+def test_library_pages_refuse_a_malformed_page(second, message):
+    first = {"models": [], "next_cursor": "a"}
+    client = _PagedClient(lambda n: first if n == 1 else second)
+    with pytest.raises(ControlMalformedResponse, match=message):
+        _read_pages(client)
+
+
+def test_runaway_library_cursor_ends_at_the_deadline_and_a_fresh_resolve_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Clock:
+        now = 0.0
+
+        def monotonic(self) -> float:
+            return self.now
+
+    clock = Clock()
+    monkeypatch.setattr(controller_cli.selection, "time", clock)
+
+    def tick() -> None:
+        clock.now += 1.0
+
+    # Every page carries a fresh cursor: only the deadline can end the read.
+    runaway = _PagedClient(
+        lambda n: {"models": [], "next_cursor": f"fresh-{n}"}, on_request=tick
+    )
+    with pytest.raises(
+        ControlMalformedResponse, match="selection observation deadline reached"
+    ):
+        controller_cli.run._model_titles(
+            cast(controller_cli.ControllerClient, runaway), deadline=30.0
+        )
+    assert (
+        len(runaway.calls) == 30
+    )  # one page per injected second, ended by the deadline
+
+    # The expired read leaves nothing behind: a fresh resolve is admitted.
+    display = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "model-display.json")
+        .read_text()
+    )
+    fresh = FakeClient(
+        {
+            ("GET", "/api/model/library"): {
+                "models": [{"selector": "Qwen/qwen3", "model_display": display}],
+                "next_cursor": None,
+            },
+            ("GET", "/api/recipe/library"): {
+                "recipes": [
+                    _recipe_projection(
+                        "vonk-forge/qwen-code", "Qwen Code", model_selector="Qwen/qwen3"
+                    )
+                ],
+                "next_cursor": None,
+            },
+        }
+    )
+    assert (
+        controller_cli._resolve_run_recipe(
+            cast(controller_cli.ControllerClient, fresh),
+            "vonk-forge/qwen-code",
+            deadline=clock.now + 30,
+        )
+        == "vonk-forge/qwen-code"
+    )
+
+
+def test_run_parser_exposes_spark_confirmation_and_wait_controls() -> None:
+    args = cli._parser().parse_args(
+        ["--profile", "3", "run", "Qwen Code", "--spark", "Atlas", "--yes"]
+    )
+    assert args.command == "run"
+    assert args.profile_number == 3
+    assert args.selector == "Qwen Code"
+    assert args.spark == ["Atlas"]
+    assert args.yes is True
+    assert args.timeout_seconds == 30
+
+
+@pytest.mark.parametrize(
+    "reason_code", [None, "profile.spark_offline", "profile.node_revoked"]
+)
+def test_run_reviews_and_waits_before_reporting_endpoint(
+    reason_code: str | None,
+) -> None:
+    profile = {
+        "name": "Default",
+        "description": "",
+        "favorite": False,
+        "installation_policy": "keep-cached",
+        "labels": {},
+        "assignments": [],
+    }
+    paths: list[str] = []
+    application_id = "33333333-3333-4333-8333-333333333333"
+
+    class RunClient:
+        request_timeout_seconds = 1.0
+
+        def request(
+            self,
+            method: str,
+            path: str,
+            payload: Mapping[str, object] | None = None,
+            *,
+            extra_headers: Mapping[str, str] | None = None,
+            query: Mapping[str, object] | None = None,
+            timeout_seconds: float | None = None,
+            retry: bool = True,
+        ) -> dict[str, object]:
+            del extra_headers, query, timeout_seconds
+            paths.append(path)
+            if path == "/api/recipe/library":
+                return {
+                    "recipes": [
+                        _recipe_projection("vonk-forge/qwen-code", "Qwen Code")
+                    ],
+                    "next_cursor": None,
+                }
+            if path == "/api/fleet":
+                return {"nodes": [{"id": "spk_" + "a" * 32, "display_name": "Atlas"}]}
+            if path == "/api/profile/1/definition":
+                return {
+                    "id": "22222222-2222-4222-8222-222222222222",
+                    "number": 1,
+                    "revision": 0,
+                    "definition": profile,
+                }
+            if method == "PUT" and path == "/api/profile/1":
+                assert payload is not None
+                profile.update(payload)
+                profile.pop("expected_revision", None)
+                return {"number": 1, "revision": 1, "definition": profile}
+            if path == "/api/profile/1/preview":
+                return {
+                    "allowed": reason_code is None,
+                    "plan_digest": "b" * 64,
+                    "effects_digest": "c" * 64,
+                    "reasons": []
+                    if reason_code is None
+                    else [{"code": reason_code, "detail": "Spark is not ready"}],
+                }
+            if method == "POST" and path == "/api/profile/1/load":
+                assert payload is not None
+                return {
+                    "id": application_id,
+                    "request_key": payload["request_key"],
+                    "state": "running",
+                    "progress": {
+                        "intended_profile": {"reviewed_plan_digest": "b" * 64}
+                    },
+                }
+            if path == f"/api/profile/applications/{application_id}":
+                return {"id": application_id, "state": "succeeded"}
+            if path == "/api/profile/1/endpoints":
+                return self.profile_endpoints(1).to_dict()
+            raise AssertionError((method, path, payload))
+
+        def profile_endpoints(self, number, alias=None):
+            assert number == 1 and alias is None
+            return FleetProfileEndpointsView.from_dict(
+                {
+                    "assignments": [],
+                    "number": 1,
+                    "observed_at": "2026-09-27T10:00:00Z",
+                    "application_id": application_id,
+                    "application_state": "succeeded",
+                }
+            )
+
+    args = cli._parser().parse_args(
+        ["--profile", "1", "run", "Qwen Code", "--spark", "Atlas", "--yes", "--json"]
+    )
+    result = controller_cli.run_controller(
+        args,
+        cast(controller_cli.ControllerClient, RunClient()),
+        lambda: "11111111-1111-4111-8111-111111111111",
+    )
+    # An ordinary blocker is not a client-side stop: the load is submitted and
+    # the Controller parks or refuses it.
+    assert result["state"] == "succeeded"
+    endpoints = result["endpoints"]
+    assert isinstance(endpoints, Mapping)
+    assert endpoints["application_id"] == application_id
+    assert profile["assignments"][0]["recipe_selector"] == "vonk-forge/qwen-code"
+    assert "/api/profile/1/load" in paths
+    # The Controller prepares what the load needs; the client no longer downloads.
+    assert not any("/download" in path for path in paths)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["recipe", "download", "vonk-forge/qwen-code"],
+        ["model", "download", "vonk-forge/qwen"],
+        ["recipe", "update", "--all"],
+        ["fleet", "rename", "Atlas", "Nova"],
+        ["fleet", "enroll", "Nova", "--output", "/tmp/nova.json"],
+        ["profile", "add", "vonk-forge/qwen-code", "--spark", "Atlas"],
+        ["key", "create", "app"],
+    ],
+)
+def test_every_mutating_command_accepts_yes(arguments: list[str]) -> None:
+    args = cli._parser().parse_args([*arguments, "--yes"])
+    assert args.yes is True
+
+
+def _zero_target_upgrade_client(job_id: str, request_key: str) -> FakeClient:
+    return FakeClient(
+        {
+            ("POST", "/api/fleet/upgrade"): {
+                "action": "upgrade",
+                "state": "succeeded",
+                "operation_id": job_id,
+                "plan_digest": "a" * 64,
+                "request_key": request_key,
+                "targets": [],
+            },
+        }
+    )
+
+
+def test_fleet_upgrade_with_no_targets_does_not_follow() -> None:
+    request_key = "11111111-1111-4111-8111-111111111111"
+    client = _zero_target_upgrade_client("upgrade-job", request_key)
+
+    status = cli.main(
+        ("fleet", "upgrade", "--all", "--yes", "--request-key", request_key),
+        control_client=client,
+    )
+
+    assert status == 0
+    assert [call[1] for call in client.calls] == ["/api/fleet/upgrade"]
+
+
+def test_fleet_upgrade_with_no_targets_json_keeps_the_receipt() -> None:
+    request_key = "11111111-1111-4111-8111-111111111111"
+    client = _zero_target_upgrade_client("upgrade-job", request_key)
+
+    status, result = run(
+        (
+            "fleet",
+            "upgrade",
+            "--all",
+            "--yes",
+            "--request-key",
+            request_key,
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0
+    assert result["state"] == "succeeded"
+    assert result["targets"] == []
+
+
+def test_job_rendering_tolerates_a_missing_progress_object(capsys) -> None:
+    job_id = "upgrade-job"
+    client = FakeClient(
+        {
+            ("GET", f"/api/jobs/{job_id}"): {
+                "id": job_id,
+                "kind": "agent-upgrade",
+                "state": "succeeded",
+                "targets": [],
+                "operations": [],
+                "progress": None,
+            }
+        }
+    )
+
+    status = cli.main(("fleet", "progress", job_id), control_client=client)
+
+    captured = capsys.readouterr()
+    assert status == 0
+    assert job_id in captured.out
+    assert "not a valid object" not in captured.out + captured.err
+
+
+_RUN_KEY = "11111111-1111-4111-8111-111111111111"
+_RUN_APPLICATION = "33333333-3333-4333-8333-333333333333"
+_RUN_DIGEST = "e" * 64
+
+
+def _run_preview(plan_digest: str, effects_digest: str) -> dict[str, object]:
+    return {
+        "allowed": True,
+        "profile_name": "Default",
+        "plan_digest": plan_digest,
+        "effects_digest": effects_digest,
+        "scope": {"node_ids": [], "idle_node_ids": []},
+        "summary": {},
+        "assignments": [],
+        "steps": [],
+        "preparations": [],
+        "preparation_decisions": [],
+        "assessments": [],
+        "admission_decisions": [],
+        "effects": {"runs": [], "installations": [], "superseded": []},
+        "reasons": [],
+    }
+
+
+def _run_responses(**overrides: object) -> dict[tuple[str, str], object]:
+    profile = {
+        "name": "Default",
+        "description": "",
+        "favorite": False,
+        "installation_policy": "keep-cached",
+        "labels": {},
+        "assignments": [],
+    }
+    responses: dict[tuple[str, str], object] = {
+        ("GET", "/api/recipe/library"): {
+            "recipes": [_recipe_projection("vonk-forge/qwen-code", "Qwen Code")],
+            "next_cursor": None,
+        },
+        ("GET", "/api/recipe/vonk-forge%2Fqwen-code"): {
+            "projected": _recipe_projection("vonk-forge/qwen-code", "Qwen Code")[
+                "projected"
+            ]
+        },
+        ("GET", "/api/fleet"): {
+            "nodes": [{"id": "spk_" + "a" * 32, "display_name": "Atlas"}]
+        },
+        ("GET", "/api/profile/1/definition"): {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "number": 1,
+            "revision": 0,
+            "definition": profile,
+        },
+        ("PUT", "/api/profile/1"): {"number": 1, "revision": 1, "definition": profile},
+        ("POST", "/api/profile/1/preview"): _run_preview("b" * 64, _RUN_DIGEST),
+        ("POST", "/api/profile/1/load"): {
+            "id": _RUN_APPLICATION,
+            "request_key": _RUN_KEY,
+            "state": "succeeded",
+            "progress": {},
+        },
+        ("GET", f"/api/profile/applications/{_RUN_APPLICATION}"): {
+            "id": _RUN_APPLICATION,
+            "state": "succeeded",
+        },
+        ("GET", "/api/profile/1/endpoints"): {
+            "assignments": [],
+            "number": 1,
+            "observed_at": "2026-09-27T10:00:00Z",
+            "application_id": _RUN_APPLICATION,
+            "application_state": "succeeded",
+        },
+    }
+    responses.update(overrides)  # type: ignore[arg-type]
+    return responses
+
+
+def _effects(client: FakeClient) -> list[tuple[str, str]]:
+    """The calls that change something, ignoring reads and the plan review."""
+
+    return [
+        (method, path)
+        for method, path, *_ in client.calls
+        if method in {"PUT", "DELETE"} or path.endswith(("/load", "/remove"))
+    ]
+
+
+class _Prompt:
+    """A terminal that answers the confirmation questions it is asked."""
+
+    def __init__(self, monkeypatch, *answers: str) -> None:
+        import sys
+
+        class Stderr(StringIO):
+            def isatty(self) -> bool:
+                return True
+
+        class Stdin:
+            def __init__(self, replies: list[str]) -> None:
+                self.replies = replies
+
+            def isatty(self) -> bool:
+                return True
+
+            def readline(self, _limit: int = -1) -> str:
+                return self.replies.pop(0) + "\n" if self.replies else ""
+
+        self.stderr = Stderr()
+        monkeypatch.setattr(sys, "stdin", Stdin(list(answers)))
+        monkeypatch.setattr(sys, "stderr", self.stderr)
+
+    @property
+    def transcript(self) -> str:
+        return self.stderr.getvalue()
+
+
+def test_run_lost_load_response_reports_the_submission_to_reconnect_to(
+    vonkctl_json,
+) -> None:
+    client = FakeClient(
+        _run_responses()
+        | {
+            ("POST", "/api/profile/1/load"): ControlTransportError("response lost"),
+            ("GET", f"/api/profile/1/requests/{_RUN_KEY}"): ControlNotFound(
+                404, "request was not accepted"
+            ),
+        }
+    )
+
+    status, document = vonkctl_json(
+        "--profile",
+        "1",
+        "run",
+        "Qwen Code",
+        "--spark",
+        "Atlas",
+        "--yes",
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 2
+    assert document["result"] == {}
+    assert (
+        f"profile progress --request-key {_RUN_KEY}"
+        in document["observation"]["reconnect_command"]
+    )
+    assert (
+        len(
+            [
+                call
+                for call in client.calls
+                if call[:2] == ("POST", "/api/profile/1/load")
+            ]
+        )
+        == 2
+    )
+    client.responses.update(_run_responses())
+    status, fresh = vonkctl_json(
+        "--profile",
+        "1",
+        "run",
+        "Qwen Code",
+        "--spark",
+        "Atlas",
+        "--yes",
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+    assert status == 0 and fresh["application"]["request_key"] == _RUN_KEY
+
+
+@pytest.mark.parametrize("flags", [(), ("--no-input",), ("--json",)])
+def test_run_that_cannot_be_confirmed_saves_nothing(flags) -> None:
+    client = FakeClient(_run_responses())
+
+    status = cli.main(
+        (*flags, "--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 2
+    assert _effects(client) == []
+
+
+def _bodies(client: FakeClient, method: str, path: str) -> list[dict]:
+    """The request bodies sent to one route, in order."""
+    return [
+        cast(dict, call[2])
+        for call in client.calls
+        if call[0] == method and call[1] == path
+    ]
+
+
+def test_declined_run_sends_no_put_and_leaves_the_profile_unchanged(
+    monkeypatch,
+) -> None:
+    client = FakeClient(_run_responses())
+    prompt = _Prompt(monkeypatch, "no")
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 2
+    assert _effects(client) == []
+    assert "control.api_error" not in prompt.transcript
+    # The reviewed plan was the unsaved draft's, with this recipe in it.
+    (draft,) = _bodies(client, "POST", "/api/profile/1/preview")
+    assert [a["recipe_selector"] for a in draft["definition"]["assignments"]] == [
+        "vonk-forge/qwen-code"
+    ]
+
+
+def test_accepted_run_saves_the_reviewed_draft_then_loads_bound_to_its_digest(
+    monkeypatch,
+) -> None:
+    client = FakeClient(_run_responses())
+    prompt = _Prompt(monkeypatch, "yes")
+    client.responses[("PUT", "/api/profile/1")] = {
+        "number": 1,
+        "revision": 1,
+        "definition": {},
+        "warnings": ["Option x is no longer offered by the recipe"],
+    }
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 0, prompt.transcript
+    sent = [(c[0], c[1]) for c in client.calls if c[0] in {"PUT", "POST"}]
+    assert sent == [
+        ("POST", "/api/profile/1/preview"),
+        ("PUT", "/api/profile/1"),
+        ("POST", "/api/profile/1/load"),
+    ]
+    (put,) = _bodies(client, "PUT", "/api/profile/1")
+    (preview,) = _bodies(client, "POST", "/api/profile/1/preview")
+    assert put["expected_revision"] == 0
+    assert {k: v for k, v in put.items() if k != "expected_revision"} == preview[
+        "definition"
+    ]
+    (load,) = _bodies(client, "POST", "/api/profile/1/load")
+    assert load["review"] == {"effects_digest": _RUN_DIGEST}
+    assert "no longer offered" in prompt.transcript
+
+
+def test_run_rebuilds_on_the_newest_profile_when_the_save_conflicts(
+    monkeypatch,
+) -> None:
+    base = _run_responses()
+    older = base[("GET", "/api/profile/1/definition")]
+    older = cast(dict, older)
+    newest = {
+        **older,
+        "revision": 5,
+        "definition": {**older["definition"], "description": "edited elsewhere"},
+    }
+    client = FakeClient(
+        base
+        | {
+            ("GET", "/api/profile/1/definition"): [older, newest],
+            ("PUT", "/api/profile/1"): [
+                ControlConflict(
+                    409, "profile revision conflict", code="profile.revision_conflict"
+                ),
+                base[("PUT", "/api/profile/1")],
+            ],
+        }
+    )
+    prompt = _Prompt(monkeypatch, "yes", "yes")
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 0, prompt.transcript
+    puts = [
+        put["expected_revision"] for put in _bodies(client, "PUT", "/api/profile/1")
+    ]
+    assert puts == [0, 5]
+    assert len(_bodies(client, "POST", "/api/profile/1/preview")) == 2
+
+
+def test_run_converges_when_the_profile_already_holds_the_assignment(
+    monkeypatch,
+) -> None:
+    """A rerun after a death between save and load: equal-content save, bound load."""
+    base = _run_responses()
+    first = cli.main
+    client = FakeClient(base)
+    _Prompt(monkeypatch, "yes")
+    assert (
+        first(
+            ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+            control_client=client,
+            request_id_factory=lambda: _RUN_KEY,
+        )
+        == 0
+    )
+    (saved,) = _bodies(client, "PUT", "/api/profile/1")
+    held = {k: v for k, v in saved.items() if k != "expected_revision"}
+    rerun = FakeClient(
+        base
+        | {
+            ("GET", "/api/profile/1/definition"): {
+                **cast(dict, base[("GET", "/api/profile/1/definition")]),
+                "revision": 1,
+                "definition": held,
+            }
+        }
+    )
+    _Prompt(monkeypatch, "yes")
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=rerun,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 0
+    (put,) = _bodies(rerun, "PUT", "/api/profile/1")
+    assert put == {**held, "expected_revision": 1}
+    (load,) = _bodies(rerun, "POST", "/api/profile/1/load")
+    assert load["review"] == {"effects_digest": _RUN_DIGEST}
+
+
+def test_run_ends_with_the_observation_when_the_profile_read_times_out(
+    vonkctl_json,
+) -> None:
+    client = FakeClient(
+        _run_responses()
+        | {("GET", "/api/profile/1/definition"): ControlUnavailable(503, "down")}
+    )
+
+    status, document = vonkctl_json(
+        "--profile",
+        "1",
+        "run",
+        "Qwen Code",
+        "--spark",
+        "Atlas",
+        "--yes",
+        "--timeout-seconds",
+        "1",
+        "--interval-seconds",
+        "0.05",
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 2
+    assert document["observation"]["status"] == "timed_out"
+    assert _effects(client) == []
+
+
+_RUN_OPTIONS = [
+    {
+        "name": "verification",
+        "label": "Verification",
+        "help": "How drafted tokens are verified.",
+        "choices": [
+            {"value": "standard", "label": "Standard", "help": "h", "default": True},
+            {"value": "adaptive-k", "label": "Adaptive", "help": "h"},
+        ],
+    },
+    {
+        "name": "projections",
+        "label": "Projections",
+        "help": "Dense projection precision.",
+        "choices": [
+            {"value": "stock", "label": "Stock", "help": "h", "default": True},
+            {"value": "dense-fp8", "label": "FP8", "help": "h"},
+        ],
+    },
+]
+_ATLAS_ID = "spk_" + "a" * 32
+
+
+def _option_run(definitions: list[dict]) -> FakeClient:
+    """A run whose recipe declares options and whose first save hits a race."""
+    base = _run_responses()
+    detail = cast(dict, base[("GET", "/api/recipe/vonk-forge%2Fqwen-code")])
+    detail["projected"]["options"] = _RUN_OPTIONS
+    view = cast(dict, base[("GET", "/api/profile/1/definition")])
+    return FakeClient(
+        base
+        | {
+            ("GET", "/api/profile/1/definition"): [
+                {**view, "revision": number, "definition": definition}
+                for number, definition in enumerate(definitions)
+            ],
+            ("PUT", "/api/profile/1"): [
+                ControlConflict(
+                    409, "profile revision conflict", code="profile.revision_conflict"
+                ),
+                base[("PUT", "/api/profile/1")],
+            ],
+        }
+    )
+
+
+def _empty_definition() -> dict:
+    return {
+        "name": "Default",
+        "description": "",
+        "favorite": False,
+        "installation_policy": "keep-cached",
+        "labels": {},
+        "assignments": [],
+    }
+
+
+def _assignment(choices: dict[str, str]) -> dict:
+    return {
+        "recipe_selector": "vonk-forge/qwen-code",
+        "spark_ids": [_ATLAS_ID],
+        "desired_state": "running",
+        "option_choices": choices,
+    }
+
+
+def _saved_choices(client: FakeClient) -> list[dict]:
+    return [
+        put["assignments"][0]["option_choices"]
+        for put in _bodies(client, "PUT", "/api/profile/1")
+    ]
+
+
+def test_run_keeps_option_answers_across_a_rebuild_without_asking_again(
+    monkeypatch,
+) -> None:
+    client = _option_run([_empty_definition(), _empty_definition()])
+    # Two answers for the options, then consent in each of the two rounds.
+    _Prompt(monkeypatch, "adaptive-k", "dense-fp8", "yes", "yes")
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 0
+    chosen = {"verification": "adaptive-k", "projections": "dense-fp8"}
+    assert _saved_choices(client) == [chosen, chosen]
+
+
+def test_run_lets_a_newer_saved_choice_win_over_one_it_never_asked(
+    monkeypatch,
+) -> None:
+    saved = _assignment({"projections": "stock"})
+    newer = _assignment({"projections": "dense-fp8"})
+    client = _option_run(
+        [
+            {**_empty_definition(), "assignments": [saved]},
+            {**_empty_definition(), "assignments": [newer]},
+        ]
+    )
+    # Only the option without a saved choice is asked, in round one.
+    _Prompt(monkeypatch, "adaptive-k", "yes", "yes")
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 0
+    assert _saved_choices(client) == [
+        {"projections": "stock", "verification": "adaptive-k"},
+        {"projections": "dense-fp8", "verification": "adaptive-k"},
+    ]
+
+
+def test_run_does_not_retry_a_refused_save_that_is_not_a_newer_profile(
+    monkeypatch,
+) -> None:
+    client = FakeClient(
+        _run_responses()
+        | {("PUT", "/api/profile/1"): ControlConflict(409, "recipe is not offered")}
+    )
+    _Prompt(monkeypatch, "yes", "yes")
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 2
+    assert _effects(client) == [("PUT", "/api/profile/1")]
+
+
+def test_run_refuses_before_writing_when_the_controller_ignores_the_draft(
+    monkeypatch,
+) -> None:
+    saved_row_preview = {**_run_preview("b" * 64, _RUN_DIGEST), "profile_revision": 3}
+    client = FakeClient(
+        _run_responses() | {("POST", "/api/profile/1/preview"): saved_row_preview}
+    )
+    _Prompt(monkeypatch, "yes")
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 2
+    assert _effects(client) == []
+
+
+def test_run_review_leads_with_profile_sparks_and_what_stops(monkeypatch) -> None:
+    preview = _run_preview("b" * 64, _RUN_DIGEST)
+    preview["effects"] = {
+        "runs": [
+            {
+                "alias": "coding",
+                "action": "stop",
+                "run_id": "55555555-5555-4555-8555-555555555555",
+                "installation_id": "66666666-6666-4666-8666-666666666666",
+                "node_ids": ["spk_" + "a" * 32],
+            }
+        ],
+        "installations": [],
+        "superseded": [],
+    }
+    client = FakeClient(
+        {**_run_responses(), ("POST", "/api/profile/1/preview"): preview}
+    )
+    prompt = _Prompt(monkeypatch, "no")
+
+    cli.main(
+        ("--profile", "1", "run", "Qwen Code"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    lines = [
+        prompt.transcript.index(text)
+        for text in (
+            "Profile edited: 1 (Default)",
+            "Sparks selected: Atlas",
+            "Will stop: coding",
+            "Ready for review",
+        )
+    ]
+    assert lines == sorted(lines)
+
+
+@pytest.mark.parametrize(
+    ("argv", "effect_suffix"),
+    [
+        (("--profile", "1", "profile", "load"), "/load"),
+        (("model", "remove", "qwen"), "/remove"),
+        (("recipe", "remove", "vision", "--keep-model"), "/remove"),
+    ],
+)
+def test_declined_action_exits_nonzero_without_an_effect(
+    argv, effect_suffix, monkeypatch
+) -> None:
+    client = FakeClient(
+        {
+            ("POST", "/api/profile/1/preview"): _run_preview("b" * 64, _RUN_DIGEST),
+            ("GET", "/api/model/qwen/remove-review"): _removal_review(
+                "model", "qwen", model_digest="a" * 64
+            ),
+            ("GET", "/api/recipe/vision/remove-review"): _removal_review(
+                "recipe", "vision", with_model=False
+            ),
+        }
+    )
+    prompt = _Prompt(monkeypatch, "no")
+
+    status = cli.main(argv, control_client=client, request_id_factory=lambda: _RUN_KEY)
+
+    assert status == 2
+    assert not [
+        path
+        for method, path, *_ in client.calls
+        if method == "POST" and path.endswith(effect_suffix)
+    ]
+    assert "control.api_error" not in prompt.transcript
+
+
+def test_run_binds_the_load_to_the_plan_it_showed_and_asks_again_when_it_changed(
+    monkeypatch,
+) -> None:
+    changed = "f" * 64
+    stale = ControlConflict(
+        409, "The profile plan changed", code="profile.review_stale"
+    )
+    receipt = {
+        "id": _RUN_APPLICATION,
+        "request_key": _RUN_KEY,
+        "state": "succeeded",
+        "progress": {},
+    }
+    client = FakeClient(
+        _run_responses()
+        | {
+            ("POST", "/api/profile/1/preview"): [
+                _run_preview("b" * 64, _RUN_DIGEST),
+                _run_preview("c" * 64, changed),
+            ],
+            ("POST", "/api/profile/1/load"): [stale, receipt],
+        }
+    )
+    prompt = _Prompt(monkeypatch, "yes", "yes")
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 0, prompt.transcript
+    loads = [call[2] for call in client.calls if call[1] == "/api/profile/1/load"]
+    assert loads == [
+        {"request_key": _RUN_KEY, "review": {"effects_digest": _RUN_DIGEST}},
+        {"request_key": _RUN_KEY, "review": {"effects_digest": changed}},
+    ]
+    assert prompt.transcript.count("[y/N]") == 2
+
+
+def test_run_yes_forwards_the_current_owner_review_binding() -> None:
+    client = FakeClient(_run_responses())
+
+    status = cli.main(
+        ("--json", "--profile", "1", "run", "Qwen Code", "--spark", "Atlas", "--yes"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 0
+    loads = [call[2] for call in client.calls if call[1] == "/api/profile/1/load"]
+    assert loads == [
+        {"request_key": _RUN_KEY, "review": {"effects_digest": _RUN_DIGEST}}
+    ]
+
+
+def test_profile_list_traverses_the_server_continuation():
+    # A full first page cannot hide later profiles from ordinary CLI output.
+    client = FakeClient(
+        {
+            ("GET", "/api/profile"): [
+                {
+                    "profiles": [{"number": number} for number in range(1, 129)],
+                    "next_after": 128,
+                },
+                {"profiles": [{"number": 129}], "next_after": None},
+            ]
+        }
+    )
+    status, result = run(("profile", "list", "--json"), client)
+    assert status == 0
+    profiles = result["profiles"]
+    assert isinstance(profiles, list)
+    assert [item["number"] for item in profiles] == list(range(1, 130))
+    assert client.calls[-1][3] == {"after": 128}
+
+
+# Independent CLI selection reads run at once and keep their own outcomes.
+# Every fake read waits on a barrier that opens only when all of them are in
+# flight together, so concurrency is proven by ordering, not by elapsed time.
+
+
+def _barrier(parties: int) -> threading.Barrier:
+    return threading.Barrier(parties, timeout=30)  # wall-clock: hang guard
+
+
+def _meeting(barrier: threading.Barrier, value: object, *, fail: bool = False):
+    def read() -> object:
+        barrier.wait()
+        if fail:
+            raise ValueError("fleet is unavailable")
+        return value
+
+    return read
+
+
+def test_independent_reads_are_in_flight_together() -> None:
+    barrier = _barrier(3)
+
+    outcomes = _read_concurrently(
+        _meeting(barrier, "a"),
+        _meeting(barrier, "b"),
+        _meeting(barrier, "c"),
+    )
+
+    assert [outcome.get() for outcome in outcomes] == ["a", "b", "c"]
+
+
+def test_one_failing_read_does_not_hide_the_others() -> None:
+    barrier = _barrier(3)
+
+    first, failed, last = _read_concurrently(
+        _meeting(barrier, "a"),
+        _meeting(barrier, "b", fail=True),
+        _meeting(barrier, "c"),
+    )
+
+    assert first.get() == "a"
+    assert last.get() == "c"
+    with pytest.raises(ValueError, match="fleet is unavailable"):
+        failed.get()
+
+
+class _InjectedClock:
+    """A clock the test owns: sleeping advances it, nothing waits in real time."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, delay: float) -> None:
+        self.now += max(delay, 0.01)
+
+
+def test_definition_read_past_its_deadline_reports_its_own_timed_out_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The definition read's own typed outcome reaches the operator, every run.
+
+    The concurrency helper must never put a generic error in its place, so the
+    run is repeated to prove no scheduling order changes the answer.
+    """
+    for _ in range(50):
+        clock = _InjectedClock()
+        for module in (controller_cli.observation, selection, profile_authoring):
+            monkeypatch.setattr(module, "time", clock)
+        responses = dict(_ADD_RESPONSES)
+        responses[("GET", "/api/profile/2/definition")] = ControlUnavailable(
+            503, "control API unavailable"
+        )
+        client = FakeClient(responses)
+
+        status, payload = run(
+            (
+                "--profile",
+                "2",
+                "profile",
+                "add",
+                "Recipe UUID",
+                "--spark",
+                "Atlas",
+                "--timeout-seconds",
+                "1",
+                "--json",
+            ),
+            client,
+        )
+
+        assert status == 2
+        observation = payload["observation"]
+        assert isinstance(observation, dict)
+        assert observation["status"] == "timed_out"
+        assert observation["path"] == "/api/profile/2/definition"
+        assert observation["reconnect_command"]
+        assert "deadline reached" not in json.dumps(payload)
+        assert not any(call[0] == "PUT" for call in client.calls)
+
+
+def test_a_single_real_read_runs_inline_and_keeps_its_error() -> None:
+    from cluster_profiles.controller_cli.selection import _skipped_read
+
+    seen: list[threading.Thread] = []
+
+    def broken() -> object:
+        seen.append(threading.current_thread())
+        raise OSError("down")
+
+    outcome, skipped = _read_concurrently(broken, _skipped_read)
+
+    assert seen == [threading.current_thread()]
+    assert skipped.get() is None
+    with pytest.raises(OSError):
+        outcome.get()
+
+
+def test_a_read_that_dies_with_a_base_exception_does_not_hang_the_waiter() -> None:
+    def cancelled() -> object:
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        _read_concurrently(cancelled, lambda: "fine")
+
+
+def test_ctrl_c_interrupts_at_once_while_reads_hang() -> None:
+    release = threading.Event()
+
+    def hanging() -> object:
+        release.wait(30)  # wall-clock: hang guard
+        return "late"
+
+    main = threading.get_ident()
+    sender = threading.Timer(0.2, lambda: signal.pthread_kill(main, signal.SIGINT))
+    sender.start()
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            _read_concurrently(hanging, hanging)
+    finally:
+        release.set()
+
+
+class _MeetingClient(FakeClient):
+    """Holds the first GET of each named path until all of them are in flight."""
+
+    def __init__(self, responses, meet: set[str], failing: str | None = None):
+        super().__init__(responses)
+        self._barrier = _barrier(len(meet))
+        self._meet = meet
+        self._failing = failing
+        self._first: set[str] = set()
+        self._lock = threading.Lock()
+        self.completed: set[str] = set()
+
+    def request(self, method, path, *args, **kwargs):
+        with self._lock:
+            first = path in self._meet and path not in self._first
+            self._first.add(path)
+        if first:
+            self._barrier.wait()
+        if path == self._failing:
+            raise ControlMalformedResponse("peer is down")
+        result = super().request(method, path, *args, **kwargs)
+        self.completed.add(path)
+        return result
+
+
+_ATLAS = {"id": "spk_" + "a" * 32, "display_name": "Atlas", "hostname": "atlas"}
+_ADD_RESPONSES = {
+    ("GET", "/api/profile/2/definition"): {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "number": 2,
+        "revision": 7,
+        "definition": {"name": "Coding", "assignments": []},
+    },
+    ("GET", "/api/recipe/library"): {
+        "recipes": [_recipe_projection("vonk-forge/recipe-uuid", "Recipe UUID")],
+        "next_cursor": None,
+    },
+    ("GET", "/api/fleet"): {"nodes": [_ATLAS]},
+    ("PUT", "/api/profile/2"): {"number": 2, "revision": 8},
+}
+_ADD_PATHS = {"/api/profile/2/definition", "/api/recipe/library", "/api/fleet"}
+
+
+def _profile_add(client: FakeClient) -> tuple[int, dict[str, object]]:
+    return run(
+        (
+            "--profile",
+            "2",
+            "profile",
+            "add",
+            "Recipe UUID",
+            "--spark",
+            "Atlas",
+            "--yes",
+            "--json",
+        ),
+        client,
+    )
+
+
+def test_profile_add_reads_definition_recipe_and_sparks_together() -> None:
+    client = _MeetingClient(dict(_ADD_RESPONSES), _ADD_PATHS)
+
+    status, _ = _profile_add(client)
+
+    assert status == 0
+    assert _ADD_PATHS <= client.completed
+
+
+def test_profile_add_failing_peer_leaves_the_other_reads_intact() -> None:
+    client = _MeetingClient(dict(_ADD_RESPONSES), _ADD_PATHS, failing="/api/fleet")
+
+    status, _ = _profile_add(client)
+
+    assert status != 0
+    assert {"/api/profile/2/definition", "/api/recipe/library"} <= client.completed
+    assert not any(call[0] == "PUT" for call in client.calls)
+
+
+def _run_command(client: FakeClient) -> None:
+    args = cli._parser().parse_args(
+        ["--profile", "1", "run", "Qwen Code", "--yes", "--json"]
+    )
+    controller_cli._run(
+        args,
+        cast(controller_cli.ControllerClient, client),
+        lambda: "11111111-1111-4111-8111-111111111111",
+    )
+
+
+class _StopAfterReads(RuntimeError):
+    pass
+
+
+_RUN_RESPONSES = {
+    ("GET", "/api/recipe/library"): {
+        "recipes": [_recipe_projection("vonk-forge/qwen-code", "Qwen Code")],
+        "next_cursor": None,
+    },
+    ("GET", "/api/fleet"): {"nodes": [_ATLAS]},
+    # Ends the command right after the two reads under test.
+    ("GET", "/api/profile/1/definition"): _StopAfterReads(),
+}
+_RUN_PATHS = {"/api/recipe/library", "/api/fleet"}
+
+
+def test_run_reads_the_library_and_the_fleet_together() -> None:
+    client = _MeetingClient(dict(_RUN_RESPONSES), _RUN_PATHS)
+
+    with pytest.raises(_StopAfterReads):
+        _run_command(client)
+
+    assert _RUN_PATHS <= client.completed
+
+
+def test_run_failing_fleet_read_leaves_the_library_result_intact() -> None:
+    client = _MeetingClient(dict(_RUN_RESPONSES), _RUN_PATHS, failing="/api/fleet")
+
+    with pytest.raises(ControlMalformedResponse):
+        _run_command(client)
+
+    assert "/api/profile/1/definition" not in client.completed
+    assert "/api/recipe/library" in client.completed
+
+
+def test_profile_read_fetches_spark_names_for_people_but_not_for_json(capsys):
+    """Catches ids in human output, and names leaking into the JSON document."""
+    profile = {
+        "number": 1,
+        "name": "p",
+        "definition": {
+            "assignments": [{"recipe_selector": "r", "spark_ids": ["spk_1"]}]
+        },
+        "assignments": [],
+    }
+    roster = {"nodes": [{"id": "spk_1", "display_name": "spark-a"}]}
+    responses = {("GET", "/api/profile/1"): profile, ("GET", "/api/fleet"): roster}
+
+    client = FakeClient(dict(responses))
+    status, document = run(("profile", "--json"), client)
+    assert status == 0 and "spark_names" not in document
+    assert ("GET", "/api/fleet") not in [call[:2] for call in client.calls]
+
+    client = FakeClient(dict(responses))
+    assert cli.main(("profile",), control_client=client) == 0
+    capsys.readouterr()
+    assert ("GET", "/api/fleet") in [call[:2] for call in client.calls]
