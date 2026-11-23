@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shlex
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from enum import StrEnum
 from typing import Any
 from urllib.parse import quote
@@ -407,6 +407,39 @@ def _model_counts(rows: Sequence[Any]) -> tuple[int, int]:
     return len(models), len(variants)
 
 
+#: ``vonkctl recipe`` prints this many rows unless ``--all`` or ``--wide`` asks for more.
+COMPACT_RECIPE_ROWS = 20
+
+
+def most_relevant[T](
+    rows: Sequence[T], running_and_working: Callable[[T], tuple[bool, bool]]
+) -> list[T]:
+    """Running recipes first, then Working ones, the rest in the order given."""
+    return sorted(
+        rows,
+        key=lambda row: tuple(not flag for flag in running_and_working(row)),
+    )[:COMPACT_RECIPE_ROWS]
+
+
+def _compact_table(labels: list[str], rows: list[list[object]]) -> None:
+    """A table without the shared publisher prefix and without columns that never differ."""
+    rendered = [[_text(value) for value in row] for row in rows]
+    prefixes = {value.split("/", 1)[0] for value in (row[0] for row in rendered)}
+    if len(prefixes) == 1 and all("/" in row[0] for row in rendered):
+        print(f"Publisher: {prefixes.pop()}")
+        for row in rendered:
+            row[0] = row[0].split("/", 1)[1]
+    same = [
+        index
+        for index in range(1, len(labels))
+        if len(rendered) > 1 and len({row[index] for row in rendered}) == 1
+    ]
+    for index in same:
+        _field(labels[index].title(), rendered[0][index])
+    keep = [index for index in range(len(labels)) if index not in same]
+    _table([labels[i] for i in keep], [[row[i] for i in keep] for row in rendered])
+
+
 def _library(
     payload: Mapping[str, object], noun: str, *, detail: bool, wide: bool
 ) -> None:
@@ -472,7 +505,10 @@ def _library(
             labels.extend(["READY", "QUALIFICATION"])
         if noun == LibraryNoun.MODEL:
             labels.extend(["UNIQUE", "SHARED"])
-        _table(labels, [_library_row(item, noun) for item in rows])
+        if noun == LibraryNoun.RECIPE:
+            _compact_table(labels, [_library_row(item, noun) for item in rows])
+        else:
+            _table(labels, [_library_row(item, noun) for item in rows])
         if noun == LibraryNoun.MODEL:
             for item in rows:
                 raw_usage = _optional(item.get("cache_usage"), "cache_usage")

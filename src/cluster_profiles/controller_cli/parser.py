@@ -18,6 +18,7 @@ from .common import (
     _activity_target,
     _add_output,
     _add_profile_selection,
+    _add_show_all,
     _add_verbose,
     _add_yes,
     _filters,
@@ -304,6 +305,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         epilog="Without a command, lists cached recipes.",
     )
     _add_output(recipe)
+    _add_show_all(recipe)
     recipe_actions = recipe.add_subparsers(
         dest="recipe_action", parser_class=type(recipe)
     )
@@ -347,6 +349,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         item=int,
     )
     _add_output(recipe_library)
+    _add_show_all(recipe_library)
     recipe_sync_status = recipe_actions.add_parser(
         "sync-status", help="Show when the recipe catalog last synced and what it found"
     )

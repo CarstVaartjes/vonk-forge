@@ -25,9 +25,11 @@ from cluster_profiles.cli_render.fleet import (
     run_problem,
 )
 from cluster_profiles.cli_render.library import (
+    COMPACT_RECIPE_ROWS,
     _applied_filters,
     _needs_download,
     _qualification_status,
+    most_relevant,
 )
 from cluster_profiles.cli_render.operations import stalls
 from cluster_profiles.cli_render.profile import EndpointListing, endpoint_listing
@@ -353,3 +355,44 @@ def test_fleet_detail_shows_cpu_clock_with_temperature_and_throttle_hint(capsys)
 
     render_payload(_spark("atlas", 1), "fleet", action="detail")
     assert "GHz" not in capsys.readouterr().out
+
+
+def _recipe_library_payload(count: int) -> dict[str, object]:
+    return {
+        "recipes": [
+            {
+                "selector": f"vonk-forge/recipe-{index:03d}",
+                "node_count": 1,
+                "local": {
+                    "controller": "cached" if index % 2 else "not_cached",
+                    "running_on": ["spk_1"] if index == count - 1 else [],
+                },
+                "resources": {"disk_bytes": 1024**3},
+                "qualification": {"status": "Working", "required_sparks": 1},
+            }
+            for index in range(count)
+        ],
+        "next_cursor": None,
+    }
+
+
+def test_recipe_listing_is_compact_by_default_and_full_with_all(capsys):
+    # Break caught: a 100-recipe library printing hundreds of stacked lines.
+    payload = _recipe_library_payload(100)
+    render_payload(payload, "recipe", action=None)
+    compact = capsys.readouterr().out.splitlines()
+    assert len(compact) < 40
+    assert sum("recipe-" in line for line in compact) == COMPACT_RECIPE_ROWS
+
+    render_payload(payload, "recipe", action=None, show_all=True)
+    full = capsys.readouterr().out.splitlines()
+    assert sum("recipe-" in line for line in full) == 100
+
+
+def testmost_relevant_recipes_put_running_then_working_first():
+    # Break caught: the one running recipe hidden behind the cut-off.
+    rows = [(index, index == 40, index % 2 == 0) for index in range(60)]
+    shown = most_relevant(rows, lambda row: (row[1], row[2]))
+    assert len(shown) == COMPACT_RECIPE_ROWS
+    assert shown[0][0] == 40
+    assert all(row[2] for row in shown[1:])
