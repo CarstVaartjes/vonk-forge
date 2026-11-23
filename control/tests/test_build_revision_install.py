@@ -9,7 +9,9 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import CompiledExecutionPlan, LifecycleState, RunSwitchCode
+from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_control.agent_contacts import record_contact
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,

@@ -460,7 +460,8 @@ def test_cancellation_observes_consumer_uncertainty_then_releases_for_fresh_buil
     tmp_path, postgres_engine, monkeypatch
 ):
     """A transient consumer read cannot convert authorized cancellation to bad input."""
-    from vonk_agent_protocol import LifecycleState, RecipeBuildCode
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+    from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
     from vonk_control.recipe_builds.cancellation import BuildConsumerError
     from vonk_control.recipe_operations import build_cancellation as owner
 

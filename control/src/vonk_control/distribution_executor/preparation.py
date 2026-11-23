@@ -10,12 +10,13 @@ from threading import RLock
 from typing import Any, cast
 
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    LifecycleState,
-    OperationProgress,
+from vonk_agent_protocol.agent_words import (
+    ProfileChildPhase,
+    ProfileEffectState,
     ProgressPhase,
 )
-from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileEffectState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import OperationProgress
 
 from ..content_identity import same_image
 from ..fleet_profiles.read_observation import profile_read

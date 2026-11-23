@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.catalog.entities import recipe_document_projection
 from vonk_control.catalog.revision_contract import write_catalog_projection
 from vonk_control.jobs.documents import (

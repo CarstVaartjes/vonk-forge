@@ -9,17 +9,19 @@ from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    Disposition,
-    InvalidRequestError,
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
-    ProfileReasonCode,
-    SecurityRefusalError,
     SecurityRefusalReason,
-    SupersedeCode,
-    UnknownOutcomeError,
     WaitReason,
 )
+from vonk_agent_protocol.outcome import (
+    InvalidRequestError,
+    SecurityRefusalError,
+    UnknownOutcomeError,
+)
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 
 from ..fleet_profile_contract.applications import FleetProfileIntendedConfiguration
 from ..fleet_profile_contract.assessment import FleetProfileReason

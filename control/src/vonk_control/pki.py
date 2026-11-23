@@ -13,7 +13,7 @@ from pathlib import Path
 from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
-from vonk_agent_protocol import UnknownError
+from vonk_agent_protocol.outcome import UnknownError
 
 from .ca_issuance_contract import CertificateIssuanceBinding
 

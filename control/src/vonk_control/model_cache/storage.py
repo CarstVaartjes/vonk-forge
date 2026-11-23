@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING, NamedTuple, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import LifecycleState, ModelCacheBlockerCode
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheBlockerCode
 
 from ..models.cache import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
 from ..storage_demands import NAS_MODELS, StorageDemands

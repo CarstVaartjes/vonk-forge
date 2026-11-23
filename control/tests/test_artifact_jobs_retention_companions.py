@@ -11,17 +11,17 @@ from threading import Event
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    AgentResult,
-    AgentResultState,
-    LifecycleState,
-    OperationProgress,
+from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, LifecycleState
+from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
     RecipeJobRunRequest,
     RecipeJobRunResult,
-    canonical_message,
-    recipe_job_manifest_sha256,
 )
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_sha256 as recipe_job_manifest_sha256,
+)
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.agent_jobs.contracts import (
     controller_result_consumer,
 )
@@ -473,14 +473,12 @@ def test_undelivered_job_outputs_resume_without_repeating_the_process(
     tmp_path, postgres_engine, expires, lease_lapses, reconcile
 ):
     """Ending on 413, losing the receipt, or resetting retention fails this flow."""
-    from vonk_agent_protocol import (
-        FailureStage,
-        OutcomeEvidence,
-        OutcomeKind,
-        OutcomeUnknown,
+    from vonk_agent_protocol.agent_words import FailureStage
+    from vonk_agent_protocol.lifecycle_vocabulary import OutcomeKind, WaitReason
+    from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeUnknown
+    from vonk_agent_protocol.recipe_jobs import (
         RecipeJobEvidence,
         RecipeJobOutputManifest,
-        WaitReason,
     )
 
     sessions, recipe_operations, _, service, run_id, node_id = running_artifact_service(
@@ -570,7 +568,7 @@ def test_undelivered_job_outputs_resume_without_repeating_the_process(
     restarted.set_result_consumer(consume)
     second = claim_agent(restarted, node_id, "serial-0")
     assert second is not None and second.fence != first.fence
-    from vonk_agent_protocol import RecipeJobRunRequest
+    from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 
     assert isinstance(second.payload, RecipeJobRunRequest)
     assert second.payload.output_delivery_only is True
@@ -865,7 +863,10 @@ def test_a_companion_receipt_without_files_never_ends_the_job_and_the_owner_does
         (_companion_node, companion),
         _nodes,
     ) = _two_rank_claims(tmp_path, 138)
-    from vonk_agent_protocol import RecipeJobEvidence, RecipeJobOutputManifest
+    from vonk_agent_protocol.recipe_jobs import (
+        RecipeJobEvidence,
+        RecipeJobOutputManifest,
+    )
 
     content = b"image"
     output = RecipeJobFile(
@@ -933,7 +934,10 @@ def test_a_running_companion_is_told_to_stop_when_the_owner_ends(
         tmp_path, 200 + 10 * ["cancelled", "exits-zero", "fails"].index(companion_ends)
     )
     if owner_outcome == "succeeded":
-        from vonk_agent_protocol import RecipeJobEvidence, RecipeJobOutputManifest
+        from vonk_agent_protocol.recipe_jobs import (
+            RecipeJobEvidence,
+            RecipeJobOutputManifest,
+        )
 
         content = b"image"
         output = RecipeJobFile(
@@ -1022,7 +1026,10 @@ def test_a_running_companion_is_told_to_stop_when_the_owner_ends(
             )
         )
     else:
-        from vonk_agent_protocol import RecipeJobEvidence, RecipeJobOutputManifest
+        from vonk_agent_protocol.recipe_jobs import (
+            RecipeJobEvidence,
+            RecipeJobOutputManifest,
+        )
 
         agent_jobs.succeed(
             companion,
@@ -1078,7 +1085,10 @@ def test_a_companion_that_fails_first_makes_the_job_and_parent_failed(tmp_path) 
         )
     )
     assert service.get(submitted.id).state == "failed"
-    from vonk_agent_protocol import RecipeJobEvidence, RecipeJobOutputManifest
+    from vonk_agent_protocol.recipe_jobs import (
+        RecipeJobEvidence,
+        RecipeJobOutputManifest,
+    )
 
     content = b"image"
     output = RecipeJobFile(

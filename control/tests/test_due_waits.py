@@ -11,7 +11,7 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import JSON, Column, MetaData, Table, cast, inspect, literal, null, text
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState, WaitOwnerKind
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitOwnerKind
 from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.due_waits import DueWaitBackstop, WaitSource
 from vonk_control.jobs.queue import JobService
@@ -289,7 +289,7 @@ def test_unevidenced_job_uses_its_owner_instead_of_first_table_binding(postgres_
 
 def test_logical_owners_sharing_a_table_get_independent_turns(postgres_engine):
     """Catches one Job kind consuming another kind's bounded observation turns."""
-    from vonk_agent_protocol import WaitReason
+    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
     from vonk_control.operations.blockers import BlockingOperation, make_blocker
     from vonk_control.persisted_waits import write_wait
 
@@ -595,7 +595,7 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
             ).model_dump(mode="json", exclude_none=True)
     now = RECIPE_NOW + timedelta(seconds=5)
     if superseded:
-        from vonk_agent_protocol import AgentOperation as WireAgentOperation
+        from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
 
         with sessions.begin() as session:
             service._admit_workload_intent(
@@ -631,7 +631,7 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
     assert backstop is not None
     backstop()
     if missing_receipt:
-        from vonk_agent_protocol import WaitReason
+        from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
         from vonk_control.persisted_waits import read_wait
 
         with sessions.begin() as session:
@@ -671,7 +671,8 @@ def test_catalog_retry_clock_survives_dependency_recovery_and_reconstruction(
     tmp_path, postgres_engine, monkeypatch
 ):
     """Catches resampling a logged retry or a restarted catalog owner losing its wait."""
-    from vonk_agent_protocol import CatalogSyncCode, CatalogSyncState
+    from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
+    from vonk_agent_protocol.state_machines import CatalogSyncState
     from vonk_control.catalog.sync import (
         AutomaticCatalogSync,
         ManagedRecipeCatalogSyncService,

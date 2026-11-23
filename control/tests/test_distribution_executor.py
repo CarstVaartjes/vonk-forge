@@ -18,17 +18,12 @@ from pydantic import BaseModel
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol import (
-    AgentResultState,
-    ArtifactDistributionPayload,
-    DistributionObject,
-    LifecycleState,
-    OperationMemberProgress,
-    OperationProgress,
-    ProgressPhase,
-    canonical_message,
-)
+from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.contracts import ArtifactDistributionPayload, canonical_message
+from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
+from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, LifecycleState
+from vonk_agent_protocol.wire_model import OperationMemberProgress, OperationProgress
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping
@@ -2086,8 +2081,7 @@ def test_expired_distribution_fence_cannot_revive_or_block_fresh_transfer(agent_
     """Issued transfer expiry releases dispatch while retaining late evidence."""
     from datetime import timedelta
 
-    from vonk_agent_protocol import AgentResult
-    from vonk_agent_protocol.contracts import ArtifactDistributionResult
+    from vonk_agent_protocol.contracts import AgentResult, ArtifactDistributionResult
 
     from .runtime_identity_support import claim_agent
     from .test_distribution import _assignment

@@ -30,10 +30,6 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from vonk_agent_protocol import (
-    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
-    canonical_message,
-)
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledArtifact,
     CompiledArtifactMount,
@@ -54,6 +50,10 @@ from vonk_agent_protocol.compiled_execution_plan import (
 )
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledRuntimeImage as WireCompiledRuntimeImage,
+)
+from vonk_agent_protocol.contracts import (
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
+    canonical_message,
 )
 
 from .content_identity import same_model_object
@@ -524,7 +524,9 @@ def compile_verified_execution_plan(
 
 def validate_compiled_launch_payload(value: object) -> WireCompiledExecutionPlan:
     """Enforce canonical schema/security validation and the transport ceiling."""
-    from vonk_agent_protocol import validate_compiled_execution_plan
+    from vonk_agent_protocol.compiled_execution_plan import (
+        validate_compiled_execution_plan,
+    )
 
     try:
         encoded = canonical_message(value)

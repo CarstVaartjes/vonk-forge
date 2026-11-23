@@ -9,13 +9,11 @@ from typing import TYPE_CHECKING, cast
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    ArtifactLifecycleCode,
-    AssetAvailability,
-    ModelCacheCode,
-    RecipeImageCode,
-    RuntimeImageCode,
-)
+from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
+from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
+from vonk_agent_protocol.state_machines import AssetAvailability
 
 from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,

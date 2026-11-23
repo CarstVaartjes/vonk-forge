@@ -17,13 +17,13 @@ from fastapi import FastAPI
 from pydantic import ValidationError
 from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    LifecycleState,
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.recipe_observations import (
     RecipeRunObservationsWire,
     RecipeRunObservationWire,
-    RecipeStartPayload,
-    canonical_message,
 )
+from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 from vonk_control.agent_api.common import AgentApiServices
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.api.application import create_app

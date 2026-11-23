@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from vonk_agent_protocol import (
+from vonk_agent_protocol.wire_model import (
     OperationCheckpoint,
     OperationMemberProgress,
     OperationProgress,
@@ -237,7 +237,8 @@ def test_the_aggregate_of_parallel_transfers_is_a_transfer_and_otherwise_prepare
 
 def test_successful_distribution_progress_no_longer_projects_pulling() -> None:
     # A retained heartbeat describes the last active step, not the terminal phase.
-    from vonk_agent_protocol import LifecycleState, ProgressPhase
+    from vonk_agent_protocol.agent_words import ProgressPhase
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
     from vonk_control.operations.progress import project_progress_for_state
 
     pulled = OperationProgress(
@@ -251,7 +252,7 @@ def test_successful_distribution_progress_no_longer_projects_pulling() -> None:
 
 
 def test_subprocess_observations_advance_without_becoming_completed_items() -> None:
-    from vonk_agent_protocol import ProgressPhase
+    from vonk_agent_protocol.agent_words import ProgressPhase
     from vonk_control.stall_window import progress_advanced
 
     before = OperationProgress(

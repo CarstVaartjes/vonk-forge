@@ -13,14 +13,14 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol.contracts import (
     AgentProgress,
     AgentResult,
-    WaitReason,
+    ArtifactDistributionResult,
     canonical_message,
 )
-from vonk_agent_protocol.contracts import ArtifactDistributionResult
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.predicates import _claim_predicate
 from vonk_control.agent_jobs.service import AgentJobService
@@ -224,7 +224,7 @@ def test_successful_distribution_receipt_preserves_observed_order_wide_bytes(
 def test_queue_stores_and_claims_the_canonical_payload_hash(
     service, explicit_null: bool
 ) -> None:
-    from vonk_agent_protocol import canonical_payload
+    from vonk_agent_protocol.contracts import canonical_payload
 
     jobs, sessions, clock = service
     vector = json.loads(

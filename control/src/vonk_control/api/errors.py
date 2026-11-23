@@ -13,14 +13,12 @@ from fastapi.exception_handlers import (
 )
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from vonk_agent_protocol import (
-    CatalogCode,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.error_response import (
     RequestValidationIssue,
     RequestValidationProblem,
 )
+from vonk_agent_protocol.reason_codes.catalog import CatalogCode
 
 from ..capabilities import CapabilityUnavailableError
 from ..catalog.api import CatalogProblem

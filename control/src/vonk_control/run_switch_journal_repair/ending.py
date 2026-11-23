@@ -7,11 +7,9 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    JournalRepairCode,
-    LifecycleState,
-    ReservationState,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.runs import JournalRepairCode
+from vonk_agent_protocol.state_machines import ReservationState
 
 from .. import agent_operation_states
 from ..admission_locking import AdmissionRowLock, lock_admission_rows

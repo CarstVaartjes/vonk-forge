@@ -15,14 +15,11 @@ from pydantic import (
 )
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as OperationKind
-from vonk_agent_protocol import (
-    LifecycleState,
-    OperationReason,
-    RuntimePreflightCode,
-    WaitReason,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
+from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 
 from .failure_classification import is_security_failure

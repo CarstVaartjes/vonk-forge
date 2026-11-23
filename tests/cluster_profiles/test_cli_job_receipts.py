@@ -1,9 +1,9 @@
 """The resume client reconnects to its exact accepted operator decision."""
 
-from vonk_agent_protocol import LifecycleState, OperatorActionName
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OperatorActionName
 
 from cluster_profiles import cli
-from cluster_profiles.control_client import ControlTransportError
+from cluster_profiles.control_client.errors import ControlTransportError
 
 JOB = "11111111-1111-4111-8111-111111111111"
 KEY = "22222222-2222-4222-8222-222222222222"

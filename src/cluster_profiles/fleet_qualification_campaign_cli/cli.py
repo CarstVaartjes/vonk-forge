@@ -26,16 +26,14 @@ from pathlib import Path
 from typing import Any
 
 from ..cli_states import FAILED
-from ..control_client import (
-    ControlClient,
-    ControlClientError,
-)
+from ..control_client.errors import ControlClientError
+from ..control_client.transfers import ControlClient
 from ..fleet_qualification import (
     QualificationError,
     QualificationObservationUnknown,
     _observe,
 )
-from ..qualification_fixtures import FixtureError
+from ..qualification_fixtures.contracts import FixtureError
 from .application import load
 from .contracts import ResultsLog, load_campaign
 from .recovery import recover

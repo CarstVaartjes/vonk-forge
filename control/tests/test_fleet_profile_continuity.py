@@ -4,8 +4,9 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import InvalidRequestError, InvalidRequestReason
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
+from vonk_agent_protocol.outcome import InvalidRequestError
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.models.fleet import (

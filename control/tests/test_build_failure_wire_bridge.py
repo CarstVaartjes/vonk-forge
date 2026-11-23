@@ -11,18 +11,19 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
+from vonk_agent_protocol.agent_words import FailureStage
+from vonk_agent_protocol.build_import import RecipeBuildRequest
+from vonk_agent_protocol.contracts import (
     AgentFailureKind,
     AgentFailureResult,
-    AgentResultState,
-    FailureCode,
-    FailureStage,
-    LifecycleState,
-    OutcomeFailed,
-    OutcomeUnknown,
-    RecipeBuildRequest,
     canonical_message,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    AgentResultState,
+    FailureCode,
+    LifecycleState,
+)
+from vonk_agent_protocol.outcome import OutcomeFailed, OutcomeUnknown
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,

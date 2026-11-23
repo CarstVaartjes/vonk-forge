@@ -13,9 +13,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import event, func, select, update
 from sqlalchemy.exc import OperationalError
-from vonk_agent_protocol import AgentClaim, AgentProgress, AgentResult, AgentResultState
+from vonk_agent_protocol.contracts import AgentClaim, AgentProgress, AgentResult
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.inventory import InventoryRequest
+from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.api.application import create_app
@@ -301,7 +302,7 @@ def test_large_inventory_and_damaged_history_do_not_block_exact_ingress(
     client, services, codec, clock = make_agent_system(tmp_path, engine=postgres_engine)
     headers = agent_headers(NODE_A, "serial-a")
     body = _inventory(clock)
-    from vonk_agent_protocol import canonical_message
+    from vonk_agent_protocol.contracts import canonical_message
     from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
     item_bytes = len(canonical_message({"sha256": "f" * 64, "bytes": 1024**2})) + 1
@@ -699,7 +700,8 @@ def test_unknown_receipt_read_after_commit_preserves_owner_and_retry(
     tmp_path, postgres_engine, monkeypatch
 ):
     """Catches an unknown owner read being converted to a terminal internal-error response."""
-    from vonk_agent_protocol import UnknownOutcomeError, WaitReason
+    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+    from vonk_agent_protocol.outcome import UnknownOutcomeError
     from vonk_control import agent_acceptance
 
     client, services, _, clock = make_agent_system(tmp_path, engine=postgres_engine)

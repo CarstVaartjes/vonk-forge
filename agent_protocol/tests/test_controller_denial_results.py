@@ -15,8 +15,9 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from vonk_agent_protocol import AgentEvidenceCode, AgentFailureResult, AgentResult
+from vonk_agent_protocol.contracts import AgentFailureResult, AgentResult
 from vonk_agent_protocol.optional_evidence import redact_host_paths
+from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 
 VECTORS = Path(__file__).parents[1] / "src/vonk_agent_protocol/vectors"
 CASES: list[dict[str, Any]] = json.loads(

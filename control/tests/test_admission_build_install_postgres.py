@@ -183,7 +183,7 @@ def test_install_admission_ignores_a_row_lock_on_a_released_reservation(
     from datetime import UTC, datetime
 
     from sqlalchemy.orm import Session
-    from vonk_agent_protocol import ReservationState
+    from vonk_agent_protocol.state_machines import ReservationState
     from vonk_control.models.execution import ResourceReservation
 
     sessions, operations, _queue, mapping_id, build_id, nodes = setup_services(

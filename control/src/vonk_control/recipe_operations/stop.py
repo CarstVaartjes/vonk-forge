@@ -12,17 +12,17 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import (
-    Disposition,
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
     OperatorActionName,
-    RunState,
-    UnknownOutcomeError,
     WaitReason,
-    canonical_message,
 )
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.state_machines import RunState
 
 from ..admission_locking import (
     AdmissionLockBusy,

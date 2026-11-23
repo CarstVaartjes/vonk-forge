@@ -13,8 +13,8 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import event, select
-from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.inventory.repository import (
     InventoryRepository,
@@ -36,8 +36,8 @@ from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImag
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from cluster_profiles.cli import main
-from cluster_profiles.cli_render import render_payload
-from cluster_profiles.control_client import ControlClient
+from cluster_profiles.cli_render.dispatch import render_payload
+from cluster_profiles.control_client.transfers import ControlClient
 
 from .recipe_operations_support import NOW, setup_services
 from .run_switch_operations_support import RecordingArtifactExecutor
@@ -419,7 +419,7 @@ def test_a_library_pass_reads_failed_copies_once_for_every_candidate(
     assessed_library, monkeypatch
 ):
     """Catches one jobs scan per candidate placement."""
-    from vonk_agent_protocol import LibraryAssessmentCode
+    from vonk_agent_protocol.reason_codes.catalog import LibraryAssessmentCode
     from vonk_control.library import assessment as library_assessment
     from vonk_control.library.contract import RecipeReadinessCheck
 

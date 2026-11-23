@@ -7,7 +7,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from vonk_agent_protocol import ModelCacheCode, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 
 from ..bounded_retry import bounded_attempts
 from ..categorized_errors import InvalidValue

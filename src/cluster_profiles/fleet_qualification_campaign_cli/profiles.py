@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ..cli_states import SUCCEEDED
-from ..control_client import (
+from ..control_client.errors import (
     ControlClientError,
     ControlForbidden,
     ControlMalformedResponse,

@@ -7,13 +7,10 @@ import logging
 from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    ArtifactLifecycleCode,
-    LifecycleState,
-    ResourceBlockerCode,
-    RunSwitchCode,
-)
 from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, ResourceBlockerCode
+from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_forge_contracts.recipe import Scalar
 
 from ..jobs import states as job_states

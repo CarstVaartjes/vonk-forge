@@ -14,7 +14,7 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql.functions import FunctionElement
 from sqlalchemy.types import TypeDecorator, TypeEngine
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     LifecycleSubject,
     check_words,

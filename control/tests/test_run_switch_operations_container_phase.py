@@ -10,11 +10,9 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    ReservationState,
-    canonical_message,
-)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.state_machines import ReservationState
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.inventory.repository import (
     InventoryRepository,
@@ -295,7 +293,10 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
     assert _phase_result(execution.result, phase=phase) == execution.result
 
     # A build preview superseded in place re-plans; it does not end the load.
-    from vonk_agent_protocol import InvalidRequestReason, WaitReason
+    from vonk_agent_protocol.lifecycle_vocabulary import (
+        InvalidRequestReason,
+        WaitReason,
+    )
     from vonk_control.recipe_operations.errors import RecipeRequestInvalid
     from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
 

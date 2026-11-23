@@ -6,16 +6,15 @@ from collections.abc import Mapping
 from datetime import datetime
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
-from vonk_agent_protocol import (
-    AgentFailureResult,
-    Disposition,
+from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol.contracts import AgentFailureResult, canonical_message
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
-    OperationProgress,
     OutcomeKind,
     WaitReason,
-    canonical_message,
 )
-from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol.wire_model import OperationProgress
 
 from ..bounded_json import require_mapping
 from ..distribution_assignment import NodeDistributionAssignment

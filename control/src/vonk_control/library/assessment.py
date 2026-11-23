@@ -12,7 +12,7 @@ from typing import get_args
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LibraryAssessmentCode
+from vonk_agent_protocol.reason_codes.catalog import LibraryAssessmentCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..model_cache.resolution import artifact_sets_resolved_once

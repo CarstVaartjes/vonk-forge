@@ -57,13 +57,15 @@ from typing import Any, Protocol
 
 from sqlalchemy import select, true
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    Disposition,
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
-    ModelAccessReason,
-    ModelCacheCode,
     WaitOwnerKind,
     WaitReason,
+)
+from vonk_agent_protocol.reason_codes.model_cache import (
+    ModelAccessReason,
+    ModelCacheCode,
 )
 
 from ..agent_operation_facts import aware

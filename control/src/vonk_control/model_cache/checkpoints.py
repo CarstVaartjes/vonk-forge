@@ -8,12 +8,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
-from vonk_agent_protocol import (
-    Disposition,
-    LifecycleState,
-    ModelCacheCode,
-    ModelFileState,
-)
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
+from vonk_agent_protocol.state_machines import ModelFileState
 
 from ..agent_operation_facts import aware as _aware
 from ..fleet_profiles.read_observation import observe_storage

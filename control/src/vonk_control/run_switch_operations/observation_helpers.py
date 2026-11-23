@@ -6,15 +6,14 @@ import uuid
 from dataclasses import replace
 
 import httpx2
-from vonk_agent_protocol import (
+from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
-    RouteState,
-    RunState,
-    RunSwitchCode,
     SecurityRefusalReason,
 )
-from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.state_machines import RouteState, RunState
 
 from ..failure_classification import error_code, is_security_failure
 from ..jobs import states as job_states

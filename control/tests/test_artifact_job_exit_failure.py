@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 import pytest
-from vonk_agent_protocol import (
-    AgentResult,
+from vonk_agent_protocol.contracts import AgentResult
+from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     FailureCode,
-    OutcomeFailed,
     OutcomeKind,
+    WaitReason,
+)
+from vonk_agent_protocol.outcome import OutcomeFailed
+from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
     RecipeJobRunResult,
-    WaitReason,
-    recipe_job_manifest_document,
-    recipe_job_manifest_sha256,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_document as recipe_job_manifest_document,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_sha256 as recipe_job_manifest_sha256,
 )
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs import states as ajs

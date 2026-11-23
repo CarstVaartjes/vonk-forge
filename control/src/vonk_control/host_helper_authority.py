@@ -16,16 +16,13 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import (
     AgentOperation,
     AgentProtocolError,
-    InvalidRequestReason,
-    LifecycleState,
-    SecurityRefusalReason,
+    AgentUpgradePayload,
     canonical_message,
 )
-from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentUpgradePayload
 from vonk_agent_protocol.host_helper import (
     HOST_HELPER_AUTHORITY,
     MAX_HOST_HELPER_GRANT_SECONDS,
@@ -42,6 +39,11 @@ from vonk_agent_protocol.host_helper import (
     RecipeReconciliationIdentity,
     SignedHostHelperGrant,
     host_helper_grant_signing_bytes,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    LifecycleState,
+    SecurityRefusalReason,
 )
 from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest

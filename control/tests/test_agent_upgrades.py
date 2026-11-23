@@ -8,9 +8,8 @@ import httpx2
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentUpgradeResult
+from vonk_agent_protocol.contracts import AgentUpgradeResult, canonical_message
 from vonk_agent_protocol.package_upgrade import PackageActivationOutcome
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control import agent_operation_states as aos
@@ -2016,14 +2015,14 @@ def test_upgrade_identity_warning_names_its_order_and_clears_on_confirmation(
     postgres_engine,
     monkeypatch,
 ) -> None:
-    from vonk_agent_protocol import (
-        AgentResult,
+    from vonk_agent_protocol.contracts import AgentResult
+    from vonk_agent_protocol.lifecycle_vocabulary import (
         AgentResultState,
         LifecycleState,
         OutcomeKind,
-        OutcomeUnknown,
         WaitReason,
     )
+    from vonk_agent_protocol.outcome import OutcomeUnknown
     from vonk_control.evidence_repeats import note_repeat, owner_evidence
     from vonk_control.models.operations import AgentOperation
 
@@ -2115,8 +2114,12 @@ def test_idle_worker_adopts_only_exact_retained_upgrade_receipt(
     The same stored report must settle on a reconstructed worker, without a
     claim, contact renewal, reinstall or adoption under changed authority.
     """
-    from vonk_agent_protocol import AgentResultState, LifecycleState, ObservationCause
     from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
+    from vonk_agent_protocol.lifecycle_vocabulary import (
+        AgentResultState,
+        LifecycleState,
+        ObservationCause,
+    )
     from vonk_control.agent_jobs.retry import schedule_agent_upgrade_retry
 
     monkeypatch.setattr(f"{__name__}.create_engine", lambda *_: postgres_engine)

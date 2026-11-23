@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.bounded_retry import REQUEST_PAUSES
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base

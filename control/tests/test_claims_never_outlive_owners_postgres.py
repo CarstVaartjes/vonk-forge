@@ -27,12 +27,10 @@ import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import (
-    DistributionObject,
-    LifecycleState,
-    ReservationState,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.distribution import DistributionObject
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.state_machines import ReservationState
 from vonk_control import journal_models
 from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS
 from vonk_control.agent_jobs.service import AgentJobService

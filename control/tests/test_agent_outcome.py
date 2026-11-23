@@ -13,20 +13,20 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
     AgentOperation,
     AgentResult,
+    AgentResultPayload,
+)
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
-    Disposition,
     FailureCode,
-    OutcomeDone,
-    OutcomeFailed,
     OutcomeKind,
-    OutcomeUnknown,
-    RecipeStopResult,
     WaitReason,
 )
-from vonk_agent_protocol.contracts import AgentResultPayload
+from vonk_agent_protocol.outcome import OutcomeDone, OutcomeFailed, OutcomeUnknown
+from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.agent_jobs.retry import result_disposition
 from vonk_control.agent_jobs.service import AgentJobService

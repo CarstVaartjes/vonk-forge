@@ -20,7 +20,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, MappedColumn, mapped_column
-from vonk_agent_protocol import LifecycleState, LifecycleSubject
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
 
 from ..model_primitives import Base, _lower_hex, _state_in
 from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column

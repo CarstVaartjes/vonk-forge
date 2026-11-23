@@ -15,8 +15,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.profiles import PROFILE_REFUSAL_CODES
 from vonk_control.api.application import create_app
 from vonk_control.auth import MUTATION_ROLES, Actor, TokenCodec
@@ -35,7 +35,7 @@ from vonk_control.strict_json import route_endpoint
 from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
 from cluster_profiles import cli
-from cluster_profiles.control_client import ControlClient
+from cluster_profiles.control_client.transfers import ControlClient
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 

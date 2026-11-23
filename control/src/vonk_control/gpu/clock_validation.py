@@ -3,12 +3,12 @@
 from collections.abc import Sequence
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import RunSwitchCode
 from vonk_agent_protocol.agent_words import (
     ProfileReasonSeverity,
     RunSwitchReasonScopeName,
 )
 from vonk_agent_protocol.gpu_clock import GPU_CLOCK_POLICY, GpuClockRange
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
 from ..run_switch_contract.evidence import RunSwitchReason
 

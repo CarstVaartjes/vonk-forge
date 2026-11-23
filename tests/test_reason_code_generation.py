@@ -10,7 +10,8 @@ import json
 from enum import Enum
 from pathlib import Path
 
-from vonk_agent_protocol import ReasonCodeVocabulary, canonical_message
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.reason_codes.vocabulary import ReasonCodeVocabulary
 
 from cluster_profiles.generated_control.models.reason_code_vocabulary import (
     ReasonCodeVocabulary as GeneratedVocabulary,

@@ -9,18 +9,21 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
     AgentFailureKind,
     AgentResult,
+    ArtifactDistributionResult,
+    canonical_message,
+    canonical_payload,
+)
+from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     FailureCode,
     LifecycleState,
     OutcomeKind,
-    SupersedeCode,
-    canonical_message,
 )
-from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
-from vonk_agent_protocol.contracts import ArtifactDistributionResult, canonical_payload
+from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.lifecycle.agent_operation import (
@@ -70,12 +73,12 @@ from .runtime_identity_support import (
 )
 def test_terminal_request_is_not_revived_by_stale_recovery_evidence(service, condition):
     """A definite terminal result cannot be reopened by stale retry evidence."""
-    from vonk_agent_protocol import (
-        AgentFailureResult,
+    from vonk_agent_protocol.contracts import AgentFailureResult
+    from vonk_agent_protocol.lifecycle_vocabulary import (
         LifecycleState,
         ObservationCause,
-        OutcomeFailed,
     )
+    from vonk_agent_protocol.outcome import OutcomeFailed
 
     jobs, sessions, clock = service
     kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
@@ -631,8 +634,8 @@ def test_an_order_that_ended_keeps_its_outcome_unless_its_report_is_replaced(
 def test_gpu_fault_between_admission_and_claim_waits_then_recovers(service) -> None:
     # Catches dispatching a previously accepted launch after the GPU broke;
     # cleanup must remain claimable and a healthy observation must unblock it.
-    from vonk_agent_protocol import ProjectionCode
     from vonk_agent_protocol.inventory import GpuHealth
+    from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
     from vonk_control.inventory.repository import (
         InventoryRepository,
         NodeInventoryReport,

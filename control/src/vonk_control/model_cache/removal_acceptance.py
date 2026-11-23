@@ -15,10 +15,8 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    ArtifactLifecycleCode,
-    ModelCacheCode,
-)
+from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 
 from ..admission_locking import admitting
 from ..artifact_jobs.lifecycle import (

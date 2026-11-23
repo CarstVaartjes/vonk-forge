@@ -20,7 +20,7 @@ from pydantic import (
     TypeAdapter,
     ValidationError,
 )
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.contracts import canonical_message
 
 
 @dataclass(frozen=True)

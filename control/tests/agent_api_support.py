@@ -20,11 +20,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from starlette.types import Message
-from vonk_agent_protocol import CompiledExecutionPlan as AgentCompiledExecutionPlan
-from vonk_agent_protocol import (
-    RecipeStopPayload,
-    canonical_message,
+from vonk_agent_protocol.compiled_execution_plan import (
+    CompiledExecutionPlan as AgentCompiledExecutionPlan,
 )
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_control.agent_api.common import (
     AgentApiServices,
 )

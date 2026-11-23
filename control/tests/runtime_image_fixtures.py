@@ -11,7 +11,7 @@ import hashlib
 import json
 from datetime import timedelta
 
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.oci_image_store import OCI_MANIFEST
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 

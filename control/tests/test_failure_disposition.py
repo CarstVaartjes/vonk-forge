@@ -14,21 +14,25 @@ from datetime import UTC, datetime, timedelta
 
 import httpx2
 import pytest
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import AgentFailureKind
+from vonk_agent_protocol.disposition import (
     FAILURE_KIND_DISPOSITION,
     HTTP_STATUS_DISPOSITIONS,
     WAIT_REASON_DISPOSITION,
-    AgentFailureKind,
     Disposition,
-    InvalidRequestError,
-    InvalidRequestReason,
-    ModelCacheCode,
-    SecurityRefusalError,
-    SecurityRefusalReason,
-    UnknownOutcomeError,
-    WaitReason,
     http_status_disposition,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    SecurityRefusalReason,
+    WaitReason,
+)
+from vonk_agent_protocol.outcome import (
+    InvalidRequestError,
+    SecurityRefusalError,
+    UnknownOutcomeError,
+)
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.failure_classification import disposition, is_definite
 from vonk_control.lifecycle.core import transition
@@ -388,7 +392,7 @@ def test_a_distribution_identity_mismatch_is_definite_and_unavailability_observe
     # manifest" was a transient unknown, so the same mismatch was re-planned
     # every minute forever.  A mismatch is definite (#1476 names it); a
     # manifest that cannot be read stays an observed unknown.
-    from vonk_agent_protocol import DistributionCode
+    from vonk_agent_protocol.reason_codes.fleet import DistributionCode
     from vonk_control.distribution.types import DistributionError, DistributionUnknown
 
     mismatch = DistributionError(
@@ -540,7 +544,7 @@ def test_cache_reference_adapter_preserves_typed_unknowns_and_refusals(
     condition, expected
 ):
     """A non-retryable effect is not necessarily known; lost authority remains a refusal."""
-    from vonk_agent_protocol import ArtifactLifecycleCode
+    from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
     from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleError
     from vonk_control.model_cache.errors import (
         ModelCacheDeletionFenceLost,
@@ -573,7 +577,7 @@ def test_stale_writer_across_worker_passes_waits_then_publishes(
 ) -> None:
     """Catches a mapper conflict becoming terminal after six publication passes."""
     from sqlalchemy.orm.exc import StaleDataError
-    from vonk_agent_protocol import RouteState
+    from vonk_agent_protocol.state_machines import RouteState
     from vonk_control.models.execution import RecipeRun
     from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
     from vonk_control.recovery_policy import ROUTE_RECOVERY

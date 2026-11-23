@@ -28,9 +28,9 @@ from statistics import median
 from sqlalchemy import and_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as OperationKind
-from vonk_agent_protocol import LifecycleState, stored_words
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.inventory import NetworkInterface
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, stored_words
 
 from .agent_operation_states import ORDER
 from .catalog.revision_collection import GRACE

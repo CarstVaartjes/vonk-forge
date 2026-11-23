@@ -14,20 +14,17 @@ from typing import Protocol
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    Disposition,
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
-    RecipeStartPayload,
-    RecipeStopPayload,
-    ReservationState,
-    RouteState,
-    RunState,
     WaitOwnerKind,
     WaitResumeCondition,
-    canonical_message,
 )
+from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
+from vonk_agent_protocol.state_machines import ReservationState, RouteState, RunState
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from ..agent_jobs.retirement import release_owned_reservations_in_session

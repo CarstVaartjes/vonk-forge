@@ -10,12 +10,10 @@ from typing import cast as _typing_cast
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    LifecycleState,
-    ProfileReasonCode,
-    RunSwitchCode,
-)
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
 from ..fleet_profile_contract.review import (
     FleetProfileApplicationView,

@@ -8,19 +8,18 @@ from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import ValidationError
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    DesiredAssignmentState,
-    InvalidRequestReason,
-    ObservedAssignmentState,
-    ProfileReasonCode,
-    WaitReason,
-)
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileChildPhase,
     ProfileInstallationPolicy,
     ProfileProjectionKind,
     ProfileReasonSeverity,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_agent_protocol.state_machines import (
+    DesiredAssignmentState,
+    ObservedAssignmentState,
 )
 from vonk_forge_contracts import RecipeDefinition
 

@@ -17,10 +17,8 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi.testclient import TestClient
 from httpx2 import ASGITransport, AsyncClient
 from sqlalchemy import delete
-from vonk_agent_protocol import (
-    canonical_message,
-)
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.enrollment import EnrollmentObservationReply
 from vonk_control.agent_api.common import (
     EnrollmentRateLimiter,
@@ -290,7 +288,7 @@ def test_revoked_identity_is_gated_before_invalid_json_is_parsed(agent_system) -
 
 
 def test_job_wire_routes_publish_the_canonical_model_graph(agent_system) -> None:
-    from vonk_agent_protocol import (
+    from vonk_agent_protocol.contracts import (
         AgentClaim,
         AgentDirective,
         AgentProgress,
@@ -386,7 +384,7 @@ def test_cli_enrollment_file_and_recovery_use_the_actual_authority(
     )
 
     from cluster_profiles import cli
-    from cluster_profiles.control_client import ControlClient
+    from cluster_profiles.control_client.transfers import ControlClient
 
     from .test_enrollment import csr, evidence
 
@@ -581,7 +579,7 @@ def test_fleet_detail_reports_the_claimed_agent_build_and_updates_it(
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
     from vonk_control.fleet_projection.service import FleetProjection
 
-    from cluster_profiles.cli_render import render_payload
+    from cluster_profiles.cli_render.dispatch import render_payload
 
     client, services, _, clock = agent_system
     projection = FleetProjection(services.sessions, clock=clock)
@@ -628,7 +626,7 @@ def test_gpu_clock_failure_evidence_survives_http_storage_and_fleet_detail(
     from vonk_agent_protocol.telemetry import TelemetryRequest, TelemetrySample
     from vonk_control.fleet_projection.service import FleetProjection
 
-    from cluster_profiles.cli_render import render_payload
+    from cluster_profiles.cli_render.dispatch import render_payload
 
     client, services, _, clock = agent_system
     sample = TelemetrySample(

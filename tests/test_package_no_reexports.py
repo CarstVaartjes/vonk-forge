@@ -1,10 +1,19 @@
-"""A Controller package ``__init__`` re-exports nothing: import from the owning module."""
+"""A package ``__init__`` re-exports nothing: import from the owning module.
+
+Covers the Controller, the platform packages (``cluster_profiles`` and its
+sub-packages; the gitignored ``generated_control`` is generated code) and the
+agent protocol."""
 
 import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGE = ROOT / "control/src/vonk_control"
+PACKAGES = (
+    ROOT / "control/src/vonk_control",
+    ROOT / "src/cluster_profiles",
+    ROOT / "agent_protocol/src/vonk_agent_protocol",
+)
+GENERATED = ROOT / "src/cluster_profiles/generated_control"
 
 
 def reexports(source: str) -> list[int]:
@@ -42,7 +51,9 @@ def reexports(source: str) -> list[int]:
 def test_no_package_init_re_exports_names() -> None:
     failures = {
         relative: lines
-        for path in PACKAGE.rglob("__init__.py")
+        for package in PACKAGES
+        for path in package.rglob("__init__.py")
+        if not path.is_relative_to(GENERATED)
         if (relative := str(path.relative_to(ROOT)))
         if (lines := reexports(path.read_text(encoding="utf-8")))
     }

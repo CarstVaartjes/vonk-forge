@@ -12,9 +12,9 @@ category as a keyword.
 
 from __future__ import annotations
 
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
+from vonk_agent_protocol.outcome import (
     InvalidRequestError,
-    InvalidRequestReason,
     SecurityRefusalError,
     UnknownOutcomeError,
 )

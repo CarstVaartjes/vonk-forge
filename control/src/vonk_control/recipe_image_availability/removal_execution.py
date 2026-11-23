@@ -8,17 +8,16 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import DBAPIError
-from vonk_agent_protocol import (
-    ArtifactLifecycleCode,
-    Disposition,
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
-    ModelCacheCode,
-    RecipeImageCode,
-    SecurityRefusalError,
-    UnknownOutcomeError,
     WaitReason,
 )
+from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 
 from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,

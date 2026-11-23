@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 import httpx2
 from pydantic import ValidationError
-from vonk_agent_protocol import RecipePackageCode
+from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
 from vonk_forge_contracts import (
     CONTRACT_MAJOR,
     PACKAGE_SCHEMA_VERSION,

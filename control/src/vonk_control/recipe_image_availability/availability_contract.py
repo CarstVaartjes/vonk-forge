@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import ConfigDict, Field
-from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.build_import import RecipeBuildEvidence
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
 from ..strict_json import StrictJSONModel
 

@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.jobs.documents import (
     AvailabilityJobPayload,
@@ -470,7 +470,8 @@ def test_live_download_survives_a_parent_observation_gap_and_resumes(
 def test_preparation_expiry_preserves_download_but_explicit_cancel_still_owns_it(
     tmp_path: Path, postgres_engine, checkpointed: bool
 ) -> None:
-    from vonk_agent_protocol import RecipeImageCode, WaitReason
+    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+    from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
     from vonk_control.recipe_operations.lifecycle_contract import (
         RecipeOperationCancellationResult,
     )

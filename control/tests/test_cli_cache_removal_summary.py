@@ -6,12 +6,10 @@ import hashlib
 import json
 
 import pytest
-from vonk_agent_protocol import (
-    ArtifactLifecycleCode,
-    AssetAvailability,
-    ModelCacheCode,
-    RuntimeImageCode,
-)
+from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
+from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
+from vonk_agent_protocol.state_machines import AssetAvailability
 from vonk_control.cache_removal_review import (
     CacheAssetDisposition,
     CacheRemovalAsset,
@@ -22,7 +20,7 @@ from vonk_control.cache_removal_review import (
 )
 
 from cluster_profiles import cli
-from cluster_profiles.cli_render import render_payload
+from cluster_profiles.cli_render.dispatch import render_payload
 
 from .test_cli_cache_removal_review import (
     _accept_response_contracts,  # noqa: F401

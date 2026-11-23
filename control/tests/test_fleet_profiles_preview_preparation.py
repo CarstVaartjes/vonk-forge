@@ -9,10 +9,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import Table, select, update
-from vonk_agent_protocol import (
-    DesiredAssignmentState,
-)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.state_machines import DesiredAssignmentState
 from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
@@ -972,7 +970,7 @@ def test_load_waiting_on_a_working_preparation_outlives_its_wait_window() -> Non
 
     from datetime import timedelta
 
-    from vonk_agent_protocol import RecipeImageCode
+    from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
     from vonk_control.fleet_profile_contract.vocabulary import (
         FLEET_PROFILE_ENDED_STATES,
     )

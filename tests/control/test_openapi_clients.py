@@ -9,10 +9,8 @@ from typing import Literal, Protocol, overload
 
 import pytest
 
-from cluster_profiles.control_client import (
-    ControlClientError,
-    validate_control_document,
-)
+from cluster_profiles.control_client.errors import ControlClientError
+from cluster_profiles.control_client.schema import validate_control_document
 
 ROOT = Path(__file__).resolve().parents[2]
 OPENAPI = ROOT / "control/openapi.json"
@@ -52,8 +50,8 @@ def test_cli_packages_the_generated_admin_openapi_contract() -> None:
 
 def test_enrollment_and_error_producers_reach_generated_http_consumer() -> None:
     import httpx2
-    from vonk_agent_protocol import LifecycleState
     from vonk_agent_protocol.error_response import BoundedErrorResponse
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
     from vonk_control.operator_projection_api.contracts import FleetActionResponse
     from vonk_control.strict_json import serialize_json_value
 
@@ -516,7 +514,7 @@ def test_generated_fleet_projection_vocabulary_is_finite() -> None:
     ]
     offline = schema["NodeConnection"]["properties"]["offline_reason"]
     assert offline["anyOf"][0] == {"$ref": "#/components/schemas/NodeOfflineReason"}
-    from vonk_agent_protocol import NodeOfflineReason
+    from vonk_agent_protocol.reason_codes.evidence import NodeOfflineReason
 
     assert schema["NodeOfflineReason"]["enum"] == [
         reason.value for reason in NodeOfflineReason

@@ -7,7 +7,7 @@ goes through the words below, so no module spells one.
 
 from __future__ import annotations
 
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     LifecycleSubject,
     adopt_state,

@@ -18,14 +18,10 @@ from dataclasses import dataclass
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    AgentClaim,
-    AgentProgress,
-    AgentResult,
-    AgentResultState,
-    OperationProgress,
-)
+from vonk_agent_protocol.contracts import AgentClaim, AgentProgress, AgentResult
+from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs import states as ajs
 from vonk_control.artifact_jobs.contracts import ArtifactJobView

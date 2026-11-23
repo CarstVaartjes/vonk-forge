@@ -16,11 +16,9 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    LifecycleState,
-    RunState,
-    RunSwitchCode,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.state_machines import RunState
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision

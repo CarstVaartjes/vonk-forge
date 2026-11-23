@@ -19,16 +19,15 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
-    RecipeStartPayload,
-    RecipeStopPayload,
-    canonical_message,
+    HostRuntimeRequest,
     host_helper_grant_signing_bytes,
 )
-from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.host_helper import HostRuntimeRequest
+from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 from vonk_agent_protocol.route_activation import SupervisorPhase
 from vonk_control.agent_contacts import record_contact
 from vonk_control.agent_jobs.service import AgentJobService

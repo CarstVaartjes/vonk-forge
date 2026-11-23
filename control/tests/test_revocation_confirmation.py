@@ -12,7 +12,8 @@ from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select, text
-from vonk_agent_protocol import CertificateCode, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.reason_codes.admission import CertificateCode
 from vonk_agent_protocol.state_machines import (
     CertificateIssuancePurpose,
     CertificateRecordState,

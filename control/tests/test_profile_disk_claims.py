@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.execution import RecipeInstallation, ResourceReservation
 from vonk_control.models.fleet import FleetProfileApplication

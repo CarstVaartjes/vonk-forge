@@ -225,7 +225,7 @@ from fastapi.testclient import TestClient
 from vonk_control.auth import Actor
 from vonk_control.model_cache.api import install_model_operator_routes
 from cluster_profiles.cli import main
-from cluster_profiles.control_client import ControlClient
+from cluster_profiles.control_client.transfers import ControlClient
 opened = service._open_source
 offsets = []
 def source(spec, offset):

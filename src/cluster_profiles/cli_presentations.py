@@ -1,7 +1,7 @@
 """Registered presentations for every Controller command response."""
 
 from .cli_json_contract import Word
-from .cli_render import render_payload
+from .cli_render.dispatch import render_payload
 
 COMMAND_ACTIONS = {
     "platform": (None,),

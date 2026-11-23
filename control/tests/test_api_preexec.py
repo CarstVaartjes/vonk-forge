@@ -132,7 +132,7 @@ def test_administrator_initialization_rejects_malformed_secret_before_db_access(
 
 @pytest.mark.parametrize("fault", ["typed", "io"])
 def test_startup_storage_unknown_ends_and_fresh_startup_executes(monkeypatch, fault):
-    from vonk_agent_protocol import WaitReason
+    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
     from vonk_control import api_preexec
     from vonk_control.categorized_errors import UnsettledOutcome
 

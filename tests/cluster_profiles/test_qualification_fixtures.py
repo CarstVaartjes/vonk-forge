@@ -13,19 +13,23 @@ from pathlib import Path
 import pytest
 
 from cluster_profiles.fleet_qualification import ArtifactJobSmokeAdapter
-from cluster_profiles.qualification_fixtures import (
+from cluster_profiles.qualification_fixtures.assertions import _parse_assertion
+from cluster_profiles.qualification_fixtures.contracts import (
     Fixture,
     FixtureError,
-    FixtureRegistry,
     RecipeFixture,
-    _parse_assertion,
-    _parse_recipe_fixture,
+)
+from cluster_profiles.qualification_fixtures.media import (
     _safe_zip_entries,
-    _validate_document_archive,
     _validate_magic,
+)
+from cluster_profiles.qualification_fixtures.outputs import validate_outputs
+from cluster_profiles.qualification_fixtures.recipe_cases import _parse_recipe_fixture
+from cluster_profiles.qualification_fixtures.registry import FixtureRegistry
+from cluster_profiles.qualification_fixtures.semantic import (
+    _validate_document_archive,
     _validate_realtime_transcript,
     _validate_synchronized_media_receipt,
-    validate_outputs,
 )
 from control.tests.consumer_outcomes import not_adopted
 from tests.cluster_profiles.test_glb_validation import Glb
@@ -468,7 +472,7 @@ class _ArtifactClient(_DownloadClient):
         self.accepted = {}
 
     def _response(self, job_id, *, state=None, preparation=None):
-        from cluster_profiles.control_client import validate_control_document
+        from cluster_profiles.control_client.schema import validate_control_document
         from cluster_profiles.generated_control.models.artifact_job_response import (
             ArtifactJobResponse,
         )
@@ -600,7 +604,7 @@ def test_artifact_adapter_runs_each_digest_bound_case_as_its_own_job(tmp_path) -
 def test_artifact_smoke_reconciles_acceptance_and_missing_output_then_reuses_after_restart(
     tmp_path,
 ):
-    from cluster_profiles.control_client import ControlTransportError
+    from cluster_profiles.control_client.errors import ControlTransportError
 
     class LostReply(_ArtifactClient):
         lost = False

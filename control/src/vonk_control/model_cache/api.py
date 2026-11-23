@@ -7,15 +7,14 @@ from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Path, status
-from vonk_agent_protocol import (
-    Disposition,
-    ErrorCategory,
-    OperationProgress,
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import ErrorCategory, WaitReason
+from vonk_agent_protocol.outcome import (
     SecurityRefusalError,
     UnknownError,
     UnknownOutcomeError,
-    WaitReason,
 )
+from vonk_agent_protocol.wire_model import OperationProgress
 
 from ..api_availability import AVAILABILITY_ERRORS
 from ..auth import MUTATION_ROLES, Actor, CursorCodec

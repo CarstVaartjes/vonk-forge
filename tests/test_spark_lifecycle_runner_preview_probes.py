@@ -22,7 +22,8 @@ def test_lost_start_probe_binds_produced_placement_to_owned_interface(
     tmp_path: Path,
     foreign_host: bool,
 ) -> None:
-    from vonk_agent_protocol import CompiledExecutionPlan, RecipeStartPayload
+    from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
+    from vonk_agent_protocol.recipe_operations import RecipeStartPayload
     from vonk_control.recipe_operations.start_payloads import (
         RecipeStartPlacement,
         build_recipe_start_payload,

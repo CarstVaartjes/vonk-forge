@@ -12,20 +12,24 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from vonk_agent_protocol import (
-    AgentFailureResult,
-    AgentInstallResult,
+from vonk_agent_protocol.build_import import (
     RecipeBuildCleanupEvidence,
     RecipeBuildEvidence,
-    RecipeJobRunResult,
-    RecipeOperationCode,
-    RecipeReconcileResult,
+)
+from vonk_agent_protocol.contracts import (
+    AgentFailureResult,
+    AgentInstallResult,
     RecipeStartResult,
-    RecipeStopResult,
-    RecipeUninstallResult,
     canonical_message,
 )
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.reason_codes.recipes import RecipeOperationCode
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
+from vonk_agent_protocol.recipe_operations import (
+    RecipeReconcileResult,
+    RecipeStopResult,
+    RecipeUninstallResult,
+)
 
 from ..library.contract import NodeId, UuidId
 from ..strict_json import StrictJSONModel

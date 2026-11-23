@@ -8,10 +8,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.reason_codes.runtime import (
     RuntimePreflightCode,
     RuntimePreflightFindingCode,
-    canonical_message,
 )
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,

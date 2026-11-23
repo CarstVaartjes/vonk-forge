@@ -14,13 +14,12 @@ from datetime import UTC, datetime, timedelta
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import ColumnElement, or_, select, true
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
-    SecurityRefusalError,
-    UnknownOutcomeError,
     WaitReason,
 )
+from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 
 from ..admission_locking import ConstraintReplay, admitting
 from ..categorized_errors import InvalidType, InvalidValue, MissingRecord

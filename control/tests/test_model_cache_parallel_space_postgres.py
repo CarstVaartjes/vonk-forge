@@ -9,7 +9,8 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState, ModelCacheCode
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.model_cache.persistence import _store_operation_payload
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base

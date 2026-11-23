@@ -4,11 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from vonk_agent_protocol import (
-    InvalidRequestError,
-    InvalidRequestReason,
-    UnknownOutcomeError,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
+from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_forge_contracts.recipe import RecipeTopology
 
 

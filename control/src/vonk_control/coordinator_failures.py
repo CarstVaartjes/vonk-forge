@@ -5,16 +5,16 @@ from datetime import datetime, timedelta
 
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    Disposition,
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import (
     FailureCode,
     InvalidRequestReason,
-    OperationReason,
     WaitOwnerKind,
     WaitReason,
     WaitResumeCondition,
-    canonical_message,
 )
+from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
 
 from .agent_operation_facts import aware
 from .coordinator_contract import CoordinatorFailureEvidence

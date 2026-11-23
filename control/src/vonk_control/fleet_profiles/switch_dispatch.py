@@ -7,15 +7,13 @@ from typing import cast as _typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    DesiredAssignmentState,
-    InvalidRequestReason,
-)
 from vonk_agent_protocol.agent_words import (
     ProfileChildJobKind,
     ProfileChildPhase,
     ProfileSwitchChildKind,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
+from vonk_agent_protocol.state_machines import DesiredAssignmentState
 
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract.definitions import FleetProfileAssignment

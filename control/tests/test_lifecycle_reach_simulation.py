@@ -23,7 +23,7 @@ import uuid
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import RunState
+from vonk_agent_protocol.state_machines import RunState
 from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
 from vonk_control.models.fleet import FleetProfileApplication

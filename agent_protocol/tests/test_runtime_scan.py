@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol import RecipeRunObservationCheckpoint
+from vonk_agent_protocol.runtime_scan import RecipeRunObservationCheckpoint
 
 
 def test_retained_cutoff_lexemes_match_native_restart_cases() -> None:

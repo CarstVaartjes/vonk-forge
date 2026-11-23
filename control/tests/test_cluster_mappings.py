@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.cluster_mappings import ClusterMappingError, ClusterMappingService
 from vonk_control.inventory.repository import (
     InventoryRepository,

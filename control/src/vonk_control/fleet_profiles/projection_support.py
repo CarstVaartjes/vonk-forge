@@ -10,12 +10,6 @@ from datetime import UTC, datetime
 from sqlalchemy import select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    DesiredAssignmentState,
-    InvalidRequestReason,
-    LifecycleState,
-    canonical_message,
-)
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileChildPhase,
@@ -23,6 +17,12 @@ from vonk_agent_protocol.agent_words import (
     ProfileProjectionKind,
     ProfileSwitchChildKind,
 )
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    LifecycleState,
+)
+from vonk_agent_protocol.state_machines import DesiredAssignmentState
 from vonk_forge_contracts import RecipeDefinition
 from vonk_forge_contracts.recipe import RecipeTopology
 

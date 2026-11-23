@@ -10,7 +10,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import Disposition, LifecycleState, ModelCacheCode
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog.entities import CatalogEntityService
@@ -152,7 +154,7 @@ def test_changed_removal_scope_requires_a_new_plan_and_can_then_be_accepted(worl
     """A known scope mismatch ends; repeating observations cannot repair its plan."""
     from dataclasses import replace
 
-    from vonk_agent_protocol import ArtifactLifecycleCode
+    from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 
     catalog, cache, sessions, _client = world
     row = _activate(catalog, publisher="test", weight="a")

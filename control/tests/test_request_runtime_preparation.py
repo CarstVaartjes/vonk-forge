@@ -5,14 +5,14 @@ from __future__ import annotations
 import hashlib
 
 import pytest
-from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.distribution import DistributionObject
+from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
-    DistributionCode,
-    DistributionObject,
     ExecuteContainerRuntimeRequestOperation,
-    canonical_message,
 )
+from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 from vonk_control.agent_jobs.stored import column_value
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource

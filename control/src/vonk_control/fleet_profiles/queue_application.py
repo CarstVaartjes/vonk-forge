@@ -7,21 +7,23 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    DesiredAssignmentState,
-    Disposition,
-    InvalidRequestReason,
-    LifecycleState,
-    ObservedAssignmentState,
-    ProfileReasonCode,
-    SupersedeCode,
-)
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileCancellationCause,
     ProfileChildPhase,
     ProfileOperationKind,
     ProfileReasonSeverity,
+)
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    LifecycleState,
+)
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_agent_protocol.reason_codes.runs import SupersedeCode
+from vonk_agent_protocol.state_machines import (
+    DesiredAssignmentState,
+    ObservedAssignmentState,
 )
 
 from ..admission_locking import AdmissionRowLock, lock_admission_rows

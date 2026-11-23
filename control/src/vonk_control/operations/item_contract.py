@@ -28,20 +28,17 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from vonk_agent_protocol import (
-    AgentOperation,
-    LifecycleState,
-    OperationProgress,
-    WaitReason,
-)
 from vonk_agent_protocol.contracts import (
     AgentFailureResult,
+    AgentOperation,
     validate_result_for_operation,
 )
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.optional_evidence import EvidenceDrop
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
+from vonk_agent_protocol.wire_model import OperationProgress
 
 from .. import agent_operation_states
 from ..fleet_profile_contract.applications import (

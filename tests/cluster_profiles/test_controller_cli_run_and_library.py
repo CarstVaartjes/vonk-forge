@@ -19,14 +19,18 @@ from controller_cli_support import (
 )
 from library_route_fixtures import _recipe_projection
 
-from cluster_profiles import cli, controller_cli
-from cluster_profiles.control_client import (
+from cluster_profiles import cli
+from cluster_profiles.control_client.errors import (
     ControlConflict,
     ControlMalformedResponse,
     ControlNotFound,
     ControlTransportError,
     ControlUnavailable,
 )
+from cluster_profiles.controller_cli import common, dispatch
+from cluster_profiles.controller_cli import observation as observation_module
+from cluster_profiles.controller_cli import run as run_module
+from cluster_profiles.controller_cli import selection as selection_module
 from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
     FleetProfileEndpointsView,
 )
@@ -97,10 +101,10 @@ def test_run_resolves_a_recipe_or_its_model_to_one_catalog_recipe(
         }
     )
     assert (
-        controller_cli._resolve_run_recipe(
-            cast(controller_cli.ControllerClient, client),
+        run_module._resolve_run_recipe(
+            cast(common.ControllerClient, client),
             requested,
-            deadline=controller_cli.observation.time.monotonic() + 30,
+            deadline=observation_module.time.monotonic() + 30,
         )
         == expected
     )
@@ -145,10 +149,10 @@ def test_run_title_resolution_reads_the_model_library_in_pages_not_per_model() -
         }
     )
     assert (
-        controller_cli._resolve_run_recipe(
-            cast(controller_cli.ControllerClient, client),
+        run_module._resolve_run_recipe(
+            cast(common.ControllerClient, client),
             "title 120",
-            deadline=controller_cli.observation.time.monotonic() + 30,
+            deadline=observation_module.time.monotonic() + 30,
         )
         == "vonk-forge/recipe-120"
     )
@@ -175,8 +179,8 @@ class _PagedClient(FakeClient):
 
 def _read_pages(client, deadline=1e9):
     return list(
-        controller_cli.selection._library_pages(
-            cast(controller_cli.ControllerClient, client),
+        selection_module._library_pages(
+            cast(common.ControllerClient, client),
             "/api/model/library",
             "models",
             {"sort": "name"},
@@ -224,7 +228,7 @@ def test_runaway_library_cursor_ends_at_the_deadline_and_a_fresh_resolve_runs(
             return self.now
 
     clock = Clock()
-    monkeypatch.setattr(controller_cli.selection, "time", clock)
+    monkeypatch.setattr(selection_module, "time", clock)
 
     def tick() -> None:
         clock.now += 1.0
@@ -236,9 +240,7 @@ def test_runaway_library_cursor_ends_at_the_deadline_and_a_fresh_resolve_runs(
     with pytest.raises(
         ControlMalformedResponse, match="selection observation deadline reached"
     ):
-        controller_cli.run._model_titles(
-            cast(controller_cli.ControllerClient, runaway), deadline=30.0
-        )
+        run_module._model_titles(cast(common.ControllerClient, runaway), deadline=30.0)
     assert (
         len(runaway.calls) == 30
     )  # one page per injected second, ended by the deadline
@@ -266,8 +268,8 @@ def test_runaway_library_cursor_ends_at_the_deadline_and_a_fresh_resolve_runs(
         }
     )
     assert (
-        controller_cli._resolve_run_recipe(
-            cast(controller_cli.ControllerClient, fresh),
+        run_module._resolve_run_recipe(
+            cast(common.ControllerClient, fresh),
             "vonk-forge/qwen-code",
             deadline=clock.now + 30,
         )
@@ -381,9 +383,9 @@ def test_run_reviews_and_waits_before_reporting_endpoint(
     args = cli._parser().parse_args(
         ["--profile", "1", "run", "Qwen Code", "--spark", "Atlas", "--yes", "--json"]
     )
-    result = controller_cli.run_controller(
+    result = dispatch.run_controller(
         args,
-        cast(controller_cli.ControllerClient, RunClient()),
+        cast(common.ControllerClient, RunClient()),
         lambda: "11111111-1111-4111-8111-111111111111",
     )
     # An ordinary blocker is not a client-side stop: the load is submitted and

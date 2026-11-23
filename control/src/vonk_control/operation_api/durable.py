@@ -10,15 +10,14 @@ from pathlib import Path
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
+from vonk_agent_protocol.outcome import UnknownError
+from vonk_agent_protocol.route_activation import ActivationMarker
+from vonk_agent_protocol.state_machines import (
+    CertificateRecordState,
     EndpointState,
     GatewayRouteState,
-    LifecycleState,
-    LifecycleSubject,
-    UnknownError,
 )
-from vonk_agent_protocol.route_activation import ActivationMarker
-from vonk_agent_protocol.state_machines import CertificateRecordState
 
 from ..agent_jobs.retirement import (
     authorize_operator_resume_in_session,

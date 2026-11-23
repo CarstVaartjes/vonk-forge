@@ -9,7 +9,7 @@ from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
 import pytest
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
 from tests.spark_lifecycle_runner_support import _module
 
@@ -633,7 +633,7 @@ def test_recipe_download_consumes_typed_terminal_receipt() -> None:
         "fastapi", reason="Controller contract tests run in the control suite"
     )
     lifecycle = _module()
-    from vonk_agent_protocol import OperationProgress
+    from vonk_agent_protocol.wire_model import OperationProgress
     from vonk_control.recipe_image_availability.api import (
         RecipeImageAvailabilityResponse,
         RecipeImageAvailabilityResult,
@@ -701,11 +701,9 @@ def test_recipe_download_timeout_preserves_durable_progress(monkeypatch, state) 
         "fastapi", reason="Controller contract tests run in the control suite"
     )
     lifecycle = _module()
-    from vonk_agent_protocol import (
-        ArtifactLifecycleCode,
-        OperationProgress,
-        ProgressPhase,
-    )
+    from vonk_agent_protocol.agent_words import ProgressPhase
+    from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
+    from vonk_agent_protocol.wire_model import OperationProgress
     from vonk_control.operations.contract import (
         AvailabilityOperationFailure,
         AvailabilityRecoveryAction,

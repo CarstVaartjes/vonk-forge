@@ -55,7 +55,7 @@ def test_ended_preparation_does_not_block_a_fresh_application(tmp_path) -> None:
     """A cancelled application's preparation cannot gate a new request."""
     from uuid import uuid4
 
-    from vonk_agent_protocol import LifecycleState
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
     from .test_recipe_image_availability_request_recovery import _owner
 

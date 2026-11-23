@@ -18,9 +18,7 @@ from datetime import datetime
 from sqlalchemy import or_, select, tuple_
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
-from vonk_agent_protocol import (
-    ReservationState,
-)
+from vonk_agent_protocol.state_machines import ReservationState
 
 from ..admission_locking import ConstraintReplan
 from ..models.execution import ResourceReservation

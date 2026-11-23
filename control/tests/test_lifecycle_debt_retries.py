@@ -14,14 +14,13 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
-    RecipeStopResult,
-    SecurityRefusalError,
     SecurityRefusalReason,
-    UnknownOutcomeError,
     WaitReason,
 )
+from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
+from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control import agent_jobs, install_admission, run_admission
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.install_admission.contracts import InstallAdmissionBusy
@@ -497,7 +496,8 @@ def test_run_switch_cancel_reports_exhausted_contention_then_can_progress(
     """A busy boundary cannot look completed or poison the next attempt."""
     from uuid import uuid4
 
-    from vonk_agent_protocol import LifecycleState, RecipeBuildCode
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+    from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
     from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
     from vonk_control.run_switch_operations import cancellation_retry
     from vonk_control.run_switch_operations.errors import RunSwitchRetryLater

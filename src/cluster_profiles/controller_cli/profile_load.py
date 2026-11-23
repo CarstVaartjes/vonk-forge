@@ -12,18 +12,18 @@ from dataclasses import dataclass, replace
 from typing import cast
 
 from ..cli_outcome import SubmissionAcceptance
-from ..cli_render import render_payload
+from ..cli_render.dispatch import render_payload
 from ..cli_states_generated import (
     PROFILE_REFUSAL_CODES,
     PROFILE_REVIEW_STALE,
     PROFILE_REVISION_CONFLICT,
 )
-from ..control_client import (
+from ..control_client.errors import (
     ControlClientError,
     ControlConflict,
     ControlMalformedResponse,
-    validate_control_document,
 )
+from ..control_client.schema import validate_control_document
 from ..error_reporting import ClientCode, protocol_context
 from ..generated_control.models.fleet_profile_load_request import (
     FleetProfileLoadRequest,

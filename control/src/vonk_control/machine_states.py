@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Annotated, overload
 
 from pydantic import BeforeValidator
-from vonk_agent_protocol import (
+from vonk_agent_protocol.state_machines import (
     CatalogSyncState,
     CertificateState,
     DistributionAssignmentState,

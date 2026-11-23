@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterable
 
-from vonk_agent_protocol import InvalidRequestReason, UnknownOutcomeError, WaitReason
 from vonk_agent_protocol.job_limits import MAX_INPUT_FILE_BYTES
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 
 from ..bounded_retry import bounded_attempts
 from ..categorized_errors import MissingRecord

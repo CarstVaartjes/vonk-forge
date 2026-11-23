@@ -13,18 +13,16 @@ from fastapi import Request
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import FileResponse, StreamingResponse
-from vonk_agent_protocol import (
-    CatalogCode,
-    ControllerErrorCode,
-    SecurityRefusalReason,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.error_response import (
     BoundedErrorResponse,
     ErrorContextResponse,
     RequestValidationIssue,
     RequestValidationProblem,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
+from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
+from vonk_agent_protocol.reason_codes.catalog import CatalogCode
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
 
 from ..catalog.api import CatalogProblem

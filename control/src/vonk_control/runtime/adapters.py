@@ -35,11 +35,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.build_import import (
     RecipeBuildAdapter,
     RecipeBuildAdapterDefinition,
 )
+from vonk_agent_protocol.contracts import canonical_message
 
 from ..harnesses.canonical_metadata import CANONICAL_HARNESS_BY_SLUG
 from .writable_paths import writable_paths

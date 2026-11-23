@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from pydantic import Field, model_validator
-from vonk_agent_protocol import ContainerRuntimeAction
+from vonk_agent_protocol.host_helper import ContainerRuntimeAction
 
 from .strict_json import StrictModel
 

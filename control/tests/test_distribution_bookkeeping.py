@@ -4,11 +4,9 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from vonk_agent_protocol import (
-    DistributionObject,
-    SecurityRefusalError,
-)
 from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol.distribution import DistributionObject
+from vonk_agent_protocol.outcome import SecurityRefusalError
 from vonk_control.distribution.filesystem import FilesystemObjectSource
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.distribution.service import DistributionService

@@ -7,8 +7,8 @@ from controller_cli_support import FakeClient, _accepted_profile_cancellation, r
 from library_route_fixtures import _recipe_projection
 
 from cluster_profiles import cli
-from cluster_profiles.cli_render import progress_line
-from cluster_profiles.control_client import (
+from cluster_profiles.cli_render.progress import progress_line
+from cluster_profiles.control_client.errors import (
     ControlForbidden,
     ControlHTTPError,
     ControlNotFound,

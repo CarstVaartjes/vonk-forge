@@ -884,7 +884,7 @@ def test_production_owner_survives_storage_hang_failure_and_recovers(
 
     from vonk_control.api.production import LibraryObservations
 
-    from cluster_profiles.cli_render import render_payload
+    from cluster_profiles.cli_render.dispatch import render_payload
 
     original, sessions, *_ = assessed_library
     model = original.models().models[0]
@@ -995,7 +995,7 @@ def test_completed_cache_change_is_visible_without_storage_refresh(
     change,
 ):
     """The DB batch owns list/filter/detail state even when byte observations disagree."""
-    from vonk_agent_protocol import LifecycleState
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
     from vonk_control.library.contract import LibraryCacheState
     from vonk_control.model_cache.service import ModelCacheService
 
@@ -1129,7 +1129,7 @@ def test_damaged_verified_references_do_not_hide_healthy_cached_model(
 )
 def test_storage_age_reason_does_not_claim_endpoint_unavailable(reason, capsys):
     """A reason without an exception class must not acquire an unavailable suffix."""
-    from cluster_profiles.cli_render import render_payload
+    from cluster_profiles.cli_render.dispatch import render_payload
 
     render_payload(
         {

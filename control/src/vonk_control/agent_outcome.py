@@ -24,26 +24,30 @@ as observations.
 from __future__ import annotations
 
 from pydantic import ValidationError
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
     AgentFailureResult,
     AgentOperation,
     AgentProtocolError,
     AgentResult,
+    canonical_message,
+    validate_result_for_operation,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    RETIRED_RESULT_STATE_SPELLINGS,
     AgentResultState,
     FailureCode,
+    OutcomeKind,
+    WaitReason,
+)
+from vonk_agent_protocol.outcome import (
     OperationOutcome,
     OutcomeDone,
     OutcomeEvidence,
     OutcomeFailed,
-    OutcomeKind,
     OutcomeUnknown,
-    WaitReason,
-    canonical_message,
     outcome_body,
     outcome_state,
-    validate_result_for_operation,
 )
-from vonk_agent_protocol.lifecycle_vocabulary import RETIRED_RESULT_STATE_SPELLINGS
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 
 from .agent_upgrades.status import AGENT_UPGRADE_AWAITING_IDENTITY_REASONS

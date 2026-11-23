@@ -9,11 +9,8 @@ from typing import Any
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    AgentResult,
-    DistributionAssignment,
-    RecipeStartResult,
-)
+from vonk_agent_protocol.contracts import AgentResult, RecipeStartResult
+from vonk_agent_protocol.distribution import DistributionAssignment
 from vonk_control.agent_outcome import stored_report
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource

@@ -14,7 +14,8 @@ from sqlalchemy import create_engine, event, select, update
 from sqlalchemy.engine import Connection, Engine, ExecutionContext
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState, ReservationState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.state_machines import ReservationState
 from vonk_control import terminal_history_collection
 from vonk_control.catalog.revision_collection import INTERVAL
 from vonk_control.metrics.registry import MetricsRegistry, OperationalMetricsCollector

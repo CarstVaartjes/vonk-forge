@@ -15,8 +15,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from vonk_agent_protocol import ProjectionCode
 from vonk_agent_protocol.inventory import NetworkInterface
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 
 NasRouteWarningCode = Literal[
     ProjectionCode.NETWORK_NAS_ROUTE_WIFI_NO_WIRED_PORT,

@@ -14,7 +14,8 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState, ModelCacheCode
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.auth import Actor
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.model_cache.api import (

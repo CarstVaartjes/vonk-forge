@@ -7,11 +7,9 @@ from datetime import datetime
 from typing import Literal, Protocol
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import (
-    LifecycleState,
-    OperationProgress,
-)
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import OperationProgress
 
 from ..jobs import states as job_states
 from ..lifecycle.recipe_operation import RecipeOperationAdapter

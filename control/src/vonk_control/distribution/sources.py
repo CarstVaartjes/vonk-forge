@@ -8,11 +8,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, cast
 
-from vonk_agent_protocol import (
-    DistributionCode,
-    DistributionObject,
-    SecurityRefusalError,
-)
+from vonk_agent_protocol.distribution import DistributionObject
+from vonk_agent_protocol.outcome import SecurityRefusalError
+from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 
 from ..compiled_execution_plan import VerifiedModelObject
 from .model_cache import model_file_receipt

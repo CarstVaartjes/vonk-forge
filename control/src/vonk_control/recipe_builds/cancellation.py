@@ -10,15 +10,15 @@ from pydantic import ConfigDict
 from sqlalchemy import String, and_, cast, or_, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    Disposition,
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
-    RecipeBuildCode,
-    UnknownOutcomeError,
-    canonical_message,
 )
-from vonk_agent_protocol.agent_words import ProfileChildJobKind
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_forge_contracts import read_recipe
 
 from ..admission_locking import is_admission_contention

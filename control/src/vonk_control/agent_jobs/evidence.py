@@ -8,19 +8,24 @@ from datetime import datetime
 
 from sqlalchemy import String, cast, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
+    AgentFailureResult,
     AgentOperation,
     AgentResult,
-    InvalidRequestReason,
-    LifecycleState,
-    RecipeStopResult,
-    RunState,
-    UnknownOutcomeError,
     canonical_message,
     validate_result_for_operation,
 )
-from vonk_agent_protocol.contracts import AgentFailureResult
-from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    LifecycleState,
+)
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.recipe_operations import (
+    RecipeStartPayload,
+    RecipeStopPayload,
+    RecipeStopResult,
+)
+from vonk_agent_protocol.state_machines import RunState
 
 from .. import agent_operation_states
 from ..agent_contacts import last_seen

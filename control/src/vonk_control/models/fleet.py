@@ -27,8 +27,12 @@ from sqlalchemy.orm import Mapped, Mapper, mapped_column, relationship
 
 if TYPE_CHECKING:
     from .telemetry import NodeInventoryItemsSnapshot
-from vonk_agent_protocol import LifecycleState, LifecycleSubject, machine_check
-from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdentityState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
+from vonk_agent_protocol.state_machines import (
+    CertificateRecordState,
+    NodeIdentityState,
+    machine_check,
+)
 
 from ..model_primitives import (
     Base,

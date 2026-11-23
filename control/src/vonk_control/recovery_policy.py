@@ -15,7 +15,9 @@ import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from vonk_agent_protocol import AgentFailureKind, Disposition, FailureCode
+from vonk_agent_protocol.contracts import AgentFailureKind
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import FailureCode
 
 FailureKind = AgentFailureKind
 

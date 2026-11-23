@@ -10,13 +10,11 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
-from vonk_agent_protocol import (
-    DesiredAssignmentState,
-    ProfileReasonCode,
-)
 from vonk_agent_protocol.agent_words import ProfileDocumentState
 from vonk_agent_protocol.gpu_clock import GpuClockRange, default_gpu_clock
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_agent_protocol.state_machines import DesiredAssignmentState
 from vonk_forge_contracts import EndpointAlias
 
 from ..model_cache.contract import CachedResourceEstimate

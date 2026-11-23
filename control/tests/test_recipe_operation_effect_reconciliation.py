@@ -9,13 +9,9 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    LifecycleState,
-    ReservationState,
-    SecurityRefusalError,
-    UnknownOutcomeError,
-    WaitReason,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
+from vonk_agent_protocol.state_machines import ReservationState
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from vonk_control.install_admission.contracts import InstallEvidenceChanged
 from vonk_control.models.execution import (

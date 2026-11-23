@@ -8,14 +8,13 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import or_, select, true
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    Disposition,
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     OperatorActionName,
-    RouteState,
-    RunState,
 )
-from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.state_machines import RouteState, RunState
 
 from ..distributed_lifecycle import DistributedLifecycleError
 from ..failure_classification import is_definite

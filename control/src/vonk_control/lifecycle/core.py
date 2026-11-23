@@ -45,7 +45,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime
 
-from vonk_agent_protocol import FailureCode, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, WaitReason
 
 from ..recovery_policy import RECOVERY, WAIT_STEP
 from .adapter import KindAdapter

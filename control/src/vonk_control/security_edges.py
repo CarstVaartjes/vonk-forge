@@ -19,7 +19,7 @@ from __future__ import annotations
 from enum import StrEnum
 from types import MappingProxyType
 
-from vonk_agent_protocol import SecurityRefusalReason as Reason
+from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason as Reason
 
 
 class SecurityEdge(StrEnum):

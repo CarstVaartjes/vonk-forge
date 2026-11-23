@@ -16,7 +16,7 @@ import httpx2
 import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.bounded_json import (
     require_integer,
     require_mapping,

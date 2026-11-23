@@ -14,7 +14,8 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-from vonk_agent_protocol import ResourceBlockerCode, ResourcePlanningCode
+from vonk_agent_protocol.lifecycle_vocabulary import ResourceBlockerCode
+from vonk_agent_protocol.reason_codes.resources import ResourcePlanningCode
 from vonk_agent_protocol.swap import GIB, SWAP_POLICY, usable_swap_bytes
 from vonk_control.resource_planning.capacity import plan_capacity
 from vonk_control.resource_planning.memory import memory_capacity_snapshot

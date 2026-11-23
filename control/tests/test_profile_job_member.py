@@ -17,16 +17,19 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import func, select
-from vonk_agent_protocol import (
-    AgentResult,
-    ProjectionCode,
+from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
-    ReservationState,
-    WaitReason,
-    canonical_message,
-    recipe_job_manifest_document,
-    recipe_job_manifest_sha256,
 )
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_document as recipe_job_manifest_document,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_sha256 as recipe_job_manifest_sha256,
+)
+from vonk_agent_protocol.state_machines import ReservationState
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs import states as ajs
 from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
@@ -44,8 +47,8 @@ from vonk_control.run_switch_contract.phase_results import RunSwitchRuntimeInsta
 from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
-from cluster_profiles.fleet_qualification_campaign_cli import _serving_run
 from cluster_profiles.fleet_qualification_campaign_cli.contracts import Lane, Row
+from cluster_profiles.fleet_qualification_campaign_cli.profiles import _serving_run
 
 from .artifact_jobs_support import _configure_artifact_recipe, submitted_artifact_job
 from .lifecycle_simulation.invariants import ENDED

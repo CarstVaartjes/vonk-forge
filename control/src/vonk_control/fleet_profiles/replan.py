@@ -9,7 +9,8 @@ from typing import cast as _typing_cast
 
 from pydantic import ValidationError
 from sqlalchemy.orm import Session, object_session
-from vonk_agent_protocol import ProfileReasonCode, SupersedeCode
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 from vonk_forge_contracts import RecipeDefinition
 
 from ..fleet_profile_contract.applications import (

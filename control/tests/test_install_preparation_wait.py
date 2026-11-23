@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState, RecipeImageCode
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_control.install_admission.contracts import InstallAdmissionBusy
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision

@@ -19,18 +19,19 @@ from collections.abc import Callable
 
 import pytest
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
-    InstallationState,
-    InvalidRequestReason,
-    RunState,
-    SecurityRefusalReason,
     SignedHostHelperGrant,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    SecurityRefusalReason,
     WaitReason,
-    canonical_message,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
+from vonk_agent_protocol.state_machines import InstallationState, RunState
 from vonk_control import host_helper_authority
 from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,

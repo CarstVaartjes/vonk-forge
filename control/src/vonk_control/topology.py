@@ -5,7 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from vonk_agent_protocol import InvalidRequestError, InvalidRequestReason, TopologyCode
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
+from vonk_agent_protocol.outcome import InvalidRequestError
+from vonk_agent_protocol.reason_codes.fleet import TopologyCode
 
 from .recipe_operations.runtime_specs import RecipeRuntimeSpecError, recipe_topology
 

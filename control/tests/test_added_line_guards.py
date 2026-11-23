@@ -1,7 +1,7 @@
 """Each fixture proves a new violation fails while untouched source is ignored."""
 
 import pytest
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
 from .added_line_guards.check import check_source
 from .added_line_guards.patch import added_lines, changed_lines

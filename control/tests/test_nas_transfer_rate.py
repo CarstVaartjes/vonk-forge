@@ -264,8 +264,8 @@ def test_unreadable_wired_and_unselected_links_leave_warning_unchanged() -> None
 def test_link_evidence_fits_the_warning_bound_without_cutting_it_off() -> None:
     # Wrong implementation: appending link data exceeds ProjectionReason's
     # bound and breaks the fleet view, or truncates away the link diagnosis.
-    from vonk_agent_protocol import ProjectionCode
     from vonk_agent_protocol.agent_words import ProfileReasonSeverity
+    from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
     from vonk_control.fleet_projection.common import ProjectionReason
 
     notice = NasTransferNotice(

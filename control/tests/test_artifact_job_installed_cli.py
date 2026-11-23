@@ -13,11 +13,15 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from packaging.requirements import Requirement
 from sqlalchemy import select
-from vonk_agent_protocol import (
+from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
     RecipeJobRunResult,
-    recipe_job_manifest_document,
-    recipe_job_manifest_sha256,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_document as recipe_job_manifest_document,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_sha256 as recipe_job_manifest_sha256,
 )
 from vonk_control.artifact_jobs.api import install_artifact_job_routes
 from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore

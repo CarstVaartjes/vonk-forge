@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleVocabulary,
     ResourceBlockerCode,
     RunAdmissionCode,

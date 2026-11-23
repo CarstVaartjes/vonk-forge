@@ -29,9 +29,7 @@ from .cli_states import (
     SUCCEEDED,
     preparation,
 )
-from .control_client import (
-    ControlClientError,
-)
+from .control_client.errors import ControlClientError
 from .fleet_qualification_observation import (
     QualificationError,
     QualificationObservationUnknown,
@@ -42,12 +40,9 @@ from .fleet_qualification_observation import (
     _forget_key,
     _observe,
 )
-from .qualification_fixtures import (
-    FixtureError,
-    FixtureRegistry,
-    RecipeFixture,
-    validate_outputs,
-)
+from .qualification_fixtures.contracts import FixtureError, RecipeFixture
+from .qualification_fixtures.outputs import validate_outputs
+from .qualification_fixtures.registry import FixtureRegistry
 
 
 def _canonical(value: object) -> bytes:

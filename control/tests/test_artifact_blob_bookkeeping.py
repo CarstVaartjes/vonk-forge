@@ -191,7 +191,7 @@ def test_stream_retries_same_content_without_replaying_iterator(
     """Catches streaming callers bypassing retries or destroying verified temporary bytes."""
     import asyncio
 
-    from vonk_agent_protocol import WaitReason
+    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
     from vonk_control.artifact_jobs.blob_store import ArtifactBlobBusy
 
     store = _store(tmp_path)

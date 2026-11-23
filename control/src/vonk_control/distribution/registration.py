@@ -7,10 +7,8 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    DistributionAssignmentState,
-    DistributionCode,
-)
+from vonk_agent_protocol.reason_codes.fleet import DistributionCode
+from vonk_agent_protocol.state_machines import DistributionAssignmentState
 
 from ..admission_locking import admitting
 from ..artifact_jobs.lifecycle import (

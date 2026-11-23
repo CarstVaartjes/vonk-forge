@@ -15,7 +15,8 @@ its bases so every ``except`` clause keeps working:
 
 from __future__ import annotations
 
-from vonk_agent_protocol import SecurityRefusalReason, UnknownOutcomeError, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 
 
 def security_reason(code: object) -> SecurityRefusalReason | None:

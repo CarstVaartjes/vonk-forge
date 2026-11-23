@@ -12,10 +12,8 @@ from typing import (
 )
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    ResourceBlockerCode,
-    RunSwitchCode,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import ResourceBlockerCode
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
 from ..lifecycle_preflight import LifecyclePreflightCheckpoint
 from ..models.cache import RecipeBuild

@@ -19,7 +19,7 @@ import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.admission_locking import (
     AdmissionRowLock,
     lock_admission_rows,

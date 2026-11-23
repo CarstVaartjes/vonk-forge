@@ -11,16 +11,13 @@ from typing import cast as _typing_cast
 from pydantic import ValidationError
 from sqlalchemy import or_, select, true
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    FailureCode,
-    LifecycleState,
-    ProfileReasonCode,
-    SupersedeCode,
-)
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileProjectionKind,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 
 from ..evidence_repeats import load_subject, note_repeat
 from ..fleet_profile_contract.applications import (

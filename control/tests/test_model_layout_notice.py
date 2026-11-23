@@ -5,20 +5,23 @@ from datetime import UTC, timedelta
 from pathlib import Path
 
 from sqlalchemy import Engine
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
     AgentFailureKind,
+    AgentFailureResult,
+    AgentInstallResult,
     AgentResult,
-    AgentResultState,
-    LifecycleState,
-    ProjectionCode,
     canonical_message,
 )
-from vonk_agent_protocol.contracts import AgentFailureResult, AgentInstallResult
 from vonk_agent_protocol.failure_evidence import (
     FailureDiagnostics,
     ModelStoreLayoutFault,
 )
-from vonk_agent_protocol.lifecycle_vocabulary import FailureCode
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    AgentResultState,
+    FailureCode,
+    LifecycleState,
+)
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.fleet_projection.service import FleetProjection
 

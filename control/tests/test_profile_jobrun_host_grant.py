@@ -5,14 +5,12 @@ import hashlib
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    ContainerRuntimeAction,
-    canonical_message,
-    host_helper_grant_signing_bytes,
-)
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.host_helper import (
+    ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
     HostRuntimeRequest,
+    host_helper_grant_signing_bytes,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput

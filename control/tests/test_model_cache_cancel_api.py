@@ -6,7 +6,8 @@ from unittest.mock import Mock
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
-from vonk_agent_protocol import LifecycleState, canonical_message
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.auth import Actor
 from vonk_control.cache_removal_review import (
     CacheRemovalReviewContent,

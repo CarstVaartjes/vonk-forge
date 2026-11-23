@@ -12,7 +12,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.auth import Actor
 from vonk_control.model_cache.api import install_model_operator_routes
 from vonk_control.model_cache.contract import ModelCacheDownloadResult

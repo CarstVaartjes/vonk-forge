@@ -11,14 +11,11 @@ import pytest
 from sqlalchemy import create_engine, select, text, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    InstallationState,
-    InstallDegradedReason,
-    canonical_message,
-)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.inventory import InventoryRequest
-from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_agent_protocol.reason_codes.admission import InstallDegradedReason
+from vonk_agent_protocol.state_machines import InstallationState, NodeIdentityState
 from vonk_control.agent_contacts import record_contact
 from vonk_control.fleet_projection.common import (
     FleetNode,
@@ -1197,8 +1194,8 @@ def test_retention_failure_survives_inventory_storage_and_projects_one_warning()
     None
 ):
     # Catches journal-only faults and duplicating attention on every retry.
-    from vonk_agent_protocol import ProjectionCode
     from vonk_agent_protocol.inventory import HostSettings
+    from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
     from vonk_agent_protocol.store_cleanup import StoreRetentionFailure
 
     host = HostSettings(

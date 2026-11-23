@@ -11,7 +11,8 @@ from datetime import UTC, datetime, timedelta
 from pydantic import field_validator
 from sqlalchemy import func, literal_column, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import InvalidRequestReason, canonical_message
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.state_machines import RouteState
 from vonk_agent_protocol.telemetry import (
     HostResourceSample,

@@ -10,10 +10,8 @@ from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from vonk_agent_protocol import (
-    RuntimeImageCode,
-    WaitReason,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
 
 from ..content_identity import ImageContent, differing_image_fields, same_image
 from ..fleet_profiles.read_observation import observe_storage

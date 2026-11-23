@@ -13,17 +13,16 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    InvalidRequestError,
-    InvalidRequestReason,
-    SecurityRefusalError,
-    UnknownOutcomeError,
-    WaitReason,
-)
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 from vonk_agent_protocol.compiled_execution_plan import CompiledPlacement
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
+from vonk_agent_protocol.outcome import (
+    InvalidRequestError,
+    SecurityRefusalError,
+    UnknownOutcomeError,
+)
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, read_recipe
 from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 from vonk_forge_contracts.model import ModelFile

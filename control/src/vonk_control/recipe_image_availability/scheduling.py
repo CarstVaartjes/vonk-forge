@@ -8,14 +8,14 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select, true
 from sqlalchemy.orm import Session, object_session
-from vonk_agent_protocol import (
-    ArtifactLifecycleCode,
-    Disposition,
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
-    RecipeImageCode,
     WaitReason,
 )
+from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 
 from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,

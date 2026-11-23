@@ -6,17 +6,14 @@ from collections.abc import Sequence
 from typing import Any
 
 from pydantic import ValidationError
-from vonk_agent_protocol import (
-    LifecycleState,
-    ProfileReasonCode,
-    WaitReason,
-    canonical_message,
-)
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileDocumentState,
     ProfileReasonSeverity,
 )
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 
 from ..bounded_json import sequence
 from ..failure_classification import is_security_failure

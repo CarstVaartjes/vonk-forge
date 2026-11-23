@@ -7,9 +7,7 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    EnrollmentGrantState,
-)
+from vonk_agent_protocol.state_machines import EnrollmentGrantState
 
 from ..agent_api.common import AgentApiServices, EnrollmentGrantResponse
 from ..agent_upgrades.contract import AgentUpgradePackage, AgentUpgradeRequestIntent

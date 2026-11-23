@@ -6,14 +6,14 @@ from dataclasses import replace
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    EnrollmentGrantState,
+from vonk_agent_protocol.lifecycle_vocabulary import (
     ErrorCategory,
     SecurityRefusalReason,
 )
 from vonk_agent_protocol.state_machines import (
     CertificateRecordState,
     CertificateRotationState,
+    EnrollmentGrantState,
     EnrollmentRecordState,
 )
 from vonk_control.enrollment.contract import EnrollmentGrant
@@ -424,7 +424,7 @@ def test_controller_restart_after_ca_outage_serves_renewal_and_fresh_rotation(
     service, monkeypatch
 ):
     """Catches a standing renewal gate after an unavailable CA and lost process."""
-    from vonk_agent_protocol import UnknownError
+    from vonk_agent_protocol.outcome import UnknownError
     from vonk_control.enrollment.service import EnrollmentService
 
     enrollment, sessions, clock, authority = service

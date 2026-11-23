@@ -7,12 +7,14 @@ import sys
 
 import pytest
 
-from cluster_profiles import cli, controller_cli
-from cluster_profiles.control_client import (
+from cluster_profiles import cli
+from cluster_profiles.control_client.errors import (
     ControlConflict,
     ControlMalformedResponse,
     ControlNotFound,
 )
+from cluster_profiles.controller_cli import common as common_module
+from cluster_profiles.controller_cli import profile_load as profile_load_module
 
 KEY = "11111111-1111-4111-8111-111111111111"
 APPLICATION = "33333333-3333-4333-8333-333333333333"
@@ -90,7 +92,7 @@ class _Controller:
 
     def profile_endpoints(
         self, number: int, alias: str | None = None
-    ) -> controller_cli.common.FleetProfileEndpointsView:
+    ) -> common_module.FleetProfileEndpointsView:
         pytest.fail("review submission must not look up serving endpoints")
 
     def loads(self) -> list[object]:
@@ -239,7 +241,7 @@ def test_confirmed_run_review_preserves_the_owner_binding(monkeypatch):
     args = cli._parser().parse_args(
         ("--profile", "2", "profile", "load", "--yes", "--detach")
     )
-    controller_cli.profile_load._review_and_submit_profile_load(
+    profile_load_module._review_and_submit_profile_load(
         controller,
         2,
         args,

@@ -12,7 +12,8 @@ import pytest
 from sqlalchemy import event
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState, ModelCacheCode
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.model_cache import partials_collection
 from vonk_control.model_cache.errors import _ArtifactWriterBusy
 from vonk_control.model_cache.partials_collection import ModelPartialsCollector

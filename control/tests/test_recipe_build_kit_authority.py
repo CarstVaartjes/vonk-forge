@@ -4,7 +4,8 @@ import io
 
 import pytest
 from sqlalchemy import select, update
-from vonk_agent_protocol import LifecycleState, PrebuiltImageCode
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.images import PrebuiltImageCode
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.fleet import AgentNode
@@ -142,7 +143,7 @@ def test_accepted_source_is_not_readmitted_by_declarative_policy(tmp_path):
 @pytest.mark.usefixtures(signed_recipe_releases.__name__)
 def test_failed_controller_pull_ends_and_fresh_request_publishes_exact_image(tmp_path):
     """A spent pull never dispatches a Spark build or poisons the pinned image."""
-    from vonk_agent_protocol import ImageStoreCode
+    from vonk_agent_protocol.reason_codes.images import ImageStoreCode
     from vonk_control.models.execution import ResourceReservation
     from vonk_control.models.jobs import Job
     from vonk_control.models.operations import AgentOperation

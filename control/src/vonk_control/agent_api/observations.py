@@ -13,21 +13,15 @@ from typing import Annotated, cast
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    AgentClaim,
-    AgentEvidenceCode,
-    InventoryRequest,
-    InventoryVerdict,
-    RecipeRunObservationsWire,
-    RouteState,
-    RunState,
-    SecurityRefusalError,
-    UnknownOutcomeError,
-    WaitReason,
-    canonical_message,
-)
 from vonk_agent_protocol.claims import ClaimRequest
+from vonk_agent_protocol.contracts import AgentClaim, canonical_message
 from vonk_agent_protocol.http_failure import TransientReason
+from vonk_agent_protocol.inventory import InventoryRequest, InventoryVerdict
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
+from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
+from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_agent_protocol.telemetry import TelemetryRequest
 
 from ..agent_acceptance import InventoryAcceptance, ObservationAcceptance

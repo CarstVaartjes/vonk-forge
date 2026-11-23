@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from vonk_agent_protocol import ModelCacheCode
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 
 from .constants import _GITHUB_RELEASE_ASSET_HOST, _HF_CANONICAL_HOST
 from .errors import ModelCacheConflictInvalid, ModelCacheResolutionInvalid

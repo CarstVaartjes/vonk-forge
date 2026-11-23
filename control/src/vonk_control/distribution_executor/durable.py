@@ -6,20 +6,16 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as AgentOperationKind
-from vonk_agent_protocol import (
-    DistributionCode,
-    LifecycleState,
-    OperationMemberProgress,
-    OperationProgress,
-    ProgressPhase,
-    WaitReason,
-)
 from vonk_agent_protocol.agent_words import (
     FailureStage,
     ProfileChildPhase,
     ProfileEffectState,
+    ProgressPhase,
 )
+from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.reason_codes.fleet import DistributionCode
+from vonk_agent_protocol.wire_model import OperationMemberProgress, OperationProgress
 
 from ..agent_jobs.retry import abandon_idempotent_job_in_session
 from ..agent_operation_facts import aware

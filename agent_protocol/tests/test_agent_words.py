@@ -8,18 +8,18 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol import (
+from vonk_agent_protocol.agent_words import (
     RETIRED_PROGRESS_PHASE_SPELLINGS,
     TRANSFER_PHASES,
     WAITING_PHASES,
     FailureStage,
     HostHelperResponseStatus,
-    LifecycleVocabulary,
-    OperationProgress,
     ProgressPhase,
     adopt_progress_phase,
 )
 from vonk_agent_protocol.helper_response import HostHelperResponse
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleVocabulary
+from vonk_agent_protocol.wire_model import OperationProgress
 
 ROOT = Path(__file__).resolve().parents[2]
 GENERATED_RUST = ROOT / "rust/crates/vonk-agent-protocol/src/generated.rs"

@@ -4,12 +4,9 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    ReservationState,
-    RunState,
-    UnknownOutcomeError,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.state_machines import ReservationState, RunState
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )
@@ -377,7 +374,7 @@ def test_stale_or_unrelated_work_cannot_supply_replacement_overlap(
 def test_replacement_stop_retains_current_root_after_withdrawal_response_loss(
     tmp_path, postgres_engine, changed_field: str | None
 ):
-    from vonk_agent_protocol import InvalidRequestReason
+    from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
     from vonk_control.jobs.documents import RecipeStopParent
     from vonk_control.recipe_operations.errors import RecipeRequestInvalid
     from vonk_control.run_switch_contract.operations import RunSwitchOperationResult

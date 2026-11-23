@@ -11,7 +11,7 @@ from pydantic import (
     StringConstraints,
     TypeAdapter,
 )
-from vonk_agent_protocol import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress
 
 from ..recipe_image_availability.clocks_contract import readable_or_none
 from ..recipe_operations.lifecycle_contract import LifecycleNodeResult

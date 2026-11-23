@@ -13,7 +13,9 @@ from typing import cast
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import ArtifactLifecycleCode, AssetAvailability, LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
+from vonk_agent_protocol.state_machines import AssetAvailability
 from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs.lifecycle import ArtifactReferenceUnverified
 from vonk_control.artifact_jobs.service import ArtifactJobService

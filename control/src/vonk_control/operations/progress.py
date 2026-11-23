@@ -12,16 +12,15 @@ from datetime import UTC, datetime
 from math import exp
 from typing import Any
 
-from vonk_agent_protocol import (
+from vonk_agent_protocol.agent_words import (
     TRANSFER_PHASES,
     WAITING_PHASES,
-    LifecycleState,
-    OperationMemberProgress,
-    OperationProgress,
     ProgressPhase,
     adopt_progress_phase,
-    canonical_message,
 )
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import OperationMemberProgress, OperationProgress
 
 from .. import agent_operation_states
 from ..jobs import states as job_states

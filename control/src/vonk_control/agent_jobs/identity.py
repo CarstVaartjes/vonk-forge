@@ -9,16 +9,18 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
+from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentProgress,
     AgentResult,
+    canonical_message,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
     SecurityRefusalReason,
-    canonical_message,
 )
-from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, AgentRuntimeIdentity
 from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdentityState
 
 from ..agent_contacts import record_contact

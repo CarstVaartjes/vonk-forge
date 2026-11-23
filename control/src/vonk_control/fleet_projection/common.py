@@ -8,15 +8,8 @@ from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints, TypeAdapter, field_validator
 from sqlalchemy import Row
-from vonk_agent_protocol import (
-    CertificateState,
-    InstallDegradedReason,
-    NodeOfflineReason,
-    ProjectionCode,
-    RunDegradedReason,
-    canonical_message,
-)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.failure_evidence import ModelStoreLayoutFault
 from vonk_agent_protocol.gpu_clock import (
     GpuClockPolicy,
@@ -25,6 +18,13 @@ from vonk_agent_protocol.gpu_clock import (
 from vonk_agent_protocol.inventory import (
     InventoryRequest,
 )
+from vonk_agent_protocol.reason_codes.admission import InstallDegradedReason
+from vonk_agent_protocol.reason_codes.evidence import (
+    NodeOfflineReason,
+    RunDegradedReason,
+)
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+from vonk_agent_protocol.state_machines import CertificateState
 from vonk_agent_protocol.swap import SwapIntent, SwapPolicy
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_CAPACITY_BYTES
 from vonk_agent_protocol.wire_model import strict_json_datetime

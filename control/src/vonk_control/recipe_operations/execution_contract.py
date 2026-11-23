@@ -14,18 +14,18 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
-from vonk_agent_protocol import (
+from vonk_agent_protocol.build_import import RecipeBuildRequest
+from vonk_agent_protocol.compiled_execution_plan import (
+    COMPILED_PLAN_STORAGE_CONTEXT,
     CompiledExecutionPlan,
-    OperatorActionName,
-    RecipeBuildRequest,
-    canonical_message,
 )
-from vonk_agent_protocol.compiled_execution_plan import COMPILED_PLAN_STORAGE_CONTEXT
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.integer_domains import (
     MAX_DATABASE_BIGINT,
     MAX_DATABASE_INTEGER,
 )
 from vonk_agent_protocol.inventory import MemoryPool
+from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName
 
 from ..content_identity import ImageContent, same_image
 from ..library.contract import Digest, ImageDigest, NodeId, Text64, UuidId

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import Engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import CatalogSyncState
+from vonk_agent_protocol.state_machines import CatalogSyncState
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.queries import active_head_revision
 from vonk_control.catalog.revision_contract import read_catalog_document

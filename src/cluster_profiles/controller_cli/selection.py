@@ -11,13 +11,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from ..cli_select import SelectorError
-from ..control_client import (
+from ..control_client.errors import (
     ControlClientError,
     ControlForbidden,
     ControlMalformedResponse,
     ControlUnauthorized,
-    validate_control_document,
 )
+from ..control_client.schema import validate_control_document
 
 if TYPE_CHECKING:
     from ..generated_control.models.library_recipe_projection import (

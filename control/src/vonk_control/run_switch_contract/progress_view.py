@@ -6,11 +6,9 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 
 from pydantic import BaseModel
-from vonk_agent_protocol import (
-    OperationProgress,
-    canonical_message,
-)
 from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import OperationProgress
 
 from ..lifecycle.evidence import (
     BookkeepingReason,

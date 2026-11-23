@@ -5,16 +5,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import (
-    InstallAdmissionCode,
-    InstallationState,
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
+from vonk_agent_protocol.outcome import (
     InvalidRequestError,
-    InvalidRequestReason,
     SecurityRefusalError,
     UnknownOutcomeError,
-    WaitReason,
 )
+from vonk_agent_protocol.reason_codes.admission import InstallAdmissionCode
+from vonk_agent_protocol.state_machines import InstallationState
 
 from ..admission_locking import (
     AdmissionLockBusy,

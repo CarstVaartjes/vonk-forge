@@ -84,15 +84,15 @@ from sqlalchemy import (
 )
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased, sessionmaker
-from vonk_agent_protocol import (
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
     TERMINAL_LIFECYCLE_STATES,
-    InstallationState,
     LifecycleSubject,
     WaitReason,
-    canonical_message,
     stored_words,
 )
-from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+from vonk_agent_protocol.state_machines import InstallationState
 from vonk_forge_contracts import ModelDefinition
 
 from ..agent_jobs.retirement import release_owned_reservations_in_session

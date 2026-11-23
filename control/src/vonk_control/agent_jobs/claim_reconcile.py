@@ -7,14 +7,9 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    AgentOperation,
-    AgentResult,
-    Disposition,
-    FailureCode,
-    LifecycleState,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentOperation, AgentResult, canonical_message
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
 
 from .. import agent_operation_states
 from ..agent_operation_facts import attempt_is_live

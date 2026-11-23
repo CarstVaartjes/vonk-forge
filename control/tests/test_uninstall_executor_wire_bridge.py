@@ -8,15 +8,15 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from vonk_agent_protocol import (
+from vonk_agent_protocol.agent_state import AgentExecutorProbeMode
+from vonk_agent_protocol.lifecycle_vocabulary import (
     TERMINAL_LIFECYCLE_STATES,
     AgentResultState,
-    InstallationState,
     LifecycleState,
-    OutcomeUnknown,
-    RecipeUninstallPayload,
 )
-from vonk_agent_protocol.agent_state import AgentExecutorProbeMode
+from vonk_agent_protocol.outcome import OutcomeUnknown
+from vonk_agent_protocol.recipe_operations import RecipeUninstallPayload
+from vonk_agent_protocol.state_machines import InstallationState
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.models.execution import RecipeInstallation
 from vonk_control.models.fleet import AgentNode

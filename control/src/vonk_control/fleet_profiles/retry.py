@@ -11,17 +11,15 @@ from typing import cast as _typing_cast
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import object_session
-from vonk_agent_protocol import (
-    Disposition,
-    InvalidRequestReason,
-    ProfileReasonCode,
-    SupersedeCode,
-    UnknownOutcomeError,
-)
 from vonk_agent_protocol.agent_words import (
     ProfileOperationKind,
     ProfileReasonSeverity,
 )
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 
 from ..admission_locking import ConstraintReplan, patient_admission
 from ..categorized_errors import MissingRecord

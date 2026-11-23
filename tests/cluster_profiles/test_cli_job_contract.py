@@ -9,7 +9,7 @@ import pytest
 from cluster_profiles import cli, cli_artifact_jobs
 from cluster_profiles.cli_render.artifact_jobs import contract_knob_fields
 from cluster_profiles.cli_states_generated import JobContractState
-from cluster_profiles.control_client import ControlNotFound
+from cluster_profiles.control_client.errors import ControlNotFound
 from cluster_profiles.generated_control.models.artifact_job_contract_response import (
     ArtifactJobContractResponse,
 )

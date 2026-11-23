@@ -10,8 +10,9 @@ from threading import Lock
 from typing import TYPE_CHECKING
 
 from pydantic import ConfigDict, Field, ValidationError
-from vonk_agent_protocol import UnknownOutcomeError, canonical_message
 from vonk_agent_protocol.build_import import RecipeBuildOptions
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_forge_contracts import (
     ModelDefinition,
     PrebuiltImage,
