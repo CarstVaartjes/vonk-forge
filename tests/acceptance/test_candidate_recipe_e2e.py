@@ -23,9 +23,6 @@ from urllib.parse import quote
 
 import httpx2
 import pytest
-from vonk_forge_contracts import read_model, read_recipe
-from vonk_forge_contracts.recipe import RecipeModelSelection
-
 from cluster_profiles.generated_control.models.library_model_identity import (
     LibraryModelIdentity,
 )
@@ -46,6 +43,8 @@ from cluster_profiles.generated_control.models.recipe_detail_response import (
 from cluster_profiles.generated_control.models.recipe_library_response import (
     RecipeLibraryResponse,
 )
+from vonk_forge_contracts import read_model, read_recipe
+from vonk_forge_contracts.recipe import RecipeModelSelection
 
 PACKAGE_MEDIA_TYPE = "application/vnd.vonk-forge.recipe-package.v2+tar+gzip"
 DEFAULT_SLUG = "qwen3-8-flash-next-nvfp4-sglang-dual"

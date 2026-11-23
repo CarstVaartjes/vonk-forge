@@ -36,8 +36,7 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256
 from .display_fixtures import reworded
 from .insert_collision_support import collide_inserts
 from .non_blocking import assert_ended_without_blocking
-from .runtime_image_fixtures import place_test_image
-from .test_recipe_image_availability import (
+from .recipe_image_availability_support import (
     ARCHIVE,
     IMAGE_DIGEST,
     Transport,
@@ -49,6 +48,7 @@ from .test_recipe_image_availability import (
     _runtime,
     _service,
 )
+from .runtime_image_fixtures import place_test_image
 
 
 def test_update_commits_parent_and_exact_scope_before_any_child_admission(tmp_path):

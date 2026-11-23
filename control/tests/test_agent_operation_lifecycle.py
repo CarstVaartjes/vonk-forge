@@ -41,8 +41,7 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
-from .runtime_identity_support import claim_agent
-from .test_agent_jobs import (
+from .agent_jobs_support import (
     COMMIT,
     NODE_A,
     STOP_PAYLOAD,
@@ -52,7 +51,8 @@ from .test_agent_jobs import (
     job_state,
     parent,
 )
-from .test_agent_jobs import service as agent_service  # noqa: F401 - the fixture
+from .agent_jobs_support import service as agent_service  # noqa: F401 - the fixture
+from .runtime_identity_support import claim_agent
 
 KIND_STOP = ProtocolAgentOperation.RECIPE_STOP.value
 KIND_DISTRIBUTION = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value

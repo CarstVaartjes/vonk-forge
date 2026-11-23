@@ -52,9 +52,7 @@ from vonk_control.recipe_operations.errors import (
     RecipeRetryLater,
 )
 
-from .runtime_identity_support import claim_agent
-from .test_artifact_jobs import (
-    NOW,
+from .artifact_jobs_support import (
     MutableClock,
     artifact_create_request,
     cancellation_result,
@@ -62,6 +60,8 @@ from .test_artifact_jobs import (
     running_artifact_service,
     submitted_artifact_job,
 )
+from .recipe_operations_support import NOW
+from .runtime_identity_support import claim_agent
 
 _STOP_REQUEST = "00000000-0000-4000-8000-000000000154"
 

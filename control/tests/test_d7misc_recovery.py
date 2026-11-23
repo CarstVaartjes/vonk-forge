@@ -184,7 +184,7 @@ def test_unmatched_active_handoff_is_named_and_preserves_owners(monkeypatch):
         ReservationState,
         UnknownOutcomeError,
     )
-    from vonk_control import profile_capacity
+    from vonk_control.fleet_profiles import capacity as profile_capacity
     from vonk_control.models.execution import ResourceReservation
 
     claims = {

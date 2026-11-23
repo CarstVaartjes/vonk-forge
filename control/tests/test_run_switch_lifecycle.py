@@ -51,8 +51,8 @@ from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 from vonk_control.run_switch_operations.errors import RunSwitchOperationConflict
 from vonk_control.run_switch_operations.result_helpers import _read_progress
 
-from .test_recipe_operations import NOW, installed_recipe, setup_services
-from .test_run_switch_operations import (
+from .recipe_operations_support import NOW, installed_recipe, setup_services
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _child_operation_id,

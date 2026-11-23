@@ -248,9 +248,9 @@ def test_profile_disk_handoff_preserves_materialized_install_headroom(
         FilesystemRuntimeImageStorage,
     )
 
+    from .recipe_operations_support import NOW, installed_recipe
     from .test_disk_reservations import _record_disk
     from .test_fleet_profile_recovery_identity import _complete_rebuild
-    from .test_recipe_operations import NOW, installed_recipe
 
     sessions, profiles, planner, profile, _api, _headers, _, nodes = _capacity_profile(
         tmp_path, postgres_engine

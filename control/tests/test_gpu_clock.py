@@ -259,8 +259,13 @@ def test_start_always_binds_the_selected_clock_without_supported_levels(
         assert gpu_clock_start_intent(session, NODE) == desired
 
 
-from .test_agent_api import NODE_A, agent_headers, make_agent_system, telemetry_payload
-from .test_agent_api import agent_system as _agent_system
+from .agent_api_support import (
+    NODE_A,
+    agent_headers,
+    make_agent_system,
+    telemetry_payload,
+)
+from .agent_api_support import agent_system as _agent_system
 
 agent_system = _agent_system
 

@@ -25,6 +25,9 @@ from ..distributed_recovery.common import (
     enforce_recovery_deadline,
     recovery_start_plan,
 )
+from ..fleet_profiles.stop_authority import (
+    ProfileJobRunStopJob,
+)
 from ..jobs.documents import (
     ProfilePartialStop,
     RecipeStopParent,
@@ -41,9 +44,6 @@ from ..models.execution import RecipeInstallation, RecipeRun, RunNode
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
 from ..persisted_waits import schedule_wait
-from ..profile_stop_authority import (
-    ProfileJobRunStopJob,
-)
 from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value
 from .intent import _intent_is_current, _job_workload_intent, _shared_workload_intent

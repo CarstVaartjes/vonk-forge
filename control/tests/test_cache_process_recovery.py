@@ -18,7 +18,7 @@ from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheOperation
 
-from .test_model_cache import _artifact
+from .model_cache_support import _artifact
 from .test_model_cache_availability_regressions import _drain, _start
 
 

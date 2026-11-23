@@ -18,11 +18,11 @@ from vonk_control.lifecycle.core import RECOVERY
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.jobs import Job
 
+from .fleet_profiles_support import _uuid
 from .test_fleet_profile_recovery_current import (
     _crash_rounds,
     _failed_profile,
 )
-from .test_fleet_profiles import _uuid
 
 _CAUSE = "temporary runtime dependency unavailable"
 

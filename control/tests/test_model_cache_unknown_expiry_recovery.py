@@ -24,8 +24,8 @@ from vonk_control.operation_api.responses import operation_detail_response
 
 from cluster_profiles.cli_render import render_payload
 
+from .model_cache_support import _artifact
 from .non_blocking import assert_no_orphaned_holds
-from .test_model_cache import _artifact
 from .test_model_cache_cancel_recovery import _api
 
 

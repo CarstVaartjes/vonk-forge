@@ -31,8 +31,8 @@ from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImag
 from vonk_forge_contracts import RecipeDefinition
 
 from .display_fixtures import reworded
+from .recipe_image_availability_support import _add_revision, _recipe, _runtime
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
-from .test_recipe_image_availability import _add_revision, _recipe, _runtime
 
 pytest_plugins = ["tests.test_profile_load_installed_cli"]
 

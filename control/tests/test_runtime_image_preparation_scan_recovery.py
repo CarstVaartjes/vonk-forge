@@ -98,7 +98,7 @@ def test_unknown_receipt_attempt_ends_without_blocking_fresh_preparation(
         AvailabilityBuildReceipt,
     )
 
-    from .test_recipe_image_availability import (
+    from .recipe_image_availability_support import (
         ARCHIVE_SHA,
         IMAGE_DIGEST,
         Transport,
@@ -239,7 +239,7 @@ def test_observation_budget_is_owned_by_request_across_restart_for_all_unknowns(
         RuntimeImagePreparationUnknown,
     )
 
-    from .test_recipe_image_availability import (
+    from .recipe_image_availability_support import (
         _add_revision,
         _builder,
         _recipe,
@@ -363,7 +363,7 @@ def test_postgres_concurrent_owner_newer_intent_fences_stale_claim_and_restarts(
     from vonk_control.models.jobs import Job
     from vonk_control.recipe_image_availability.contracts import BuildUnsettled
 
-    from .test_recipe_image_availability import (
+    from .recipe_image_availability_support import (
         _add_recipe_successors,
         _builder,
         _recipe,

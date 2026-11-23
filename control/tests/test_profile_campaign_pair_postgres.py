@@ -29,9 +29,7 @@ from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.progress import RunSwitchMemberReceipt
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
-from .insert_collision_support import Rendezvous
-from .test_fleet_profile_api import _client, _headers
-from .test_fleet_profiles import (
+from .fleet_profiles_support import (
     NOW,
     _assessment,
     _exact_preparation,
@@ -40,6 +38,8 @@ from .test_fleet_profiles import (
     _SwitchAdapter,
     _uuid,
 )
+from .insert_collision_support import Rendezvous
+from .test_fleet_profile_api import _client, _headers
 from .test_fleet_profiles_canonical import (
     NODE_1,
     NODE_2,

@@ -54,10 +54,7 @@ from vonk_control.recipe_operations.service import RecipeOperationService
 
 from .agent_fences import fenced_operation
 from .agent_grant_requests import own_stop_grant_request, stop_grant_request
-from .recipe_stop_fixtures import recipe_stop_payload
-from .runtime_identity_support import claim_agent
-from .runtime_image_fixtures import refresh_inventory
-from .test_agent_jobs import (
+from .agent_jobs_support import (
     COMMIT,
     NODE_A,
     NODE_B,
@@ -65,21 +62,23 @@ from .test_agent_jobs import (
     STOP_RESULT,
     canonical_start_payload,
     parent,
-    service,  # noqa: F401 -- pytest fixture
 )
+from .recipe_operations_support import (
+    ConcurrentPublisher,
+    bind_route_publications,
+    installed_recipe,
+    setup_services,
+    started_recipe,
+)
+from .recipe_stop_fixtures import recipe_stop_payload
+from .runtime_identity_support import claim_agent
+from .runtime_image_fixtures import refresh_inventory
 from .test_host_helper_authority import (
     NOW,
     RUNTIME_INSTALLATION_ID,
     RUNTIME_RUN_ID,
     runtime_service,
     service_stop_runtime_service,
-)
-from .test_recipe_operations import (
-    ConcurrentPublisher,
-    bind_route_publications,
-    installed_recipe,
-    setup_services,
-    started_recipe,
 )
 
 NODE = "spk_" + "1" * 32
@@ -438,7 +437,7 @@ _HELD = {"newer intent": 0, "newer intent, past the cancellation window": 700}
 
 
 @pytest.mark.parametrize("held", _HELD)
-def test_an_issued_cleanup_order_outlives_a_newer_intent(service, held: str) -> None:  # noqa: F811 -- pytest fixture
+def test_an_issued_cleanup_order_outlives_a_newer_intent(service, held: str) -> None:
     jobs, sessions, clock = service
     job = parent(sessions, clock)
     order = jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
@@ -462,7 +461,7 @@ def test_an_issued_cleanup_order_outlives_a_newer_intent(service, held: str) -> 
     _admit_newer_work(jobs, sessions, clock)
 
 
-def test_an_unissued_cleanup_order_is_claimed_after_a_newer_intent(service) -> None:  # noqa: F811 -- pytest fixture
+def test_an_unissued_cleanup_order_is_claimed_after_a_newer_intent(service) -> None:
     """An offline Spark's Stop waits for it and runs when it returns."""
     jobs, sessions, clock = service
     job = parent(sessions, clock)
@@ -489,7 +488,7 @@ def test_an_unissued_cleanup_order_is_claimed_after_a_newer_intent(service) -> N
     _admit_newer_work(jobs, sessions, clock)
 
 
-def test_a_newer_intent_still_supersedes_an_order_that_is_not_cleanup(service) -> None:  # noqa: F811 -- pytest fixture
+def test_a_newer_intent_still_supersedes_an_order_that_is_not_cleanup(service) -> None:
     """The newest request steers every order but cleanup."""
     jobs, sessions, clock = service
     job = parent(sessions, clock)
@@ -501,7 +500,7 @@ def test_a_newer_intent_still_supersedes_an_order_that_is_not_cleanup(service) -
     assert jobs.heartbeat(claim, None, 30).cancel_requested is True
 
 
-def test_a_silent_sparks_cleanup_order_waits_and_runs_when_it_returns(service) -> None:  # noqa: F811 -- pytest fixture
+def test_a_silent_sparks_cleanup_order_waits_and_runs_when_it_returns(service) -> None:
     jobs, sessions, clock = service
     job = parent(sessions, clock)
     order = jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
@@ -651,12 +650,12 @@ def _lost_job_run(tmp_path):
     operator: its container may remain, so the run's Stop must remove it."""
     from vonk_control.artifact_jobs import states as ajs
 
-    from .test_artifact_jobs import (
+    from .artifact_jobs_support import (
         MutableClock,
         running_artifact_service,
         submitted_artifact_job,
     )
-    from .test_recipe_operations import NOW as RECIPE_NOW
+    from .recipe_operations_support import NOW as RECIPE_NOW
 
     sessions, operations, _queue, artifacts, run_id, node_id = running_artifact_service(
         tmp_path

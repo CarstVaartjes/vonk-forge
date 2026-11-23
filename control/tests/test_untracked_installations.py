@@ -16,7 +16,7 @@ from vonk_control.model_primitives import Base
 from vonk_control.models.execution import ArtifactJob, RecipeInstallation
 from vonk_control.untracked_installations import untracked_installations, untracked_runs
 
-from .test_artifact_jobs import running_artifact_service, submitted_artifact_job
+from .artifact_jobs_support import running_artifact_service, submitted_artifact_job
 from .test_catalog_revision_collection import NODE, Catalog
 
 

@@ -43,8 +43,8 @@ def column_message(row: object, column: str) -> bytes:
     encoding. Agent orders and other accepted documents retain their bound wire
     bytes, including timestamp spellings. A damaged column has no valid bytes.
     """
+    from ..fleet_profiles.stop_authority import ProfileJobRunStopJob
     from ..jobs.documents import _RecipeParent
-    from ..profile_stop_authority import ProfileJobRunStopJob
 
     value = read_row_column(row, column)
     if isinstance(value, Residue):

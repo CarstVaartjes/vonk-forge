@@ -38,15 +38,7 @@ from vonk_control.recipe_image_availability.view_contract import (
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
-from .recipe_removal_review_support import remove_after_review
-from .runtime_image_fixtures import place_test_image
-from .test_model_removal_reference_lifecycle import (
-    _one_model,
-    _register_model,
-    _removal_service,
-    _seed_model,
-)
-from .test_recipe_image_availability import (
+from .recipe_image_availability_support import (
     ARCHIVE,
     ARCHIVE_SHA,
     _add_head,
@@ -55,6 +47,14 @@ from .test_recipe_image_availability import (
     _recipe,
     _reference_receipt,
     _runtime,
+)
+from .recipe_removal_review_support import remove_after_review
+from .runtime_image_fixtures import place_test_image
+from .test_model_removal_reference_lifecycle import (
+    _one_model,
+    _register_model,
+    _removal_service,
+    _seed_model,
 )
 
 

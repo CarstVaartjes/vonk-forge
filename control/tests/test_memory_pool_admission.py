@@ -25,11 +25,11 @@ from vonk_control.run_admission import (
     RunAdmissionService,
 )
 
+from .recipe_builds_support import RecordingQueue
+from .recipe_builds_support import setup as build_setup
+from .recipe_operations_support import installed_recipe
 from .test_load_phase_swap_admission import set_measured_peaks
 from .test_profile_capacity_admission import _capacity_profile
-from .test_recipe_builds import RecordingQueue
-from .test_recipe_builds import setup as build_setup
-from .test_recipe_operations import installed_recipe
 from .test_run_admission import setup as run_setup
 
 

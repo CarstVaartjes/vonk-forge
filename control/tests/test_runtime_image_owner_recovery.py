@@ -22,8 +22,8 @@ from vonk_control.runtime_image_preparation.preparation import prepare_runtime_i
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.runtime_image_preparation.transport import OciLayoutImageTransport
 
+from .recipe_image_availability_support import _add_revision, _recipe, _runtime
 from .test_oci_image_store import _docker_archive, _layer
-from .test_recipe_image_availability import _add_revision, _recipe, _runtime
 
 
 @pytest.mark.needs_skopeo

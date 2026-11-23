@@ -3,6 +3,12 @@ from io import BytesIO, TextIOWrapper
 from pathlib import Path
 
 import pytest
+from cluster_profiles.generated_control.models.gpu_clock_observation import (
+    GpuClockObservation,
+)
+from cluster_profiles.generated_control.models.gpu_clock_unavailable import (
+    GpuClockUnavailable,
+)
 from vonk_agent_protocol import ProjectionCode
 
 from cluster_profiles.cli_render import progress_line, render_payload
@@ -34,12 +40,6 @@ from cluster_profiles.cli_render.profile import EndpointListing, endpoint_listin
 from cluster_profiles.cli_render.review import ReviewVerdict, review_verdict
 from cluster_profiles.cli_states_generated import GpuClockMetric, QualificationStatus
 from cluster_profiles.control_client import ControlMalformedResponse
-from cluster_profiles.generated_control.models.gpu_clock_observation import (
-    GpuClockObservation,
-)
-from cluster_profiles.generated_control.models.gpu_clock_unavailable import (
-    GpuClockUnavailable,
-)
 
 
 def test_unknown_transfer_total_does_not_hide_measured_work_or_invent_percent():
