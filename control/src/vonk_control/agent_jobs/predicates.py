@@ -27,6 +27,7 @@ from ..agent_operation_facts import (
     operation_start_deadline as _operation_start_deadline,
 )
 from ..jobs.agent_contract import ClaimFacts
+from ..jobs.documents import RecipeStartParent
 from ..logging import redact_text
 from ..models.fleet import AgentNode
 from ..models.jobs import Job
@@ -393,7 +394,6 @@ def _anchor_start_budget(
     """
 
     # job_documents reaches this module through the build contracts.
-    from ..jobs.documents import RecipeStartParent
 
     job = session.get(Job, operation.parent_job_id, with_for_update=True)
     if job is None:

@@ -22,6 +22,7 @@ from vonk_agent_protocol.state_machines import (
 
 from ..admission_locking import admission_attempts
 from ..jobs import states as job_states
+from ..jobs.documents import RecipeBuildIntent
 from ..lifecycle.evidence import (
     Damaged,
     Residue,
@@ -31,7 +32,7 @@ from ..models.cache import RecipeBuild
 from ..models.execution import InstallationNode, RecipeInstallation, ResourceReservation
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
-from ..recipe_builds.cancellation import RecipeBuildIntent, build_cancellation
+from ..recipe_builds.cancellation import build_cancellation
 from ..recipe_builds.common import RecipeBuildPlan
 from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value

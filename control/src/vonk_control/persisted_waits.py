@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import get_args
 
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel
 
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
@@ -17,7 +17,6 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitResumeCondition,
 )
 from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
-from vonk_agent_protocol.wire_model import canonical_message
 
 from .agent_operation_facts import aware
 from .jobs import states as job_states
@@ -41,17 +40,7 @@ from .models.waits import ScheduledWaitOwner
 from .operations.blockers import BlockingOperation, OperationBlocker, make_blocker
 from .stored.json_values import binding_for
 from .strict_json import warn_unreadable_once
-from .wait_contract import QueueWait, WaitEvidence
-
-_REASON = TypeAdapter(OperationReason)
-
-
-def typed_wait_reason(value: str | None, fallback: OperationReason) -> OperationReason:
-    """Adopt a declared code, never classify the human-readable detail."""
-    try:
-        return _REASON.validate_json(canonical_message(value))
-    except ValidationError:
-        return fallback
+from .wait_contract import QueueWait, WaitEvidence, typed_wait_reason
 
 
 def read_wait(owner: ScheduledWaitOwner) -> QueueWait | None:

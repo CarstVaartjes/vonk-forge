@@ -25,7 +25,8 @@ from ..logging import redact_text
 from ..models.cache import ModelCacheOperation, ModelCacheSet
 from ..operations.blockers import make_blocker
 from ..operations.contract import AvailabilityRecoveryAction
-from ..persisted_waits import schedule_wait, typed_wait_reason
+from ..persisted_waits import schedule_wait
+from ..wait_contract import typed_wait_reason
 from .artifacts import ArtifactSetManifest
 from .catalog_helpers import _iso
 from .constants import (

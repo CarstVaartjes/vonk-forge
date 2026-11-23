@@ -53,7 +53,7 @@ from vonk_control.lifecycle.types import (
     State,
     Tick,
 )
-from vonk_control.lifecycle_preflight import LifecyclePreflightCheckpoint
+from vonk_control.lifecycle_preflight_contract import LifecyclePreflightCheckpoint
 from vonk_control.models.jobs import Job
 from vonk_control.persisted_waits import read_wait
 from vonk_control.recovery_policy import RECOVERY

@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Literal
 
-from pydantic import ConfigDict
 from sqlalchemy import String, and_, cast, or_, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
@@ -30,6 +28,7 @@ from ..fleet_profile_contract.review import FleetProfilePreview
 from ..fleet_profile_contract.vocabulary import profile_switch_child_request_key
 from ..fleet_profiles import states as fleet_profile_states
 from ..jobs import states as job_states
+from ..jobs.documents import RecipeBuildIntent
 from ..models.cache import RecipeBuild
 from ..models.fleet import AgentNode, FleetProfileApplication
 from ..models.jobs import Job
@@ -41,14 +40,7 @@ from ..recipe_operations.lifecycle_contract import (
 from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_contract.plans import RunSwitchPlan
 from ..runtime_image_preparation.contracts import RuntimeImageReceipt
-from ..strict_json import StrictJSONModel, read_stored_model
-
-
-class RecipeBuildIntent(StrictJSONModel):
-    """The accepted producer's intent, independent of its current consumers."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-    kind: Literal["independent", "dependency"]
+from ..strict_json import read_stored_model
 
 
 def read_build_intent(job: Job) -> RecipeBuildIntent:

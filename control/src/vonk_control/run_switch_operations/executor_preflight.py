@@ -19,7 +19,8 @@ from vonk_agent_protocol.state_machines import RunState
 from vonk_agent_protocol.wire_model import canonical_message
 
 from ..inventory.repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
-from ..lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
+from ..lifecycle_preflight import LifecyclePreflight
+from ..lifecycle_preflight_contract import LifecyclePreflightCheckpoint
 from ..models.cache import RecipeBuild
 from ..models.catalog import CatalogDocumentRevision
 from ..models.execution import RecipeRun, RunNode

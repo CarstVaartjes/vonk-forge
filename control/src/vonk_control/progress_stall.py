@@ -350,7 +350,8 @@ def observe_application_progress(
     if target.next_action_at is not None and progress.blockers:
         from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 
-        from .persisted_waits import schedule_wait, typed_wait_reason
+        from .persisted_waits import schedule_wait
+        from .wait_contract import typed_wait_reason
 
         causes = [
             b for b in progress.blockers if b.code is not ProgressAlarmCode.STALLED

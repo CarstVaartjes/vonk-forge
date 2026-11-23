@@ -124,6 +124,12 @@ class RecipeRunStatus:
     one_shot: bool
 
 
+class RecipeRunStatusReader(Protocol):
+    """The one lifecycle read Run/Switch observation needs: a run's status."""
+
+    def run_status(self, run_id: str) -> RecipeRunStatus: ...
+
+
 new_recipe_job = RecipeOperationAdapter.new_job
 
 
