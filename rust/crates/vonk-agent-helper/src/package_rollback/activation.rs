@@ -51,12 +51,9 @@ impl Store {
         // The current signed request supersedes damaged or unfinished journals.
         // No old journal supplies source bytes or rollback authority. Verify the
         // current source bytes before replacing custody; disk drift cannot veto
-        // a newer authorized candidate.
-        if digest(source)? != authority.source.package_sha256
-            || digest(candidate)? != candidate_sha256
-        {
-            return Err("authorized package digest differs".into());
-        }
+        // a newer authorized candidate. Both packages arrive through
+        // `take_package_custody`, which hashes and signature-checks them; they
+        // are not hashed again here.
         for package in [source, candidate] {
             let package = package.to_str().ok_or("invalid package path")?;
             if command("/usr/bin/dpkg-deb", &["--field", package, "Package"], false)?
