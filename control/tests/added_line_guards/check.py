@@ -34,7 +34,7 @@ def check_source(
         # Browser fixtures (control/web/e2e) hold the wire documents, like the .spec files.
         or path.startswith(("tests/", "control/web/e2e/"))
         or path.endswith(
-            ("/tests.rs", ".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")
+            ("/tests.rs", "_tests.rs", ".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")
         )
     )
     noexit_hits: list[str] = (

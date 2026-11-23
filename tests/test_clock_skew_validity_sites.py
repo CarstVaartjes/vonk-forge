@@ -37,7 +37,7 @@ SITES = {
     ),
     "rust/crates/vonk-agent/src/identity.rs": (
         "the agent allows CERTIFICATE_CLOCK_SKEW_SECONDS before not_before",
-        "rust/crates/vonk-agent/src/identity.rs",
+        "rust/crates/vonk-agent/src/identity/tests.rs",
         "a_fresh_certificate_is_valid_on_a_clock_that_lags_its_issuer",
     ),
 }
@@ -45,8 +45,10 @@ SITES = {
 
 def _is_test_source(path: Path) -> bool:
     parts = path.relative_to(ROOT).parts
-    return path.name in {"tests.rs", "test_support.rs"} or any(
-        part in {"tests", "test_support"} for part in parts
+    return (
+        path.name == "test_support.rs"
+        or path.name.endswith("tests.rs")
+        or any(part in {"tests", "test_support"} for part in parts)
     )
 
 
