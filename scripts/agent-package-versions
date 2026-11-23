@@ -71,9 +71,9 @@ def read(run_id: str, sha: str) -> list[str]:
     records = [item for item in artifacts if not item.get("expired")]
     if not records:
         raise ValueError("agent package versions record is missing")
-    if len(records) != 1:
-        raise ValueError("agent package versions are ambiguous")
-    archive = gh(f"/repos/{repository}/actions/artifacts/{records[0]['id']}/zip")
+    # A partial rerun can leave one record per attempt; the newest stands.
+    newest = max(records, key=lambda item: item["id"])
+    archive = gh(f"/repos/{repository}/actions/artifacts/{newest['id']}/zip")
     with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
         member = bundle.getinfo("versions.txt")
         if member.file_size > MAX_RECORD_BYTES:
