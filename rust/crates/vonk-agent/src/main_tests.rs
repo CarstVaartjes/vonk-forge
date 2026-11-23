@@ -1,3 +1,4 @@
+#![cfg(test)]
 #[tokio::test(start_paused = true)]
 async fn refused_control_reports_and_resumes_without_certificate_change() {
     // Wrong implementation: one control 403 permanently suppresses claims

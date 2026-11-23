@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::{ExitCause, FailureDiagnostics, LOG_TAIL_BYTES, is_omission_marker, omission_marker};
 
 #[test]

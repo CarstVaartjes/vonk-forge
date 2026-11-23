@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 use vonk_agent_protocol::{canonical_generated_json, parse_strict};
 

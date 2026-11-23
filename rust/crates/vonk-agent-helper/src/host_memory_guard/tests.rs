@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 #[test]
 fn absent_container_receipts_and_interrupted_writes_leave_after_inventory_recovers() {

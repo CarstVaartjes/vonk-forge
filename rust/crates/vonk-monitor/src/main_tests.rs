@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::{INTERVAL, next_tick_after};
 use std::time::Duration;
 

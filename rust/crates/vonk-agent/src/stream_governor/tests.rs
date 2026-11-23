@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 
 const MIB: u64 = 1024 * 1024;

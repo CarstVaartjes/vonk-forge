@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 use crate::generated::{ApplySwapOperation, HostOperationKind, SwapObservation};
 use crate::{HostHelperOperation, canonical_json, parse_strict};

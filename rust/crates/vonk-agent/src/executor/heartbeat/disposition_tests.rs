@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 
 fn refused(status: u16) -> ClientError {

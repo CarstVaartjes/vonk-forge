@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 
 fn enrollment_bootstrap_document() -> serde_json::Value {

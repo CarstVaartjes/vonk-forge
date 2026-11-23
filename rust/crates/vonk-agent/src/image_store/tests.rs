@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 
 const DIGEST: &str = "0e16f117c4f95ba678a0d89ef1fe2cbf2c08bec568f9c55d4873272ac1d69b7e";

@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 use vonk_agent_protocol::RecipeBuildAdapterDefinition;
 

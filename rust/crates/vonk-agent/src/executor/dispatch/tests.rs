@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 use crate::executor::test_support::{NoProcess, claim};
 use uuid::Uuid;

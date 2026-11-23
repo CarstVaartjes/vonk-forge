@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 use rcgen::{CertificateParams, KeyPair, PKCS_ED25519, date_time_ymd};
 use tempfile::tempdir;

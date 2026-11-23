@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 use crate::process::{ProcessError, ProcessRunner, Program, SystemProcessRunner};
 use std::{

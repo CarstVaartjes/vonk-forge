@@ -1,3 +1,4 @@
+#![cfg(test)]
 use crate::{HostRuntimeAction, HostRuntimeRequest};
 #[test]
 fn fixed_helper_preflight_cannot_carry_a_command_or_mount_argument() {

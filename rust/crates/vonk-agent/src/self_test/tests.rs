@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 use std::io;
 use std::os::unix::fs::{PermissionsExt, symlink};

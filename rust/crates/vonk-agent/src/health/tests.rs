@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::{readiness_endpoint, wait_ready, wait_ready_until};
 use chrono::{Duration as ChronoDuration, FixedOffset, Utc};
 use std::{

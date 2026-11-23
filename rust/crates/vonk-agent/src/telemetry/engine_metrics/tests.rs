@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 
 const LOOPBACK: IpAddr = crate::client::test_support::FIXTURE_IP;

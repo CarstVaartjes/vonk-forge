@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::{
     DIAGNOSTIC_LIMIT, DIAGNOSTIC_TRUNCATED, ProcessDiskReserve, ProcessRunner, Program,
     SystemProcessRunner, directory_bytes, podman_image_tmpdir, present_during_scan,

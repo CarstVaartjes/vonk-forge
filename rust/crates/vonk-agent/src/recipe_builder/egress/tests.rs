@@ -1,3 +1,4 @@
+#![cfg(test)]
 /// The proxy's connection bound, read from its own source: one owner.
 fn proxy_max_connections() -> usize {
     include_str!("../../../../vonk-build-egress/src/main.rs")

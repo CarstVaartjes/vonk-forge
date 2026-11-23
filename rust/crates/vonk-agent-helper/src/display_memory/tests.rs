@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 fn put(root: &Path, path: &str, bytes: impl AsRef<[u8]>) {
     let path = root.join(path);

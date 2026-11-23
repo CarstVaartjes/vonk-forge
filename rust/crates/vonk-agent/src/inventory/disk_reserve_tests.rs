@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::{
     STATE_DATABASE_DISK_RESERVE_BYTES, disk_reserve_degraded, maintain_state_database_reserve,
 };

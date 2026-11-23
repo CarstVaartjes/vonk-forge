@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::{
     HelperErrorCode, HelperRejection, HelperResponse, HostHelperResponseStatus,
     MAX_CONCURRENT_REQUESTS, acquire_worker,

@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 
 /// Scales the fixtures that are sized against the retained bound.

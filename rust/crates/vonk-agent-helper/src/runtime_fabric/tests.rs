@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 
 pub(crate) fn gid(root: &Path, device: &str, index: &str, address: &str, kind: &str) {

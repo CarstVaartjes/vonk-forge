@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::{combined_status, progress_payload, watchdog_enabled_for};
 
 #[test]

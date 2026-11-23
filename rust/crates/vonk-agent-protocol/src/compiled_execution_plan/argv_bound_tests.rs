@@ -1,3 +1,4 @@
+#![cfg(test)]
     use super::{MAX_ARGV_BYTES, MAX_ARGV_ITEM_BYTES, MAX_ARGV_ITEMS, valid_opaque_argv};
 
     #[test]

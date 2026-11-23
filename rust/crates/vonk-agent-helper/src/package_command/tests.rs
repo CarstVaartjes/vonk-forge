@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 #[test]
 fn timeout_stops_child_script_before_it_can_mutate_state() {

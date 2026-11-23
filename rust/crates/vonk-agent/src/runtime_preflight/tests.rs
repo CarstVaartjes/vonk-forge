@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 use crate::process::ProcessOutput;
 use std::cell::RefCell;

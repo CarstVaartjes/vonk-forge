@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::{
     HOST_RUNTIME_REQUEST_ENVELOPE_BYTES, HostRuntimeAction, HostRuntimeRequest,
     HostRuntimeRequestRule, MAX_HOST_RUNTIME_REQUEST_BYTES, canonical_json,

@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 
 fn request(action: HostRuntimeAction, installation_id: Option<Uuid>) -> HostRuntimeRequest {
