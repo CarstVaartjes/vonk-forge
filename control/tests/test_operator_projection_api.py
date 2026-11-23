@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from vonk_control.agent_api.common import AgentApiServices, EnrollmentGrantResponse
-from vonk_control.agent_upgrade_contract import (
+from vonk_control.agent_upgrades.contract import (
     AgentUpgradePackage,
     AgentUpgradeRequestIntent,
 )

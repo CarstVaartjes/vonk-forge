@@ -34,7 +34,7 @@ from ..agent_operation_facts import (
     RESTART_REISSUE_OPERATIONS as _RESTART_REISSUE_OPERATIONS,
 )
 from ..agent_operation_facts import aware as _aware
-from ..agent_upgrade_status import AGENT_UPGRADE_AWAITING_IDENTITY_REASONS
+from ..agent_upgrades.status import AGENT_UPGRADE_AWAITING_IDENTITY_REASONS
 from ..failure_classification import disposition, is_security_failure
 from ..lifecycle.agent_operation import (
     AgentOperationAdapter,

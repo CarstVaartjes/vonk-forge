@@ -32,7 +32,7 @@ from vonk_control.agent_jobs.retry import result_disposition
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_operation_facts import aware, operation_start_deadline
 from vonk_control.agent_outcome import agent_outcome, stored_report
-from vonk_control.agent_upgrade_status import (
+from vonk_control.agent_upgrades.status import (
     AGENT_UPGRADE_AWAITING_IDENTITY_PREDECESSOR_REASON,
     AGENT_UPGRADE_AWAITING_IDENTITY_REASON,
 )

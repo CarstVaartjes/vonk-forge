@@ -48,7 +48,7 @@ from vonk_forge_contracts import (
     RecipeDisplay,
 )
 
-from ..agent_upgrade_contract import (
+from ..agent_upgrades.contract import (
     AgentUpgradeRolloutPayload,
     AgentUpgradeRolloutResult,
 )

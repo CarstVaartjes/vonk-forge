@@ -18,7 +18,7 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.contracts import OperatorRetirementRefused
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.agent_upgrade_status import (
+from vonk_control.agent_upgrades.status import (
     agent_upgrade_next_action,
 )
 from vonk_control.api.application import create_app

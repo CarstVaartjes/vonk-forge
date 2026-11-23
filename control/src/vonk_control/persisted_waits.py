@@ -311,7 +311,7 @@ def owner_identity(
         previous = read_wait(owner)
         kind = previous.owner_kind if previous else WaitOwnerKind.JOB
         if previous is None:
-            from .agent_upgrade_contract import AgentUpgradeRolloutPayload
+            from .agent_upgrades.contract import AgentUpgradeRolloutPayload
             from .jobs.documents import (
                 AvailabilityJobPayload,
                 RecipeBuildCleanupParent,

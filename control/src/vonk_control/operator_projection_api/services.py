@@ -12,7 +12,7 @@ from vonk_agent_protocol import (
 )
 
 from ..agent_api.common import AgentApiServices, EnrollmentGrantResponse
-from ..agent_upgrade_contract import AgentUpgradePackage, AgentUpgradeRequestIntent
+from ..agent_upgrades.contract import AgentUpgradePackage, AgentUpgradeRequestIntent
 from ..enrollment.bootstrap import accepted_installer_url
 from ..enrollment.contract import (
     EnrollmentGrant,

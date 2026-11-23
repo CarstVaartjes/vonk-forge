@@ -15,17 +15,17 @@ from vonk_agent_protocol.package_upgrade import PackageActivationOutcome
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.agent_upgrade_contract import (
+from vonk_control.agent_upgrades import package as agent_upgrades_module
+from vonk_control.agent_upgrades.constants import _AGENT_UPGRADE_RECOVERY_FENCE
+from vonk_control.agent_upgrades.contract import (
     AgentUpgradePackage,
     AgentUpgradeRequestIntent,
 )
-from vonk_control.agent_upgrade_status import (
-    AGENT_UPGRADE_AWAITING_IDENTITY_PREDECESSOR_REASON,
-)
-from vonk_control.agent_upgrades import package as agent_upgrades_module
-from vonk_control.agent_upgrades.constants import _AGENT_UPGRADE_RECOVERY_FENCE
 from vonk_control.agent_upgrades.errors import AgentUpgradeConflict
 from vonk_control.agent_upgrades.service import AgentUpgradeService
+from vonk_control.agent_upgrades.status import (
+    AGENT_UPGRADE_AWAITING_IDENTITY_PREDECESSOR_REASON,
+)
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.queue import AttemptFence, JobService, StaleAttempt
 from vonk_control.model_primitives import Base

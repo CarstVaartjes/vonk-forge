@@ -172,7 +172,7 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/agent_upgrade_contract.py",
+      "module": "control/src/vonk_control/agent_upgrades/contract.py",
       "kind": "controller-contract"
     },
     {
