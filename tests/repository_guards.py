@@ -65,6 +65,10 @@ GUARDS: tuple[str, ...] = (
 
 SCOPED: tuple[tuple[str, str], ...] = (
     (
+        "tests/scripts/test_touched_tests.py",
+        "scripts/test changed selects a test its patch edits, one importing a touched module directly or through test support modules, and not an unrelated one.",
+    ),
+    (
         "control/tests/test_missing_acceptance_retryable.py",
         "A mutation that returns without writing its owner row answers the retryable 503, then resolves once the row exists.",
     ),

@@ -11,6 +11,7 @@ usage() {
 Usage: scripts/test SUITE [--markers EXPR] [--shard I/N] [--durations FILE] [-- PYTEST_ARGS...]
 
 SUITE is one of:
+  changed     the guards plus only the tests your diff touches (scripts/test-changed)
   guards      fast cross-area checks in tests/repository_guards.py
   repository  tests/, excluding guards
   control     control/tests, except the built-image and corpus-acceptance checks, the Rust wire
@@ -25,6 +26,7 @@ SUITE is one of:
               VONK_TEST_CONTROLLER_IMAGE / VONK_TEST_WORKER_IMAGE
 
 --markers EXPR    also require this marker expression (for example "not lane")
+--files-from FILE run only the test files listed in FILE, in this suite's environment
 --shard I/N       run only shard I of N (1-based), whole files per shard,
                   balanced by the measured per-file durations in --durations
                   when given (unmeasured files get the measured average)
@@ -37,12 +39,17 @@ USAGE
 (($#)) || { usage >&2; exit 2; }
 suite=$1
 shift
+if [[ "$suite" == changed ]]; then
+    exec scripts/test-changed "$@"
+fi
+files_from=
 shard=
 durations=
 markers=
 while (($#)); do
     case "$1" in
         --markers) markers=${2:?--markers needs an expression}; shift 2 ;;
+        --files-from) files_from=${2:?--files-from needs a file}; shift 2 ;;
         --shard) shard=${2:?--shard needs I/N}; shift 2 ;;
         --durations) durations=${2:?--durations needs a file}; shift 2 ;;
         --) shift; break ;;
@@ -115,7 +122,10 @@ if [[ "$suite" == repository || "$suite" == control || "$suite" == corpus ]]; th
     scripts/sync-cli-dependencies
 fi
 
-if [[ -n "$shard" ]]; then
+if [[ -n "$files_from" ]]; then
+    mapfile -t paths < "$files_from"
+    ((${#paths[@]})) || { echo "--files-from named no files" >&2; exit 1; }
+elif [[ -n "$shard" ]]; then
     # A shard is a set of whole test files, found the way pytest finds them
     # (test_*.py under the suite paths) minus the files the selection ignores.
     # Markers and --deselect apply when the shard runs, so no collection pass
