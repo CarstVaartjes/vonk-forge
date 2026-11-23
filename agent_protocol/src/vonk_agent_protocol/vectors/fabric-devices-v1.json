@@ -1,0 +1,195 @@
+{
+  "comment": "FabricDevice lists as the agent reports them in HostSettings (bytes received plus transmitted over window_seconds since its last report, from the sysfs port counters in 4-byte words) and whether the Controller raises network.rails-underused. Busy is at least 8 MiB/s, flat under 1% of the busy sibling, window at least 30 s. The Rust agent test reads every list through the generated contract and reads the sysfs sample as the agent_sample; the Controller test projects each case onto a node.",
+  "cases": [
+    {
+      "name": "both rails of both ports carry traffic",
+      "fabric_devices": [
+        {
+          "port": "01:00.0",
+          "active": true,
+          "bytes": 3700000000,
+          "window_seconds": 120
+        },
+        {
+          "port": "01:00.0",
+          "active": true,
+          "bytes": 3600000000,
+          "window_seconds": 120
+        },
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 3650000000,
+          "window_seconds": 120
+        },
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 3640000000,
+          "window_seconds": 120
+        }
+      ],
+      "underused": false
+    },
+    {
+      "name": "one rail flat beside a busy sibling",
+      "fabric_devices": [
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 7300000000,
+          "window_seconds": 120
+        },
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 12288,
+          "window_seconds": 120
+        }
+      ],
+      "underused": true
+    },
+    {
+      "name": "idle fabric keepalives only",
+      "fabric_devices": [
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 20000,
+          "window_seconds": 120
+        },
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 9000,
+          "window_seconds": 120
+        }
+      ],
+      "underused": false
+    },
+    {
+      "name": "sibling port down so never launched",
+      "fabric_devices": [
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 7300000000,
+          "window_seconds": 120
+        },
+        {
+          "port": "01:00.1",
+          "active": false,
+          "bytes": 0,
+          "window_seconds": 120
+        }
+      ],
+      "underused": false
+    },
+    {
+      "name": "window too short to judge",
+      "fabric_devices": [
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 7300000000,
+          "window_seconds": 10
+        },
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 0,
+          "window_seconds": 10
+        }
+      ],
+      "underused": false
+    },
+    {
+      "name": "uneven but both in use",
+      "fabric_devices": [
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 7300000000,
+          "window_seconds": 120
+        },
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 730000000,
+          "window_seconds": 120
+        }
+      ],
+      "underused": false
+    },
+    {
+      "name": "no previous reading yet",
+      "fabric_devices": [],
+      "underused": false
+    }
+  ],
+  "agent_sample": {
+    "comment": "Two same-port devices (PCI domains 0000 and 0002, function 01:00.1) and a down port; counters in 4-byte words; the second reading is 120 s after the first.",
+    "devices": [
+      {
+        "name": "rocep1s0f1",
+        "pci": "0000:01:00.1",
+        "state": "4: ACTIVE",
+        "first": [
+          1000,
+          2000
+        ],
+        "second": [
+          400001000,
+          400002000
+        ]
+      },
+      {
+        "name": "roceP2p1s0f1",
+        "pci": "0002:01:00.1",
+        "state": "4: ACTIVE",
+        "first": [
+          500,
+          500
+        ],
+        "second": [
+          503,
+          500
+        ]
+      },
+      {
+        "name": "rocep1s0f0",
+        "pci": "0000:01:00.0",
+        "state": "1: DOWN",
+        "first": [
+          0,
+          0
+        ],
+        "second": [
+          0,
+          0
+        ]
+      }
+    ],
+    "window_seconds": 120,
+    "expected": [
+      {
+        "port": "01:00.1",
+        "active": true,
+        "bytes": 12,
+        "window_seconds": 120
+      },
+      {
+        "port": "01:00.0",
+        "active": false,
+        "bytes": 0,
+        "window_seconds": 120
+      },
+      {
+        "port": "01:00.1",
+        "active": true,
+        "bytes": 3200000000,
+        "window_seconds": 120
+      }
+    ]
+  }
+}

@@ -648,6 +648,7 @@ def _emit(
             safe,
             getattr(args, "command", None) or "profile",
             wide=getattr(args, "wide", False),
+            show_all=getattr(args, "show_all", False),
             action=(
                 "connection"
                 if getattr(args, "check_connection", False)

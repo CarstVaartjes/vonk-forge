@@ -514,12 +514,12 @@ test("reuses the create identity across lost receipts, resumed upload, and exact
   expect(client.artifactJobByRequestId).toHaveBeenCalledWith(firstCreateKey);
   expect(client.createArtifactJob.mock.calls[1]![2]).toBe(firstCreateKey);
 
-  await user.click(screen.getByRole("button", { name: "Review and try again" }));
+  await user.click(screen.getByRole("button", { name: "Retry" }));
   await user.click(screen.getByRole("button", { name: "Submit artifact job" }));
   expect(await screen.findByText("finalize receipt was lost")).toBeInTheDocument();
   expect(client.uploadArtifactJobInput).toHaveBeenCalledOnce();
 
-  await user.click(screen.getByRole("button", { name: "Review and try again" }));
+  await user.click(screen.getByRole("button", { name: "Retry" }));
   await user.click(screen.getByRole("button", { name: "Submit artifact job" }));
 
   expect(await screen.findByText("Queued")).toBeInTheDocument();

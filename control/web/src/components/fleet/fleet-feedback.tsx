@@ -25,7 +25,7 @@ export function FleetFeedback({ fleet }: { fleet: ReturnType<typeof useFleetStre
         <section className="fleet-error" role="alert">
           <h2>Fleet unavailable</h2>
           <p>{fleet.error}</p>
-          <button type="button" className="button" onClick={fleet.retry}>
+          <button type="button" className="button secondary" onClick={fleet.retry}>
             Retry
           </button>
         </section>

@@ -173,6 +173,8 @@ test("a workload is one row with its Sparks, measured speed and requests; openin
   expect(toggle).toHaveAttribute("aria-expanded", "true");
   expect(within(row).getByLabelText("GLM 5.3 Flash")).toBeInTheDocument();
   expect(within(row).getByLabelText("GLM 5.3 Flash engine")).toBeInTheDocument();
+  // The opened unit leaves out the figures the row above already shows.
+  expect(row.querySelector(".workload-unit .hero-figures")).toBeNull();
 });
 
 test("with no workload loaded the page says so and still lists every Spark", () => {

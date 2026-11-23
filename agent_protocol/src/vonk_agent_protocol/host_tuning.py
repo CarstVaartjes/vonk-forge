@@ -88,3 +88,40 @@ class HostTuning(WireModel):
         if self.snaps is not None and len(set(self.snaps)) != len(self.snaps):
             raise ValueError("a snap is reported twice")
         return self
+
+
+class MemoryFragmentation(WireModel):
+    """``SecPageTables`` after workload stops that left the Spark idle.
+
+    Informative only: the Controller derives a reboot recommendation, and
+    nothing acts on it. Page-table pages that a process leaves behind (PyTorch
+    ``expandable_segments`` maps many IOMMU pages) are not freed when it exits,
+    can each pin a large free block, and only a reboot returns them. A stop is
+    idle when no GPU compute process runs after it (observed, not tracked), so
+    the reading holds no workload's own tables. The readings are keyed by
+    ``boot_id``; the agent starts them afresh when the boot changes.
+    """
+
+    # /proc/sys/kernel/random/boot_id.
+    boot_id: Annotated[str, Field(pattern=r"^[0-9a-f-]{36}$")]
+    # The running kernel's page size, which turns pages into blocks.
+    page_size_bytes: Annotated[int, Field(strict=True, ge=1, le=2**30)]
+    # ``SecPageTables`` after the first idle stop of this boot and after the
+    # latest.
+    idle_stop_first_bytes: MemoryBytes
+    idle_stop_latest_bytes: MemoryBytes
+
+
+class FabricDevice(WireModel):
+    """One RDMA device's traffic over the window since the agent's last report.
+
+    A DGX Spark reaches one cabled port through two RDMA devices; ``port`` is
+    their shared PCI bus:slot.function (the PCI domain differs), which pairs
+    the siblings. ``bytes`` is received plus transmitted bytes in the window.
+    The Controller compares siblings; nothing here is a verdict.
+    """
+
+    port: Annotated[str, Field(pattern=r"^[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$")]
+    active: bool
+    bytes: MemoryBytes
+    window_seconds: Annotated[int, Field(strict=True, ge=1, le=86_400)]

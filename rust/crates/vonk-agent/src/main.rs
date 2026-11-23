@@ -270,6 +270,11 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     // The inventory lane receives the Controller's verdict; retention acts on it.
     let verdict = LatestVerdict::default();
     let stops = PostStopInventory::default();
+    let memory = std::sync::Arc::new(vonk_agent::memory_readings::Ledger::open(
+        Path::new("/"),
+        &config.data_dir,
+        rustix::param::page_size() as u32,
+    ));
     let control = run_control_lane(
         config,
         runtime_identity,
@@ -277,12 +282,14 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
         state,
         verdict.clone(),
         stops.clone(),
+        memory.clone(),
     );
     let mut inventory = tokio::spawn(run_inventory_lane(
         config.clone(),
         client.clone(),
         verdict,
         stops,
+        memory,
     ));
     let outcome = supervise_lanes_with_rotation(
         control,
@@ -313,6 +320,8 @@ struct CustodyExecutor<'a, E> {
     executor: &'a E,
     available: bool,
     stops: PostStopInventory,
+    memory: std::sync::Arc<vonk_agent::memory_readings::Ledger>,
+    gpu_memory: fn() -> Option<u64>,
 }
 
 /// Seconds after a completed `recipe.stop` at which an inventory is collected.
@@ -329,6 +338,7 @@ const POST_STOP_INVENTORY_SECONDS: [u64; 4] = [31, 46, 61, 91];
 struct InventoryLink {
     verdict: LatestVerdict,
     stops: PostStopInventory,
+    memory: std::sync::Arc<vonk_agent::memory_readings::Ledger>,
 }
 
 /// The claim lane tells the inventory lane when a stop completed; the inventory
@@ -400,9 +410,20 @@ impl<E: vonk_agent::executor::Executor> vonk_agent::executor::Executor for Custo
             && matches!(result, vonk_agent::outcome::ExecutionResult::Done(_))
         {
             self.stops.stopped();
+            // Observed, not tracked: a stop is a reading only when no GPU
+            // compute process runs after it. A stop that never completed
+            // leaves nothing to forget.
+            let gpu_memory = self.gpu_memory;
+            let idle = tokio::task::spawn_blocking(gpu_memory).await.ok().flatten() == Some(0);
+            self.memory.stop_ended(idle);
         }
         result
     }
+}
+
+/// The GPU compute processes' memory, read as telemetry reads it.
+fn system_gpu_process_memory() -> Option<u64> {
+    vonk_agent::telemetry::gpu_process_memory(&SystemProcessRunner)
 }
 
 /// The typed refusal remains visible until an authenticated control pass succeeds.
@@ -465,6 +486,7 @@ async fn run_control_lane(
     state: StateStore,
     verdict: LatestVerdict,
     stops: PostStopInventory,
+    memory: std::sync::Arc<vonk_agent::memory_readings::Ledger>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // A build compiles beside the lane: the Spark keeps claiming other work.
     let runner = SystemProcessRunner;
@@ -483,7 +505,11 @@ async fn run_control_lane(
         runtime_identity,
         client.clone(),
         state,
-        InventoryLink { verdict, stops },
+        InventoryLink {
+            verdict,
+            stops,
+            memory,
+        },
         &builds,
         &beside,
     );
@@ -615,6 +641,8 @@ async fn claim_lane<'a>(
             )
             .is_ok(),
             stops: inventory.stops.clone(),
+            memory: inventory.memory.clone(),
+            gpu_memory: system_gpu_process_memory,
         };
         let operation = async {
             run_once_with_claim_hook(
@@ -654,11 +682,14 @@ async fn claim_lane<'a>(
                             let client = client.clone();
                             let available = guarded.available;
                             let stops = inventory.stops.clone();
+                            let memory = inventory.memory.clone();
                             beside.start(fence, async move {
                                 let executor = CustodyExecutor {
                                     executor: builds,
                                     available,
                                     stops,
+                                    memory,
+                                    gpu_memory: system_gpu_process_memory,
                                 };
                                 claim.execute(client, store, &executor).await
                             });
@@ -754,7 +785,11 @@ async fn run_inventory_lane(
     client: AgentHttpClient,
     verdict: LatestVerdict,
     stops: PostStopInventory,
+    memory: std::sync::Arc<vonk_agent::memory_readings::Ledger>,
 ) {
+    // In memory only: a restart loses the previous reading and the first
+    // report after it carries no traffic.
+    let traffic = std::sync::Arc::new(vonk_agent::fabric_traffic::Meter::default());
     inventory_lane(
         || {
             let config = config.clone();
@@ -778,10 +813,17 @@ async fn run_inventory_lane(
             let config = config.clone();
             let client = client.clone();
             let verdict = verdict.clone();
+            let memory = memory.clone();
+            let traffic = traffic.clone();
             async move {
                 let evidence = vonk_agent::network::collect_optional(config.controller_url).await;
                 inventory.network_interfaces = evidence.interfaces;
                 inventory.nas_route_interface = evidence.nas_route_interface;
+                if let Some(host) = inventory.host_settings.as_mut() {
+                    host.memory_fragmentation = memory.snapshot();
+                    host.fabric_devices = traffic
+                        .observe(Path::new("/sys/class/infiniband"));
+                }
                 let installations = inventory.installations.clone().unwrap_or_default();
                 let runs = inventory.runs.clone().unwrap_or_default();
                 let answer = client.report_inventory_request(inventory).await?;
