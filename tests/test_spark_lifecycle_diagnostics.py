@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.spark_lifecycle_runner_support import _module
+from tests.test_spark_lifecycle_runner import _module
 
 
 def _arguments(tmp_path: Path):
