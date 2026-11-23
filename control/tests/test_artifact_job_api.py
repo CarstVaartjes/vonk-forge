@@ -23,7 +23,13 @@ from vonk_control.artifact_jobs.api import (
     install_artifact_job_routes,
 )
 from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
-from vonk_control.artifact_jobs.contracts import ArtifactJobResponse, ArtifactJobView
+from vonk_control.artifact_jobs.contracts import (
+    ArtifactFileDeclaration,
+    ArtifactJobResponse,
+    ArtifactJobView,
+    ArtifactOutputFile,
+    OutputLimits,
+)
 from vonk_control.artifact_jobs.evidence import (
     ArtifactJobResultEvidence,
     dump_result_evidence,
@@ -99,18 +105,18 @@ class _ArtifactJobView(ArtifactJobView):
     )
     input_manifest_sha256: str = "b" * 64
     input_total_bytes: int = 0
-    input_declarations: tuple[dict[str, object], ...] = ()
-    input_files: tuple[dict[str, object], ...] = ()
-    output_limits: dict[str, object] = field(
-        default_factory=lambda: {
-            "max_files": 1,
-            "max_file_bytes": 1024,
-            "max_total_bytes": 1024,
-            "allowed_media_types": ["image/png"],
-        }
+    input_declarations: tuple[ArtifactFileDeclaration, ...] = ()
+    input_files: tuple[ArtifactFileDeclaration, ...] = ()
+    output_limits: OutputLimits | None = field(
+        default_factory=lambda: OutputLimits(
+            max_files=1,
+            max_file_bytes=1024,
+            max_total_bytes=1024,
+            allowed_media_types=["image/png"],
+        )
     )
     output_manifest_sha256: str | None = None
-    output_files: tuple[dict[str, object], ...] = ()
+    output_files: tuple[ArtifactOutputFile, ...] = ()
     result_evidence: ArtifactJobResultEvidence | None = None
     status_reason: str | None = None
     timeout_seconds: int = 60

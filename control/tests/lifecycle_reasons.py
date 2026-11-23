@@ -64,7 +64,8 @@ def free_text(node: ast.expr | None) -> ast.expr | None:
             return free_text(value)
         case ast.Call(func=ast.Attribute(attr="format", value=value)):
             return free_text(value)
-    return None
+        case _:
+            return None
 
 
 def _enum_bodies(tree: ast.Module) -> set[int]:
