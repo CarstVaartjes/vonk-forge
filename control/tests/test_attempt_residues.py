@@ -51,12 +51,12 @@ from vonk_control.run_switch_contract.requests import RunSwitchCleanupApplyReque
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .profile_due_fixtures import next_profile_due
-from .test_profile_build_process_recovery import _complete_agent_work
-from .test_recipe_operations import ConcurrentPublisher, setup_services
-from .test_run_switch_operations import (
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )
+from .test_profile_build_process_recovery import _complete_agent_work
+from .test_recipe_operations import ConcurrentPublisher, setup_services
 
 
 def _load(tmp_path: Path, *, executor=None, artifacts=None):

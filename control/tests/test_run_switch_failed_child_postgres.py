@@ -13,14 +13,14 @@ from vonk_control.run_switch_contract.phase_results import (
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 
 from .non_blocking import assert_ended_without_blocking
-from .test_recipe_operations import NOW, installed_recipe, setup_services
-from .test_run_switch_operations import (
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _replace_child,
     _request,
     _service,
 )
+from .test_recipe_operations import NOW, installed_recipe, setup_services
 
 
 @pytest.mark.parametrize("uncertain", [True, False])

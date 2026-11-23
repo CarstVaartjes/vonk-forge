@@ -43,6 +43,7 @@ from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .agent_fences import fenced_operation
 from .node_contacts import contact_row
+from .run_switch_operations_support import RecordingArtifactExecutor, _service
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profiles import (
     NOW,
@@ -62,7 +63,6 @@ from .test_recipe_operations import (
     setup_services,
     started_recipe,
 )
-from .test_run_switch_operations import RecordingArtifactExecutor, _service
 
 
 def _parallel_world(engine: Engine, *, gang: bool = False):

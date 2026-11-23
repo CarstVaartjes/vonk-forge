@@ -480,13 +480,13 @@ def _set_swap(sessions, *, total_gib, used=0):
 
 def _switch_world(tmp_path, postgres_engine, *, rise, total_gib, used, loading=0):
     """A serving run on one Spark, then a switch to the same content rising ``rise``."""
-    from .test_recipe_operations import installed_recipe, setup_services
-    from .test_run_switch_operations import (
+    from .run_switch_operations_support import (
         RecordingArtifactExecutor,
         SynchronousPhaseExecutor,
         _request,
         _service,
     )
+    from .test_recipe_operations import installed_recipe, setup_services
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine

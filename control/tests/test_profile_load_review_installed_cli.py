@@ -15,6 +15,10 @@ from vonk_control.models.execution import RecipeRun
 from vonk_control.models.fleet import AgentNode, AgentNodeContact, AgentNodeProfile
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+from .run_switch_operations_support import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
+)
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     inventory_items_fixture,
@@ -27,10 +31,6 @@ from .test_profile_load_installed_cli import (
     _run_pty,
 )
 from .test_recipe_operations import installed_recipe, setup_services, started_recipe
-from .test_run_switch_operations import (
-    CompleteArtifactInspector,
-    RecordingArtifactExecutor,
-)
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 

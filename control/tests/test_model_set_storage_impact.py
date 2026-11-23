@@ -15,14 +15,13 @@ from vonk_control.run_switch_operations.phase_planning import PhasePlanningMixin
 from vonk_control.run_switch_operations.planning_helpers import _run_switch_payload
 from vonk_control.strict_json import read_stored_model
 
-from .test_recipe_operations import setup_services
-from .test_run_switch_operations import (
-    NOW,
+from .run_switch_operations_support import (
     ModelCacheManifestProvider,
     RecordingArtifactExecutor,
     _request,
     _service,
 )
+from .test_recipe_operations import NOW, setup_services
 
 FILES = 300  # one production model had 286 files and failed planning at 256
 SET_DIGEST = "a" * 64

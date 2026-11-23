@@ -39,12 +39,12 @@ from cluster_profiles.cli import main
 from cluster_profiles.cli_render import render_payload
 from cluster_profiles.control_client import ControlClient
 
+from .run_switch_operations_support import RecordingArtifactExecutor
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .runtime_image_fixtures import remove_test_image
 from .test_library_canonical_projection import _insert_canonical_rows
 from .test_recipe_operations import NOW, setup_services
 from .test_run_switch_artifact_authority import _report_store
-from .test_run_switch_operations import RecordingArtifactExecutor
 
 
 @pytest.fixture

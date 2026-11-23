@@ -323,11 +323,11 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
 
     from .agent_fences import fenced_operation
     from .profile_stop_readmission_support import start_on_released_gang
+    from .run_switch_operations_support import RecordingArtifactExecutor, _service
     from .test_fleet_profiles import _uuid
     from .test_profile_adapter_parallel_postgres import _stored
     from .test_profile_stop_effect_adoption_postgres import _pending_stop
     from .test_recipe_operations import _issue_exact_stop_grant
-    from .test_run_switch_operations import RecordingArtifactExecutor, _service
 
     route_owner = []
     publishers = []

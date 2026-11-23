@@ -4639,7 +4639,7 @@ def test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall(
     tmp_path: Path,
     first_node_removed: bool,
 ) -> None:
-    from .test_run_switch_operations import (
+    from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
         _child_operation_id,

@@ -23,13 +23,13 @@ from vonk_control.run_switch_operations.result_helpers import (
     _read_progress,
 )
 
-from .test_recipe_operations import NOW, setup_services
-from .test_run_switch_operations import (
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _request,
     _service,
 )
+from .test_recipe_operations import NOW, setup_services
 
 
 @pytest.mark.parametrize(

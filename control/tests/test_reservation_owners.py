@@ -35,6 +35,7 @@ from vonk_control.reservation_owners import (
     reservation_owner,
 )
 
+from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service
 from .test_attempt_residues import _load, _loop
 from .test_disk_reservations import _record_disk
 from .test_recipe_operations import (
@@ -43,7 +44,6 @@ from .test_recipe_operations import (
     setup_services,
     started_recipe,
 )
-from .test_run_switch_operations import RecordingArtifactExecutor, _request, _service
 
 
 def _claims(sessions, **where) -> list[ResourceReservation]:

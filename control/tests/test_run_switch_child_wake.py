@@ -30,8 +30,7 @@ from vonk_control.run_switch_operations.result_helpers import _read_progress
 from vonk_control.run_switch_operations.results import _persisted_result
 from vonk_control.stored.json_values import read_row_column
 
-from .test_run_switch_operations import (
-    NOW,
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _child_operation_id,
@@ -39,8 +38,8 @@ from .test_run_switch_operations import (
     _request,
     _result,
     _service,
-    setup_services,
 )
+from .test_recipe_operations import NOW, setup_services
 
 #: Where each run-switch phase keeps the child it waits on (``None``: the phase
 #: completes inline and leaves no child). The runtime preflight gate's probes

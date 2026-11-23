@@ -60,11 +60,11 @@ def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
 ):
     from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
-    from .test_recipe_operations import setup_services
-    from .test_run_switch_operations import (
+    from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
+    from .test_recipe_operations import setup_services
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(tmp_path)
     planner = RunSwitchOperationService(
@@ -684,11 +684,11 @@ def _recheck_world(tmp_path, postgres_engine):
     """A real planner and profile service over PostgreSQL, with a movable clock."""
     from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
-    from .test_recipe_operations import setup_services
-    from .test_run_switch_operations import (
+    from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
+    from .test_recipe_operations import setup_services
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
         tmp_path, engine=postgres_engine

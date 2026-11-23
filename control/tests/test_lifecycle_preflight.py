@@ -661,13 +661,13 @@ def test_high_level_gate_finishes_probe_before_dispatching_expensive_transfer(
 ):
     from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 
-    from .test_recipe_operations import installed_recipe
-    from .test_run_switch_operations import (
+    from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
         _request,
         _service,
     )
+    from .test_recipe_operations import installed_recipe
 
     sessions, lifecycle, _queue, mapping, build, nodes = setup_services(tmp_path)
     installed_recipe(lifecycle, mapping, build, nodes, request_id=str(uuid.uuid4()))

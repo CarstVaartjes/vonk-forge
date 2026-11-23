@@ -32,9 +32,7 @@ from vonk_control.run_switch_operations.interfaces import PhaseExecution
 from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 
 from .non_blocking import assert_ended_without_blocking
-from .test_recipe_operations import installed_recipe, setup_services
-from .test_run_switch_operations import (
-    NOW,
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _fixture_child_result,
@@ -42,6 +40,7 @@ from .test_run_switch_operations import (
     _runtime_receipt,
     _service,
 )
+from .test_recipe_operations import NOW, installed_recipe, setup_services
 
 
 @pytest.mark.parametrize(

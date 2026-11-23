@@ -17,8 +17,7 @@ from vonk_control.run_switch_operations.result_helpers import (
     _read_progress,
 )
 
-from .test_recipe_operations import NOW, setup_services
-from .test_run_switch_operations import (
+from .run_switch_operations_support import (
     ColdStartPhaseExecutor,
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
@@ -26,6 +25,7 @@ from .test_run_switch_operations import (
     _request,
     _service,
 )
+from .test_recipe_operations import NOW, setup_services
 
 
 def test_writer_normalizes_a_mutated_measurement_before_persistence() -> None:

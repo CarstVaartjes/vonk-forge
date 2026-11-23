@@ -44,6 +44,9 @@ from .catalog_head_seed import install_seeded_heads
 from .pass_budget_clocks import (
     frozen_pass_budgets,  # noqa: F401 - inherited autouse fixture
 )
+from .run_switch_operations_support import (  # noqa: F401 - pytest fixtures
+    planner_world,
+)
 
 # A test that writes a JSON column its contract refuses fails where it writes;
 # one that damages a row on purpose says so with ``write_guard_mode(strict=False)``.

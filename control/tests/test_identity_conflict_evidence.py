@@ -24,8 +24,8 @@ from vonk_control.recipe_image_availability.service import (
 from vonk_control.run_switch_contract.progress_view import RECOVERY_STALL_WINDOW
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
+from .run_switch_operations_support import _cold_compile_switch
 from .test_recipe_operations import _CanonicalImageTransport, read_recipe
-from .test_run_switch_operations import _cold_compile_switch
 
 
 def test_identity_conflict_names_both_build_inputs_through_the_evidence_download(

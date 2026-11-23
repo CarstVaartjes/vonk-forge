@@ -60,6 +60,11 @@ from cluster_profiles.control_client import validate_control_document
 
 from .node_contacts import contact_row
 from .preflight_fixtures import record_passing_preflight
+from .run_switch_operations_support import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
+    _fixture_execution,
+)
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     claim_agent,
@@ -72,11 +77,6 @@ from .test_profile_installed_execution import (
     _installed_profile,
 )
 from .test_recipe_operations import NOW, installed_recipe, setup_services
-from .test_run_switch_operations import (
-    CompleteArtifactInspector,
-    RecordingArtifactExecutor,
-    _fixture_execution,
-)
 
 
 class _PreparedImageExecutor(RecordingArtifactExecutor):

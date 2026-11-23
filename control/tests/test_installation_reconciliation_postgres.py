@@ -33,14 +33,14 @@ from .lifecycle_simulation.invariants import ENDED
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.world import SOLO, World, build_world
 from .node_contacts import contact_row
-from .test_recipe_operations import NOW, installed_recipe, setup_services
-from .test_run_switch_operations import (
+from .run_switch_operations_support import (
     RecordingArtifactExecutor,
     _child_operation_id,
     _make_install_specs_missing_placement_authority,
     _record_successful_reconcile_member,
     _service,
 )
+from .test_recipe_operations import NOW, installed_recipe, setup_services
 
 
 def _record_original_install_attempts(sessions, installation_id: str) -> None:

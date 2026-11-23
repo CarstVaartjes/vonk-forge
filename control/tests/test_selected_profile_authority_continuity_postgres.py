@@ -60,6 +60,10 @@ from vonk_control.runtime.preflight import mandatory_capabilities
 from vonk_control.terminal_history_collection import TerminalHistoryCollector
 
 from .preflight_fixtures import record_passing_preflight
+from .run_switch_operations_support import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
+)
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     claim_agent,
@@ -71,10 +75,6 @@ from .test_recipe_operations import (
     installed_recipe,
     setup_services,
     started_recipe,
-)
-from .test_run_switch_operations import (
-    CompleteArtifactInspector,
-    RecordingArtifactExecutor,
 )
 from .test_terminal_history_collection import _job
 

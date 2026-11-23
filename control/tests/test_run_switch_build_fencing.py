@@ -17,9 +17,9 @@ from vonk_control.run_switch_contract.requests import (
     RunSwitchCleanupApplyRequest,
 )
 
+from .run_switch_operations_support import _request
 from .test_build_cancellation_recovery import _evidence
 from .test_profile_build_memory import _accepted_build_profile
-from .test_run_switch_operations import _request
 
 
 def _direct_parent(tmp_path, engine):

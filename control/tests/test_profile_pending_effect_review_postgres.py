@@ -38,6 +38,10 @@ from vonk_control.stored.json_values import write_guard_mode
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .profile_stop_readmission_support import start_on_released_gang
+from .run_switch_operations_support import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
+)
 from .test_fleet_profile_cancel import (
     _agent_result,
     _agent_service_and_target_claim,
@@ -50,10 +54,6 @@ from .test_recipe_operations import (
     installed_recipe,
     setup_services,
     start_evidence,
-)
-from .test_run_switch_operations import (
-    CompleteArtifactInspector,
-    RecordingArtifactExecutor,
 )
 
 

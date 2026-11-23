@@ -2234,8 +2234,8 @@ def test_all_idle_profile_supersedes_a_queued_load_without_a_run(
     from vonk_control.jobs.documents import RunSwitchJobPayload
     from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+    from .run_switch_operations_support import CompleteArtifactInspector, _request
     from .test_recipe_operations import setup_services
-    from .test_run_switch_operations import CompleteArtifactInspector, _request
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path
@@ -2306,11 +2306,11 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
 
     from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
-    from .test_recipe_operations import setup_services
-    from .test_run_switch_operations import (
+    from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
+    from .test_recipe_operations import setup_services
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path, nodes=2
@@ -2481,11 +2481,11 @@ def test_completed_switch_child_keeps_its_run_switch_receipt(tmp_path: Path) -> 
     from vonk_control.run_switch_operations.result_helpers import _persisted_result
     from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
-    from .test_recipe_operations import setup_services
-    from .test_run_switch_operations import (
+    from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
+    from .test_recipe_operations import setup_services
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path, nodes=2
@@ -2606,11 +2606,11 @@ def test_waiting_switch_child_keeps_the_profile_running(tmp_path: Path) -> None:
     from vonk_control.run_switch_operations.result_helpers import _persisted_result
     from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
-    from .test_recipe_operations import setup_services
-    from .test_run_switch_operations import (
+    from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
+    from .test_recipe_operations import setup_services
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path, nodes=2
@@ -2716,11 +2716,11 @@ def test_switch_adapter_joins_the_callers_row_transaction(tmp_path: Path) -> Non
 
     from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
-    from .test_recipe_operations import setup_services
-    from .test_run_switch_operations import (
+    from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
+    from .test_recipe_operations import setup_services
 
     engine = create_engine(
         f"sqlite:///{tmp_path / 'operations.sqlite'}",
@@ -2824,11 +2824,11 @@ def test_profile_tick_advances_a_switch_child_on_postgres(
 
     from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
-    from .test_recipe_operations import setup_services
-    from .test_run_switch_operations import (
+    from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
+    from .test_recipe_operations import setup_services
 
     engine = create_engine(
         postgres_engine.url.render_as_string(hide_password=False),
@@ -2914,14 +2914,14 @@ def test_production_profile_adapter_routes_all_idle_to_one_complete_stop_child(
 
     from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+    from .run_switch_operations_support import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+    )
     from .test_recipe_operations import (
         installed_recipe,
         setup_services,
         started_recipe,
-    )
-    from .test_run_switch_operations import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
     )
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
@@ -3002,14 +3002,14 @@ def test_all_idle_profile_stops_a_lost_run_that_still_has_residue(
 
     from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+    from .run_switch_operations_support import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+    )
     from .test_recipe_operations import (
         installed_recipe,
         setup_services,
         started_recipe,
-    )
-    from .test_run_switch_operations import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
     )
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
@@ -3894,11 +3894,11 @@ def test_profile_preview_projects_exact_preparation_from_run_switch_authority(
 
     from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
-    from .test_recipe_operations import setup_services
-    from .test_run_switch_operations import (
+    from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
+    from .test_recipe_operations import setup_services
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path, nodes=2
@@ -3971,11 +3971,11 @@ def _exact_cleanup_profile(tmp_path: Path, *, engine=None):
 
     from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
-    from .test_recipe_operations import installed_recipe, setup_services
-    from .test_run_switch_operations import (
+    from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
+    from .test_recipe_operations import installed_recipe, setup_services
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2, engine=engine
@@ -4073,11 +4073,11 @@ def _exact_planned_cleanup_profile(tmp_path: Path):
 
     from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
-    from .test_recipe_operations import setup_services
-    from .test_run_switch_operations import (
+    from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
+    from .test_recipe_operations import setup_services
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2
@@ -4188,14 +4188,14 @@ def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(
 
     from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+    from .run_switch_operations_support import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+    )
     from .test_recipe_operations import (
         installed_recipe,
         setup_services,
         started_recipe,
-    )
-    from .test_run_switch_operations import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
     )
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
@@ -4461,14 +4461,14 @@ def test_a_stop_step_for_an_already_replaced_workload_is_skipped(
 ) -> None:
     from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+    from .run_switch_operations_support import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+    )
     from .test_recipe_operations import (
         installed_recipe,
         setup_services,
         started_recipe,
-    )
-    from .test_run_switch_operations import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
     )
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
