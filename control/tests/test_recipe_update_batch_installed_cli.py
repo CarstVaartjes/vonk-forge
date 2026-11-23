@@ -32,7 +32,12 @@ from vonk_control.runtime_image_preparation import (
 from vonk_control.strict_json import ControllerAPIRoute
 from vonk_forge_contracts import RecipeDefinition
 
-from .recipe_image_availability_support import (
+from .runtime_image_fixtures import place_test_image
+from .test_profile_load_installed_cli import (
+    _https_api_peer,
+    _process_environment,
+)
+from .test_recipe_image_availability import (
     ARCHIVE,
     IMAGE_DIGEST,
     Transport,
@@ -41,11 +46,6 @@ from .recipe_image_availability_support import (
     _build_id,
     _recipe,
     _runtime,
-)
-from .runtime_image_fixtures import place_test_image
-from .test_profile_load_installed_cli import (
-    _https_api_peer,
-    _process_environment,
 )
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)

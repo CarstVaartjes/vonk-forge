@@ -53,7 +53,7 @@ from vonk_control.recipe_update_contract import UPDATE_KIND
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import serialize_json_value
 
-from .recipe_image_availability_support import (
+from .test_recipe_image_availability import (
     Transport,
     _add_revision,
     _recipe,

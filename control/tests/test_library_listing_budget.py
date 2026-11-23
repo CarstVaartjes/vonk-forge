@@ -56,12 +56,12 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .display_fixtures import reword
 from .pass_budget_clocks import PassClock
-from .recipe_image_availability_support import _recipe_projection
 from .runtime_image_fixtures import place_test_image, remove_test_image
 from .test_library_assessment import (  # noqa: F401 - the shared fixture
     assessed_library,
 )
 from .test_library_canonical_projection import _insert_canonical_rows
+from .test_recipe_image_availability import _recipe_projection
 from .test_recipe_operations import NOW
 
 # A blocked read holds until the test releases it; the listing must answer

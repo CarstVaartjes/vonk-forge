@@ -17,7 +17,8 @@ from vonk_control.lifecycle.model_cache import ModelCacheAdapter
 from vonk_control.models import Base, ModelCacheOperation
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
-from .recipe_image_availability_support import (
+from .test_model_cache import _artifact, cache  # noqa: F401
+from .test_recipe_image_availability import (
     Transport,
     _add_revision,
     _download_preview,
@@ -26,7 +27,6 @@ from .recipe_image_availability_support import (
     _runtime,
     _service,
 )
-from .test_model_cache import _artifact, cache  # noqa: F401
 
 _OLD_PAYLOAD_CAP = 262144
 _MODEL = "b" * 64

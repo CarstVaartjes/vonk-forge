@@ -23,7 +23,7 @@ from vonk_control.models import Base, CatalogDocument, Job, User
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition
 
-from .recipe_image_availability_support import (
+from .test_recipe_image_availability import (
     _add_revision,
     _recipe,
     _runtime,

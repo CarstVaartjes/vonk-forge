@@ -18,13 +18,13 @@ from vonk_control.models import (
 )
 from vonk_forge_contracts import document_sha256
 
-from .recipe_image_availability_support import _add_revision, _recipe
 from .test_cache_removal_cancellation_postgres import (
     _recipe_model_with_assets,
     _service,
     _source_artifact,
 )
 from .test_model_removal_reference_lifecycle import _register_model
+from .test_recipe_image_availability import _add_revision, _recipe
 
 NEWER_UNRELATED = 120
 

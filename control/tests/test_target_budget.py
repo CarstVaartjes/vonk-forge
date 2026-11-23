@@ -78,10 +78,10 @@ from vonk_control.spark_store_retention import store_retention_request
 from vonk_control.unused_storage_collection.common import spark_eviction_capacity
 from vonk_forge_contracts import read_recipe
 
-from .recipe_image_availability_support import _runtime
 from .runtime_image_fixtures import place_test_image
 from .target_budget_world import SPARK_OBJECTS, World, _hex, build_world, ordered_ids
 from .test_fleet_model_removal_postgres import inventory
+from .test_recipe_image_availability import _runtime
 
 SMALL = 1
 LARGE = 10
