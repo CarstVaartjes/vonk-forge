@@ -28,7 +28,7 @@ from vonk_control.run_admission import RunAdmissionService
 
 from tests.wire_probes import prebuilt_probe
 
-from .recipe_builds_support import RecordingQueue, setup
+from .test_recipe_builds import RecordingQueue, setup
 
 
 @pytest.fixture(scope="session")

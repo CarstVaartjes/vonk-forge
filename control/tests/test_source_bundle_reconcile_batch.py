@@ -14,7 +14,7 @@ from sqlalchemy import event
 from vonk_control.models import CatalogDocumentRevision
 from vonk_control.recipe_builds import RecipeBuildService
 
-from .recipe_builds_support import setup
+from .test_recipe_builds import setup
 
 
 def _clone_revisions(sessions, template_id: str, start: int, stop: int) -> None:

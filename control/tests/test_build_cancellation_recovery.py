@@ -26,9 +26,8 @@ from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition
 
-from .recipe_builds_support import RecordingQueue, setup
 from .recipe_removal_review_support import remove_after_review
-from .test_recipe_builds_part1 import _write_controller_build_receipt
+from .test_recipe_builds import RecordingQueue, _write_controller_build_receipt, setup
 
 
 def _services(tmp_path, engine):

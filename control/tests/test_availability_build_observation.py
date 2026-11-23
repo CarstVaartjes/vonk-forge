@@ -41,7 +41,7 @@ from .recipe_removal_review_support import remove_after_review
 from .runtime_image_fixtures import place_test_image
 from .test_build_cancellation_recovery import _active_claims, _evidence, _services
 from .test_build_consumer_ownership import _availability
-from .test_recipe_builds_part1 import _write_controller_build_receipt
+from .test_recipe_builds import _write_controller_build_receipt
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

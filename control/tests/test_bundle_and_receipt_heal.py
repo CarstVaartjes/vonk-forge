@@ -36,8 +36,8 @@ from vonk_control.source_bundles import (
     generate_source_bundle,
 )
 
-from .recipe_builds_support import setup
 from .runtime_image_fixtures import place_test_image
+from .test_recipe_builds import setup
 from .test_runtime_image_preparation import (
     ARCHIVE,
     ARCHIVE_DIGEST,
