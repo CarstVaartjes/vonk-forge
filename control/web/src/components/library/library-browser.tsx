@@ -133,6 +133,7 @@ export function LibraryBrowser({
           api={api}
           detail={detail}
           onBusyChange={onBusyChange}
+          onChanged={() => void onRefresh(new AbortController().signal)}
           onNavigate={onNavigate}
         />
       );

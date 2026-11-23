@@ -3,7 +3,7 @@ import {createRoot} from "react-dom/client";
 import {ApiClient} from "../src/api/client";
 import {validateComponent} from "../src/api/contract-json";
 import type {LibraryViewRecipeDetail, RecipeDefinition} from "../src/api/types";
-import {withObservedRuns} from "../src/pages/library";
+import {withObservedFleet} from "../src/pages/library";
 import {ArtifactJobWorkspace} from "../src/components/artifact-job/artifact-job-workspace";
 
 /** Mount the real component using schema-validated native producer documents. */
@@ -23,7 +23,7 @@ export async function mountArtifactWorkspace(definitionJson: string, revisionId:
     },
   };
   const container = document.createElement("div"); document.body.append(container);
-  const observedDetail = withObservedRuns(detail, fleet);
+  const observedDetail = withObservedFleet(detail, fleet);
   if (!observedDetail || !observedDetail.operational_state.runs.length) throw new Error("Native fleet reports no running recipe for this exact revision");
   createRoot(container).render(createElement(ArtifactJobWorkspace, {api, detail: observedDetail}));
 }
