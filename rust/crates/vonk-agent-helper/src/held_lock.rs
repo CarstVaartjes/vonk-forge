@@ -14,6 +14,10 @@ pub(crate) struct HeldLock(File);
 
 impl HeldLock {
     /// Take `file`'s exclusive lock without waiting.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "HeldLock is the one owner of the exclusive flock: it unlocks explicitly on drop, so a forked child cannot keep it held"
+    )]
     pub(crate) fn try_exclusive(file: File) -> rustix::io::Result<Self> {
         rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)?;
         Ok(Self(file))
@@ -21,6 +25,10 @@ impl HeldLock {
 }
 
 impl Drop for HeldLock {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "HeldLock is the one owner of the exclusive flock: it unlocks explicitly on drop, so a forked child cannot keep it held"
+    )]
     fn drop(&mut self) {
         // Unlocking acts on the open file itself, whoever else still shares it.
         #[expect(

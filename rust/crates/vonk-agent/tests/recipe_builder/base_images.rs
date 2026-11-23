@@ -555,6 +555,10 @@ fn supersession_during_base_fetch_ends_before_import_and_fresh_work_is_admitted(
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test takes a raw lock to prove how a HeldLock contends with it"
+)]
 fn base_image_lock_contention_waits_and_build_succeeds() {
     let root = tempdir().unwrap();
     let runtime = tempdir().unwrap();

@@ -309,6 +309,10 @@ fn missing_installation_without_a_checkpoint_does_not_poison_a_later_prepare() {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test takes a raw lock to prove how a HeldLock contends with it"
+)]
 fn separate_process_lock_contention_is_retryable_after_the_owner_exits() {
     if let Some(lock_path) = env::var_os(LOCK_PATH_ENV) {
         let file = fs::OpenOptions::new()
