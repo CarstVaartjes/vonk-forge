@@ -52,6 +52,7 @@ from ..model_cache.resolution import resolve_recipe_set
 from ..models.cache import ModelCacheOperation, ModelCacheSet, RecipeBuild
 from ..models.catalog import CatalogDocumentRevision
 from ..models.execution import RecipeInstallation, RecipeRun, RunNode
+from ..operations.progress import project_progress_for_state
 from ..operator_receipt_contract import ReceiptOwner
 from ..persisted_waits import read_wait
 from ..revision_images import revision_images
@@ -538,14 +539,17 @@ def _database_local_state(
             _note_unreadable("cache progress", operation_id, type(error).__name__)
             preparation = None
         else:
+            measured = project_progress_for_state(
+                progress.measurement, state, self._clock()
+            )
             preparation = self._cache_progress(
                 operation_id,
                 state,
                 phase=progress.measurement.phase,
                 completed=progress.measurement.completed_bytes,
                 total=progress.measurement.total_bytes,
-                rate=progress.measurement.smoothed_bytes_per_second,
-                eta=progress.measurement.eta_seconds,
+                rate=measured.smoothed_bytes_per_second,
+                eta=measured.eta_seconds,
                 wait=read_wait(cache_operation),
             )
         if state in model_cache_states.words(LifecycleState.CANCELLED):

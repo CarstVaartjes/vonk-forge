@@ -14,7 +14,17 @@ import uuid
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import String, column, create_engine, event, func, or_, select, values
+from sqlalchemy import (
+    String,
+    column,
+    create_engine,
+    event,
+    func,
+    or_,
+    select,
+    update,
+    values,
+)
 from sqlalchemy import cast as sql_cast
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -74,7 +84,10 @@ def _manifest(model: str, recipe: str | None, verified: Iterable[str]) -> object
 
 
 def _progress(
-    completed: int, rate: float | None = None, eta: float | None = None
+    completed: int,
+    rate: float | None = None,
+    eta: float | None = None,
+    observed_at: datetime = NOW,
 ) -> object:
     return serialize_json_value(
         ModelCacheOperationProgress(
@@ -93,6 +106,7 @@ def _progress(
                 total_items=1,
                 smoothed_bytes_per_second=rate,
                 eta_seconds=eta,
+                observed_at=observed_at.isoformat(),
             ),
         )
     )
@@ -126,6 +140,7 @@ def _operation(
     at: datetime,
     completed: int,
     measured: tuple[float, float] | None = None,
+    observed_at: datetime = NOW,
 ) -> ModelCacheOperation:
     # Download and repair payloads carry their identity in the artifact set
     # (ModelCacheDownloadPayload has no top-level digests); ``{}`` is the
@@ -137,7 +152,7 @@ def _operation(
         state=state,
         artifact_set_sha256=set_id,
         payload={},
-        progress=_progress(completed, *(measured or ())),
+        progress=_progress(completed, *(measured or (None, None)), observed_at),
         actor="test",
         created_at=at,
         updated_at=at,
@@ -437,8 +452,8 @@ def test_a_waiting_download_shows_its_typed_wait_in_the_preparation(tmp_path):
     assert local.preparation.next_attempt_at == retry
 
 
-def test_a_preparation_shows_the_sampled_rate_and_eta(tmp_path):
-    """The Controller's own measurement reaches the library view."""
+def test_a_preparation_shows_the_fresh_rate_and_eta_but_not_a_stale_one(tmp_path):
+    """The Controller's own measurement reaches the library view while fresh."""
 
     engine = create_engine(f"sqlite:///{tmp_path / 'rate.sqlite'}")
     Base.metadata.create_all(engine)
@@ -464,14 +479,22 @@ def test_a_preparation_shows_the_sampled_rate_and_eta(tmp_path):
                 measured=(2.5, 24.0),
             )
         )
-    preparation = (
-        _projection(sessions)._database_local_state([wanted])[wanted].preparation
-    )
-    assert preparation is not None
-    assert (preparation.smoothed_bytes_per_second, preparation.eta_seconds) == (
-        2.5,
-        24.0,
-    )
+    local = _projection(sessions)
+    fresh = local._database_local_state([wanted])[wanted].preparation
+    assert fresh is not None
+    assert (fresh.smoothed_bytes_per_second, fresh.eta_seconds) == (2.5, 24.0)
+
+    with sessions.begin() as session:
+        session.execute(
+            update(ModelCacheOperation).values(
+                progress=_progress(
+                    40, 2.5, 24.0, observed_at=NOW - timedelta(minutes=5)
+                )
+            )
+        )
+    stale = local._database_local_state([wanted])[wanted].preparation
+    assert stale is not None
+    assert (stale.smoothed_bytes_per_second, stale.eta_seconds) == (None, None)
 
 
 def _plan_work(node: dict[str, object]) -> int:

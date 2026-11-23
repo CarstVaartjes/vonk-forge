@@ -22,7 +22,7 @@ export function LibraryPreparation({
 }) {
   const operationId = preparation.operation_id;
   return (
-    <div className="library-preparation">
+    <div className="library-preparation" role="status">
       <LibraryAvailabilityProgress
         progress={availabilityProgress({
           ...preparation,

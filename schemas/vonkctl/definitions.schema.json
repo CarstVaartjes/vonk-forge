@@ -9588,6 +9588,23 @@
     "LibraryLocalProgress": {
       "description": "Observable progress for a Controller-local preparation operation.",
       "properties": {
+        "activity": {
+          "anyOf": [
+            {
+              "enum": [
+                "active",
+                "waiting",
+                "possibly_stalled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Activity"
+        },
         "blockers": {
           "items": {
             "$ref": "#/$defs/OperationBlocker"
