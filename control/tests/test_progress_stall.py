@@ -646,7 +646,7 @@ def test_every_process_with_the_fleet_profile_service_counts_observations() -> N
     # The flush hook registers with its module; the service package must load it
     # (the worker imports the service, not this module).
     probe = (
-        "import sys, vonk_control.fleet_profiles\n"
+        "import sys, vonk_control.fleet_profiles.service\n"
         "assert 'vonk_control.progress_stall' in sys.modules\n"
     )
     subprocess.run([sys.executable, "-c", probe], check=True, timeout=60)

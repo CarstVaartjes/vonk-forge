@@ -2331,7 +2331,7 @@ def test_same_pin_repair_verifies_before_atomic_replace_and_preserves_old_bytes(
     assert target.read_bytes() == good
 
     source.write_bytes(good)
-    replace = __import__("vonk_control.model_cache", fromlist=["os"]).os.replace
+    replace = os.replace
     calls = 0
 
     def fail_final_replace(source_path, target_path):
