@@ -2163,22 +2163,25 @@ progress {
 }
 .library-profile-saved > header {
   display: flex;
-  align-items: start;
+  align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
   min-width: 0;
 }
-.library-profile-saved > header > div {
-  display: grid;
+.library-profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
   min-width: 0;
-  gap: 0.15rem;
 }
-.library-profile-saved > header span {
-  color: var(--faint);
-  font-size: 0.65rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+@media (min-width: 54rem) {
+  .library-profile-actions .button {
+    min-height: 2.25rem;
+    padding: 0.35rem 0.8rem;
+    font-size: 0.82rem;
+  }
 }
 .library-profile-saved h3 {
   margin: 0;
@@ -2190,9 +2193,6 @@ progress {
   font-size: 0.72rem;
   line-height: 1.4;
   overflow-wrap: anywhere;
-}
-.library-profile-saved > header .button {
-  flex: 0 0 auto;
 }
 .library-profile-saved > dl {
   display: grid;
@@ -2320,13 +2320,6 @@ progress {
 @media (max-width: 34rem) {
   .library-profile-saved {
     padding: 0.75rem;
-  }
-  .library-profile-saved > header {
-    align-items: stretch;
-    flex-direction: column;
-  }
-  .library-profile-saved > header .button {
-    width: 100%;
   }
   .library-profile-saved > dl {
     grid-template-columns: minmax(0, 1fr);

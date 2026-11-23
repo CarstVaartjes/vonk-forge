@@ -32,7 +32,7 @@ export function ProfileExport({
     }
   }
   return (
-    <button type="button" className="button secondary" onClick={() => void download()}>
+    <button type="button" className="button quiet" onClick={() => void download()}>
       Export profile
     </button>
   );
