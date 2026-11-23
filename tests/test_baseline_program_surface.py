@@ -68,6 +68,18 @@ ENTRY_POINTS: dict[str, frozenset[str]] = {
     "vonk_control.recipe_packages.client": frozenset(
         {"RecipePackageClient", "load_recipe_package"}
     ),
+    # The previous release's flat modules for the same entry points: the canary
+    # falls back to them until a release with the packages is the carry baseline.
+    "vonk_control.catalog_service": frozenset({"CatalogService"}),
+    "vonk_control.catalog_sync": frozenset(
+        {"CatalogSyncError", "CatalogSyncView", "ManagedRecipeCatalogSyncService"}
+    ),
+    "vonk_control.catalog_sync_contract": frozenset(
+        {"CatalogSyncTrigger", "ManagedCatalogSyncRequest", "reviewed_catalog_content"}
+    ),
+    "vonk_control.recipe_packages": frozenset(
+        {"RecipePackageClient", "load_recipe_package"}
+    ),
     "vonk_control.settings": frozenset({"Settings"}),
     "vonk_control.source_bundles": frozenset({"DatabaseSourceBundleStore"}),
 }
