@@ -21,17 +21,17 @@ from ..control_client.errors import (
     ControlTransportError,
     ControlUnavailable,
 )
-from .cache_removal import _cache_operation_id
 from .common import (
     ControllerClient,
+    _cache_operation_id,
     _interval_seconds,
+    _known_http_refusal_status,
     _profile_number,
     _quoted,
     _request_key,
     _timeout_seconds,
     _WatchCallback,
 )
-from .submission import _known_http_refusal_status
 
 _TERMINAL_STATES = {
     "succeeded",

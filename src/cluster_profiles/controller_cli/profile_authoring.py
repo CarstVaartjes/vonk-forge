@@ -13,7 +13,7 @@ from ..cli_outcome import ObservationStatus
 from ..cli_select import SelectorError
 from ..control_client.errors import ControlClientError, ControlMalformedResponse
 from ..control_client.schema import validate_control_document
-from .common import ControllerClient, _profile_number
+from .common import ControllerClient, _known_http_refusal_status, _profile_number
 from .observation import _bounded_timeout, _poll_path
 from .profile_options import _apply_option_choices, _configure_option_target
 from .selection import (
@@ -23,7 +23,6 @@ from .selection import (
     _selection_remaining,
     _skipped_read,
 )
-from .submission import _known_http_refusal_status
 
 
 def _spark_id_list(value: object) -> list[str]:

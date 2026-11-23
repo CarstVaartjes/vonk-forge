@@ -23,6 +23,7 @@ from ..generated_control.models.fleet_profile_run_effect_action import (
     FleetProfileRunEffectAction,
     check_fleet_profile_run_effect_action,
 )
+from ..generated_control.models.library_recipe_projection import LibraryRecipeProjection
 from ..generated_control.models.model_display import ModelDisplay
 from ..generated_control.types import Unset
 from .common import ControllerClient, _profile_number, _request_key
@@ -298,9 +299,6 @@ def _resolve_run_recipe(
             )
         ):
             matches.add(selector)
-        from ..generated_control.models.library_recipe_projection import (
-            LibraryRecipeProjection,
-        )
 
         recipe = LibraryRecipeProjection.from_dict(row)
         for model_selector in recipe.model_selectors:

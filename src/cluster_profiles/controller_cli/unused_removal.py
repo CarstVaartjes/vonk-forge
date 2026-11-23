@@ -30,12 +30,11 @@ from ..generated_control.models.fleet_model_removal_effects import (
     FleetModelRemovalEffects,
 )
 from .cache_removal import (
-    _cache_operation_id,
     _cache_removal_review,
     _model_removal_reconnect,
     _submit_model_removal,
 )
-from .common import ControllerClient, _query
+from .common import ControllerClient, _cache_operation_id, _query
 from .confirmation import _can_prompt, _confirm_action
 from .selection import _library_pages
 
