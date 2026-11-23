@@ -14,7 +14,7 @@ from .constants import _GITHUB_RELEASE_ASSET_HOST, _HF_CANONICAL_HOST
 from .errors import ModelCacheConflictInvalid, ModelCacheResolutionInvalid
 
 
-def _model_selector(value: str) -> str:
+def _model_selector(value: object) -> str:
     if not isinstance(value, str) or not 1 <= len(value.strip()) <= 256:
         raise ModelCacheResolutionInvalid(
             ModelCacheCode.SELECTOR_INVALID, "model selector is required"

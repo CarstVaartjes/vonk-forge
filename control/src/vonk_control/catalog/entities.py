@@ -984,7 +984,7 @@ def _head(session: Session, root: CatalogDocument) -> CatalogDocumentHead:
     return head
 
 
-def _actor(actor: str) -> str:
+def _actor(actor: object) -> str:
     return actor if isinstance(actor, str) and actor else "system"
 
 

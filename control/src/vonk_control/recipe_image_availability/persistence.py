@@ -170,7 +170,7 @@ def _recipe_removal_selection_in_session(
 
 
 def _resolve_recipe_selector(
-    self: RecipeImageAvailabilityService, selector: str
+    self: RecipeImageAvailabilityService, selector: object
 ) -> str:
     """Resolve logical selectors to the current head, retaining exact pins."""
 

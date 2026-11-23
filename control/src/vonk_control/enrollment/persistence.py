@@ -215,7 +215,7 @@ def _issued(enrollment: AgentEnrollment) -> IssuedCertificate:
 
 def _replay_matches(
     enrollment: AgentEnrollment,
-    csr: bytes,
+    csr: object,
     evidence: Mapping[str, str],
 ) -> bool:
     # Apply the fresh-submit CSR bound before parsing; an oversized or

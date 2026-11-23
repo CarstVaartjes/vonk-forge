@@ -138,7 +138,7 @@ def _request_cancellation(
     *,
     actor: str,
     request_id: str,
-    reason: str,
+    reason: object,
     authorize: bool,
 ) -> RecipeOperationCancellationResult | Residue:
     if job.kind not in {OPERATION_KIND, UPDATE_KIND}:

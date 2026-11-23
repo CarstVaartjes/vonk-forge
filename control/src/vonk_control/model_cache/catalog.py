@@ -107,7 +107,7 @@ class CatalogMixin:
     def _collect_model_definitions(
         self,
         session: Session,
-        digest: str,
+        digest: object,
         rows: dict[str, CatalogDocumentRevision],
         *,
         visiting: set[str] | None = None,

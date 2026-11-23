@@ -282,7 +282,7 @@ def _record_success_once(
     build_input_sha256: str,
     image_digest: str,
     oci_layout_sha256: str,
-    image_bytes: int,
+    image_bytes: object,
     now: datetime,
 ) -> CompletedRecipeBuild:
     if (

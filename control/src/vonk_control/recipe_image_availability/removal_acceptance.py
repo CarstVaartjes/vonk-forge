@@ -63,7 +63,7 @@ if TYPE_CHECKING:
 
 def remove_selector(
     self: RecipeImageAvailabilityService,
-    selector: str,
+    selector: object,
     *,
     actor: str,
     request_id: str,

@@ -82,7 +82,7 @@ if TYPE_CHECKING:
 
 def start(
     self: RecipeImageAvailabilityService,
-    recipe_revision_id: str,
+    recipe_revision_id: object,
     *,
     actor: str,
     request_id: str,

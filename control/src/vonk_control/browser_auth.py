@@ -89,11 +89,11 @@ class LoginRateLimiter:
     def __init__(
         self,
         *,
-        token_signing_key: bytes,
+        token_signing_key: object,
         clock: Callable[[], float] = time.monotonic,
-        maximum_tracked_subjects: int = _MAX_TRACKED_SUBJECTS,
-        maximum_subject_failures: int = _MAX_SUBJECT_FAILURES,
-        maximum_global_failures: int = _MAX_GLOBAL_FAILURES,
+        maximum_tracked_subjects: object = _MAX_TRACKED_SUBJECTS,
+        maximum_subject_failures: object = _MAX_SUBJECT_FAILURES,
+        maximum_global_failures: object = _MAX_GLOBAL_FAILURES,
         window_seconds: float = _LOGIN_WINDOW_SECONDS,
     ) -> None:
         if not isinstance(token_signing_key, bytes) or not token_signing_key:
@@ -149,7 +149,7 @@ class LoginRateLimiter:
             self._attempts[attempt_id] = state
             return LoginAttempt(self._owner, attempt_id)
 
-    def fail(self, attempt: LoginAttempt) -> None:
+    def fail(self, attempt: object) -> None:
         if not isinstance(attempt, LoginAttempt) or attempt._owner is not self._owner:
             raise ValueError("login attempt is invalid")
         now = self._clock()
@@ -159,7 +159,7 @@ class LoginRateLimiter:
             if state is not None:
                 state.failed = True
 
-    def succeed(self, attempt: LoginAttempt) -> None:
+    def succeed(self, attempt: object) -> None:
         if not isinstance(attempt, LoginAttempt) or attempt._owner is not self._owner:
             raise ValueError("login attempt is invalid")
         now = self._clock()
@@ -182,7 +182,7 @@ class LoginRateLimiter:
             else:
                 del self._subjects[state.identifier]
 
-    def _identifier(self, subject: str) -> str:
+    def _identifier(self, subject: object) -> str:
         if not isinstance(subject, str):
             return ""
         return hmac_new(
@@ -209,9 +209,9 @@ class BrowserAuthService:
         self,
         sessions: sessionmaker[Session],
         *,
-        token_signing_key: bytes,
-        clock: Callable[[], datetime],
-        token_source: Callable[[], str] | None = None,
+        token_signing_key: object,
+        clock: Callable[[], object],
+        token_source: Callable[[], object] | None = None,
         rate_limiter: LoginRateLimiter | None = None,
     ) -> None:
         if not isinstance(token_signing_key, bytes) or not token_signing_key:
@@ -332,7 +332,7 @@ class BrowserAuthService:
             raise RuntimeError("token source returned an invalid token")
         return token
 
-    def _submitted_digest(self, token: str) -> str:
+    def _submitted_digest(self, token: object) -> str:
         if not isinstance(token, str) or _OPAQUE_TOKEN.fullmatch(token) is None:
             raise BrowserAuthenticationError
         return _digest(token)

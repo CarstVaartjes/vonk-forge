@@ -202,7 +202,7 @@ class HostHelperGrantIssuer:
 
     def __init__(
         self,
-        private_key: ed25519.Ed25519PrivateKey,
+        private_key: object,
         *,
         clock: Callable[[], datetime] | None = None,
         request_id_factory: Callable[[], object] | None = None,
@@ -352,7 +352,7 @@ class HostRuntimeAuthorityService:
     def __init__(
         self,
         sessions: sessionmaker[Session],
-        issuer: HostHelperGrantIssuer,
+        issuer: object,
         *,
         clock: Callable[[], datetime] | None = None,
     ) -> None:

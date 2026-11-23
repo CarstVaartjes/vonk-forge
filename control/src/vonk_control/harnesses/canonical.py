@@ -174,7 +174,8 @@ def _image(package: object) -> tuple[str, str]:
 
 
 def _settings(
-    recipe: RecipeDefinition, supplied: Mapping[str, object] | None
+    recipe: RecipeDefinition,
+    supplied: object,
 ) -> dict[str, object]:
     settings = recipe.settings
     values: dict[str, object] = {}

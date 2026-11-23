@@ -570,7 +570,7 @@ def _sealed_recipe_removal_review(
 
 
 def review_removal(
-    self: RecipeImageAvailabilityService, selector: str, *, with_model: bool
+    self: RecipeImageAvailabilityService, selector: object, *, with_model: bool
 ) -> CacheRemovalReview:
     """Return one complete read-only review of exact recipe cache effects."""
 

@@ -356,7 +356,7 @@ class RepairMixin:
         *,
         after: tuple[datetime, str] | None = None,
         limit: int = 101,
-        state: str | None = None,
+        state: object = None,
         node_id: str | None = None,
         request_id: str | None = None,
     ) -> dict[str, object]:

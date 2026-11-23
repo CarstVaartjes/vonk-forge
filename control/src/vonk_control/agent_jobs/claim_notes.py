@@ -54,7 +54,7 @@ def claim_next_operation(
     *,
     runtime_identity: object,
     preflight_fingerprint: str | None = None,
-    hostname: str | None = None,
+    hostname: object = None,
     source: AgentSource | None = None,
     claim_fence: str | None = None,
 ) -> AgentClaim | None:

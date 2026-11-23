@@ -271,7 +271,7 @@ def _verify_contact_source(
         )
 
 
-def _fence_token(fence: AgentFence) -> str:
+def _fence_token(fence: object) -> str:
     if isinstance(fence, str):
         return fence
     if isinstance(fence, (AgentClaim, AgentProgress, AgentResult)):

@@ -444,10 +444,10 @@ class ResolutionMixin:
     def _resolve_latest_cached_once(
         self,
         *,
-        recipe_identity: str,
+        recipe_identity: object,
         model_content_sha256: str | None = None,
-        model_variant: str | None = None,
-        exact_revision_id: str | None = None,
+        model_variant: object = None,
+        exact_revision_id: object = None,
     ) -> CacheResolution:
         cache = cast("ModelCacheService", self)
 

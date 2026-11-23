@@ -272,8 +272,8 @@ class AvailabilityMixin:
         artifact_sha256: str,
         artifact_path: str,
         *,
-        offset: int = 0,
-        maximum_bytes: int = 8 * 1024 * 1024,
+        offset: object = 0,
+        maximum_bytes: object = 8 * 1024 * 1024,
     ) -> bytes:
         """Read a bounded range from a complete verified cache set."""
         cache = cast("ModelCacheService", self)

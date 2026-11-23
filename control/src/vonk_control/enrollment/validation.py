@@ -105,7 +105,7 @@ def _validate_evidence(
     return values, None
 
 
-def _decode_token(token: str) -> bytes:
+def _decode_token(token: object) -> bytes:
 
     if not isinstance(token, str) or _TOKEN.fullmatch(token) is None:
         raise EnrollmentDenied("invalid enrollment grant")

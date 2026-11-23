@@ -346,7 +346,7 @@ def _topology_capabilities(
     return result
 
 
-def _mapping_actor(actor: str) -> str:
+def _mapping_actor(actor: object) -> str:
     if not isinstance(actor, str):
         raise ClusterMappingError(ClusterMappingCode.ACTOR, "mapping actor is invalid")
     actor = actor.strip()

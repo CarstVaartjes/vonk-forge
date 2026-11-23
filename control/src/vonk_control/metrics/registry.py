@@ -96,7 +96,7 @@ def _aware(value: datetime) -> datetime:
 
 
 def protocol_version_bucket(
-    version: int | None,
+    version: object,
     *,
     minimum: int = 1,
     maximum: int = 1,
@@ -293,7 +293,7 @@ class MetricsRegistry:
             self._worker_memory_age = age
 
     @staticmethod
-    def _number(value: float, field: str) -> float:
+    def _number(value: object, field: str) -> float:
         if (
             isinstance(value, bool)
             or not isinstance(value, (int, float))
@@ -314,7 +314,7 @@ class MetricsRegistry:
         self._engine_source = source
 
     @staticmethod
-    def _fleet_values(snapshot: FleetSnapshot):
+    def _fleet_values(snapshot: object):
         """Project the typed FleetSnapshot without inventing node health."""
 
         if not isinstance(snapshot, FleetSnapshot):
@@ -401,13 +401,13 @@ class MetricsRegistry:
         with self._lock:
             self._backup_age = age
 
-    def set_backup_successful(self, *, successful: bool) -> None:
+    def set_backup_successful(self, *, successful: object) -> None:
         if not isinstance(successful, bool):
             raise TypeError("backup success must be a boolean")
         with self._lock:
             self._backup_successful = successful
 
-    def set_backup_restore_verified(self, *, verified: bool) -> None:
+    def set_backup_restore_verified(self, *, verified: object) -> None:
         if not isinstance(verified, bool):
             raise TypeError("backup restore verification must be a boolean")
         with self._lock:

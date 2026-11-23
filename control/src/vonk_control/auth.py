@@ -434,7 +434,7 @@ class CursorCodec:
 
     def decode(
         self,
-        token: str,
+        token: object,
         *,
         resource: str,
         order: str,

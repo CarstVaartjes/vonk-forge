@@ -388,7 +388,7 @@ class EnrollmentService(RotationService):
             state=LifecycleState.FAILED,
         )
 
-    def _activate_once(self, node_id: str, serial: str, generation: int) -> None:
+    def _activate_once(self, node_id: str, serial: str, generation: object) -> None:
         _validate_node_id(node_id)
         if (
             not serial.strip()

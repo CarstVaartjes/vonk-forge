@@ -70,7 +70,7 @@ class OciLayoutImageTransport:
 
 
 def _validate_evidence(
-    evidence: PulledImageEvidence,
+    evidence: object,
 ) -> None:
     if not isinstance(evidence, PulledImageEvidence):
         raise RuntimeImagePreparationUnknown(

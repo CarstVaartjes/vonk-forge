@@ -92,7 +92,7 @@ from .validation import (
 _LOGGER = logging.getLogger("vonk_control.enrollment")
 
 
-def _submission_input(csr: bytes, evidence_error: str | None = None) -> None:
+def _submission_input(csr: object, evidence_error: str | None = None) -> None:
     """Malformed caller input cannot mutate a bearer grant or an older intent."""
     if evidence_error is not None:
         raise InvalidValue(
@@ -752,7 +752,11 @@ class EnrollmentCore:
                 session.delete(intent)
 
     def _reconcile_competing_enrollment(
-        self, token_bytes: bytes, csr: bytes, evidence: Mapping[str, str], now: datetime
+        self,
+        token_bytes: bytes,
+        csr: object,
+        evidence: Mapping[str, str],
+        now: datetime,
     ) -> None:
         """A valid fresh grant drives exact observation of an older issuance gate."""
         with self._sessions() as session:

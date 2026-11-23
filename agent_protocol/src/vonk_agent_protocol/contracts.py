@@ -506,7 +506,7 @@ def _model_identity(value: str) -> bool:
     )
 
 
-def parse_model_identity(value: str) -> tuple[str, str]:
+def parse_model_identity(value: object) -> tuple[str, str]:
     """Parse the canonical result identity ``repository@revision``."""
 
     if not isinstance(value, str) or not _model_identity(value):
