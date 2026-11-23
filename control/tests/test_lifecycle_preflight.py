@@ -34,10 +34,8 @@ from vonk_control.host_helper_authority import (
 from vonk_control.inventory.items import inventory_items
 from vonk_control.lifecycle.run_switch import RunSwitchAdapter
 from vonk_control.lifecycle.types import State
-from vonk_control.lifecycle_preflight import (
-    LifecyclePreflight,
-    LifecyclePreflightCheckpoint,
-)
+from vonk_control.lifecycle_preflight import LifecyclePreflight
+from vonk_control.lifecycle_preflight_contract import LifecyclePreflightCheckpoint
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job

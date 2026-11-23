@@ -21,8 +21,7 @@ from ..jobs import states as job_states
 from ..jobs.documents import RunSwitchIntent
 from ..models.execution import ACTIVE_RUN_STATES
 from ..models.jobs import Job
-from ..recipe_operations.interfaces import RecipeOperationView
-from ..recipe_operations.service import RecipeOperationService
+from ..recipe_operations.interfaces import RecipeOperationView, RecipeRunStatusReader
 from ..run_switch_contract.evidence import RunSwitchPhase
 from ..run_switch_contract.plans import RunSwitchPlan
 from .errors import RunSwitchRequestInvalid
@@ -35,7 +34,7 @@ def _EstablishedEffect(child: RecipeOperationView, run_id: str) -> RecipeOperati
 
 
 def _established_start_effect(
-    lifecycle: RecipeOperationService | None,
+    lifecycle: RecipeRunStatusReader | None,
     phase: RunSwitchPhase,
     child: object,
 ) -> str | None:
@@ -54,7 +53,7 @@ def _established_start_effect(
 
 
 def _established_stop_effect(
-    lifecycle: RecipeOperationService | None,
+    lifecycle: RecipeRunStatusReader | None,
     phase: RunSwitchPhase,
     child: object,
 ) -> str | None:
@@ -80,7 +79,7 @@ def _established_stop_effect(
 
 
 def _start_still_progressing(
-    lifecycle: RecipeOperationService | None,
+    lifecycle: RecipeRunStatusReader | None,
     phase: RunSwitchPhase,
     child: object,
 ) -> bool:

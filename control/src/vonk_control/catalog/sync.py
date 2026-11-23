@@ -35,7 +35,7 @@ from ..capabilities import CapabilityUnavailableError
 from ..models.cache import RecipeLibrarySyncRun
 from ..models.catalog import CatalogDocumentRevision
 from ..owner_liveness import OwnerKind, OwnerRef, owner
-from ..persisted_waits import read_wait, schedule_wait, typed_wait_reason
+from ..persisted_waits import read_wait, schedule_wait
 from ..recipe_library_types import (
     RecipeLibraryError,
     RecipeLibraryItem,
@@ -44,7 +44,7 @@ from ..recipe_library_types import (
 from ..recipe_packages.contracts import has_newer_major_note
 from ..source_bundles import SourceBundleUnknown
 from ..stored.states import LibrarySyncRunState
-from ..wait_contract import QueueWait
+from ..wait_contract import QueueWait, typed_wait_reason
 from .queries import active_head_revision
 from .revision_contract import catalog_document_readable
 from .service import CatalogService

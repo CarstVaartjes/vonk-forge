@@ -42,10 +42,11 @@ from ..models.fleet import (
     FleetProfileSelection,
 )
 from ..operations.blockers import make_blocker
-from ..persisted_waits import read_wait, schedule_wait, typed_wait_reason
+from ..persisted_waits import read_wait, schedule_wait
 from ..settings import PROFILE_STALL_WINDOW_SECONDS
 from ..stall_window import stall_deadline
 from ..strict_json import read_stored_model
+from ..wait_contract import typed_wait_reason
 from ..workload_intent import take_workload_intent
 from . import states as fleet_profile_states
 from .assessment_support import (

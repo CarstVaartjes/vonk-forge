@@ -40,6 +40,10 @@ from ..models.execution import RecipeInstallation, RecipeRun
 from ..models.fleet import FleetProfileApplication
 from ..models.jobs import Job
 from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_operations.observation_helpers import (
+    _phase_request_key,
+    _stop_child_request_key,
+)
 from ..stored.json_values import read_row_column
 from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .impact_plans import (
@@ -63,10 +67,6 @@ class StopAcceptanceMixin:
         ordinal: int | None,
     ) -> ProfileStopOwnerBinding:
         service = typing_cast("RecipeOperationService", self)
-        from ..run_switch_operations.observation_helpers import (
-            _phase_request_key,
-            _stop_child_request_key,
-        )
 
         application = session.get(FleetProfileApplication, profile_application_id)
         if application is None or application.current_step is None or ordinal is None:

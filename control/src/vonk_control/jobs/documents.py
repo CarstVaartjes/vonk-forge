@@ -55,7 +55,6 @@ from ..lifecycle.evidence import BookkeepingReason
 from ..mapping_parameters import EngineArgumentValue
 from ..operations.blockers import OperationBlocker
 from ..operations.contract import AvailabilityOperationFailure
-from ..recipe_builds.cancellation import RecipeBuildIntent
 from ..recipe_image_availability.availability_contract import (
     RecipeImageAvailabilityArtifact,
     RecipeImageAvailabilityState,
@@ -499,3 +498,10 @@ class DistributionJobPayload(DistributionJobIdentity):
 
 class EmptyJobResult(_Document):
     """A kind that records its outcome elsewhere stores no result document."""
+
+
+class RecipeBuildIntent(StrictJSONModel):
+    """The accepted producer's intent, independent of its current consumers."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    kind: Literal["independent", "dependency"]

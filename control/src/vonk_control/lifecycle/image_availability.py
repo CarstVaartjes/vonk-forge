@@ -73,18 +73,14 @@ from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..jobs import states as job_states
 from ..jobs.documents import AvailabilityJobPayload
 from ..models.jobs import Job
-from ..persisted_waits import (
-    initialize_wait,
-    lifecycle_wait,
-    typed_wait_reason,
-    wait_due,
-)
+from ..persisted_waits import initialize_wait, lifecycle_wait, wait_due
 from ..recipe_image_availability.clocks_contract import StoredAvailabilityClocks
 from ..recipe_image_availability.removal_contract import RECIPE_CACHE_REMOVE_KIND
 from ..recipe_update_batches.contract import UPDATE_KIND
 from ..stall_window import stall_deadline
 from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value
+from ..wait_contract import typed_wait_reason
 from .adapter import Dispatch
 from .core import STOP_BUDGET, transition
 from .types import (
