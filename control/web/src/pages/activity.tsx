@@ -983,7 +983,6 @@ function ActivityOverview({
     },
     { recorded: 0, in_progress: 0, attention: 0, unsuccessful: 0, unknown: 0 },
   );
-  const total = Math.max(events.length, 1);
   const scope = filtering
     ? `${events.length} matching ${events.length === 1 ? "event" : "events"} from ${loadedCount} loaded`
     : `${loadedCount} loaded ${loadedCount === 1 ? "event" : "events"}`;
