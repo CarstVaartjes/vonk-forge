@@ -263,7 +263,8 @@ def test_slow_stream_releases_sql_and_keeps_original_observation(
                 for message in messages
                 if message["type"] == "http.response.body"
             )
-            assert record_threads and loop_thread not in record_threads, (
+            assert record_threads, "record encoding blocked the async event loop"
+            assert loop_thread not in record_threads, (
                 "record encoding blocked the async event loop"
             )
             frozen = _received(body, resource)

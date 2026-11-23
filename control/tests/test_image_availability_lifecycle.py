@@ -253,7 +253,8 @@ def test_claim_takes_a_lapsed_running_and_a_legacy_parked_row() -> None:
             retry_after_at=(NOW - timedelta(seconds=1)).isoformat(),
         )
         row = adapter.claim(job, "w2", NOW + timedelta(minutes=2), NOW)
-        assert row.state is State.RUNNING and job.state == "running", stored
+        assert row.state is State.RUNNING, stored
+        assert job.state == "running", stored
         assert job.current_attempt == 2
 
 

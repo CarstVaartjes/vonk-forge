@@ -733,7 +733,8 @@ def _running_profile_api(tmp_path, engine):
     api, codec = _client(sessions, profiles=service)
     headers = _headers(codec, "administrator")
     preview = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
-    assert preview.status_code == 200 and preview.json()["allowed"], preview.text
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["allowed"], preview.text
     return sessions, api, headers, profile, installed, run, preview.json()
 
 

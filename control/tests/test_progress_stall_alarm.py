@@ -523,7 +523,8 @@ def test_a_load_moving_through_its_phases_for_longer_than_a_window_is_never_stal
         application.status_reason
     )
     assert load.now[0] - application.created_at > PROGRESS_STALL_WINDOW
-    assert len({phase for phase, _ in shown}) > 2 and len(shown) > 4, shown
+    assert len({phase for phase, _ in shown}) > 2, shown
+    assert len(shown) > 4, shown
 
 
 def test_a_parked_load_repeating_an_unavailable_observation_is_stalled(

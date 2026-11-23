@@ -669,7 +669,8 @@ def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load
 
     with sessions() as session:
         stop = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
-        assert stop is not None and stop.actor == ACTOR, first.scopes
+        assert stop is not None, first.scopes
+        assert stop.actor == ACTOR, first.scopes
         assert session.scalar(select(Job).where(Job.kind == "recipe.uninstall")) is None
     assert _ordinals(sessions) == before
     # The pass measures the load's gap, the one relief told the load.
@@ -888,7 +889,8 @@ def test_a_failed_run_is_stopped_while_its_recipe_revision_row_is_held(
     assert "error" not in outcome, outcome
     with sessions() as session:
         stop = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
-        assert stop is not None and stop.actor == ACTOR, outcome
+        assert stop is not None, outcome
+        assert stop.actor == ACTOR, outcome
 
 
 def test_the_sweep_reads_its_evidence_on_postgres(

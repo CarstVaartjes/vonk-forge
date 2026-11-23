@@ -941,7 +941,8 @@ def test_resume_action_disappearing_after_preflight_is_refused(
         parent = session.get(Job, job_id)
         stored = session.get(AgentOperation, operation.id)
         assert parent is not None and parent.state == "needs-operator"
-        assert stored is not None and stored.state in aos.PARKED
+        assert stored is not None
+        assert stored.state in aos.PARKED
         assert stored.next_action_at is None
 
 
@@ -1055,8 +1056,10 @@ def test_durable_retire_refuses_live_current_attempt_without_transition(
             )
         )
         assert parent is not None and parent.state == "needs-operator"
-        assert stored is not None and stored.state in aos.PARKED
-        assert current_attempt is not None and current_attempt.state == "running"
+        assert stored is not None
+        assert stored.state in aos.PARKED
+        assert current_attempt is not None
+        assert current_attempt.state == "running"
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

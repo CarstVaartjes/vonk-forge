@@ -682,10 +682,10 @@ def test_production_services_use_exactly_the_platform_memory_floor() -> None:
             # Omitting the argument takes the constant default; passing it must
             # pass the constant itself.
             for item in floors:
-                assert (
-                    isinstance(item.value, ast.Name)
-                    and item.value.id == "PLATFORM_MEMORY_FLOOR_BYTES"
-                ), (
+                assert isinstance(item.value, ast.Name), (
+                    f"{path.name}:{node.lineno} passes a floor other than the platform constant"
+                )
+                assert item.value.id == "PLATFORM_MEMORY_FLOOR_BYTES", (
                     f"{path.name}:{node.lineno} passes a floor other than the platform constant"
                 )
     assert seen == {"RunAdmissionService": 2, "RunSwitchOperationService": 2}

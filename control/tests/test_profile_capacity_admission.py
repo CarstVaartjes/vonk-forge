@@ -107,7 +107,8 @@ def _capacity_profile(tmp_path, engine, *, node_count: int = 1):
     api, codec = _client(sessions, profiles=profiles)
     headers = _headers(codec, "administrator")
     review = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
-    assert review.status_code == 200 and review.json()["allowed"], review.text
+    assert review.status_code == 200, review.text
+    assert review.json()["allowed"], review.text
     return sessions, profiles, planner, profile, api, headers, review.json(), nodes
 
 
@@ -606,7 +607,8 @@ def test_profile_load_parks_while_shared_node_admission_is_held(
         lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
     )
     review = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
-    assert review.status_code == 200 and review.json()["allowed"], review.text
+    assert review.status_code == 200, review.text
+    assert review.json()["allowed"], review.text
     run_plan = lifecycle.preview_run(installation.owner_id, "shared-node-admission")
     assert run_plan.allowed, run_plan.nodes
     request_key = str(uuid4())

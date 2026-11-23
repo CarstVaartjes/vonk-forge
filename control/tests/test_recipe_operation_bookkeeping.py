@@ -1269,7 +1269,8 @@ def test_failed_exact_cleanup_reissues_once_then_frees_a_fresh_run(tmp_path):
     reason, completed, advanced = service._retirement_cleanup(
         original, request_id, "recipe.stop", "run", started.owner_id, ordinal
     )
-    assert advanced and not completed, reason
+    assert advanced, reason
+    assert not completed, reason
     with sessions.begin() as session:
         first = _required(
             session.scalar(select(Job).where(Job.request_id == request_id))
@@ -1284,7 +1285,8 @@ def test_failed_exact_cleanup_reissues_once_then_frees_a_fresh_run(tmp_path):
     reason, completed, advanced = service._retirement_cleanup(
         original, request_id, "recipe.stop", "run", started.owner_id, ordinal
     )
-    assert advanced and not completed, reason
+    assert advanced, reason
+    assert not completed, reason
     with sessions() as session:
         stops = tuple(session.scalars(select(Job).where(Job.kind == "recipe.stop")))
         assert len(stops) == 2

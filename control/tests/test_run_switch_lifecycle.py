@@ -615,7 +615,8 @@ def test_the_retry_clock_is_the_cores_and_resets_on_a_new_cause(tmp_path: Path) 
             break
         delays.append((due - harness.now[0]).total_seconds())
         harness.now[0] = due
-    assert delays and all(1 <= delay <= 75 for delay in delays), delays
+    assert delays, delays
+    assert all(1 <= delay <= 75 for delay in delays), delays
     assert max(delays) <= 75  # one bounded clock, not the old 5 minutes
 
 

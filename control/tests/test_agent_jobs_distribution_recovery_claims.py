@@ -66,10 +66,8 @@ def test_transient_distribution_failure_recovers_after_repeated_faults_and_resta
             NODE_A,
             "serial-a",
         )
-        assert (
-            claim is not None
-            and fenced_attempt(sessions, claim).attempt == attempt_number
-        ), attempt_number
+        assert claim is not None, attempt_number
+        assert fenced_attempt(sessions, claim).attempt == attempt_number, attempt_number
         body = {key: claim.model_dump(mode="json")[key] for key in ("fence",)}
         jobs.record_result(
             AgentResult.model_validate_json(

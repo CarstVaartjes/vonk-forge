@@ -41,7 +41,8 @@ class MemoryWorld(Protocol):
 
 def _assert_holds(holds: Iterable[Hold]) -> None:
     for hold in holds:
-        assert hold.owner_id and hold.owner_state, f"orphaned {hold.kind}: owner absent"
+        assert hold.owner_id, f"orphaned {hold.kind}: owner absent"
+        assert hold.owner_state, f"orphaned {hold.kind}: owner absent"
         assert hold.owner_state not in NON_BLOCKING_ENDS | OPERATOR_WAIT_STATES, (
             f"orphaned {hold.kind}: {hold.owner_id} is {hold.owner_state}"
         )
@@ -190,9 +191,8 @@ def assert_ended_without_blocking[World, Receipt](
         else getattr(admitted, "request_key", None)
         or getattr(admitted, "request_id", None)
     )
-    assert fresh_key and fresh_key != original_key, (
-        "fresh operation must have a new request key"
-    )
+    assert fresh_key, "fresh operation must have a new request key"
+    assert fresh_key != original_key, "fresh operation must have a new request key"
     admitted_state = _receipt_state(admitted)
     assert admitted_state in ADMITTED_STATES, (
         f"fresh operation refused: {admitted_state}"

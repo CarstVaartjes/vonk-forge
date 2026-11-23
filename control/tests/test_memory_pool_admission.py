@@ -279,7 +279,8 @@ def test_changed_physical_pool_loads_against_the_current_plan(
         assert snapshot is not None
         snapshot.memory_pool = "separate"
     current = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
-    assert current.status_code == 200 and current.json()["allowed"], current.text
+    assert current.status_code == 200, current.text
+    assert current.json()["allowed"], current.text
     assert current.json()["plan_digest"] != reviewed["plan_digest"]
     loaded = api.post(
         f"/api/profile/{profile.number}/load",

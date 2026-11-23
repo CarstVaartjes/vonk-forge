@@ -752,12 +752,11 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
         )
         assert stored is not None and stored.state == "failed"
         assert parent_row is not None and parent_row.state == "failed"
-        assert (
-            node is not None
-            and runtime_value(node, lambda identity: identity.binary_digest) == "e" * 64
-        )
+        assert node is not None
+        assert runtime_value(node, lambda identity: identity.binary_digest) == "e" * 64
         assert build is not None and build.state == "failed"
-        assert reservation is not None and reservation.state == "released"
+        assert reservation is not None
+        assert reservation.state == "released"
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

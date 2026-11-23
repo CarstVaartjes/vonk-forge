@@ -303,4 +303,5 @@ def test_a_repeated_preflight_refresh_keeps_one_progress_signature(
         attempts.append(result.retry_attempt)
         harness.advance_to_due()
     assert len(set(seen)) == 1, seen
-    assert attempts == sorted(attempts) and attempts[0] != attempts[-1], attempts
+    assert attempts == sorted(attempts), attempts
+    assert attempts[0] != attempts[-1], attempts

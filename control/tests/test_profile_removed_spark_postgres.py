@@ -325,19 +325,7 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
         if active_child is not None
         else None
     )
-    assert (
-        current.state == "running"
-        and adapter is not None
-        and any(child.queue_index == 0 for child in adapter.children)
-        and any(child.kind == "install" for child in adapter.pending_children)
-        and pending_install is not None
-        and pending_install.queue_index == 1
-        and adapter.queue[pending_install.queue_index].kind == pending_install.kind
-        and active_child is not None
-        and active_child.action == "install"
-        and active_child.state in {"queued", "running"}
-        and active_child.node_ids == list(unrelated_nodes)
-    ), (
+    diagnostic = (
         current.state,
         current.status_reason,
         adapter.position if adapter is not None else None,
@@ -346,6 +334,21 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
         else None,
         child_status,
     )
+    assert current.state == "running", diagnostic
+    assert adapter is not None, diagnostic
+    assert any(child.queue_index == 0 for child in adapter.children), diagnostic
+    assert any(child.kind == "install" for child in adapter.pending_children), (
+        diagnostic
+    )
+    assert pending_install is not None, diagnostic
+    assert pending_install.queue_index == 1, diagnostic
+    assert adapter.queue[pending_install.queue_index].kind == pending_install.kind, (
+        diagnostic
+    )
+    assert active_child is not None, diagnostic
+    assert active_child.action == "install", diagnostic
+    assert active_child.state in {"queued", "running"}, diagnostic
+    assert active_child.node_ids == list(unrelated_nodes), diagnostic
     with sessions() as session:
         stored_run = session.get(RecipeRun, run.owner_id)
         assert stored_run is not None

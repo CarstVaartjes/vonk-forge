@@ -368,7 +368,8 @@ def test_terminal_uncertain_cancel_independently_drives_only_its_exact_stop(
             (row.kind, row.state, row.status_reason)
             for row in session.scalars(select(AgentOperation))
         ]
-    assert stop is not None and stop.operation == Kind.RECIPE_STOP, debug
+    assert stop is not None, debug
+    assert stop.operation == Kind.RECIPE_STOP, debug
     assert isinstance(stop.payload, RecipeStopPayload)
     assert stop.payload.target_runtime_id == job.id
     assert stop.payload.run_id == run_id
