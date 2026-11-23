@@ -33,9 +33,9 @@ from vonk_control.offline_stops import is_deferred_stop
 from vonk_control.run_switch_contract import RunSwitchApplyRequest, RunSwitchOperation
 
 from .agent_fences import fenced_operation
-from .fleet_profiles_support import _uuid
 from .node_contacts import contact_row
 from .non_blocking import assert_ended_without_blocking
+from .test_fleet_profiles import _uuid
 from .test_profile_continuity_postgres import (
     _assessment_with_promises,
     _SQLCancellationAdapter,

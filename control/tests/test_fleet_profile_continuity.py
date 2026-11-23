@@ -16,15 +16,8 @@ from vonk_control.models import (
 )
 
 from .display_fixtures import reword
-from .fleet_profiles_support import (
-    NOW,
-    _database,
-    _node_id,
-    _seed,
-    _SwitchAdapter,
-    _uuid,
-)
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
+from .test_fleet_profiles import NOW, _database, _node_id, _seed, _SwitchAdapter, _uuid
 
 
 def _world():
@@ -320,7 +313,7 @@ def test_running_application_keeps_its_stored_recipe_after_catalog_head_changes(
         stored = session.get(CatalogDocumentRevision, pinned)
         assert stored is not None
         assert _stored_recipe(stored) == old_definition
-    from .fleet_profiles_support import _follow_profile_retry
+    from .test_fleet_profiles import _follow_profile_retry
 
     now = [NOW + timedelta(seconds=1)]
     service._clock = lambda: now[0]

@@ -326,8 +326,8 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
     from vonk_control.models import FleetProfileApplication
 
     from .agent_fences import fenced_operation
-    from .fleet_profiles_support import _uuid
     from .profile_stop_readmission_support import start_on_released_gang
+    from .test_fleet_profiles import _uuid
     from .test_profile_adapter_parallel_postgres import _stored
     from .test_profile_stop_effect_adoption_postgres import _pending_stop
     from .test_recipe_operations import _issue_exact_stop_grant

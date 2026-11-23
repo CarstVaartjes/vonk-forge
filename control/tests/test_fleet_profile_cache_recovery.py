@@ -47,7 +47,6 @@ from vonk_control.runtime_image_preparation import (
 )
 from vonk_control.stored.json_values import read_row_column
 
-from .fleet_profiles_support import NOW, _node_id
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     inventory_items_fixture,
@@ -55,6 +54,7 @@ from .runtime_identity_support import (
 )
 from .runtime_image_fixtures import remove_test_image
 from .test_fleet_profile_recovery_current import _failed_profile
+from .test_fleet_profiles import NOW, _node_id
 from .test_recipe_operations import setup_services
 from .test_run_switch_operations import (
     ColdStartPhaseExecutor,

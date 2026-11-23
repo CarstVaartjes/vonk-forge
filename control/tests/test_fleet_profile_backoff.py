@@ -17,11 +17,11 @@ from vonk_agent_protocol import LifecycleState
 from vonk_control.lifecycle.core import RECOVERY
 from vonk_control.models import FleetProfileApplication, Job
 
-from .fleet_profiles_support import _uuid
 from .test_fleet_profile_recovery_current import (
     _crash_rounds,
     _failed_profile,
 )
+from .test_fleet_profiles import _uuid
 
 _CAUSE = "temporary runtime dependency unavailable"
 

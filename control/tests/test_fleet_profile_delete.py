@@ -18,7 +18,8 @@ from vonk_control.models import (
     FleetProfileSelection,
 )
 
-from .fleet_profiles_support import (
+from .test_fleet_profile_api import _client, _headers
+from .test_fleet_profiles import (
     NOW,
     _database,
     _follow_profile_retry,
@@ -28,7 +29,6 @@ from .fleet_profiles_support import (
     _SwitchAdapter,
     _uuid,
 )
-from .test_fleet_profile_api import _client, _headers
 
 
 def _service(

@@ -31,13 +31,6 @@ from vonk_control.recipe_operations import record_build_evidence
 from vonk_control.run_switch_contract import RunSwitchPlan
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
-from .fleet_profiles_support import (
-    NOW,
-    _assessment,
-    _exact_preparation,
-    _SwitchAdapter,
-    _uuid,
-)
 from .runtime_image_fixtures import (
     place_test_image,
     refresh_inventory,
@@ -45,6 +38,13 @@ from .runtime_image_fixtures import (
 )
 from .test_fleet_profile_cache_recovery import _typed_cache_failure
 from .test_fleet_profile_recovery_current import _failed_profile
+from .test_fleet_profiles import (
+    NOW,
+    _assessment,
+    _exact_preparation,
+    _SwitchAdapter,
+    _uuid,
+)
 from .test_recipe_operations import installed_recipe, setup_services
 
 

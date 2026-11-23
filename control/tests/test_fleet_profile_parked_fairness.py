@@ -14,7 +14,7 @@ from vonk_control.models import (
     FleetProfileApplication,
 )
 
-from .fleet_profiles_support import (
+from .test_fleet_profiles import (
     NOW,
     _assessment,
     _exact_preparation,

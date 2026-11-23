@@ -24,8 +24,8 @@ from vonk_control.models import (
     FleetProfileSelection,
 )
 
-from .fleet_profiles_support import _input, _node_id, _seed, _uuid
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
+from .test_fleet_profiles import _input, _node_id, _seed, _uuid
 from .test_selected_profile_postgres import NOW, _service, _tick_selected_when_due
 
 

@@ -37,19 +37,19 @@ from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
 
 from cluster_profiles.cli_render import render_payload
 
-from .fleet_profiles_support import (
+from .non_blocking import assert_ended_without_blocking
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
+from .test_fleet_profiles import (
     NOW,
     _assessment,
     _database,
+    _exact_cleanup_profile,
     _exact_preparation,
     _input,
     _node_id,
     _seed,
     _SwitchAdapter,
 )
-from .non_blocking import assert_ended_without_blocking
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
-from .test_fleet_profiles_part3 import _exact_cleanup_profile
 from .test_recipe_operations import started_recipe
 
 
