@@ -37,10 +37,9 @@ from vonk_control.fleet_profiles.contracts import (
 from vonk_control.fleet_profiles.persistence import _stored_recipe
 from vonk_control.fleet_profiles.projection_support import (
     _choice_id,
-    _digest,
     _effective_option_choices,
     _expanded_roles,
-    _profile_document,
+    _saved_since_review,
 )
 from vonk_control.fleet_profiles.read_observation import observe_storage
 from vonk_control.fleet_profiles.saved_profiles import _definition
@@ -395,13 +394,13 @@ class FleetProfileService:
         session: Session,
         profile: FleetProfile,
         *,
-        profile_digest: str,
+        profile_revision: int | None,
         assignments: tuple[FleetProfileAssignment, ...],
     ) -> None:
         """Recheck the saved draft and exact recipe heads bound by a review."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
-        if _digest(_profile_document(profile)) != profile_digest:
+        if _saved_since_review(profile_revision, profile.revision):
             raise FleetProfileStalePlanConflict(
                 "Fleet profile changed during application admission"
             )

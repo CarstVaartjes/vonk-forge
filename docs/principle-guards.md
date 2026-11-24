@@ -196,3 +196,7 @@ document (added-line mode `identity`, "stored row re-hashed") refuses the row
 whenever a newer Controller reads it back differently. Digests are verified at
 ingress only (`REHASH_INGRESS`). The guard also catches a `payload_digest`
 column compared with any `*_digest(...)` call, not only `sha256`.
+
+Whether a saved Fleet profile changed since its review is answered by its
+`revision` (every save bumps it), compared with the revision the review recorded
+(`_saved_since_review`); the live profile document is never re-hashed for it.

@@ -56,7 +56,7 @@ from vonk_control.fleet_profiles.persistence import (
 from vonk_control.fleet_profiles.projection_support import (
     _aware,
     _digest,
-    _profile_document,
+    _saved_since_review,
 )
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.lifecycle.fleet_profile import FleetProfileAdapter
@@ -200,7 +200,7 @@ class FleetProfileService:
                         preview.profile_id, reason=InvalidRequestReason.NOT_FOUND
                     )
                 if selection_precondition is None:
-                    if _digest(_profile_document(profile)) != preview.profile_digest:
+                    if _saved_since_review(preview.profile_revision, profile.revision):
                         raise FleetProfileStalePlanConflict(
                             "Fleet profile changed before its admission intent was persisted"
                         )
