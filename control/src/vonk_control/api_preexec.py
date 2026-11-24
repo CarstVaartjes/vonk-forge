@@ -9,7 +9,6 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from vonk_agent_protocol.outcome import UnknownOutcomeError
-from vonk_control.browser_auth import bootstrap_administrator
 from vonk_control.db.connections import (
     build_engine,
     run_with_database_startup_retry,
@@ -17,6 +16,7 @@ from vonk_control.db.connections import (
 )
 from vonk_control.db.startup import initialize_database
 from vonk_control.runtime_init import read_runtime_secret
+from vonk_control.security.browser_auth import bootstrap_administrator
 from vonk_control.settings import SECRETS_ROOT
 
 _LOGGER = logging.getLogger(__name__)

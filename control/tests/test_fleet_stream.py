@@ -19,7 +19,6 @@ from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.db.connections import session_factory
 from vonk_control.fleet_event_contract import (
@@ -55,7 +54,8 @@ from vonk_control.models.telemetry import (
     FleetStreamEvent,
     NodeTelemetrySample,
 )
-from vonk_control.passwords import hash_password
+from vonk_control.security.browser_auth import BrowserAuthService
+from vonk_control.security.passwords import hash_password
 from vonk_control.telemetry.samples import (
     TelemetryRepository,
     TelemetrySampleView,

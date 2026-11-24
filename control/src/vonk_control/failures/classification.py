@@ -44,7 +44,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
-from vonk_control.security_edges import SECURITY_REFUSAL_EDGES
+from vonk_control.security.edges import SECURITY_REFUSAL_EDGES
 
 # The codes of a real security refusal, including the agent's `helper_<code>`
 # preflight codes, the helper's un-prefixed wire rejection codes, the agent's

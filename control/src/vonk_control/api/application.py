@@ -27,7 +27,6 @@ from vonk_control.artifact_jobs.api import install_artifact_job_routes
 from vonk_control.artifact_jobs.service import ArtifactJobService
 from vonk_control.auth import CursorCodec, TokenCodec
 from vonk_control.auth_api import install_auth_routes
-from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.capabilities import RecoveringService
 from vonk_control.catalog.api import install_catalog_routes
 from vonk_control.cli_update_contract import install_cli_update_contract_routes
@@ -53,6 +52,7 @@ from vonk_control.operator_acceptance import ControllerAPIRoute, OperatorReceipt
 from vonk_control.operator_projection_api.services import FleetOperatorServices
 from vonk_control.recipe_image_availability.api import install_recipe_operator_routes
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.security.browser_auth import BrowserAuthService
 
 
 def create_app(

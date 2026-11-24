@@ -175,7 +175,7 @@ TABLE_LOCK_OWNERS = frozenset(
     {
         "control/src/vonk_control/exact_integer_adoption.py",
         "control/src/vonk_control/db/node_facts.py",
-        "control/src/vonk_control/browser_auth.py",
+        "control/src/vonk_control/security/browser_auth.py",
     }
 )
 
@@ -313,7 +313,7 @@ SECURITY_EDGES = frozenset(
         "control/src/vonk_control/model_cache/http.py",
         # The GitHub LFS link host allowlist and redirect refusal (SSRF edge).
         "control/src/vonk_control/model_cache/github_lfs.py",
-        "control/src/vonk_control/browser_auth.py",
+        "control/src/vonk_control/security/browser_auth.py",
         "control/src/vonk_control/auth_api.py",
         "control/src/vonk_control/agent_api/authority.py",
         # The recipe source policy refusal: the source authority edge for builds.

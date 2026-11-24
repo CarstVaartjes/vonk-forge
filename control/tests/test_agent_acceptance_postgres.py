@@ -30,7 +30,6 @@ from vonk_control.api.application import create_app
 from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs.service import ArtifactJobService
 from vonk_control.auth import TokenCodec
-from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild
@@ -40,6 +39,7 @@ from vonk_control.models.operations import AgentOperationAttempt
 from vonk_control.models.telemetry import NodeInventorySnapshot, NodeTelemetrySample
 from vonk_control.operator_receipt_contract import AcceptanceReceipt, ReceiptCode
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
+from vonk_control.security.browser_auth import BrowserAuthService
 from vonk_control.source_bundles import SourceBundleStore
 
 from .agent_api_support import (

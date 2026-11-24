@@ -894,7 +894,7 @@ def test_a_table_wide_lock_is_taken_only_by_its_owners():
         collector, 'sql = "lock table users in share mode"\n', {1}, modes=("locks",)
     )
     assert not check_source(collector, fence, set(), modes=("locks",))
-    owner = "control/src/vonk_control/browser_auth.py"
+    owner = "control/src/vonk_control/security/browser_auth.py"
     assert not check_source(owner, fence, {1}, modes=("locks",))
     test = "control/tests/test_catalog_revision_collection.py"
     assert not check_source(test, fence, {1}, modes=("locks",))
@@ -2464,7 +2464,7 @@ def test_a_savepoint_in_a_with_block_passes(path: str, source: str) -> None:
     assert not check_source(path, source, lines, modes=("savepoints",))
 
 
-_REVOCATION_PATH = "control/src/vonk_control/browser_auth.py"
+_REVOCATION_PATH = "control/src/vonk_control/security/browser_auth.py"
 _REVOCATION_SOURCE = "def f(row):\n    row.revoked_at = now\n{extra}"
 
 

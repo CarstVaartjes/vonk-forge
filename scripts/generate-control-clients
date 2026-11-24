@@ -69,9 +69,6 @@ from vonk_control.api.application import (  # noqa: E402 -- the project imports 
 from vonk_control.auth import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     TokenCodec,
 )
-from vonk_control.browser_auth import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
-    BrowserAuthService,
-)
 from vonk_control.cache_removal_review import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     CacheAssetDisposition,
 )
@@ -97,6 +94,9 @@ from vonk_control.operation_api.openapi import (  # noqa: E402 -- the project im
 )
 from vonk_control.run_readiness import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     GroupHealth,
+)
+from vonk_control.security.browser_auth import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    BrowserAuthService,
 )
 
 OPENAPI = ROOT / "control/openapi.json"

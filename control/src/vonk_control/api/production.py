@@ -30,7 +30,6 @@ from vonk_control.availability_production.production import (
     build_recipe_image_availability,
 )
 from vonk_control.bounded_retry import REQUEST_PAUSES
-from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.capabilities import CapabilityRegistry, CapabilityUnavailableError
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import (
@@ -90,6 +89,7 @@ from vonk_control.runtime_image_preparation.preparation import (
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.runtime_image_preparation.transport import OciLayoutImageTransport
+from vonk_control.security.browser_auth import BrowserAuthService
 from vonk_control.settings import (
     AGENT_RELEASE_API_URL,
     ARTIFACT_JOB_RETENTION_SECONDS,

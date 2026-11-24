@@ -10,7 +10,9 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_control.auth import Actor
-from vonk_control.browser_auth import (
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import LoginSession, User
+from vonk_control.security.browser_auth import (
     BootstrapResult,
     BrowserAuthenticationError,
     BrowserAuthenticationThrottledError,
@@ -18,9 +20,7 @@ from vonk_control.browser_auth import (
     LoginRateLimiter,
     bootstrap_administrator,
 )
-from vonk_control.model_primitives import Base
-from vonk_control.models.fleet import LoginSession, User
-from vonk_control.passwords import hash_password, verify_password
+from vonk_control.security.passwords import hash_password, verify_password
 
 from .insert_collision_support import Rendezvous
 
