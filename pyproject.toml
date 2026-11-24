@@ -64,8 +64,6 @@ extend-include = ["scripts/*", "bin/*", "rust/fuzz/seed-corpus"]
 extend-exclude = [
     "src/cluster_profiles/generated_control",
     "scripts/*.Dockerfile",
-    # Dockerfiles: the hook hands staged extensionless paths to Ruff by name.
-    "**/Dockerfile",
     "scripts/*.toml",
     "scripts/**/*.sh",
     # Shell scripts.

@@ -39,17 +39,10 @@ def python_files(paths: list[str], python: Path) -> list[str]:
     bare = [path for path in paths if not Path(path).suffix]
     selected: set[Path] = set()
     if bare:
+        # Ruff's selection of the whole tree, never the staged paths by name:
+        # a path named on the command line is linted whatever its type.
         shown = subprocess.run(
-            [
-                str(python),
-                "-m",
-                "ruff",
-                "check",
-                "--show-files",
-                "--force-exclude",
-                "--",
-                *bare,
-            ],
+            [str(python), "-m", "ruff", "check", "--show-files", "."],
             cwd=ROOT,
             capture_output=True,
             text=True,
