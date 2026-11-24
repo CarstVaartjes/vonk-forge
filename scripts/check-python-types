@@ -27,7 +27,7 @@ def extensionless_scripts() -> list[str]:
     shown = subprocess.run(
         [sys.executable, "-m", "ruff", "check", "--show-files", "."],
         cwd=ROOT,
-        capture_output=True,
+        stdout=subprocess.PIPE,
         text=True,
         check=True,
         timeout=60,
@@ -73,8 +73,11 @@ def main(arguments: list[str]) -> int:
                 **os.environ,
                 "PYRIGHT_PYTHON_IGNORE_WARNINGS": "1",
                 # The whole scope exceeds Node's default ~2 GB heap.
-                "NODE_OPTIONS": os.environ.get(
-                    "NODE_OPTIONS", "--max-old-space-size=6144"
+                "NODE_OPTIONS": " ".join(
+                    filter(
+                        None,
+                        (os.environ.get("NODE_OPTIONS"), "--max-old-space-size=6144"),
+                    )
                 ),
             },
             check=False,

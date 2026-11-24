@@ -46,7 +46,7 @@ def python_files(paths: list[str], python: Path) -> list[str]:
         shown = subprocess.run(
             [str(python), "-m", "ruff", "check", "--show-files", "."],
             cwd=ROOT,
-            capture_output=True,
+            stdout=subprocess.PIPE,
             text=True,
             check=True,
             timeout=60,
