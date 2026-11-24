@@ -14,6 +14,7 @@ from pydantic import (
 from vonk_agent_protocol.agent_words import (
     ProfileEffectState,
 )
+from vonk_agent_protocol.identifiers import Digest, NodeId
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.fleet_profile_contract.definitions import (
@@ -32,15 +33,13 @@ from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchChildResult,
 )
 from vonk_control.fleet_profile_contract.vocabulary import (
-    Digest,
     FleetProfileCancellationState,
     FleetProfileInstallationPolicy,
     FleetProfileOperationKind,
     FleetProfileOperationState,
     FleetProfileSupersedeCode,
-    NodeId,
-    UuidId,
 )
+from vonk_control.identifiers import UuidId
 from vonk_control.operations.blockers import OperationBlocker, ProgressStall
 from vonk_control.run_switch_contract.progress import RunSwitchProgress
 from vonk_control.strict_json import StrictModel

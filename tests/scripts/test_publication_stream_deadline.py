@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import importlib.machinery
 import importlib.util
-import os
 import sys
 from pathlib import Path
 
@@ -32,11 +31,9 @@ def test_partial_silent_transfer_is_reaped_and_fresh_read_recovers(
 ):
     publication = _publication(monkeypatch)
     payload = tmp_path / "accepted-remote-object"
-    pidfile = tmp_path / "transfer.pid"
     child = tmp_path / "transfer.py"
     child.write_text(
-        "import os,pathlib,sys,time\n"
-        "pathlib.Path(sys.argv[2]).write_text(str(os.getpid()))\n"
+        "import pathlib,sys,time\n"
         "payload=pathlib.Path(sys.argv[1])\n"
         "if payload.exists():\n"
         "    sys.stdout.buffer.write(payload.read_bytes())\n"
@@ -52,7 +49,7 @@ def test_partial_silent_transfer_is_reaped_and_fresh_read_recovers(
 
     def spawn(*args, **kwargs):
         assert args[0][0] == "rclone"
-        args = ([sys.executable, str(child), str(payload), str(pidfile)], *args[1:])
+        args = ([sys.executable, str(child), str(payload)], *args[1:])
         process = popen(*args, **kwargs)
         children.append(process)
         return process
@@ -68,9 +65,7 @@ def test_partial_silent_transfer_is_reaped_and_fresh_read_recovers(
     try:
         with pytest.raises(publication.PublicationError):
             read()
-        pid = int(pidfile.read_text())
-        with pytest.raises(ProcessLookupError):
-            os.kill(pid, 0)
+        assert children[-1].returncode is not None
         # The transfer fault has cleared. A fresh Python process may need more
         # than the injected stall budget merely to start on a busy CI worker.
         monkeypatch.setattr(publication, "RCLONE_TRANSFER_TIMEOUT", transfer_timeout)
@@ -83,8 +78,7 @@ def test_partial_silent_transfer_is_reaped_and_fresh_read_recovers(
             payload.write_bytes(b"x" * 129)
             with pytest.raises(publication.PublicationError):
                 read()
-            with pytest.raises(ProcessLookupError):
-                os.kill(int(pidfile.read_text()), 0)
+            assert children[-1].returncode is not None
             payload.write_bytes(complete)
             assert read() == complete
     finally:

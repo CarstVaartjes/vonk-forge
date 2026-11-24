@@ -6,8 +6,9 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, model_validator
 
+from vonk_agent_protocol.identifiers import Digest
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-from vonk_control.model_cache.contract import DIGEST_PATTERN, UUID_PATTERN
+from vonk_control.identifiers import UUID_PATTERN
 from vonk_control.operations.contract import AvailabilityOperationFailure
 from vonk_control.strict_json import StrictJSONModel
 
@@ -16,7 +17,6 @@ RecipeCacheRemovalKind = Literal["recipe.cache.remove.v2"]
 RequestKey = Annotated[str, Field(pattern=UUID_PATTERN)]
 Selector = Annotated[str, Field(min_length=1, max_length=256)]
 Identifier = Annotated[str, Field(min_length=1, max_length=128)]
-Digest = Annotated[str, Field(pattern=DIGEST_PATTERN)]
 
 
 class RecipeCacheRemovalIntent(StrictJSONModel):

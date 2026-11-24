@@ -21,6 +21,7 @@ from ... import (
     request_path_scans,
     retention_head_digests,
     scratch_names,
+    shared_id_patterns,
     shell_trap_waits,
     typed_string_lengths,
     whole_collection_readers,
@@ -883,4 +884,12 @@ def check_clocks(ctx: CheckContext) -> None:
     if python and is_test and "clocks" in modes:
         hits.extend(
             (line, wall_clocks.KIND) for line in wall_clocks.scan_source(source)
+        )
+
+
+def check_shared_id_patterns(ctx: CheckContext) -> None:
+    if ctx.python and "shared-id-patterns" in ctx.modes:
+        ctx.hits.extend(
+            (line, shared_id_patterns.KIND)
+            for line in shared_id_patterns.scan_source(ctx.path, ctx.source)
         )

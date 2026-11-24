@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import hashlib
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import ConfigDict, Field, model_validator
 
+from vonk_agent_protocol.identifiers import Digest
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
@@ -25,7 +26,6 @@ from vonk_control.fleet_model_removal_contract import (
 )
 from vonk_control.strict_json import StrictJSONModel
 
-Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 ArtifactKind = Literal["model-set", "model-object", "runtime-image"]
 
 

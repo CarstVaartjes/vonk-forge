@@ -8,17 +8,39 @@ selection (`COMPOSE_PROFILES` in `.env`) is resolved here once.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Literal, TypedDict
 
 import yaml
 
 from vonk_nas_setup.environment import SELECTION_ENV, profiles
 from vonk_nas_setup.filesystem import SetupError
 
-_SECTIONS = ("networks", "secrets", "volumes", "configs")
+_Section = Literal["networks", "secrets", "volumes", "configs"]
+_SECTIONS: tuple[_Section, ...] = ("networks", "secrets", "volumes", "configs")
 
 
-def _used(service: dict[str, Any], section: str) -> set[str]:
+class ComposeMount(TypedDict, total=False):
+    """The long form of a network, secret, volume or config reference."""
+
+    source: str
+
+
+class ComposeDependency(TypedDict, total=False):
+    required: bool
+
+
+class ComposeService(TypedDict, total=False):
+    """The part of a Compose service this module reads or edits."""
+
+    depends_on: list[str] | dict[str, ComposeDependency]
+    network_mode: str
+    networks: list[str | ComposeMount]
+    secrets: list[str | ComposeMount]
+    volumes: list[str | ComposeMount]
+    configs: list[str | ComposeMount]
+
+
+def _used(service: ComposeService, section: _Section) -> set[str]:
     entries = service.get(section) or []
     names: set[str] = set()
     for entry in entries:

@@ -21,12 +21,12 @@ from vonk_control.api_availability import AVAILABILITY_ERRORS
 from vonk_control.auth import MUTATION_ROLES, Actor, CursorCodec
 from vonk_control.bounded_json import require_integer, require_sequence
 from vonk_control.cache_removal_review import CacheRemovalReview
+from vonk_control.identifiers import UUID_PATTERN
 from vonk_control.library_projection.common import (
     LibrarySelectorAmbiguous,
     SelectorAmbiguityHTTPError,
 )
 from vonk_control.model_cache.contract import (
-    UUID_PATTERN,
     CacheOperationKind,
     ModelCacheCancellationRequest,
     ModelCacheOperatorAction,

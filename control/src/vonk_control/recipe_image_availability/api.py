@@ -20,8 +20,8 @@ from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.auth import MUTATION_ROLES
 from vonk_control.bounded_json import require_integer, require_sequence
 from vonk_control.cache_removal_review import CacheRemovalReview
+from vonk_control.identifiers import UUID_PATTERN
 from vonk_control.logging import redact_text
-from vonk_control.model_cache.contract import UUID_PATTERN
 from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
 from vonk_control.operation_api.contracts import bounded_error_responses
 from vonk_control.operations.contract import AvailabilityOperationFailure

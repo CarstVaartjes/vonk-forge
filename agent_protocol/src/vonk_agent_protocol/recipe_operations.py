@@ -10,10 +10,10 @@ from pydantic import Field, ValidationError, model_validator
 from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 from vonk_agent_protocol.gpu_clock import GpuClockIntent
+from vonk_agent_protocol.identifiers import Digest, Uuid4Text
 from vonk_agent_protocol.wire_model import (
     MAX_RUN_GENERATION,
     AgentProtocolError,
-    Uuid4Text,
     WireModel,
     canonical_message,
 )
@@ -28,12 +28,6 @@ RECIPE_OPERATIONS = frozenset(
     }
 )
 
-_UUID_PATTERN = (
-    r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
-    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}"
-)
-Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
-CanonicalUuid = Annotated[str, Field(pattern=f"^{_UUID_PATTERN}$")]
 ByteCount = Annotated[int, Field(ge=0, le=16 * 1024**4)]
 RunGeneration = Annotated[int, Field(ge=1, le=MAX_RUN_GENERATION, strict=True)]
 
@@ -43,7 +37,7 @@ class _StrictPayload(WireModel):
 
 
 class RecipeInstallPayload(_StrictPayload):
-    installation_id: CanonicalUuid
+    installation_id: Uuid4Text
     plan_digest: Digest
     expected_bytes: ByteCount
     compiled_execution_plan: CompiledExecutionPlan
@@ -52,10 +46,10 @@ class RecipeInstallPayload(_StrictPayload):
 class RecipeStartPayload(_StrictPayload):
     """Start one rank; placement, image and addresses come from the plan."""
 
-    run_id: CanonicalUuid
-    installation_id: CanonicalUuid
-    recipe_revision_id: CanonicalUuid
-    mapping_id: CanonicalUuid
+    run_id: Uuid4Text
+    installation_id: Uuid4Text
+    recipe_revision_id: Uuid4Text
+    mapping_id: Uuid4Text
     plan_digest: Digest
     compiled_execution_plan: CompiledExecutionPlan
     gpu_clock: GpuClockIntent | None = None
@@ -102,12 +96,12 @@ class RecipeStopPayload(_StrictPayload):
     grant; the helper reconciles only the matching runtime generation.
     """
 
-    run_id: CanonicalUuid
-    target_runtime_id: CanonicalUuid
+    run_id: Uuid4Text
+    target_runtime_id: Uuid4Text
     run_generation: RunGeneration
-    installation_id: CanonicalUuid
-    recipe_revision_id: CanonicalUuid
-    mapping_id: CanonicalUuid
+    installation_id: Uuid4Text
+    recipe_revision_id: Uuid4Text
+    mapping_id: Uuid4Text
     plan_digest: Digest
     rank: Annotated[int, Field(ge=0, strict=True)]
     role: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]{0,63}$")]
@@ -117,7 +111,7 @@ class RecipeStopPayload(_StrictPayload):
 
 
 class RecipeUninstallPayload(_StrictPayload):
-    installation_id: CanonicalUuid
+    installation_id: Uuid4Text
     plan_digest: Digest
     recipe_content_sha256: Digest
     # The key is required on the wire.  Null means this operation retains the

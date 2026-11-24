@@ -17,6 +17,7 @@ from vonk_control.fleet_profiles.contracts import (
     FleetProfileConflict,
     FleetProfilePermissionDenied,
 )
+from vonk_control.identifiers import UUID_PATTERN
 from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
 from vonk_control.operation_api.contracts import bounded_error_responses
 from vonk_control.operator_acceptance import (
@@ -29,7 +30,6 @@ _CANCEL_PATH = "/api/profile/applications/{application_id}/cancel"
 _CANCEL_RECEIPT_PATH = (
     "/api/profile/applications/{application_id}/cancellations/{request_key}"
 )
-_UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 
 
 def install_profile_application_cancel_route(
@@ -51,8 +51,8 @@ def install_profile_application_cancel_route(
         operation_id="getProfileApplicationCancellation",
     )
     def get_profile_application_cancellation(
-        application_id: Annotated[str, Path(pattern=_UUID)],
-        request_key: Annotated[str, Path(pattern=_UUID)],
+        application_id: Annotated[str, Path(pattern=UUID_PATTERN)],
+        request_key: Annotated[str, Path(pattern=UUID_PATTERN)],
         actor: Actor = actor_dependency,
     ) -> FleetProfileApplicationView:
         if actor.role not in MUTATION_ROLES[("POST", _CANCEL_PATH)]:
@@ -88,7 +88,7 @@ def install_profile_application_cancel_route(
     @operator_acceptance(ReceiptPolicy.PROFILE_CANCEL)
     def cancel_profile_application(
         body: FleetProfileApplicationCancelRequest,
-        application_id: Annotated[str, Path(pattern=_UUID)],
+        application_id: Annotated[str, Path(pattern=UUID_PATTERN)],
         actor: Actor = actor_dependency,
     ) -> FleetProfileApplicationView:
         if actor.role not in MUTATION_ROLES[("POST", _CANCEL_PATH)]:

@@ -4556,3 +4556,27 @@ def test_maintainer_scripts_stay_shims_and_units_run_no_shell(path, source, flag
         assert not check_source(
             path, source, {len(lines) + 5}, modes=("maintainershim",)
         )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]\n',
+        'NODE = r"^spk_[0-9a-f]{32}$"\n',
+        'OCI = (\n    r"^sha256:"\n    r"[0-9a-f]{64}$"\n)\n',
+    ],
+)
+def test_a_shared_id_pattern_is_imported_not_respelled(source):
+    assert check_source(PATH, source, {1, 2, 3, 4}, modes=("shared-id-patterns",))
+    assert not check_source(
+        "control/src/vonk_control/identifiers.py",
+        source,
+        {1, 2, 3, 4},
+        modes=("shared-id-patterns",),
+    )
+    assert not check_source(
+        PATH,
+        "from vonk_agent_protocol.identifiers import DIGEST_PATTERN\n",
+        {1},
+        modes=("shared-id-patterns",),
+    )

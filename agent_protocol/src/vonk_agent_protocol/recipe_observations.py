@@ -8,10 +8,10 @@ from typing import Any
 from pydantic import Field, field_validator, model_validator
 
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.identifiers import Uuid4Text
 from vonk_agent_protocol.wire_model import (
     MAX_RUN_GENERATION,
     AgentProtocolError,
-    Uuid4Text,
     WireModel,
     canonical_message,
 )

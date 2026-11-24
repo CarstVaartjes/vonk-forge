@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import hashlib
+import importlib.metadata
 import os
 import signal
 import subprocess
@@ -14,6 +15,20 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 PREPARATION_TIMEOUT = 600
+
+
+def pyright_environment() -> dict[str, str]:
+    """The environment that runs the locked pyright: hook and CI share it.
+
+    uv.lock owns the version; the interpreter running this holds that install,
+    and the nodejs wheel keeps pyright from downloading or finding another Node.
+    """
+    return {
+        **os.environ,
+        "PYRIGHT_PYTHON_FORCE_VERSION": importlib.metadata.version("pyright"),
+        "PYRIGHT_PYTHON_NODEJS_WHEEL": "1",
+        "PYRIGHT_PYTHON_GLOBAL_NODE": "0",
+    }
 
 
 def run_preparation(command: list[str], root: Path, deadline: float) -> None:

@@ -90,6 +90,7 @@ MODES = (
     "head-digests",
     "set-first-requester",
     "printed-output",
+    "shared-id-patterns",
     "maintainershim",
 )
 

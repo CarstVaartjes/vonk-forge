@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
+from vonk_agent_protocol.identifiers import Digest
 from vonk_agent_protocol.job_limits import (
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
@@ -14,7 +15,6 @@ from vonk_agent_protocol.job_limits import (
 from vonk_agent_protocol.job_wire import (
     ArtifactName,
     ArtifactSlot,
-    Digest,
     MediaType,
     _parse_model,
     _RecipeJobModel,

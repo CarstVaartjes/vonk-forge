@@ -5,8 +5,8 @@ from enum import StrEnum
 from pydantic import AwareDatetime, Field
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.identifiers import Digest
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
-from vonk_agent_protocol.wire_model import Digest
 from vonk_control.strict_json import StrictModel
 
 

@@ -7,8 +7,6 @@ from typing import Annotated
 from pydantic import Field
 
 COMMIT_PATTERN = r"^[0-9a-f]{40}$"
-DIGEST_PATTERN = r"^[0-9a-f]{64}$"
-NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 _ACTIVE_PUBLICATION_STATES = frozenset({"completed"})
 _ADMIN_OPERATION_IDS = {
     ("get", "/api/jobs/{job_id}/requests/{request_id}"): "getJobOperatorReceipt",
@@ -47,5 +45,3 @@ _ADMIN_OPERATION_IDS = {
 }
 _HTTP_METHODS = frozenset({"delete", "get", "patch", "post", "put"})
 BoundedIdentifier = Annotated[str, Field(min_length=1, max_length=128)]
-NodeIdentifier = Annotated[str, Field(pattern=NODE_PATTERN)]
-DigestIdentifier = Annotated[str, Field(pattern=DIGEST_PATTERN)]

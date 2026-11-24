@@ -15,6 +15,7 @@ from vonk_forge_contracts import EndpointAlias
 
 from vonk_agent_protocol.agent_words import ProfileDocumentState
 from vonk_agent_protocol.gpu_clock import GpuClockRange, default_gpu_clock
+from vonk_agent_protocol.identifiers import Digest, NodeId
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.state_machines import (
@@ -25,16 +26,14 @@ from vonk_control.fleet_profile_contract.vocabulary import (
     MAX_PROFILE_WARNINGS,
     Description,
     DesiredAssignmentStateField,
-    Digest,
     FleetProfileInstallationPolicy,
     LabelName,
     LabelValue,
     Name,
-    NodeId,
     OptionChoices,
     RecipeSelector,
-    UuidId,
 )
+from vonk_control.identifiers import UuidId
 from vonk_control.model_cache.contract import CachedResourceEstimate
 from vonk_control.recipe_update_batches.notice import RecipeUpdateNotice
 from vonk_control.run_switch_contract.requests import SparkGroupNode

@@ -21,6 +21,12 @@ from pydantic import (
 )
 from pydantic_core import CoreSchema, SchemaValidator, ValidationError, core_schema
 
+from vonk_agent_protocol.identifiers import (
+    DIGEST_PATTERN,
+    UUID_PATTERN,
+    Digest,
+)
+
 # RecipeRun owns generations in a PostgreSQL BIGINT column. The helper and
 # agent carry that exact identity; their storage/argv representations must not
 # impose a smaller integer domain.
@@ -247,29 +253,23 @@ class WireModel(StrictJSONModel, Mapping[str, Any]):
         return len(self.model_fields_set) + len(self.model_extra or {})
 
 
-Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
-UUID4_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-Uuid4Text = Annotated[str, Field(pattern=UUID4_PATTERN)]
-
-
 class AgentProtocolError(ValueError):
     """A protocol message is invalid or outside the agent trust boundary."""
 
 
-_UUID_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 CanonicalUUID = Annotated[
     str,
     Field(
         strict=True,
         min_length=36,
         max_length=36,
-        pattern=_UUID_PATTERN,
+        pattern=UUID_PATTERN,
         json_schema_extra={"format": "uuid"},
     ),
 ]
 DigestText = Annotated[
     str,
-    Field(strict=True, pattern=r"^[0-9a-f]{64}$"),
+    Field(strict=True, pattern=DIGEST_PATTERN),
 ]
 
 
@@ -511,7 +511,6 @@ __all__ = [
     "OperationMemberProgress",
     "OperationProgress",
     "StrictJSONModel",
-    "Uuid4Text",
     "WireEnum",
     "WireModel",
     "canonical_message",

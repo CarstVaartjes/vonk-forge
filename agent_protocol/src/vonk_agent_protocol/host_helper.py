@@ -18,6 +18,7 @@ from vonk_agent_protocol.document_limits import (
     MAX_HOST_RUNTIME_REQUEST_BYTES,
 )
 from vonk_agent_protocol.gpu_clock import GpuClockIntent
+from vonk_agent_protocol.identifiers import Digest, NodeId, Uuid4Text
 from vonk_agent_protocol.package_upgrade import PackageRollbackAuthority
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import (
@@ -30,7 +31,6 @@ from vonk_agent_protocol.swap import SwapIntent
 from vonk_agent_protocol.wire_model import (
     MAX_RUN_GENERATION,
     AgentProtocolError,
-    Uuid4Text,
     WireModel,
     canonical_message,
 )
@@ -38,9 +38,7 @@ from vonk_agent_protocol.wire_model import (
 HOST_HELPER_AUTHORITY = "vonk.host-maintenance-helper"
 HOST_HELPER_GRANT_DOMAIN = b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\x00"
 MAX_HOST_HELPER_GRANT_SECONDS = 300
-Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 Signature = Annotated[str, Field(pattern=r"^[0-9a-f]{128}$")]
-NodeId = Annotated[str, Field(pattern=r"^spk_[0-9a-f]{32}$")]
 ContainerRuntimeActionName = Literal[
     "runtime-preflight",
     "image-pull",
