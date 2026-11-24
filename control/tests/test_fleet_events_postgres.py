@@ -12,9 +12,9 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
-from vonk_control import fleet_events
-from vonk_control.fleet_event_contract import JobPayload
-from vonk_control.fleet_events import (
+from vonk_control.fleet_events import outbox as fleet_events
+from vonk_control.fleet_events.contract import JobPayload
+from vonk_control.fleet_events.outbox import (
     FleetEventDraft,
     FleetEventRecorder,
     FleetEventRepository,

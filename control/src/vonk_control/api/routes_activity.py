@@ -20,8 +20,8 @@ from vonk_control.auth import Actor
 from vonk_control.bounded_json import BoundedJSONError
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.failures.evidence import FailureEvidenceService
-from vonk_control.fleet_stream import parse_last_event_id
-from vonk_control.fleet_stream_contract import FLEET_SSE_EVENTS, FleetStreamEvent
+from vonk_control.fleet_events.stream import parse_last_event_id
+from vonk_control.fleet_events.stream_contract import FLEET_SSE_EVENTS, FleetStreamEvent
 from vonk_control.metrics.prometheus_api import PrometheusReader
 from vonk_control.operation_api.contracts import (
     OperationDetailResponse,

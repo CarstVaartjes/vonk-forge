@@ -16,7 +16,7 @@ from pydantic import (
 
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-from vonk_control.fleet_event_contract import (
+from vonk_control.fleet_events.contract import (
     AgentOperationPayload,
     InstallationNodePayload,
     JobPayload,

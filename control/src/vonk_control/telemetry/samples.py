@@ -23,8 +23,8 @@ from vonk_agent_protocol.telemetry import (
 from vonk_agent_protocol.wire_model import canonical_message, strict_json_datetime
 from vonk_control.categorized_errors import InvalidValue
 from vonk_control.dialect_insert import dialect_insert
-from vonk_control.fleet_event_contract import NodeTelemetryPayload
-from vonk_control.fleet_events import FleetEventDraft, FleetEventRepository
+from vonk_control.fleet_events.contract import NodeTelemetryPayload
+from vonk_control.fleet_events.outbox import FleetEventDraft, FleetEventRepository
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.fleet import AgentNode

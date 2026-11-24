@@ -193,7 +193,7 @@ module defines its own.
 | `control/src/vonk_control/endpoint_contract.py` | controller-contract | 1 | Secret-free projection of one published recipe endpoint. |
 | `control/src/vonk_control/enrollment/contract.py` | controller-contract | 7 | Enrollment status, grants, exact issuance/rotation claims and local/CA revocation confirmation. |
 | `control/src/vonk_control/failures/evidence.py` | declared | 5 | Failure diagnostics rendered on request from durable failure rows. |
-| `control/src/vonk_control/fleet_event_contract.py` | controller-contract | 9 | Strict payload contracts for the durable Fleet outbox. |
+| `control/src/vonk_control/fleet_events/contract.py` | controller-contract | 9 | Strict payload contracts for the durable Fleet outbox. |
 | `control/src/vonk_control/fleet_profile_contract/endpoints.py` | controller-contract | 3 | Fleet profile contract: endpoints. |
 | `control/src/vonk_control/fleet_profile_contract/definitions.py` | controller-contract | 19 | Fleet profile contract: definitions. |
 | `control/src/vonk_control/fleet_profile_contract/assessment.py` | controller-contract | 11 | Fleet profile contract: assessment. |
@@ -203,7 +203,7 @@ module defines its own.
 | `control/src/vonk_control/fleet_profile_contract/review.py` | controller-contract | 9 | Fleet profile contract: review. |
 | `control/src/vonk_control/fleet_profiles/contracts.py` | controller-contract | 1 | Saved profile content identity used by admission and projections. |
 | `control/src/vonk_control/fleet_projection/common.py` | declared | 14 | Complete typed projection of PostgreSQL-authoritative Fleet state, transferred through bounded immutable observation records. |
-| `control/src/vonk_control/fleet_stream_contract.py` | controller-contract | 14 | Typed JSON envelopes emitted by the Fleet Server-Sent Events stream. |
+| `control/src/vonk_control/fleet_events/stream_contract.py` | controller-contract | 14 | Typed JSON envelopes emitted by the Fleet Server-Sent Events stream. |
 | `control/src/vonk_control/gateway/keys.py` | declared | 18 | Inference gateway client keys: LiteLLM virtual keys managed by the Controller. |
 | `control/src/vonk_control/harnesses/canonical_metadata.py` | declared | 1 | Strict platform metadata for built-in canonical harnesses. |
 | `control/src/vonk_control/jobs/documents.py` | controller-contract | 45 | Typed documents of the generic job queue bound to the job columns; the kind-agnostic remainder is a declared passthrough. |

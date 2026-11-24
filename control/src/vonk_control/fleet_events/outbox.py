@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_control.auth import CursorError
-from vonk_control.fleet_event_contract import (
+from vonk_control.fleet_events.contract import (
     AgentOperationPayload,
     FleetEventPayload,
     InstallationNodePayload,

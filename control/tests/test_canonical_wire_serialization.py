@@ -4,8 +4,8 @@ import json
 from datetime import UTC, datetime
 
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.fleet_event_contract import NodeProfilePayload
-from vonk_control.fleet_stream_contract import (
+from vonk_control.fleet_events.contract import NodeProfilePayload
+from vonk_control.fleet_events.stream_contract import (
     FleetChangeEvent,
     FleetStreamEvent,
     NodeProfileChange,

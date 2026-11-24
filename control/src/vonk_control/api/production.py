@@ -44,10 +44,10 @@ from vonk_control.distribution_executor.preparation import (
 )
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.failures.evidence import FailureEvidenceService
-from vonk_control.fleet_events import FleetEventRepository
+from vonk_control.fleet_events.outbox import FleetEventRepository
+from vonk_control.fleet_events.stream import FleetStream
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.fleet_projection.service import FleetProjection
-from vonk_control.fleet_stream import FleetStream
 from vonk_control.gateway.keys import (
     GatewayKeyError,
     GatewayKeyService,

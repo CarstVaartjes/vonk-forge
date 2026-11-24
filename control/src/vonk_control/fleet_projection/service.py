@@ -18,8 +18,8 @@ from vonk_agent_protocol.state_machines import (
 )
 from vonk_control.auth import CursorError
 from vonk_control.evidence_repeats import repeating_evidence
-from vonk_control.fleet_event_contract import NodeProfilePayload
-from vonk_control.fleet_events import FleetEventDraft, FleetEventRepository
+from vonk_control.fleet_events.contract import NodeProfilePayload
+from vonk_control.fleet_events.outbox import FleetEventDraft, FleetEventRepository
 from vonk_control.fleet_projection.common import (
     _AUTHORITY_REVISION,
     _LOW_CLOCK_LOOKBACK_SLACK,

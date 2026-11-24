@@ -282,7 +282,7 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
-      "module": "control/src/vonk_control/fleet_event_contract.py",
+      "module": "control/src/vonk_control/fleet_events/contract.py",
       "kind": "controller-contract"
     },
     {
@@ -328,7 +328,7 @@
       "reason": "API model colocated with the one derivation that fills it (Spark host checks)"
     },
     {
-      "module": "control/src/vonk_control/fleet_stream_contract.py",
+      "module": "control/src/vonk_control/fleet_events/stream_contract.py",
       "kind": "controller-contract"
     },
     {

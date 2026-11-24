@@ -29,7 +29,7 @@ from vonk_agent_protocol.state_machines import ReservationState
 from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control.content_identity import RecipeExecution, runs_identically
 from vonk_control.dialect_insert import dialect_insert
-from vonk_control.fleet_events import FleetEventRecorder, FleetEventRepository
+from vonk_control.fleet_events.outbox import FleetEventRecorder, FleetEventRepository
 from vonk_control.memory_reservations import MEMORY_RESERVATION_KINDS
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import (

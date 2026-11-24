@@ -63,7 +63,7 @@ from vonk_control.compiled_artifact_contract import (
     ParameterScalar,
 )
 from vonk_control.failures.coordinator_contract import CoordinatorFailureEvidence
-from vonk_control.fleet_event_contract import (
+from vonk_control.fleet_events.contract import (
     AgentOperationPayload,
     InstallationNodePayload,
     JobPayload,
