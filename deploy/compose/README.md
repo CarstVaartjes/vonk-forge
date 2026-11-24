@@ -250,96 +250,31 @@ After a NAS reboot Docker restarts every service by its restart policy, without
 Compose ordering. `runtime-init` restages the same release while the others
 start from the retained volumes.
 
-## NAS daemon platform-image retention and network repair
+## NAS Docker daemon: old images and lost networks
 
-`image-janitor` is an independent, stdlib-only Python service using the reviewed
-slim Python image. It alone mounts the NAS Docker socket; neither Controller
-service has socket access. The renderer embeds its small script in the Python command of the signed NAS
-bundle, with no Controller or worker package in the janitor. This keeps the
-root filesystem read-only without Compose inline-config injection.
+No service mounts the NAS Docker socket, so nothing in the project operates the
+NAS Docker daemon. Two daemon-level conditions need an operator step.
 
-The hourly scan considers images carrying the exact Vonk Forge source label or
-an exact API, worker or LiteLLM repository identity (including repository
-digests after a tag moves). All third-party images are excluded, including old
-PostgreSQL, Caddy and Tailscale pins. A container reference from any project,
-running or stopped, protects an image and resets its unused grace. First-seen
-unused timestamps live in `image-janitor-state`, published atomically with fsync;
-restarting the service preserves them. Build age and disk pressure do not select
-an image for deletion. The first scan starts the 24-hour grace; it does not
-immediately remove old builds.
+Old platform images: every release pulls new API, worker and LiteLLM images and
+the previous ones stay in the daemon store. Remove the unused ones with the NAS
+Docker UI's image cleanup, or only Vonk Forge's with:
 
-Deletion addresses the exact image ID, with `force=false` and parent pruning
-disabled. Docker remains the final guard against a concurrent container create.
-A refusal (including multiple repository tags) retains the image, logs its cause
-and next hourly attempt, then re-plans from fresh inventory. The service never
-removes containers or volumes. Logs include every exclusion/grace refusal and
-Docker's exact deletion receipts. Reported image size includes shared layers
-and is not a measurement of freed disk space. Failed scans leave health stale;
-the healthcheck reports unhealthy after two hours without a successful scan.
+```sh
+sudo docker image prune -a --force \
+  --filter label=org.opencontainers.image.source=https://github.com/CarstVaartjes/vonk-forge
+```
 
-The same process repairs lost network attachments of its own Compose project
-every 30 seconds. `compose up` does not: it starts a stopped container as-is
-and checks networks only on running ones, and a restart reuses the container
-record. A network recreated under a stopped container (new ID) therefore
-leaves it exited with `network ... not found`; for Caddy that closes `:8443`.
-Losing Docker's network store across a daemon restart produces exactly this.
-
-The janitor heals against the networks the rendered bundle declares for each
-service (`VONK_COMPOSE_NETWORKS`, rendered by `scripts/render-dev-compose`),
-not against the container's own record: Docker can lose a network and drop it
-from the record together, and a healer that trusted the record saw nothing
-wrong (the 2026-11-19 outage, the third after 11-03 and 11-05: Caddy running
-without `ingress`, `:8443` closed, no outbound DNS). Once per tick, against one
-inspect per network, a declared network that does not exist is broken whatever
-the record says, but only for a container that should run (running, a failed
-start, or a journalled start) and is still in the state it was inspected in:
-Compose removes the network of a container it stopped cleanly and reconnects it
-itself, so the janitor waits (`WAIT_NETWORK`) instead of recreating the network
-under it. A recorded entry is broken when it names an older network ID,
-or when the container runs and the network lists no endpoint for it. A declared
-network that exists but is missing from the record is left to Compose (a
-redeploy may be attaching it), unless a journalled repair owes it or the
-network carries the janitor's own mark. A missing declared network is recreated
-only inside a journalled, backed-off repair, from the bundle's definition
-(`internal` flag, Compose project and network labels). It carries a
-`config-hash` that Compose never computes, so the next `compose up` sees it as
-diverged and recreates it from the bundle: Compose stays the owner. An
-undeclared missing network waits for the next `compose up`. A non-empty,
-unparsable `VONK_COMPOSE_NETWORKS` logs `declared-networks-invalid-blind` and
-the janitor falls back to the records alone.
-
-State to action, first match: Docker-owned state (`restarting`, `paused`,
-`removing`, `dead`) waits; a missing undeclared network waits; a broken or owed
-network is repaired; a container that is not running but should be (failed
-start with an `always`/`unless-stopped` policy, or owed a start by the journal)
-is started; a container left `created` by an aborted `up` is started after a
-grace; otherwise nothing. The repair is journalled in `image-janitor-state`
-(`/state/repairing.json`) before its first effect, then stops a running
-container, disconnects and re-attaches each broken network by name with its
-aliases, and starts the container if it should run. A repair that fails
-half-way still starts the container, but the missing network stays owed,
-so the journal (or the network mark) owes it again on the next tick;
-each repair backs off exponentially with jitter (30 s doubling to five minutes)
-while it does not converge. Containers sharing another container's network
-namespace are not touched.
-
-This uses more of the Docker API than image collection: the janitor stops and
-starts project containers, creates a declared network that vanished, and
-disconnects and connects their networks.
-
-The janitor's health check also requires a completed repair pass in the last 15
-minutes. Caddy's health check requires a default route, which exists only
-while `ingress` (its one non-internal network) is attached, so a half-attached
-Caddy shows `unhealthy`. If every active Spark is offline for five minutes,
-the critical `AgentIngressDown` alert fires and names this cause (runbook:
-`docs/runbooks/observability.md#agent-ingress-down`). If the janitor log shows
-`repair-backoff` repeating, a repair is not converging; as a manual recovery
-delete the Caddy container (not volumes) and Redeploy.
-
-**Deployment requires rerunning the accepted NAS installer in the existing bundle
-directory**, preserving `.env`, secrets and volumes, then redeploying Compose.
-Pulling newer API/worker images alone cannot install this service or update its
-embedded script. Its named state volume must survive upgrades.
+Lost networks: after a NAS or Docker restart, Docker can lose a project network
+(seen 2026-11-03, 11-05 and 11-19, each time Caddy's `ingress`). `compose up`
+and restarts reuse the container record, so Caddy either fails to start
+(`network ... not found`) or runs on its internal networks only: `:8443` is
+closed and every Spark goes offline. Caddy's health check requires a default
+route, which exists only while `ingress` is attached, so it shows `unhealthy`,
+and the critical `AgentIngressDown` alert fires after five minutes (runbook:
+`docs/runbooks/observability.md#agent-ingress-down`). Recovery: delete the
+Caddy container (not volumes) and Redeploy; Compose recreates it on all its
+networks. A container left `created` by an aborted `up` also starts on the
+next Redeploy.
 
 This daemon store is separate from recipe availability: recipe preparation
 copies registry bytes with skopeo into the Controller's `image-cache/oci` layout,

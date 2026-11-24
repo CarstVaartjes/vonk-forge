@@ -30,7 +30,6 @@ IMAGES = {
 }
 SERVICES = {
     "runtime-init",
-    "image-janitor",
     "tailscale-gateway",
     "tailscale-configurator",
     "postgres",

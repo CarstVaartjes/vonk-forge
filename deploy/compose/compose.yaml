@@ -21,31 +21,6 @@ x-control-environment: &control-environment
   VONK_RECIPE_LIBRARY_RELEASE: ${VONK_RECIPE_LIBRARY_RELEASE:-latest}
 
 services:
-  image-janitor:
-    # Standalone stdlib-only janitor, sharing the reviewed Python build pin.
-    image: python:3.14-slim-trixie@sha256:0514bc76712d64f8bb48adcb95b1ab0d88c69fee95d62fe4c18ee948bee9b1e1
-    command: [python, -u, -B, /janitor.py]
-    restart: unless-stopped
-    logging: *bounded-logging
-    read_only: true
-    user: "0:0"
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    network_mode: none
-    configs:
-      - source: image-janitor-script
-        target: /janitor.py
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - image-janitor-state:/state
-    healthcheck:
-      # The hourly sweep and the 30-second repair loop must both be alive.
-      test: [CMD, python, -c, "import os,time; assert time.time()-os.stat('/state/unused.json').st_mtime < 7200 and time.time()-os.stat('/state/network-tick-ok').st_mtime < 900"]
-      interval: 5m
-      timeout: 5s
-      retries: 1
-      start_period: 1m
-
   # Root, no network: on each start stages each consumer's private secrets,
   # this release's runtime kit (configs and entrypoints from the Controller
   # image) and the ownership of the shared volume roots, then marks itself
@@ -345,12 +320,6 @@ services:
       timeout: 5s
       retries: 12
 
-# Source-checkout mount; the renderer embeds the script in the bundle command.
-# No Controller or worker code or socket access is involved.
-configs:
-  image-janitor-script:
-    file: ./image-janitor/janitor.py
-
 # Every secret is a file the installer generates under ./secrets.
 secrets:
   hf-token:
@@ -409,7 +378,6 @@ networks:
   litellm-metrics: {internal: true}
 
 volumes:
-  image-janitor-state: {}
   postgres-data: {}
   control-state: {}
   agent-artifacts: {}

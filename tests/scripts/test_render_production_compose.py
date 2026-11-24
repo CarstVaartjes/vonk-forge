@@ -117,13 +117,6 @@ def test_production_and_development_render_the_same_resolved_runtime_model(
     )
 
     assert production_model == development_model
-    # Both renderers stamp the janitor's declared networks (the equality above
-    # then proves they agree on them).
-    janitor_env = production_model["services"]["image-janitor"]["environment"]
-    assert (
-        "ingress"
-        in json.loads(janitor_env["VONK_COMPOSE_NETWORKS"])["services"]["caddy"]
-    )
     assert "include:" not in production.read_text(encoding="utf-8")
 
 

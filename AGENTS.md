@@ -327,6 +327,9 @@ healthy. Its readers start once it is healthy and never poll for a staged file;
 see [Runtime staging](deploy/compose/README.md#runtime-staging-runtime-init).
 `control-api` runs as 10001 without capabilities or Compose secrets and reads
 staged copies only; under an older Compose file its pre-exec steps down from root.
+No NAS service mounts the Docker socket; daemon-level recovery (old images,
+lost networks) is an operator step, see
+[NAS Docker daemon](deploy/compose/README.md#nas-docker-daemon-old-images-and-lost-networks).
 
 Removal is documented in [docs/operations/uninstall.md](docs/operations/uninstall.md),
 derived from what the installers create. A change that makes an installer, the

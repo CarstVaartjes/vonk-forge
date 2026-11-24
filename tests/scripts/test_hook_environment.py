@@ -278,7 +278,7 @@ def test_staged_files_outside_the_pyright_scope_are_not_type_checked() -> None:
     module = hook()
     assert module.type_checked(
         [
-            "deploy/compose/image-janitor/janitor.py",
+            "deploy/compose/litellm/config_supervisor.py",
             "control/tests/test_api.py",
             "src/cluster_profiles/generated_control/client.py",
             "src/cluster_profiles/cli.py",
