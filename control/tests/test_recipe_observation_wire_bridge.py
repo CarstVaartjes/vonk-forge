@@ -34,7 +34,7 @@ from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.distributed_recovery.common import _proves_fresh_absence
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
-from vonk_control.host_helper_authority import (
+from vonk_control.host_authority.helper import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )

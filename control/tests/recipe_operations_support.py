@@ -45,11 +45,11 @@ from vonk_control.execution_plan.service import (
     ControllerExecutionPlanService,
 )
 from vonk_control.gateway.litellm import LiteLlmGeneration, ServedModelInfo
-from vonk_control.host_helper_authority import (
+from vonk_control.host_authority.helper import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )
-from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
+from vonk_control.host_authority.runtime_plan import derive_runtime_plan_binding
 from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.inventory.items import inventory_items
 from vonk_control.inventory.repository import (

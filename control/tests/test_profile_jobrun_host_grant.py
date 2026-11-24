@@ -16,7 +16,7 @@ from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
-from vonk_control.host_helper_authority import (
+from vonk_control.host_authority.helper import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )

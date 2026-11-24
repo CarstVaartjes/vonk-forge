@@ -37,7 +37,7 @@ from vonk_control.fleet_profile_contract.definitions import FleetProfileDefiniti
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.gpu.clock import gpu_clock_start_intent
 from vonk_control.gpu.clock_validation import assess_gpu_clock
-from vonk_control.host_helper_authority import (
+from vonk_control.host_authority.helper import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )

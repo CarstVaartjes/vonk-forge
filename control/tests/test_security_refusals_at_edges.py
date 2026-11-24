@@ -32,7 +32,7 @@ from vonk_control.failures.classification import (
     is_definite,
     is_security_failure,
 )
-from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
+from vonk_control.host_authority.runtime_plan import derive_runtime_plan_binding
 from vonk_control.model_cache.source_helpers import _validate_source
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.jobs import Job

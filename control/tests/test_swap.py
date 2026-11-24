@@ -35,7 +35,7 @@ from vonk_agent_protocol.swap import (
 )
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_projection.nodes import _swap_warning
-from vonk_control.host_helper_authority import (
+from vonk_control.host_authority.helper import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )

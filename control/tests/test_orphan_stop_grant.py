@@ -20,7 +20,7 @@ from vonk_agent_protocol.host_helper import (
     SignedHostHelperGrant,
     host_helper_grant_signing_bytes,
 )
-from vonk_control.host_helper_authority import (
+from vonk_control.host_authority.helper import (
     HostHelperAuthorityError,
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,

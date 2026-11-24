@@ -71,7 +71,7 @@ from vonk_control.enrollment.types import (
     RenewalIssuanceUncertain,
 )
 from vonk_control.evidence_repeats import note_repeat, note_success
-from vonk_control.host_helper_authority import (
+from vonk_control.host_authority.helper import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
     HostRuntimeEvidenceUnavailable,

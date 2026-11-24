@@ -54,7 +54,7 @@ from vonk_control import agent_operation_states
 from vonk_control.agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
 from vonk_control.agent_upgrades.package_activation import matches_receipt
 from vonk_control.gpu.clock import selected_gpu_clock
-from vonk_control.host_runtime_plan_authority import (
+from vonk_control.host_authority.runtime_plan import (
     RuntimePlanAuthorityError,
     RuntimePlanBinding,
     RuntimePlanEvidenceUnavailable,

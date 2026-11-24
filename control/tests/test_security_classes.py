@@ -65,7 +65,7 @@ SECURITY_CLASSES: dict[str, frozenset[SecurityEdge]] = {
     "vonk_control.fleet_profiles.contracts:FleetProfilePermissionDenied": frozenset(
         {_AUTHZ}
     ),
-    "vonk_control.host_runtime_plan_authority:RuntimePlanAuthorityRefused": frozenset(
+    "vonk_control.host_authority.runtime_plan:RuntimePlanAuthorityRefused": frozenset(
         {_SIGNED}
     ),
     "vonk_control.jobs.queue:StaleAttempt": frozenset({_FENCE}),

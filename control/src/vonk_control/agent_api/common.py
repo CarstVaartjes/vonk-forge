@@ -57,7 +57,7 @@ from vonk_control.enrollment.bootstrap import EnrollmentBootstrapConfig, Install
 from vonk_control.enrollment.contract import EnrollmentId
 from vonk_control.enrollment.responses import _now
 from vonk_control.enrollment.service import EnrollmentService
-from vonk_control.host_helper_authority import HostRuntimeAuthorityService
+from vonk_control.host_authority.helper import HostRuntimeAuthorityService
 from vonk_control.http_errors import SecurityHTTPError, temporary_http_answer
 from vonk_control.logging import log_event
 from vonk_control.models.fleet import AgentCertificate, AgentNode

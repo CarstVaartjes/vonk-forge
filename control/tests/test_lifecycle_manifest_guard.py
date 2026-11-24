@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 import pytest
 
 from vonk_agent_protocol.host_helper import ContainerRuntimeAction
-from vonk_control.host_helper_authority import HostRuntimeAuthorityService
+from vonk_control.host_authority.helper import HostRuntimeAuthorityService
 from vonk_control.recipe_operations.constants import _MANIFEST_BOUND_KINDS
 from vonk_control.recipe_operations.errors import RecipeRequestInvalid
 from vonk_control.recipe_operations.persistence import PersistenceMixin

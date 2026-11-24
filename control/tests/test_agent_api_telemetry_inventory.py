@@ -38,7 +38,7 @@ from vonk_agent_protocol.recipe_operations import RecipeReconciliationIdentity
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_api import observations
-from vonk_control.host_helper_authority import (
+from vonk_control.host_authority.helper import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )

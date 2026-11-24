@@ -16,7 +16,7 @@ from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.wiring import build_distribution_service_from_components
 from vonk_control.enrollment.bootstrap import EnrollmentBootstrapConfig
 from vonk_control.enrollment.service import EnrollmentService
-from vonk_control.host_helper_authority import (
+from vonk_control.host_authority.helper import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )
