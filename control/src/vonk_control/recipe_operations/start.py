@@ -275,7 +275,9 @@ class StartMixin:
                         raise RecipeRequestInvalid(
                             str(error), reason=InvalidRequestReason.UNSUPPORTED
                         ) from error
-                    if gpu_clock is not None and desired_clock.range != gpu_clock:
+                    if gpu_clock is not None and (
+                        desired_clock is None or desired_clock.range != gpu_clock  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
+                    ):
                         raise RecipeRequestInvalid(
                             "Reviewed GPU clock range differs from the selected profile; re-plan against the latest profile assignment",
                             reason=(
