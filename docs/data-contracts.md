@@ -263,7 +263,7 @@ module defines its own.
 | `agent_protocol/src/vonk_agent_protocol/run_inspect_target.py` | agent-protocol | 7 | What one read-only run inspection asks the root helper about. |
 | `agent_protocol/src/vonk_agent_protocol/store_cleanup.py` | agent-protocol | 3 | Local retention delegation; no arbitrary privileged filesystem paths. |
 | `agent_protocol/src/vonk_agent_protocol/swap.py` | agent-protocol | 4 | Spark swap size: the owner's policy, the desired intent and what the helper did. |
-| `tools/vonkctl_json_contract.py` | controller-contract | 13 | The ``vonkctl --json`` client contract: one model per published document. |
+| `tools/vonkctl_json_contract.py` | controller-contract | 13 | The `vonkctl --json` client contract: one model per published document. |
 | `control/src/vonk_control/fleet_projection/host_checks.py` | declared | 1 | Spark host checks: plain advice derived from the agent's measured host tuning. |
 | `control/src/vonk_control/metrics/contract.py` | controller-contract | 7 | Shared operator contracts for bounded Prometheus reads. |
 | `control/src/vonk_control/metrics/prometheus_api.py` | declared | 9 | Read-only fixed-query adapter to the internal Prometheus service. |
