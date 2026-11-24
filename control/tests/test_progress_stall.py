@@ -23,7 +23,7 @@ from vonk_control.fleet_profile_contract.applications import (
 )
 from vonk_control.lifecycle.image_availability import PREPARATION_STALL_WINDOW
 from vonk_control.operations.blockers import make_blocker
-from vonk_control.progress_stall import (
+from vonk_control.waits.progress_stall import (
     PROGRESS_STALL_WINDOW,
     is_stalled,
     next_stall,
@@ -661,6 +661,6 @@ def test_every_process_with_the_fleet_profile_service_counts_observations() -> N
     # (the worker imports the service, not this module).
     probe = (
         "import sys, vonk_control.fleet_profiles.service\n"
-        "assert 'vonk_control.progress_stall' in sys.modules\n"
+        "assert 'vonk_control.waits.progress_stall' in sys.modules\n"
     )
     subprocess.run([sys.executable, "-c", probe], check=True, timeout=60)

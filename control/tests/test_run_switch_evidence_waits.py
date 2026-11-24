@@ -29,13 +29,13 @@ from vonk_control.inventory.repository import (
 )
 from vonk_control.models.execution import RecipeRun, RunNode
 from vonk_control.operations.blockers import STALL_RETRY_ATTEMPT, ProgressStall
-from vonk_control.progress_stall import is_stalled, next_stall
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 from vonk_control.run_switch_operations.errors import RunSwitchInstallPreflightExpired
 from vonk_control.run_switch_operations.evidence_waits import (
     RunSwitchPostStopInventoryPending,
 )
 from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
+from vonk_control.waits.progress_stall import is_stalled, next_stall
 
 from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .run_switch_operations_support import (

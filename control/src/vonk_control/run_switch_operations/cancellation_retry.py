@@ -32,7 +32,6 @@ from vonk_control.jobs.documents import RecipeStartParent, RecipeStopParent
 from vonk_control.lifecycle.run_switch import LIVE_STATES as _LIVE_STATES
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_builds.cancellation import (
     BuildConsumerError,
     lock_run_switch_build_dependency,
@@ -75,6 +74,7 @@ from vonk_control.run_switch_operations.result_helpers import (
 from vonk_control.run_switch_operations.results import _persisted_result
 from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import read_stored_model, serialize_json_value
+from vonk_control.waits.persisted import schedule_wait
 from vonk_control.workload_intent import take_workload_intent
 
 if TYPE_CHECKING:

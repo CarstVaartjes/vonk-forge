@@ -32,7 +32,6 @@ from vonk_control.lifecycle.types import Effect as _LifecycleEffect
 from vonk_control.lifecycle.types import State as _LifecycleState
 from vonk_control.models.jobs import Job
 from vonk_control.operations.blockers import BlockingOperation, make_blocker
-from vonk_control.persisted_waits import schedule_wait, wait_due
 from vonk_control.recipe_builds.cancellation import needs_container_build
 from vonk_control.recipe_builds.common import RecipeBuildAdmissionBusy
 from vonk_control.recipe_operations.interfaces import RecipeOperationView
@@ -107,8 +106,9 @@ from vonk_control.run_switch_operations.result_helpers import (
     _without_observation_time,
 )
 from vonk_control.run_switch_operations.results import _persisted_result
-from vonk_control.stall_window import stall_deadline
 from vonk_control.stored.rows import read_row_column
+from vonk_control.waits.persisted import schedule_wait, wait_due
+from vonk_control.waits.stall_window import stall_deadline
 
 if TYPE_CHECKING:
     from vonk_control.run_switch_operations.service import RunSwitchOperationService

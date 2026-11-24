@@ -29,7 +29,7 @@ from vonk_control.run_switch_operations.image_receipts import (
     _planned_transfer_bytes,
     _planned_transfer_parts,
 )
-from vonk_control.stall_window import last_progress_at, stall_deadline
+from vonk_control.waits.stall_window import last_progress_at, stall_deadline
 
 #: Preparation, transfer and verification end after this long without progress.
 RECOVERY_STALL_WINDOW = timedelta(hours=1)

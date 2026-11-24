@@ -15,7 +15,6 @@ from vonk_control.inventory.repository import INVENTORY_MAX_AGE
 from vonk_control.logging import log_event
 from vonk_control.models.execution import InstallationNode, RecipeInstallation
 from vonk_control.oci_image_store import IMAGE_CACHE_DIRECTORY
-from vonk_control.persisted_waits import read_wait
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.settings import (
     STORAGE_EVICTION_RESERVE_FLOOR_BYTES,
@@ -92,6 +91,7 @@ from vonk_control.unused_storage_collection.removal import (
     _stop_failed_runs,
     _uninstall,
 )
+from vonk_control.waits.persisted import read_wait
 from vonk_control.worker.memory_contract import WorkerMemoryComponent
 
 

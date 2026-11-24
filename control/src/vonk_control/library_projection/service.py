@@ -66,7 +66,7 @@ from vonk_control.library_projection.views import (
 from vonk_control.model_cache import states as model_cache_states
 from vonk_control.model_cache.contract import ModelCacheOperationState, ModelCacheUsage
 from vonk_control.models.catalog import CatalogDocumentRevision
-from vonk_control.wait_contract import QueueWait
+from vonk_control.waits.contract import QueueWait
 
 REQUEST_BUDGET_SECONDS = 8.0
 IMAGE_BUDGET_SECONDS = 2.0

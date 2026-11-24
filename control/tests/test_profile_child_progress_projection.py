@@ -68,7 +68,7 @@ from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
 from vonk_control.run_switch_operations.results import _stored_result
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.stored.json_values import write_guard_mode
-from vonk_control.wait_contract import QueueWait
+from vonk_control.waits.contract import QueueWait
 
 from .node_contacts import contact_row
 from .preflight_fixtures import record_passing_preflight

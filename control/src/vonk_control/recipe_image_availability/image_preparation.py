@@ -48,9 +48,9 @@ from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImageReferenceIntent,
 )
 from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
-from vonk_control.stall_window import last_progress_at, latest_progress
 from vonk_control.stored.states import RecipeBuildState
 from vonk_control.strict_json import serialize_json_value
+from vonk_control.waits.stall_window import last_progress_at, latest_progress
 
 if TYPE_CHECKING:
     from vonk_control.recipe_image_availability.service import (

@@ -47,7 +47,6 @@ from vonk_control.catalog.sync_contract import (
 from vonk_control.models.cache import RecipeLibrarySyncRun
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
-from vonk_control.persisted_waits import read_wait, schedule_wait
 from vonk_control.recipe_packages.contracts import has_newer_major_note
 from vonk_control.recipe_packages.library_types import (
     RecipeLibraryError,
@@ -56,7 +55,8 @@ from vonk_control.recipe_packages.library_types import (
 )
 from vonk_control.source_bundles import SourceBundleUnknown
 from vonk_control.stored.states import LibrarySyncRunState
-from vonk_control.wait_contract import QueueWait, typed_wait_reason
+from vonk_control.waits.contract import QueueWait, typed_wait_reason
+from vonk_control.waits.persisted import read_wait, schedule_wait
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_RESULT_ITEMS = 256

@@ -105,10 +105,10 @@ from vonk_control.models.execution import STOPPABLE_RUN_STATES, ArtifactJob, Rec
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation as StoredOperation
 from vonk_control.models.operations import AgentOperationAttempt
-from vonk_control.persisted_waits import lifecycle_wait
 from vonk_control.settings import DATABASE_WAIT_BUDGETS
-from vonk_control.stall_window import stall_deadline
 from vonk_control.stored.rows import read_row_column
+from vonk_control.waits.persisted import lifecycle_wait
+from vonk_control.waits.stall_window import stall_deadline
 
 KIND = "artifact-job"
 WAITING = ajs.NEEDS_OPERATOR

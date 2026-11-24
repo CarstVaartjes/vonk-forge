@@ -54,10 +54,10 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation as StoredOperation
 from vonk_control.models.operations import AgentOperationAttempt
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationCancellationResult,
 )
+from vonk_control.waits.persisted import schedule_wait
 
 
 def release_owned_reservations_in_session(

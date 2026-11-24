@@ -21,7 +21,7 @@ from vonk_control.fleet_profile_contract.applications import (
 from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
 from vonk_control.fleet_profiles.persistence import _persisted_profile_progress
 from vonk_control.models.fleet import AgentNode, FleetProfileApplication
-from vonk_control.persisted_waits import wait_due
+from vonk_control.waits.persisted import wait_due
 
 from .test_profile_capacity_admission import _capacity_profile
 

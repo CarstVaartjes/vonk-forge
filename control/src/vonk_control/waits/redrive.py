@@ -8,7 +8,6 @@ from vonk_agent_protocol.lifecycle_vocabulary import WaitOwnerKind
 from vonk_control import (
     models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
 )
-from vonk_control.due_waits import AdvanceWait, WaitSource
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import (
     ArtifactLifecycleGate,
@@ -26,6 +25,7 @@ from vonk_control.models.fleet import (
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.models.routes import RoutePublicationOwner
+from vonk_control.waits.due import AdvanceWait, WaitSource
 
 # This is dispatch coverage, not a duplicate state/reason vocabulary. The
 # whole-tree guard compares both the ORM owners and concrete KindAdapters.

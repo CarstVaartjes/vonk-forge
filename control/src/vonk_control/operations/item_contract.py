@@ -51,7 +51,7 @@ from vonk_control.operations.contract import (
 )
 from vonk_control.strict_json import StrictModel, read_stored_model
 from vonk_control.summary_cut import summary_cut
-from vonk_control.wait_contract import QueueWait
+from vonk_control.waits.contract import QueueWait
 
 #: The wire word for an agent operation kind.
 AGENT_OPERATION_KINDS = frozenset(operation.value for operation in AgentOperation)

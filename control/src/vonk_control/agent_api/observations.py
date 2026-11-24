@@ -66,7 +66,6 @@ from vonk_control.operator_acceptance import operator_acceptance
 from vonk_control.operator_receipt_contract import ReceiptPolicy
 from vonk_control.optimistic import Stale, transition
 from vonk_control.owner_liveness import builds_in_flight, run_has_live_operation
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.presence import PresenceError
 from vonk_control.recipe_operations.observation_helpers import (
     prepare_exact_recipe_run_observation_nodes,
@@ -81,6 +80,7 @@ from vonk_control.untracked_installations import (
     untracked_runs,
     wanted_run_ids,
 )
+from vonk_control.waits.persisted import schedule_wait
 
 
 def _wake_post_stop_waits(

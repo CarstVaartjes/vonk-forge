@@ -16,7 +16,7 @@ from vonk_control.run_switch_contract.phase_results import (
     RunSwitchModelDownloadPendingResult,
 )
 from vonk_control.strict_json import serialize_json_value
-from vonk_control.wait_contract import QueueWait
+from vonk_control.waits.contract import QueueWait
 
 NOW = datetime(2026, 11, 6, 12, tzinfo=UTC)
 RETRY = datetime(2026, 11, 6, 13, tzinfo=UTC)

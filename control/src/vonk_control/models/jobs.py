@@ -25,7 +25,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSu
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.model_primitives import Base, _lower_hex, _state_in
 from vonk_control.models.waits import wait_due_column, wait_evidence_column
-from vonk_control.wait_contract import WaitEvidence
+from vonk_control.waits.contract import WaitEvidence
 
 
 class Job(Base):

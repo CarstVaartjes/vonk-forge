@@ -22,9 +22,9 @@ from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.jobs import ControlProcessHeartbeat
 from vonk_control.observation.capture import begin_observation_capture
 from vonk_control.observation.platform_errors import ObservationCaptureUnavailable
-from vonk_control.persisted_waits import read_wait
-from vonk_control.progress_stall import WAITING_STATES, is_stalled, read_stall
 from vonk_control.strict_json import StrictModel
+from vonk_control.waits.persisted import read_wait
+from vonk_control.waits.progress_stall import WAITING_STATES, is_stalled, read_stall
 from vonk_control.worker_healthcheck import (
     WORKER_READINESS_WINDOW_SECONDS,
     WORKER_STEP_WINDOW_SECONDS,

@@ -10,7 +10,7 @@ from vonk_control.lifecycle.evidence import Residue
 from vonk_control.model_primitives import Base
 from vonk_control.models.waits import wait_due_column, wait_evidence_column
 from vonk_control.stored.json_values import ContractJSON
-from vonk_control.wait_contract import WaitEvidence
+from vonk_control.waits.contract import WaitEvidence
 
 
 class CoordinatorFailure(Base):

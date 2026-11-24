@@ -1571,7 +1571,10 @@ def test_the_classified_pairwise_progress_check_is_allowed():
         "    return current.phase != previous.phase\n"
     )
     assert not check_source(
-        "control/src/vonk_control/stall_window.py", source, {2}, modes=("movement",)
+        "control/src/vonk_control/waits/stall_window.py",
+        source,
+        {2},
+        modes=("movement",),
     )
     assert check_source(
         "control/src/vonk_control/other.py", source, {2}, modes=("movement",)

@@ -41,10 +41,10 @@ from vonk_control.failure_classification import disposition, error_detail, wait_
 from vonk_control.logging import log_event, redact_text
 from vonk_control.model_primitives import Base
 from vonk_control.models.waits import ScheduledWaitOwner
-from vonk_control.persisted_waits import owner_identity
 from vonk_control.recovery_policy import WAIT_STEP
 from vonk_control.strict_json import stored_document_detail
-from vonk_control.wait_contract import WaitEvidence
+from vonk_control.waits.contract import WaitEvidence
+from vonk_control.waits.persisted import owner_identity
 
 _LOGGER = logging.getLogger(__name__)
 type RowKey = tuple[str | int, ...]

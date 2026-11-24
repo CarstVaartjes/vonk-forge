@@ -46,7 +46,6 @@ from vonk_control.models.fleet import (
     FleetProfileSelection,
 )
 from vonk_control.models.jobs import Job
-from vonk_control.persisted_waits import read_wait
 from vonk_control.recipe_operations.errors import RecipeRetryLater
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.storage_demands import (
@@ -61,6 +60,7 @@ from vonk_control.unused_storage_collection.service import (
     UnusedStorageCollector,
     spark_eviction_capacity,
 )
+from vonk_control.waits.persisted import read_wait
 
 from .model_cache_support import _artifact, _download
 from .recipe_operations_support import started_recipe

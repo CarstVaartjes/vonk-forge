@@ -31,7 +31,6 @@ from vonk_control.distribution.wiring import build_distribution_service_from_com
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
 )
-from vonk_control.due_waits import AdvanceWait, DueWaitBackstop, RowKey
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.gateway.route_grants import require_existing_recipe_routes
 from vonk_control.install_admission.service import InstallAdmissionService
@@ -54,7 +53,8 @@ from vonk_control.telemetry.maintenance import (
 )
 from vonk_control.terminal_history_collection import TerminalHistoryCollector
 from vonk_control.unused_storage_collection.service import UnusedStorageCollector
-from vonk_control.wait_redrive import wait_sources
+from vonk_control.waits.due import AdvanceWait, DueWaitBackstop, RowKey
+from vonk_control.waits.redrive import wait_sources
 
 if TYPE_CHECKING:
     from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService

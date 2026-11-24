@@ -19,7 +19,6 @@ from vonk_control.agent_jobs.contracts import (
 )
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.auth import TokenCodec
-from vonk_control.due_waits import DueWaitBackstop, WaitSource
 from vonk_control.models.execution import (
     RecipeInstallation,
     RecipeRun,
@@ -37,6 +36,7 @@ from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.run_admission import RunAdmissionBusy
 from vonk_control.stored.rows import read_row_column
+from vonk_control.waits.due import DueWaitBackstop, WaitSource
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .non_blocking import assert_ended_without_blocking

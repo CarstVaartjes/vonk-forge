@@ -81,7 +81,7 @@ from vonk_control.lifecycle.types import (
 )
 from vonk_control.logging import redact_text
 from vonk_control.models.jobs import Job, JobAttempt
-from vonk_control.persisted_waits import initialize_wait, lifecycle_wait, wait_due
+from vonk_control.waits.persisted import initialize_wait, lifecycle_wait, wait_due
 
 KIND = "job"
 WAITING = LifecycleState.NEEDS_OPERATOR.value

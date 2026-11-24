@@ -22,7 +22,7 @@ from vonk_control.operations.progress import (
     sample_progress,
 )
 from vonk_control.recipe_image_availability.api import _progress
-from vonk_control.stall_window import progress_advanced
+from vonk_control.waits.stall_window import progress_advanced
 
 NOW = datetime(2026, 9, 8, tzinfo=UTC)
 

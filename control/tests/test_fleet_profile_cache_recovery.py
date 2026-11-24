@@ -37,7 +37,6 @@ from vonk_control.models.fleet import (
 )
 from vonk_control.models.jobs import Job
 from vonk_control.models.telemetry import NodeInventorySnapshot
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_builds.common import RecipeBuildPlan
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
@@ -48,6 +47,7 @@ from vonk_control.runtime_image_preparation.contracts import (
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.stored.rows import read_row_column
+from vonk_control.waits.persisted import schedule_wait
 
 from .fleet_profiles_support import NOW, _node_id
 from .recipe_operations_support import setup_services

@@ -41,9 +41,9 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.operations.blockers import BlockingOperation, make_blocker
-from vonk_control.persisted_waits import read_wait
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
+from vonk_control.waits.persisted import read_wait
 
 from .agent_fences import fenced_operation
 from .recipe_operations_support import NOW, installed_recipe, setup_services

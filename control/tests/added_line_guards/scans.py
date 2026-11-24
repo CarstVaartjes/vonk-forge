@@ -1424,7 +1424,7 @@ _MOVEMENT_FIELDS = frozenset(
 
 MOVEMENT_VERDICTS: dict[tuple[str, str], str] = {
     (
-        "control/src/vonk_control/stall_window.py",
+        "control/src/vonk_control/waits/stall_window.py",
         "progress_advanced",
     ): "agent operation progress within one attempt: forward-only marks need a "
     "per-attempt store (an OperationProgress protocol field); owner proposal",

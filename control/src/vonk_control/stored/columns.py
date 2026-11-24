@@ -146,7 +146,7 @@ from vonk_control.run_switch_contract.phase_results import (
 )
 from vonk_control.stored.documents import RouteClaimMarker
 from vonk_control.stored.json_values import bind
-from vonk_control.wait_contract import WaitEvidence
+from vonk_control.waits.contract import WaitEvidence
 
 ProfileLabels = Annotated[dict[LabelName, LabelValue], Field(max_length=16)]
 

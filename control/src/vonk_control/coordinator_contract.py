@@ -8,7 +8,7 @@ from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.strict_json import StrictModel
-from vonk_control.wait_contract import QueueWait
+from vonk_control.waits.contract import QueueWait
 
 
 class CoordinatorFailureEvidence(StrictModel):

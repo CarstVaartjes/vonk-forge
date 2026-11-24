@@ -54,8 +54,8 @@ from vonk_control.lifecycle.fleet_profile import (
 from vonk_control.models.execution import STOPPABLE_RUN_STATES, RecipeRun
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.operations.blockers import BlockingOperation, make_blocker
-from vonk_control.persisted_waits import schedule_wait, write_wait
 from vonk_control.run_switch_contract.operations import RunSwitchOperation
+from vonk_control.waits.persisted import schedule_wait, write_wait
 
 if TYPE_CHECKING:
     from vonk_control.fleet_profiles.run_switch_adapter import (

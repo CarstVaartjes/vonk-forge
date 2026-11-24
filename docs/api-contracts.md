@@ -647,7 +647,7 @@ these types; the guard is described in [testing and CI](testing-and-ci.md).
 
 ### Persisted Controller waits
 
-`wait_contract.WaitEvidence` owns the typed reason, dependency and owner identities,
+`waits.contract.WaitEvidence` owns the typed reason, dependency and owner identities,
 nonempty blockers, first-blocked and real-progress clocks, optional dependency
 expiry, and resume condition. Each existing durable owner stores this evidence
 in the transaction that parks its work. `QueueWait.next_check` is projected from

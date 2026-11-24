@@ -59,9 +59,9 @@ from vonk_control.recipe_operations.stop_payloads import (
     RecipeStopAuthorityError,
     durable_run_stop_payloads,
 )
-from vonk_control.stall_window import stall_deadline
 from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import read_stored_model, serialize_json_value
+from vonk_control.waits.stall_window import stall_deadline
 
 
 def _start_binds_current_run_plan(session: Session, start: Job, run: RecipeRun) -> bool:

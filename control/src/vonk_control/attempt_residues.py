@@ -95,8 +95,8 @@ from vonk_control.owner_liveness import (
     installations_named_by_live_jobs,
     referencing_active_job,
 )
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.reservation_owners import release_dead_owner_reservations
+from vonk_control.waits.persisted import schedule_wait
 
 _LOGGER = logging.getLogger(__name__)
 #: How long an unowned incomplete installation is left alone before it is

@@ -32,7 +32,7 @@ from vonk_control.run_switch_operations.awaited_children import awaited_jobs
 from vonk_control.run_switch_operations.constants import _FINAL_VERIFICATION_MAX_SECONDS
 from vonk_control.run_switch_operations.errors import RunSwitchPostStopEvidencePending
 from vonk_control.run_switch_operations.planning_helpers import _aware, _stored_job_plan
-from vonk_control.stall_window import Verdict, progress_deadline
+from vonk_control.waits.stall_window import Verdict, progress_deadline
 
 #: Dependency recovery before verification: stayed unreadable.
 DEPENDENCY_WINDOW = timedelta(hours=1)

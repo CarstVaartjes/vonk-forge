@@ -82,10 +82,10 @@ from vonk_control.operations.blockers import (
     StallWait,
     make_blocker,
 )
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
-from vonk_control.stall_window import Verdict, progress_verdict
-from vonk_control.wait_contract import WaitEvidence, typed_wait_reason
+from vonk_control.waits.contract import WaitEvidence, typed_wait_reason
+from vonk_control.waits.persisted import schedule_wait
+from vonk_control.waits.stall_window import Verdict, progress_verdict
 
 #: How long a wait shows no movement before it is shown as stalled: the load's
 #: own stall window.  It is longer than a preparation's own stall window, so a

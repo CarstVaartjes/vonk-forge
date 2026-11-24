@@ -41,7 +41,7 @@ from vonk_control.model_primitives import (
     _state_in,
 )
 from vonk_control.models.waits import wait_due_column, wait_evidence_column
-from vonk_control.wait_contract import WaitEvidence
+from vonk_control.waits.contract import WaitEvidence
 
 
 class RecipeInstallation(Base):

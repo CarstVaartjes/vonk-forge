@@ -76,7 +76,6 @@ from vonk_control.models.fleet import (
     AgentIssuedCertificateRevocation,
     AgentNode,
 )
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.security.enrollment import (
     require_admitted_request,
@@ -88,6 +87,7 @@ from vonk_control.security.enrollment import (
 )
 from vonk_control.settings import DATABASE_WAIT_BUDGETS
 from vonk_control.step_ca import StepCAIssuancePending
+from vonk_control.waits.persisted import schedule_wait
 
 _LOGGER = logging.getLogger("vonk_control.enrollment")
 

@@ -57,7 +57,6 @@ from vonk_control.lifecycle.evidence import BookkeepingReason, Residue
 from vonk_control.logging import log_event
 from vonk_control.models.execution import STOPPABLE_RUN_STATES, RecipeRun, RunNode
 from vonk_control.models.jobs import Job
-from vonk_control.persisted_waits import read_wait, schedule_wait
 from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_plan,
@@ -67,6 +66,7 @@ from vonk_control.recipe_operations.start_payloads import (
     validate_distributed_start_timeout_seconds,
 )
 from vonk_control.recovery_policy import DISTRIBUTED_RECOVERY
+from vonk_control.waits.persisted import read_wait, schedule_wait
 
 _LOGGER = logging.getLogger(__name__)
 

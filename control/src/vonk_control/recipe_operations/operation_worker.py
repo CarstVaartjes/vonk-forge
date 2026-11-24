@@ -27,7 +27,6 @@ from vonk_control.models.execution import RecipeRun, RunNode
 from vonk_control.models.jobs import Job
 from vonk_control.optimistic import Stale, transition
 from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_operations.constants import _INITIAL_OBSERVATION_GRACE_SECONDS
 from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
@@ -40,7 +39,8 @@ from vonk_control.recipe_routes.shared import (
     publication_disposition,
 )
 from vonk_control.recovery_policy import RECOVERY, ROUTE_RECOVERY, WAIT_STEP, schedule
-from vonk_control.stall_window import stall_deadline
+from vonk_control.waits.persisted import schedule_wait
+from vonk_control.waits.stall_window import stall_deadline
 
 _LOGGER = logging.getLogger("vonk-control-worker")
 

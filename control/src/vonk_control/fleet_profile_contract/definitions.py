@@ -38,7 +38,7 @@ from vonk_control.model_cache.contract import CachedResourceEstimate
 from vonk_control.recipe_update_batches.notice import RecipeUpdateNotice
 from vonk_control.run_switch_contract.requests import SparkGroupNode
 from vonk_control.strict_json import StrictModel
-from vonk_control.wait_contract import QueueWait
+from vonk_control.waits.contract import QueueWait
 
 
 class FleetProfileNode(SparkGroupNode):

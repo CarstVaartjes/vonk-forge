@@ -22,7 +22,7 @@ from vonk_control.failure_classification import disposition, error_code, error_d
 from vonk_control.logging import redact_text
 from vonk_control.models.coordinator import CoordinatorFailure
 from vonk_control.operations.blockers import BlockingOperation, make_blocker
-from vonk_control.persisted_waits import read_wait, write_wait
+from vonk_control.waits.persisted import read_wait, write_wait
 
 _RETRY_FIRST_SECONDS = 5
 _RETRY_CAP_SECONDS = 300

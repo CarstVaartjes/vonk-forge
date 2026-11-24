@@ -20,7 +20,6 @@ from vonk_control.logging import redact_text
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.jobs import Job
 from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
-from vonk_control.persisted_waits import schedule_wait, wait_due
 from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityRefused,
@@ -38,8 +37,9 @@ from vonk_control.recipe_update_batches.contract import (
     UpdateChildState,
     read_update_document,
 )
-from vonk_control.stall_window import progress_deadline
 from vonk_control.strict_json import serialize_json_value
+from vonk_control.waits.persisted import schedule_wait, wait_due
+from vonk_control.waits.stall_window import progress_deadline
 
 if TYPE_CHECKING:
     from vonk_control.recipe_update_batches.service import RecipeUpdateBatches

@@ -30,7 +30,6 @@ from vonk_control.operations.blockers import (
     BlockingOperation,
     make_blocker,
 )
-from vonk_control.persisted_waits import read_wait
 from vonk_control.recovery_policy import RECOVERY
 from vonk_control.runtime.preflight import (
     admission_blockers,
@@ -38,7 +37,8 @@ from vonk_control.runtime.preflight import (
     recipe_requirements,
     request_digest,
 )
-from vonk_control.wait_contract import typed_wait_reason
+from vonk_control.waits.contract import typed_wait_reason
+from vonk_control.waits.persisted import read_wait
 
 # The agent bounds probe execution. After its normal delivery/reporting window,
 # observe less frequently while that same fenced operation owns recovery.

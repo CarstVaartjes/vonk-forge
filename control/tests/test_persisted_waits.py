@@ -35,15 +35,15 @@ from vonk_control.operations.blockers import (
     make_blocker,
 )
 from vonk_control.operations.item_contract import OperationItem
-from vonk_control.persisted_waits import (
+from vonk_control.run_switch_journal_repair.discovery import _fingerprint
+from vonk_control.stored.json_values import binding_for
+from vonk_control.waits.contract import WaitEvidence
+from vonk_control.waits.persisted import (
     owner_identity,
     read_wait,
     schedule_wait,
     write_wait,
 )
-from vonk_control.run_switch_journal_repair.discovery import _fingerprint
-from vonk_control.stored.json_values import binding_for
-from vonk_control.wait_contract import WaitEvidence
 
 from .test_catalog_sync import _fixture
 

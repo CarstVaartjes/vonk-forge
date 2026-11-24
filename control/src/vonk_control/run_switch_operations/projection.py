@@ -12,7 +12,6 @@ from vonk_control.jobs import states as job_states
 from vonk_control.journal_models import RunSwitchJournalRepairPending
 from vonk_control.models.jobs import Job
 from vonk_control.operations.blockers import make_blocker
-from vonk_control.persisted_waits import read_wait, wait_due
 from vonk_control.run_switch_contract.journal import RunSwitchJournalRepairPendingState
 from vonk_control.run_switch_contract.operations import RunSwitchOperation
 from vonk_control.run_switch_contract.progress_view import (
@@ -31,6 +30,7 @@ from vonk_control.run_switch_operations.result_helpers import (
     _read_progress,
 )
 from vonk_control.stored.rows import read_row_column
+from vonk_control.waits.persisted import read_wait, wait_due
 
 
 class ProjectionMixin:

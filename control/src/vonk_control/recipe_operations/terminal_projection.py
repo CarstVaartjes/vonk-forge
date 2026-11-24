@@ -35,7 +35,6 @@ from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_operations.intent import (
     _intent_is_current,
     _job_workload_intent,
@@ -65,6 +64,7 @@ from vonk_control.recipe_operations.run_transitions import (
 from vonk_control.recipe_operations.start_cleanup import StartCleanup, stage
 from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import serialize_json_value
+from vonk_control.waits.persisted import schedule_wait
 
 if TYPE_CHECKING:
     from vonk_control.recipe_operations.service import RecipeOperationService

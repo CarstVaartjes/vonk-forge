@@ -61,7 +61,7 @@ from vonk_control.recipe_image_availability.removal_contract import (
 from vonk_control.recipe_update_batches.contract import RecipeUpdateDocument
 from vonk_control.stored.json_values import binding_for
 from vonk_control.strict_json import warn_unreadable_once
-from vonk_control.wait_contract import QueueWait, WaitEvidence, typed_wait_reason
+from vonk_control.waits.contract import QueueWait, WaitEvidence, typed_wait_reason
 
 
 def read_wait(owner: ScheduledWaitOwner) -> QueueWait | None:

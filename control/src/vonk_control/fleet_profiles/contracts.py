@@ -45,7 +45,7 @@ from vonk_control.preparation_contract import RuntimeImageIdentity
 from vonk_control.run_switch_contract.plans import RunSwitchAssessment
 from vonk_control.run_switch_operations.errors import RunSwitchOperationConflict
 from vonk_control.storage_demands import StorageRelief
-from vonk_control.wait_contract import QueueWait
+from vonk_control.waits.contract import QueueWait
 
 
 class PreparationStarter(Protocol):

@@ -25,8 +25,8 @@ from vonk_control.models.execution import RecipeRun, RunNode
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
-from vonk_control.persisted_waits import read_wait
 from vonk_control.recovery_policy import DISTRIBUTED_RECOVERY
+from vonk_control.waits.persisted import read_wait
 
 from .host_memory_guard_support import guard_diagnostics
 from .node_contacts import contact_row

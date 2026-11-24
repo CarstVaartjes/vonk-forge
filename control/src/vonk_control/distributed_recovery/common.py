@@ -55,7 +55,6 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.operations.blockers import BlockingOperation, make_blocker
 from vonk_control.owner_liveness import run_has_live_operation
-from vonk_control.persisted_waits import read_wait, schedule_wait, write_wait
 from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     RouteWithdrawalFollowUp,
@@ -68,6 +67,7 @@ from vonk_control.recipe_operations.lifecycle_contract import (
 from vonk_control.recovery_policy import DISTRIBUTED_RECOVERY, schedule
 from vonk_control.stored.rows import read_row_column
 from vonk_control.stored.states import CatalogRevisionState
+from vonk_control.waits.persisted import read_wait, schedule_wait, write_wait
 
 """Durable controller coordination for distributed recipe recovery."""
 

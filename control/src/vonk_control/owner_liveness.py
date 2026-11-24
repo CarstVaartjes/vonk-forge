@@ -81,10 +81,10 @@ from vonk_control.models.fleet import (
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.models.operations import AgentOperation as StoredOperation
-from vonk_control.stall_window import progress_deadline
 from vonk_control.stored.rows import read_row_column
 from vonk_control.stored.states import LibrarySyncRunState, RecipeBuildState
 from vonk_control.strict_json import read_stored_model
+from vonk_control.waits.stall_window import progress_deadline
 
 #: A Job in one of these has ended; nothing it owns can still be used by it.
 JOB_ENDED_STATES = job_states.words(

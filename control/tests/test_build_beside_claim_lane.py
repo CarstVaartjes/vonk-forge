@@ -28,8 +28,8 @@ from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation as StoredOperation
 from vonk_control.operations.blockers import BlockingOperation
-from vonk_control.persisted_waits import read_wait
-from vonk_control.wait_contract import QueueWait
+from vonk_control.waits.contract import QueueWait
+from vonk_control.waits.persisted import read_wait
 
 from .agent_fences import fenced_operation
 from .agent_jobs_support import COMMIT, NODE_A, NODE_B, parent

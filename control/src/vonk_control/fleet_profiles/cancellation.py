@@ -71,11 +71,11 @@ from vonk_control.models.fleet import (
     FleetProfileSelection,
 )
 from vonk_control.operations.blockers import make_blocker
-from vonk_control.persisted_waits import read_wait, schedule_wait
 from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
-from vonk_control.stall_window import stall_deadline
 from vonk_control.strict_json import read_stored_model
-from vonk_control.wait_contract import typed_wait_reason
+from vonk_control.waits.contract import typed_wait_reason
+from vonk_control.waits.persisted import read_wait, schedule_wait
+from vonk_control.waits.stall_window import stall_deadline
 from vonk_control.workload_intent import take_workload_intent
 
 if TYPE_CHECKING:

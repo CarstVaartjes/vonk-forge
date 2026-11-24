@@ -66,7 +66,6 @@ from vonk_control.models.operations import AgentOperationAttempt
 from vonk_control.offline_stops import is_deferred_stop
 from vonk_control.operations.blockers import make_blocker
 from vonk_control.own_cleanup import CLEANUP_KINDS
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_builds.common import (
     BUILD_ARTIFACT_FORMAT,
     _build_disk_envelope,
@@ -79,6 +78,7 @@ from vonk_control.recipe_operations.execution_contract import (
 from vonk_control.recipe_operations.observation_helpers import reinstall_in_flight
 from vonk_control.recovery_policy import WAIT_STEP
 from vonk_control.spark_disk import spark_free_bytes
+from vonk_control.waits.persisted import schedule_wait
 
 if TYPE_CHECKING:
     from vonk_control.agent_jobs.service import AgentJobService

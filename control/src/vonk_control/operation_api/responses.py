@@ -46,7 +46,6 @@ from vonk_control.operations.item_contract import (
 )
 from vonk_control.operations.progress import project_progress_for_state
 from vonk_control.operations.summary import operation_summary
-from vonk_control.persisted_waits import read_wait
 from vonk_control.strict_json import (
     StrictModel,
     read_stored_model,
@@ -54,6 +53,7 @@ from vonk_control.strict_json import (
     warn_unreadable_once,
 )
 from vonk_control.summary_cut import summary_cut
+from vonk_control.waits.persisted import read_wait
 
 
 def _required_text(value: object, detail: str) -> str:

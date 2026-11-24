@@ -7,8 +7,8 @@ from collections.abc import Sequence
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_control.models.operations import AgentOperation
 from vonk_control.operations.item_contract import OperationItem
-from vonk_control.persisted_waits import read_wait
-from vonk_control.wait_contract import QueueWait
+from vonk_control.waits.contract import QueueWait
+from vonk_control.waits.persisted import read_wait
 
 
 def apply_queue_wait(item: OperationItem, wait: QueueWait | None) -> OperationItem:

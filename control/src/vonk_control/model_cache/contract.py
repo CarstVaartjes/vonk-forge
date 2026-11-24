@@ -32,7 +32,7 @@ from vonk_control.operations.contract import AvailabilityOperationFailure
 from vonk_control.recipe_image_availability.clocks_contract import readable_or_none
 from vonk_control.settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
 from vonk_control.strict_json import StrictJSONModel, StrictModel, read_stored_model
-from vonk_control.wait_contract import QueueWait
+from vonk_control.waits.contract import QueueWait
 
 ARTIFACT_KEY_PATTERN = r"^[a-z][a-z0-9_.:-]{0,255}$"
 

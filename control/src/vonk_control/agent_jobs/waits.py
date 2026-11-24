@@ -28,10 +28,10 @@ from vonk_control.gpu.health import GPU_HEALTH_CODES
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.operations.blockers import BlockingOperation, make_blocker
 from vonk_control.operations.progress import stored_progress
-from vonk_control.persisted_waits import read_wait, write_wait
 from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
-from vonk_control.stall_window import last_progress_at
-from vonk_control.wait_contract import QueueWait
+from vonk_control.waits.contract import QueueWait
+from vonk_control.waits.persisted import read_wait, write_wait
+from vonk_control.waits.stall_window import last_progress_at
 
 
 def record_queue_waits(

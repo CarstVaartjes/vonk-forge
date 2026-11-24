@@ -563,7 +563,7 @@
       "reason": "base class of the Controller contract models, shared by every *_contract module"
     },
     {
-      "module": "control/src/vonk_control/wait_contract.py",
+      "module": "control/src/vonk_control/waits/contract.py",
       "kind": "controller-contract"
     },
     {

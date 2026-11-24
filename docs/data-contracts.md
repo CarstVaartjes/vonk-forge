@@ -269,7 +269,7 @@ module defines its own.
 | `control/src/vonk_control/metrics/prometheus_api.py` | declared | 9 | Read-only fixed-query adapter to the internal Prometheus service. |
 | `control/src/vonk_control/run_switch_operations/contracts.py` | controller-contract | 1 | Typed records owned by Run/Switch orchestration. |
 | `control/src/vonk_control/source_bundle_contract.py` | controller-contract | 1 | Durable source-ingress proof bound to an exact managed file copy. |
-| `control/src/vonk_control/wait_contract.py` | controller-contract | 2 | One persisted wait observation; the owner's SQL due column owns its clock. |
+| `control/src/vonk_control/waits/contract.py` | controller-contract | 2 | One persisted wait observation; the owner's SQL due column owns its clock. |
 | `control/src/vonk_control/capability_contract.py` | controller-contract | 1 | Availability of independently recoverable Controller capabilities. |
 | `control/src/vonk_control/runtime/asset_contract.py` | controller-contract | 1 | Complete public-kit membership produced while assembling the Controller image. |
 | `control/src/vonk_control/operator_receipt_contract.py` | controller-contract | 4 | Canonical public operator acceptance references and existing-Job decisions. |

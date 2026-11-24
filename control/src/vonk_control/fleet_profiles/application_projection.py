@@ -53,10 +53,14 @@ from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.jobs import Job
 from vonk_control.operations.blockers import MAX_BLOCKERS
 from vonk_control.operations.progress import project_progress
-from vonk_control.persisted_waits import read_wait
-from vonk_control.progress_stall import WAITING_STATES, is_stalled, stalled_blocker
 from vonk_control.run_switch_contract.phase_results import RunSwitchStopResult
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.waits.persisted import read_wait
+from vonk_control.waits.progress_stall import (
+    WAITING_STATES,
+    is_stalled,
+    stalled_blocker,
+)
 
 if TYPE_CHECKING:
     from vonk_control.fleet_profiles.service import FleetProfileService

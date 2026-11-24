@@ -29,7 +29,6 @@ from vonk_control.models.execution import (
 )
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_operations.errors import RecipeOperationConflict
 from vonk_control.recipe_operations.intent import (
     _intent_is_current,
@@ -44,6 +43,7 @@ from vonk_control.recipe_operations.results import (
 from vonk_control.recipe_routes.shared import RecipeRouteError
 from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import serialize_json_value
+from vonk_control.waits.persisted import schedule_wait
 
 if TYPE_CHECKING:
     from vonk_control.recipe_operations.service import RecipeOperationService

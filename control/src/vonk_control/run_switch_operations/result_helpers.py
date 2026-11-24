@@ -24,7 +24,6 @@ from vonk_control.failure_classification import (
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.jobs import Job
 from vonk_control.operations.blockers import OperationBlocker
-from vonk_control.persisted_waits import read_wait
 from vonk_control.recipe_operations.interfaces import RecipeOperationView
 from vonk_control.recipe_operations.lifecycle_contract import RecipeLifecycleResult
 from vonk_control.recovery_policy import FailureKind, kind_for_failure_fields
@@ -60,7 +59,8 @@ from vonk_control.run_switch_operations.errors import (
 )
 from vonk_control.run_switch_operations.planning_helpers import _aware
 from vonk_control.run_switch_operations.results import _stored_result
-from vonk_control.stall_window import stall_deadline
+from vonk_control.waits.persisted import read_wait
+from vonk_control.waits.stall_window import stall_deadline
 
 
 def _bound_workload_intent(progress: RunSwitchOperationResult) -> int:

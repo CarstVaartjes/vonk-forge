@@ -47,7 +47,6 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.models.operations import AgentOperation as AgentOperationRow
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_builds.common import (
     RecipeBuildAdmissionBusy,
     RecipeBuildPlan,
@@ -75,6 +74,7 @@ from vonk_control.revision_images import revision_images
 from vonk_control.runtime_image_preparation.contracts import PulledImageEvidence
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_policy import SourcePolicyFinding, SourcePolicyReport
+from vonk_control.waits.persisted import schedule_wait
 
 from .insert_collision_support import Rendezvous
 from .recipe_builds_support import _write_controller_build_receipt
