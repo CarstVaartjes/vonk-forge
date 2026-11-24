@@ -784,7 +784,7 @@ REHASH_INGRESS = (
     "control/src/vonk_control/recipe_packages/",
     "control/src/vonk_control/inventory/repository.py",
     "control/src/vonk_control/telemetry/samples.py",
-    "control/src/vonk_control/cached_file_verification.py",
+    "control/src/vonk_control/model_cache/file_verification.py",
     "control/src/vonk_control/model_cache/download.py",
     "control/src/vonk_control/model_cache/transfer.py",
     "control/src/vonk_control/model_cache/split_transfer.py",

@@ -27,7 +27,6 @@ from vonk_control.artifact_jobs.lifecycle import (
     reserve_removal,
 )
 from vonk_control.categorized_errors import InvalidValue
-from vonk_control.fleet_model_removal_contract import FleetModelRemovalCheckpoint
 from vonk_control.lifecycle.model_cache import ModelCacheAdapter
 from vonk_control.model_cache.constants import SCHEMA_VERSION, SOURCE_POLICY
 from vonk_control.model_cache.contract import (
@@ -44,6 +43,7 @@ from vonk_control.model_cache.errors import (
     _reference_error_type,
 )
 from vonk_control.model_cache.fleet_removal import _model_objects
+from vonk_control.model_cache.fleet_removal_contract import FleetModelRemovalCheckpoint
 from vonk_control.model_cache.lineage import lineage_contents, model_sets
 from vonk_control.model_cache.persistence import (
     _model_removal_intent_digest,

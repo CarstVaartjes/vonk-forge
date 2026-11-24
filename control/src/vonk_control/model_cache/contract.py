@@ -24,9 +24,9 @@ from vonk_agent_protocol.reason_codes.model_cache import ModelCacheBlockerCode
 from vonk_agent_protocol.state_machines import ModelCacheOperatorStatus
 from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
-from vonk_control.fleet_model_removal_contract import FleetModelRemovalCheckpoint
 from vonk_control.identifiers import UUID_PATTERN
 from vonk_control.machine_states import ModelFileStateField
+from vonk_control.model_cache.fleet_removal_contract import FleetModelRemovalCheckpoint
 from vonk_control.operations.blockers import OperationBlocker
 from vonk_control.operations.contract import AvailabilityOperationFailure
 from vonk_control.recipe_image_availability.clocks_contract import readable_or_none

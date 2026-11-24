@@ -78,10 +78,6 @@ from vonk_control.cache_removal_review import (  # noqa: E402 -- the project imp
 from vonk_control.cli_update_contract import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     cli_update_contract_schema,
 )
-from vonk_control.fleet_model_removal_contract import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
-    FleetRemovalDisposition,
-    FleetRemovalReason,
-)
 from vonk_control.fleet_profile_contract.review import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     ProfileLoadAction,
 )
@@ -91,6 +87,10 @@ from vonk_control.library.contract import (  # noqa: E402 -- the project imports
 from vonk_control.model_cache.contract import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     CacheOperationKind,
     ModelStorageObservationReason,
+)
+from vonk_control.model_cache.fleet_removal_contract import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    FleetRemovalDisposition,
+    FleetRemovalReason,
 )
 from vonk_control.operation_api.openapi import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     admin_openapi_schema,

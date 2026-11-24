@@ -42,17 +42,6 @@ from vonk_control.cache_removal_review import (
 from vonk_control.catalog.queries import active_head_revision
 from vonk_control.catalog.revision_contract import read_catalog_document
 from vonk_control.content_identity import installations_using_models, recipes_bound_to
-from vonk_control.fleet_model_removal_contract import (
-    FLEET_REMOVAL_DEADLINE,
-    FleetModelRemovalCheckpoint,
-    FleetModelRemovalEffects,
-    FleetRemovalInstallation,
-    FleetRemovalObject,
-    FleetRemovalObservationIssue,
-    FleetRemovalTarget,
-)
-from vonk_control.fleet_model_removal_contract import FleetRemovalDisposition as D
-from vonk_control.fleet_model_removal_contract import FleetRemovalReason as R
 from vonk_control.inventory.repository import spark_model_objects
 from vonk_control.jobs import states as job_states
 from vonk_control.lifecycle.evidence import (
@@ -64,6 +53,17 @@ from vonk_control.lifecycle.evidence import (
 from vonk_control.machine_states import RUN_LIVE
 from vonk_control.model_cache.contract import CacheManifest, CacheOperationKind
 from vonk_control.model_cache.errors import ModelCacheConflictInvalid
+from vonk_control.model_cache.fleet_removal_contract import (
+    FLEET_REMOVAL_DEADLINE,
+    FleetModelRemovalCheckpoint,
+    FleetModelRemovalEffects,
+    FleetRemovalInstallation,
+    FleetRemovalObject,
+    FleetRemovalObservationIssue,
+    FleetRemovalTarget,
+)
+from vonk_control.model_cache.fleet_removal_contract import FleetRemovalDisposition as D
+from vonk_control.model_cache.fleet_removal_contract import FleetRemovalReason as R
 from vonk_control.model_cache.lineage import (
     first_requested_sets,
     lineage_contents,

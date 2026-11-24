@@ -583,7 +583,7 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/fleet_model_removal_contract.py",
+      "module": "control/src/vonk_control/model_cache/fleet_removal_contract.py",
       "kind": "controller-contract"
     },
     {

@@ -6,10 +6,10 @@ from collections.abc import Mapping
 from concurrent.futures import Future
 from dataclasses import dataclass, field
 
-from vonk_control.fleet_model_removal_contract import FleetModelRemovalCheckpoint
 from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
 from vonk_control.model_cache.constants import SCHEMA_VERSION
 from vonk_control.model_cache.contract import ModelCacheOperationResult
+from vonk_control.model_cache.fleet_removal_contract import FleetModelRemovalCheckpoint
 from vonk_control.operations.blockers import OperationBlocker
 from vonk_control.wait_contract import QueueWait
 
