@@ -2922,6 +2922,7 @@ def test_a_whole_collection_read_already_there_does_not_fail_an_unrelated_change
         "bad = intended.reviewed_plan_digest != _digest(plan.reviewed)\n",
         "bad = row.profile_digest != _digest(_profile_document(profile))\n",
         "bad = sha256(canonical_message(row.payload)).hexdigest() != row.request_sha256\n",
+        "bad = parent.payload_digest != _plan_digest(sources=stored.sources)\n",
     ],
 )
 def test_any_stored_digest_column_compared_with_a_fresh_hash_is_a_rehash(source):

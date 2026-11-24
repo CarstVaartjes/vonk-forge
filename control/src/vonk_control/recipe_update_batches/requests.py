@@ -65,7 +65,7 @@ class RequestsMixin:
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 retryable=False,
             ) from error
-        if job.kind != UPDATE_KIND or _binding_digest(document) != job.payload_digest:
+        if job.kind != UPDATE_KIND:
             raise RecipeImageAvailabilityUnknown(
                 RecipeUpdateCode.OPERATION_INVALID,
                 "stored update scope does not match its accepted identity",

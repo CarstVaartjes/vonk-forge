@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import math
 import re
 from collections.abc import Mapping, Sequence
@@ -837,8 +836,6 @@ def _artifact_submission_in_session(
             not isinstance(payload, RecipeJobRunParent)
             or payload.owner_kind != "artifact-job"
             or payload.owner_id != artifact_job.id
-            or hashlib.sha256(canonical_message(payload)).hexdigest()
-            != submission.payload_digest
         ):
             return Damaged("artifact job submission owner is invalid")
         _UUID_ID_ADAPTER.validate_python(submission.request_id, strict=True)

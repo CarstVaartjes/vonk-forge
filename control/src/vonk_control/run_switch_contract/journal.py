@@ -81,11 +81,8 @@ class RunSwitchJournalRepairEvidence(StrictModel):
         encoded = json.dumps(
             value, sort_keys=True, separators=(",", ":"), allow_nan=False
         )
-        if (
-            encoded != self.original_document
-            or hashlib.sha256(encoded.encode()).hexdigest() != self.original_digest
-        ):
-            raise ValueError("original journal evidence digest is inconsistent")
+        if encoded != self.original_document:
+            raise ValueError("original journal evidence is not canonical")
         if len({sample.operation_id for sample in self.native_samples}) != len(
             self.native_samples
         ):
@@ -120,9 +117,6 @@ class RunSwitchJournalRepairEndEvidence(StrictModel):
             separators=(",", ":"),
             allow_nan=False,
         )
-        if (
-            encoded != self.original_document
-            or hashlib.sha256(encoded.encode()).hexdigest() != self.original_digest
-        ):
-            raise ValueError("ended journal evidence digest is inconsistent")
+        if encoded != self.original_document:
+            raise ValueError("ended journal evidence is not canonical")
         return self

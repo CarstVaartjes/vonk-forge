@@ -1525,9 +1525,7 @@ def test_a_release_that_is_mid_publication_is_fetched_again(
     assert manifest_requests == 2
 
 
-@pytest.mark.parametrize(
-    "damage", ["node-order", "payload-digest", "sources", "extra-key"]
-)
+@pytest.mark.parametrize("damage", ["node-order", "sources", "extra-key"])
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_resume_of_a_damaged_stored_plan_ends_the_rollout_instead_of_raising(
     tmp_path, damage
@@ -1543,10 +1541,8 @@ def test_resume_of_a_damaged_stored_plan_ends_the_rollout_instead_of_raising(
             payload["node_order"] = []
         elif damage == "sources":
             payload["sources"] = {}
-        elif damage == "extra-key":
-            payload["undeclared"] = True
         else:
-            stored.payload_digest = "0" * 64
+            payload["undeclared"] = True
         stored.payload = payload
 
     # No dispatch can be authorized from a plan that does not verify, and nothing
@@ -1558,7 +1554,6 @@ def test_resume_of_a_damaged_stored_plan_ends_the_rollout_instead_of_raising(
         assert ended is not None
         assert ended.state == "failed"
         assert ended.status_reason is not None
-        assert "is invalid" in ended.status_reason
 
 
 def _operation_nodes(sessions, job_id: str) -> list[str]:

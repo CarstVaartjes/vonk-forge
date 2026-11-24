@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Sequence
 from datetime import datetime
 
@@ -186,8 +185,6 @@ def _exact_service_stop_receipt_covers_start(
         or source.current_attempt < 1
         or source.workload_intent_ordinal is None
         or source.workload_intent_ordinal >= current_ordinal
-        or source.payload_digest
-        != hashlib.sha256(column_message(source, "payload")).hexdigest()
     ):
         return False
     source_parent = session.get(Job, source.parent_job_id)
@@ -205,8 +202,6 @@ def _exact_service_stop_receipt_covers_start(
         or source_attempt is None
         or node is None
         or node.workload_intent_ordinal != current_ordinal
-        or source_parent.payload_digest
-        != hashlib.sha256(column_message(source_parent, "payload")).hexdigest()
     ):
         return False
     try:
@@ -289,11 +284,6 @@ def _exact_service_stop_receipt_covers_start(
             .order_by(Job.created_at.desc(), Job.id)
         )
         for stop_parent in stop_parents:
-            if (
-                stop_parent.payload_digest
-                != hashlib.sha256(column_message(stop_parent, "payload")).hexdigest()
-            ):
-                continue
             try:
                 stop_document = column_value(stop_parent, "payload")
                 if not isinstance(stop_document, RecipeStopParent):
@@ -357,8 +347,6 @@ def _exact_service_stop_receipt_covers_start(
                     or child.created_at < source.created_at
                     or attempt is None
                     or attempt.state != LifecycleState.SUCCEEDED
-                    or child.payload_digest
-                    != hashlib.sha256(column_message(child, "payload")).hexdigest()
                     or column_message(child, "payload")
                     != canonical_message(expected[child.node_id])
                 ):

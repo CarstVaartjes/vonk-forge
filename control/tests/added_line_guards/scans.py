@@ -833,7 +833,7 @@ def _rehashes_stored_row(node: ast.Compare) -> bool:
         and (
             _is_fresh_hash(call)
             or (
-                ast.unparse(call.func).endswith("sha256")
+                ast.unparse(call.func).endswith(("sha256", "_digest"))
                 and any(
                     isinstance(operand, ast.Attribute)
                     and operand.attr == "payload_digest"

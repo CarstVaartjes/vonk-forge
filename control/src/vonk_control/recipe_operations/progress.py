@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
@@ -476,11 +475,7 @@ def _project_recipe_operation_progress(
                 )
             except (TypeError, ValueError):
                 return None
-            if (
-                canonical_message(observed) != canonical_message(expected)
-                or child.payload_digest
-                != hashlib.sha256(canonical_message(child.payload)).hexdigest()
-            ):
+            if canonical_message(observed) != canonical_message(expected):
                 return None
     current_index = _current_phase_index(children, phases) if phases else None
     if phases and current_index is None:

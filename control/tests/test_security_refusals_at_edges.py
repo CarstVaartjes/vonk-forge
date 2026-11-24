@@ -198,7 +198,15 @@ def test_profile_stop_whose_parent_changed_replans_and_completes(
             with sessions.begin() as session:
                 root = session.scalar(select(Job).where(Job.kind == _ROOT))
                 assert root is not None
-                root.payload_digest = "0" * 64
+                payload = dict(root.payload)
+                recorded = payload["progress"]
+                assert isinstance(recorded, dict)
+                progress = dict(recorded)
+                ordinal = progress["workload_intent_ordinal"]
+                assert isinstance(ordinal, int)
+                progress["workload_intent_ordinal"] = ordinal + 1
+                payload["progress"] = progress
+                root.payload = payload
                 changed.append(root.id)
         return accept(*args, **kwargs)
 
@@ -214,7 +222,6 @@ def test_profile_stop_whose_parent_changed_replans_and_completes(
         )
         # Re-planned under a fresh child request generation.
         assert progress.phase_retry_generation
-        assert root.payload_digest != "0" * 64
     assert _children_of(sessions, stop_id)
     lifecycle.record_node_result(stop_id, nodes[0], succeeded=True, evidence={})
     _inventory_reported_again(sessions, monkeypatch)

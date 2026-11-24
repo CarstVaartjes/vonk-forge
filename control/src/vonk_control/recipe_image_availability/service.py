@@ -182,7 +182,7 @@ class RecipeImageAvailabilityService:
         return persistence._removal_payload_digest(payload)
 
     def _read_removal_owner(self, operation: Job) -> RecipeCacheRemovalOwner:
-        return persistence._read_removal_owner(self, operation)
+        return persistence._read_removal_owner(operation)
 
     def _read_removal_intent(self, operation: Job) -> RecipeCacheRemovalIntent:
         return persistence._read_removal_intent(self, operation)

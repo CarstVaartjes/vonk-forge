@@ -231,16 +231,7 @@ class ClusterMappingService:
             except TopologyError as error:
                 raise ClusterMappingError(error.code, str(error)) from error
             topology = recipe_topology(document)
-            if plan.topology_name != topology.name or plan.placement_digest != _digest(
-                _plan_identity(
-                    plan.recipe_revision_id,
-                    plan.recipe_content_sha256,
-                    plan.topology_name,
-                    plan.generation,
-                    plan.parameters,
-                    plan.nodes,
-                )
-            ):
+            if plan.topology_name != topology.name:
                 raise ClusterMappingError(
                     ClusterMappingCode.STALE_PLAN, "mapping plan identity is invalid"
                 )
