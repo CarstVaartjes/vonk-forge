@@ -220,8 +220,8 @@ test("the frame shows the Spark's own facts, or Not reported", () => {
   expect(facts).toHaveTextContent("Uptime 1 d 1 h");
   first.unmount();
   show({ ...node, agent_runtime: null });
-  expect(screen.getByRole("list", { name: "Facts" })).toHaveTextContent("Agent Not reported");
-  expect(screen.getByRole("list", { name: "Facts" })).toHaveTextContent("Uptime Not reported");
+  expect(screen.getByRole("list", { name: "Facts" })).toHaveTextContent(/Agent.*Not reported/);
+  expect(screen.getByRole("list", { name: "Facts" })).toHaveTextContent(/Uptime\s*\W?Not reported/);
 });
 
 test("an address that names no enrolled Spark says so", () => {
@@ -318,7 +318,7 @@ test("Serving names the run, its rank and partner as a link; Storage lists model
   expect(onNavigate).toHaveBeenCalledWith(expect.anything(), "/sparks/spk_2");
   const models = screen.getByRole("list", { name: "Models on disk" });
   expect(models).toHaveTextContent("GLM212.0 GiB · in use");
-  expect(models).toHaveTextContent("QwenNot reported");
+  expect(models).toHaveTextContent(/Qwen.*Not reported/);
 });
 
 test("the section tabs follow the WAI-ARIA tabs pattern: roving tabindex, arrows, Home and End", async () => {

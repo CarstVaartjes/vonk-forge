@@ -188,7 +188,7 @@ class ControlClient(HTTPControlClient):
                     raise ControlMalformedResponse(
                         "control API response exceeds the nesting limit"
                     ) from None
-                except (UnicodeDecodeError, json.JSONDecodeError):
+                except UnicodeDecodeError, json.JSONDecodeError:
                     if error_media_type.strip().lower() == "application/json":
                         raise ControlMalformedResponse(
                             "control API returned invalid JSON error"
@@ -224,7 +224,7 @@ class ControlClient(HTTPControlClient):
                 raise ControlMalformedResponse(
                     "control API response exceeds the nesting limit"
                 ) from None
-            except (UnicodeDecodeError, json.JSONDecodeError):
+            except UnicodeDecodeError, json.JSONDecodeError:
                 raise ControlMalformedResponse(
                     "control API returned invalid JSON"
                 ) from None
@@ -337,7 +337,7 @@ class ControlClient(HTTPControlClient):
                     raise ControlMalformedResponse(
                         "control API response exceeds the nesting limit"
                     ) from None
-                except (UnicodeDecodeError, json.JSONDecodeError):
+                except UnicodeDecodeError, json.JSONDecodeError:
                     if error_media_type.strip().lower() == "application/json":
                         raise ControlMalformedResponse(
                             "control API returned invalid JSON error"

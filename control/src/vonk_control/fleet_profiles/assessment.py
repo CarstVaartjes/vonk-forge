@@ -164,13 +164,9 @@ class FleetProfileService:
                 )
                 resolved_digest = accepted_intent.profile_digest
                 installation_policy = accepted_intent.installation_policy
-                resolved_revision = (
-                    accepted_profile_revision
-                    if accepted_profile_revision is not None
-                    else row.revision
-                    if row is not None
-                    else None
-                )
+                # The accepted revision, never the saved row's: adopting the
+                # row's would hide a save made since acceptance.
+                resolved_revision = accepted_profile_revision
                 resolved_definition = accepted_profile_definition
             elif draft_definition is not None:
                 # An unsaved draft is previewed as its own content: the same

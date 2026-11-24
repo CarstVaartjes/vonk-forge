@@ -64,7 +64,7 @@ class StopAcceptanceMixin:
         service = typing_cast("RecipeOperationService", self)
 
         application = session.get(FleetProfileApplication, profile_application_id)
-        if application is None or application.current_step is None or ordinal is None:  # pyright: ignore[reportUnnecessaryComparison]  # NOT NULL column; kept with its retry message
+        if application is None or ordinal is None:
             raise RecipeRetryLater("accepted profile Stop owner is unavailable")
         adapter = _persisted_profile_progress(application).switch_adapter
         children = (
@@ -120,11 +120,8 @@ class StopAcceptanceMixin:
                 )
             phase_index = candidate_progress.phase_index
             item_index = candidate_progress.item_index
-            if (
-                phase_index is None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
-                or item_index is None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
-                or phase_index >= len(candidate_root.plan.phases)
-                or item_index >= len(candidate_root.plan.stops)
+            if phase_index >= len(candidate_root.plan.phases) or item_index >= len(
+                candidate_root.plan.stops
             ):
                 continue
             if (
@@ -154,8 +151,6 @@ class StopAcceptanceMixin:
                 progress.profile_application_id != application.id
                 or progress.workload_intent_ordinal != ordinal
                 or progress.cancellation is not None
-                or phase_index is None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
-                or item_index is None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
                 or phase_index >= len(root.plan.phases)
                 or item_index >= len(root.plan.stops)
             ):

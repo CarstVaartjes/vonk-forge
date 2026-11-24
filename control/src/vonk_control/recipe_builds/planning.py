@@ -465,5 +465,5 @@ def reusable_build_id(self: RecipeBuildService, recipe_revision_id: str) -> str 
         raise
     except SecurityRefusalError:
         raise
-    except (RecipeBuildError, KeyError, TypeError, ValueError):
+    except RecipeBuildError, KeyError, TypeError, ValueError:
         return None

@@ -237,7 +237,7 @@ def read_stall(value: object) -> ProgressStall | None:
         return None
     try:
         return ProgressStall.model_validate_json(canonical_message(value), strict=True)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -324,7 +324,7 @@ def _read_progress(value: object) -> FleetProfileApplicationProgress | None:
         return FleetProfileApplicationProgress.model_validate_json(
             canonical_message(value), strict=True
         )
-    except (TypeError, ValueError, ValidationError):
+    except TypeError, ValueError, ValidationError:
         return None
 
 

@@ -105,10 +105,6 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "PostgreSQL due-row redrive, restart, fairness and cancellation behavior; coverage scan belongs to test_wait_owner_coverage.",
     ),
     (
-        "tests/scripts/test_nas_image_janitor.py",
-        "NAS daemon platform-image selection, persisted grace, deletion refusal recovery and lost-network re-attachment.",
-    ),
-    (
         "control/tests/test_run_group_health.py",
         "A starting group is not degraded and raises no attention; a dropped or missing rank still is; no whole-tree scan.",
     ),

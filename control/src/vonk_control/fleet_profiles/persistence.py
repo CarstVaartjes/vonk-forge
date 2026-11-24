@@ -302,7 +302,7 @@ def _persisted_profile_scope(row: FleetProfileApplication) -> tuple[str, ...] | 
         scope = FleetProfileScopePreview.model_validate_json(
             canonical_message(row.plan.get("scope")), strict=True
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return tuple(scope.node_ids)
 

@@ -1,6 +1,6 @@
 import "./stat-card.css";
 import type { MetricsSeriesResponse } from "../../api/types";
-import { NOT_REPORTED_TEXT } from "../../lib/fleet";
+import { NoReading } from "./no-reading";
 import { fleetFigure, formatValue } from "../../lib/metric-units";
 import { Estimate, EstimateTag } from "./estimate";
 
@@ -35,22 +35,26 @@ export function EnergyCard({
             <EstimateTag basis={total.basis} />
           </>
         ) : (
-          NOT_REPORTED_TEXT
+          <NoReading />
         )}
       </p>
       <p className="stat-caption">{total ? total.hint : GPU_ONLY_CAPTION}</p>
       <dl className="stat-facts">
         <div>
           <dt>GPU power now</dt>
-          <dd>{watts ? `${watts.value.toFixed(1)} ${watts.symbol}` : NOT_REPORTED_TEXT}</dd>
+          <dd>{watts ? `${watts.value.toFixed(1)} ${watts.symbol}` : <NoReading />}</dd>
         </div>
         <div>
           <dt>Last 31 days</dt>
-          <dd>{NOT_REPORTED_TEXT}</dd>
+          <dd>
+            <NoReading />
+          </dd>
         </div>
         <div>
           <dt>Per 1,000 tokens</dt>
-          <dd>{NOT_REPORTED_TEXT}</dd>
+          <dd>
+            <NoReading />
+          </dd>
         </div>
       </dl>
     </section>

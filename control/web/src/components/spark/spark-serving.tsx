@@ -1,7 +1,8 @@
+import { NoReading } from "../ui/no-reading";
 import { useId, type MouseEvent } from "react";
 import type { MetricsSeriesResponse, VisualFleetNode } from "../../api/types";
 import { UNITS, formatValue, leadReading } from "../../lib/metric-units";
-import { NOT_REPORTED_TEXT, nodeRuns } from "../../lib/fleet";
+import { nodeRuns } from "../../lib/fleet";
 import { sparkPath } from "../../lib/spark-route";
 import { StatusPill } from "../ui/status-pill";
 
@@ -90,5 +91,9 @@ function DecodeSpeed({
         {UNITS[reading.data.spec.unit].symbol}
       </p>
     );
-  return pending ? null : <p className="spark-panel-note">Speed: {NOT_REPORTED_TEXT}</p>;
+  return pending ? null : (
+    <p className="spark-panel-note">
+      Speed: <NoReading />
+    </p>
+  );
 }

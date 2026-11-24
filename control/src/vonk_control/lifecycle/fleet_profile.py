@@ -867,7 +867,7 @@ def _progress(
             application.progress,
             from_json=True,
         )
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return None
 
 

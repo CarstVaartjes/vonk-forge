@@ -551,7 +551,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
                 backup_completed_at = int(backup_marker.read_text().strip())
                 if backup_completed_at < 0:
                     backup_completed_at = None
-            except (OSError, ValueError):
+            except OSError, ValueError:
                 pass
         metrics.set_backup_successful(successful=backup_completed_at is not None)
         metrics.set_backup_age(
@@ -566,7 +566,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
                 restore_completed_at = int(restore_marker.read_text().strip())
                 if restore_completed_at < 0:
                     restore_completed_at = None
-            except (OSError, ValueError):
+            except OSError, ValueError:
                 pass
         metrics.set_backup_restore_verified(verified=restore_completed_at is not None)
         metrics.set_backup_restore_verification_age(

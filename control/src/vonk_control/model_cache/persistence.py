@@ -183,7 +183,7 @@ def _rebuild_operation_payload(
     if candidate.get("result") is not None:
         try:
             parse_model_cache_result(operation.kind, candidate["result"])
-        except (TypeError, ValueError, ValidationError):
+        except TypeError, ValueError, ValidationError:
             derived = _derived_result(
                 operation,
                 selected=candidate.get("selected"),

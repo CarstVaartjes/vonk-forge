@@ -13,7 +13,7 @@ def not_adopted() -> Generator[list[Exception]]:
     failures: list[Exception] = []
     try:
         yield failures
-    except (AssertionError, NameError, AttributeError, ImportError):
+    except AssertionError, NameError, AttributeError, ImportError:
         raise
     except Exception as failure:  # noqa: BLE001 -- outcome witness deliberately ignores failure taxonomy
         failures.append(failure)

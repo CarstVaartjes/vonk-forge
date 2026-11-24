@@ -116,7 +116,7 @@ def development_step_run(step_name: str) -> str:
 
 class _WorkflowStep(TypedDict):
     name: str
-    parallel: list["_WorkflowStep"]
+    parallel: list[_WorkflowStep]
 
 
 class _WorkflowJob(TypedDict):

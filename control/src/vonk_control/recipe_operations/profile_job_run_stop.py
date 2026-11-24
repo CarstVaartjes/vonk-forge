@@ -238,13 +238,11 @@ def _switch_stops_run_now(operation: Job | None, run_id: str) -> bool:
             strict=True,
             from_json=True,
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     phase_index, item_index = current.phase_index, current.item_index
     return (
-        phase_index is not None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
-        and item_index is not None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
-        and phase_index < len(plan.phases)
+        phase_index < len(plan.phases)
         and item_index < len(plan.stops)
         and plan.phases[phase_index].kind == ProfileChildPhase.STOP.value
         and plan.stops[item_index].run_id == run_id

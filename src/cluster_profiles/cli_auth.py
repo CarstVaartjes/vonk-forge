@@ -230,7 +230,7 @@ def _mint_token(url: str, password: str) -> tuple[str, datetime]:
         ):
             raise LoginFailed(f"the Controller token request answered {status}")
         expires_at = parse_expiry(expiry)
-    except (UnicodeDecodeError, ValueError):
+    except UnicodeDecodeError, ValueError:
         raise LoginFailed("the Controller sent an unreadable token") from None
     finally:
         # The browser session expires by itself; the token is what we keep.

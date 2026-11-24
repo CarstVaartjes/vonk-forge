@@ -310,11 +310,7 @@ class HostHelperGrantIssuer:
             raise HostHelperAuthorityError(
                 "host helper authority clock is unavailable"
             ) from error
-        if (
-            not isinstance(now, datetime)  # pyright: ignore[reportUnnecessaryIsInstance]  # an injected clock's result is checked
-            or now.tzinfo is None
-            or now.utcoffset() is None
-        ):
+        if now.tzinfo is None or now.utcoffset() is None:
             raise HostHelperAuthorityError(
                 "host helper authority clock must be timezone-aware"
             )

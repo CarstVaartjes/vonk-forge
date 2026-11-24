@@ -98,7 +98,7 @@ def _payload(
                     return AvailabilityJobPayload.model_validate_json(
                         canonical_message(recovered)
                     )
-        except (RecipeImageAvailabilityError, TypeError, ValueError):
+        except RecipeImageAvailabilityError, TypeError, ValueError:
             pass
     if isinstance(value, Residue):
         return value
@@ -266,7 +266,7 @@ def _removal_payload_digest(payload: RecipeCacheRemovalPlan) -> str:
 def _read_removal_owner(operation: Job) -> RecipeCacheRemovalOwner:
     try:
         owner = read_row_column(operation, "payload")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         owner = None
     if not isinstance(owner, RecipeCacheRemovalOwner):
         raise RecipeImageAvailabilityUnknown(

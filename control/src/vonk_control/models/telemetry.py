@@ -322,7 +322,7 @@ class NodeTelemetrySample(Base):
     nic_temperature_c: Mapped[int | None] = mapped_column(Integer)
     fan_rpm_max: Mapped[int | None] = mapped_column(Integer)
 
-    resource_snapshot: Mapped[NodeInventoryResourceSnapshot] = relationship(
+    resource_snapshot: Mapped[NodeInventoryResourceSnapshot | None] = relationship(
         foreign_keys=[
             NodeInventoryResourceSnapshot.node_id,
             NodeInventoryResourceSnapshot.source_sample_id,

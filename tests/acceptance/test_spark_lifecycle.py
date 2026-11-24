@@ -1197,7 +1197,6 @@ class LocalBrowserController:
         if (
             not hostname
             or any(character in hostname for character in "\0\r\n /:")
-            or not isinstance(port, int)  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
             or isinstance(port, bool)
             or not 1 <= port <= 65535
         ):
@@ -1286,13 +1285,10 @@ class LocalBrowserController:
             or method not in {"DELETE", "GET", "PATCH", "POST", "PUT"}
             or not path.startswith("/")
             or any(character in path for character in "\0\r\n")
-            or (body is not None and not isinstance(body, bytes))  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
             or (body is not None and len(body) > MAXIMUM_RESPONSE_BYTES)
             or (method == "GET" and body is not None)
             or any(
-                not isinstance(name, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
-                or not isinstance(value, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
-                or not name
+                not name
                 or name.lower() in {"connection", "content-length", "host"}
                 or any(character in name for character in "\0\r\n:")
                 or any(character in value for character in "\0\r\n")
@@ -2221,7 +2217,7 @@ class SparkLifecycle:
         if observe_attempts:
             try:
                 document["controller_attempts"] = self._psql(
-                    "SELECT a.attempt,a.fence,a.state,o.state,"  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
+                    "SELECT a.attempt,a.fence,a.state,o.state,"  # noqa: S608 -- psql CLI lane, no bind parameters; the interpolated value is a Controller-issued id
                     "CASE WHEN a.lease_deadline<=clock_timestamp() THEN 'expired' ELSE 'live' END "
                     "FROM agent_operations o JOIN agent_operation_attempts a ON a.operation_id=o.id "
                     f"WHERE o.id='{operation_id}' ORDER BY a.attempt DESC LIMIT 8"
@@ -2255,7 +2251,7 @@ class SparkLifecycle:
         ):
             raise LifecycleError("lost Start receipt identity is invalid")
         rows = self._psql(
-            "SELECT o.id,o.payload_digest,o.payload->>'run_id',a.attempt,o.kind,o.node_id,a.state,COALESCE(o.payload->>'phase','single'),"  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
+            "SELECT o.id,o.payload_digest,o.payload->>'run_id',a.attempt,o.kind,o.node_id,a.state,COALESCE(o.payload->>'phase','single'),"  # noqa: S608 -- psql CLI lane, no bind parameters; the interpolated value is a Controller-issued id
             "o.payload#>>'{compiled_execution_plan,runtime,placement,endpoint_address}',"
             "o.payload#>>'{compiled_execution_plan,runtime,placement,port}' "
             "FROM agent_operations o JOIN agent_operation_attempts a ON a.operation_id=o.id "
@@ -2333,7 +2329,7 @@ class SparkLifecycle:
         expiry_deadline = time.monotonic() + 120
         while True:
             leases = self._psql(
-                "SELECT count(*) FROM agent_operation_attempts "  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
+                "SELECT count(*) FROM agent_operation_attempts "  # noqa: S608 -- psql CLI lane, no bind parameters; the interpolated value is a Controller-issued id
                 f"WHERE operation_id='{operation_id}' AND lease_deadline>clock_timestamp()"
             )
             if leases == [["0"]]:
@@ -2395,7 +2391,7 @@ class SparkLifecycle:
                 "Start replay did not report the same serving effect under a fresh fence"
             )
         rows = self._psql(
-            "SELECT o.id,o.payload_digest,o.payload->>'run_id',a.attempt,a.state "  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
+            "SELECT o.id,o.payload_digest,o.payload->>'run_id',a.attempt,a.state "  # noqa: S608 -- psql CLI lane, no bind parameters; the interpolated value is a Controller-issued id
             "FROM agent_operations o JOIN agent_operation_attempts a ON a.operation_id=o.id "
             f"WHERE a.fence='{fence}'"
         )
@@ -3289,7 +3285,7 @@ class SparkLifecycle:
         if re.fullmatch(r"[0-9a-f-]{36}", grant_id) is None:
             raise LifecycleError("enrollment grant identity is invalid")
         rows = self._psql(
-            "SELECT (consumed_at IS NOT NULL)::int, "  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
+            "SELECT (consumed_at IS NOT NULL)::int, "  # noqa: S608 -- psql CLI lane, no bind parameters; the interpolated value is a Controller-issued id
             "(SELECT count(*) FROM agent_enrollments e WHERE e.grant_id=g.id) "
             f"FROM agent_enrollment_grants g WHERE id='{grant_id}'"
         )
@@ -3877,7 +3873,6 @@ class SparkLifecycle:
             completed.append("uninstalled")
             if (
                 completed != list(SYNTHETIC_CANARY_STATES)
-                or not isinstance(response_digest, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # the digest is re-checked before it is reported
                 or SHA256.fullmatch(response_digest) is None
             ):
                 raise LifecycleError("synthetic canary evidence is incomplete")
@@ -4246,7 +4241,7 @@ class SparkLifecycle:
         # Project only diagnostic fields from the current checkpoint. Never
         # serialize complete operation results, signed grants, or credentials.
         query = (
-            "SELECT json_build_object('node_id',r.key,"  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
+            "SELECT json_build_object('node_id',r.key,"  # noqa: S608 -- psql CLI lane, no bind parameters; the interpolated value is a Controller-issued id
             "'receipt_fingerprint',r.value->'result'->>'fingerprint',"
             "'received_at',r.value->'received_at',"
             "'payload_sha256',a.payload_digest,"
@@ -4266,7 +4261,7 @@ class SparkLifecycle:
             f"WHERE j.id='{operation_id}' ORDER BY r.key LIMIT 2"
         )
         pending_query = (
-            "SELECT json_build_object('node_id',p.key,"  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
+            "SELECT json_build_object('node_id',p.key,"  # noqa: S608 -- psql CLI lane, no bind parameters; the interpolated value is a Controller-issued id
             "'pending_job_id',child.id,'child_state',child.state,"
             "'attempt_state',t.state,'lease_deadline',t.lease_deadline,"
             "'progress_phase',t.progress::jsonb->>'phase') FROM jobs j "
@@ -4443,39 +4438,37 @@ class SparkLifecycle:
                 # reported separately with its own failure text: a probe that
                 # discards the status tells us nothing, and one failing call
                 # must not hide the answer from the other.
-                job_detail = "unavailable"
-                if self.control is not None:  # pyright: ignore[reportUnnecessaryComparison]  # diagnostics stay safe without a login
-                    parts: list[str] = []
-                    try:
-                        _, node_operations = self.control.request(
-                            "GET",
-                            "/api/operations",
-                            query={"node_id": node_id, "limit": 5},
-                        )
-                        operations = require_object(
-                            node_operations, "stalled operation list"
-                        ).get("operations")
-                        if isinstance(operations, list):
-                            for item in operations:
-                                operation = require_object(item, "stalled operation")
-                                parts.append(
-                                    f"op {operation.get('kind')}"
-                                    f"={operation.get('state')}"
-                                    f"/{operation.get('attempt')}"
-                                    f" progress={json.dumps(operation.get('progress'), sort_keys=True)[:160]}"
-                                )
-                    except (
-                        KeyError,
-                        OSError,
-                        SliceError,
-                        TypeError,
-                        ValueError,
-                    ) as error:
-                        parts.append(
-                            "operations unavailable: "
-                            + self._redact_diagnostics(str(error), limit=200)
-                        )
-                    job_detail = " | ".join(parts) or "none"
+                parts: list[str] = []
+                try:
+                    _, node_operations = self.control.request(
+                        "GET",
+                        "/api/operations",
+                        query={"node_id": node_id, "limit": 5},
+                    )
+                    operations = require_object(
+                        node_operations, "stalled operation list"
+                    ).get("operations")
+                    if isinstance(operations, list):
+                        for item in operations:
+                            operation = require_object(item, "stalled operation")
+                            parts.append(
+                                f"op {operation.get('kind')}"
+                                f"={operation.get('state')}"
+                                f"/{operation.get('attempt')}"
+                                f" progress={json.dumps(operation.get('progress'), sort_keys=True)[:160]}"
+                            )
+                except (
+                    KeyError,
+                    OSError,
+                    SliceError,
+                    TypeError,
+                    ValueError,
+                ) as error:
+                    parts.append(
+                        "operations unavailable: "
+                        + self._redact_diagnostics(str(error), limit=200)
+                    )
+                job_detail = " | ".join(parts) or "none"
                 raise LifecycleError(
                     f"{label} did not converge: state={typed.state} "
                     f"step={typed.current_step}/{typed.total_steps} "
@@ -4888,7 +4881,7 @@ class SparkLifecycle:
         ):
             raise LifecycleError("certificate probe identity is invalid")
         rows = self._psql(
-            "SELECT generation FROM agent_certificates "  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
+            "SELECT generation FROM agent_certificates "  # noqa: S608 -- psql CLI lane, no bind parameters; the interpolated value is a Controller-issued id
             f"WHERE serial='{serial_after}' AND state='active'"
         )
         if len(rows) != 1 or len(rows[0]) != 1 or not rows[0][0].isdigit():
@@ -5189,7 +5182,7 @@ class SparkLifecycle:
         while time.monotonic() < deadline:
             rows = self._renewal_read(
                 lambda: self._psql(
-                    "SELECT a.serial,c.state,(c.revoked_at IS NOT NULL)::int "  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
+                    "SELECT a.serial,c.state,(c.revoked_at IS NOT NULL)::int "  # noqa: S608 -- psql CLI lane, no bind parameters; the interpolated value is a Controller-issued id
                     "FROM agent_certificates a JOIN agent_certificates c "
                     f"ON c.serial='{serial_before}' WHERE a.node_id='{node_id}' "
                     "AND a.state='active' AND a.revoked_at IS NULL"
@@ -5417,7 +5410,7 @@ class SparkLifecycle:
                 # moved tables in between; the Fleet API names no serial). The
                 # Fleet snapshot above proves that certificate is accepted.
                 rows = self._psql(
-                    "SELECT serial FROM agent_certificates "  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
+                    "SELECT serial FROM agent_certificates "  # noqa: S608 -- psql CLI lane, no bind parameters; the interpolated value is a Controller-issued id
                     f"WHERE node_id='{node_id}' AND state='active' "
                     "AND revoked_at IS NULL"
                 )

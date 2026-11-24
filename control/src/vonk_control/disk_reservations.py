@@ -6,7 +6,7 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, select
+from sqlalchemy import Nullable, and_, select
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.state_machines import InstallationState, ReservationState
@@ -183,7 +183,11 @@ def outstanding_disk_charges(
     reservation. Missing, malformed or mismatched ownership keeps the full charge.
     """
     rows = session.execute(
-        select(ResourceReservation, RecipeInstallation, InstallationNode)
+        select(
+            ResourceReservation,
+            Nullable(RecipeInstallation),
+            Nullable(InstallationNode),
+        )
         .outerjoin(
             RecipeInstallation,
             and_(
@@ -225,9 +229,9 @@ def outstanding_disk_charges(
         materialized = 0
         if (
             inventory_observed_at is not None
-            and installation is not None  # pyright: ignore[reportUnnecessaryComparison]  # outer-joined rows can be missing
+            and installation is not None
             and installation.state == InstallationState.INSTALLED
-            and node is not None  # pyright: ignore[reportUnnecessaryComparison]  # outer-joined rows can be missing
+            and node is not None
             and rank_installed(node.state)
             and _aware(inventory_observed_at)
             > _aware(node.updated_at) + MAX_INVENTORY_FUTURE_SKEW

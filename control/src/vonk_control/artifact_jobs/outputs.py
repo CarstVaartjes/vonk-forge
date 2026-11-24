@@ -331,7 +331,7 @@ class ArtifactJobService(InputService):
             if row is not None and row.blob_sha256 == sha256:
                 try:  # noqa: SIM105 -- contextlib.suppress would re-add a malformed-value-becomes-absent guard finding
                     file = self._output_file(row)
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     pass
             receipt = self._stored_result(session, job)
             if receipt is not None:
@@ -565,7 +565,7 @@ class ArtifactJobService(InputService):
         except ArtifactResultRefused as error:
             self._reject_result(adapter, operation, parent, artifact_job, error, now)
             return
-        except (AgentProtocolError, TypeError, ValueError):
+        except AgentProtocolError, TypeError, ValueError:
             self._observe_result(adapter, operation, parent, artifact_job, now)
             return
         adapter.settle(

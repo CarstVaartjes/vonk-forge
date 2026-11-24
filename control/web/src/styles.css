@@ -113,7 +113,9 @@ a:where(:not([class])):is(:hover, :focus-visible) {
   color: var(--link-hover);
   text-decoration-thickness: 2px;
 }
-h1[tabindex="-1"]:focus:not(:focus-visible) {
+/* Programmatic focus targets (page headings, main) show a ring only once a key was pressed last. */
+:root[data-input="pointer"] [tabindex="-1"]:focus,
+[tabindex="-1"]:focus:not(:focus-visible) {
   outline: none;
 }
 .shell {
@@ -256,13 +258,13 @@ h1[tabindex="-1"]:focus:not(:focus-visible) {
 .operator-summary > div {
   min-width: 0;
 }
-.operator-summary strong,
-.operator-summary span {
+.operator-summary > div strong,
+.operator-summary > div span {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.operator-summary span {
+.operator-summary > div span {
   margin-top: 0.1rem;
   color: var(--muted);
   font-size: 0.78rem;
@@ -924,7 +926,7 @@ progress {
 }
 .activity-overview {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.7rem;
   margin-bottom: 1rem;
 }
@@ -947,6 +949,15 @@ progress {
 .activity-overview span {
   color: var(--muted);
   font-size: 0.76rem;
+}
+@media (min-width: 64rem) {
+  .activity-overview {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  .activity-overview > div {
+    flex-wrap: wrap;
+    padding: 0.7rem 0.85rem;
+  }
 }
 .activity-overview strong {
   font-size: 1.4rem;
@@ -2934,4 +2945,10 @@ progress {
 }
 .keys-page tr.is-expired > :is(th, td):not(.key-expires, :last-child) {
   opacity: 0.6;
+}
+
+/* The Library opens tighter than other pages: its toolbar and master-detail should start above the fold. */
+.library-page .page-header {
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
 }

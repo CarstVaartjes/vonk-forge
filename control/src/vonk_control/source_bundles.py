@@ -120,10 +120,6 @@ def generate_source_bundle(files: Mapping[str, bytes]) -> GeneratedSourceBundle:
         for raw_path in sorted(files, key=lambda value: value.encode("utf-8")):
             path = _safe_path(raw_path)
             content = files[raw_path]
-            if not isinstance(content, bytes):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-                raise SourceBundleError(
-                    SourceBundleCode.FILE_INVALID, "source bundle file is not binary"
-                )
             normalized[path] = content
             member = tarfile.TarInfo(path)
             member.size = len(content)
@@ -515,10 +511,6 @@ def _generated_bundle(
 
 def _read_archive(payload: IO[bytes], limits: BundleLimits) -> bytes:
     archive = payload.read(limits.max_archive_bytes + 1)
-    if not isinstance(archive, bytes):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-        raise SourceBundleError(
-            SourceBundleCode.READ_FAILED, "source bundle is not binary"
-        )
     if not archive:
         raise SourceBundleInvalid(SourceBundleCode.EMPTY, "source bundle is empty")
     if len(archive) > limits.max_archive_bytes:

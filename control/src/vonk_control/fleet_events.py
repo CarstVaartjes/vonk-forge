@@ -633,7 +633,7 @@ class FleetEventRecorder:
         try:
             draft = cls._render(value)
             _stored_payload(draft)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             repository._allocate_cursor(session)
         else:
             repository.append_in_session(session, draft)

@@ -1,5 +1,5 @@
 import "./chart.css";
-import { NOT_REPORTED_TEXT } from "../../lib/fleet";
+import { NoReading } from "../ui/no-reading";
 
 const SIZE = 120;
 const CENTER = SIZE / 2;
@@ -41,7 +41,7 @@ export function ArcGauge({
   captions?: readonly string[];
   color: string;
 }) {
-  const shown = value === null ? NOT_REPORTED_TEXT : `${value.toLocaleString("en-US")} ${unit}`;
+  const reading = value === null ? null : `${value.toLocaleString("en-US")} ${unit}`;
   const scaled = value !== null && max !== null && max > 0;
   const toDeg = (v: number) => START_DEG + SWEEP_DEG * Math.min(1, Math.max(0, v / (max ?? 1)));
   // Only a reading with a scale is a meter; anything else is plain text, so no meter lacks its maximum.
@@ -52,7 +52,7 @@ export function ArcGauge({
         "aria-valuemin": 0,
         "aria-valuemax": max,
         "aria-valuenow": value,
-        "aria-valuetext": [shown, ...captions].join(", "),
+        "aria-valuetext": [reading, ...captions].join(", "),
       }
     : {};
   return (
@@ -85,7 +85,7 @@ export function ArcGauge({
           </svg>
         )}
         <div className="arc-gauge-text">
-          <strong>{shown}</strong>
+          <strong>{reading ?? <NoReading />}</strong>
           <span>{title}</span>
         </div>
       </div>

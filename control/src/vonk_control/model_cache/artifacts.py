@@ -359,13 +359,11 @@ def _validate_artifact(value: ArtifactSpec) -> None:
         or len(value.sha256) != _DIGEST_LENGTH
         or value.sha256 != value.sha256.lower()
         or not _is_hex(value.sha256)
-        or not isinstance(value.expected_bytes, int)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         or isinstance(value.expected_bytes, bool)
         or value.expected_bytes < 0
         or (value.expected_bytes == 0 and value.sha256 != _EMPTY_SHA256)
         or not value.roles
         or len(value.roles) > 32
-        or any(not isinstance(role, str) for role in value.roles)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         or len(set(value.roles)) != len(value.roles)
         or any(not role or len(role) > 64 for role in value.roles)
     ):
@@ -412,7 +410,6 @@ def _validate_parts(value: ArtifactSpec) -> None:
             or len(part.sha256) != _DIGEST_LENGTH
             or part.sha256 != part.sha256.lower()
             or not _is_hex(part.sha256)
-            or not isinstance(part.expected_bytes, int)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             or isinstance(part.expected_bytes, bool)
             or part.expected_bytes < 1
         ):
@@ -434,10 +431,7 @@ def _validate_manifest(value: ArtifactSetManifest) -> None:
             ModelCacheCode.ARTIFACT_DUPLICATE, "cache artifact keys must be unique"
         )
     _unique_artifacts(value.artifacts)
-    if any(
-        not isinstance(item, str) or not _is_hex(item)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-        for item in value.model_content_digests
-    ):
+    if any(not _is_hex(item) for item in value.model_content_digests):
         raise ModelCacheResolutionInvalid(
             ModelCacheCode.MODEL_CONTENT_DIGESTS_INVALID,
             "cache model dependency pins are invalid",

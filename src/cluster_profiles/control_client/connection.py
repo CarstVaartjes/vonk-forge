@@ -127,7 +127,7 @@ def read_connection() -> StoredConnection | None:
             validated_origin(document["controller_url"]),
             parse_expiry(document["token_expires_at"]),
         )
-    except (ValueError, ControlClientError):
+    except ValueError, ControlClientError:
         raise LocalFilesystemError(
             "vonkctl connection file is invalid; run vonkctl auth login"
         ) from None

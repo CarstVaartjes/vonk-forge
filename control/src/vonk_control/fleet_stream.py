@@ -97,7 +97,7 @@ def _event_frame(
                 parts.append(piece)
             if issue is not None:
                 break
-    except (TypeError, ValueError, OverflowError, UnicodeError):
+    except TypeError, ValueError, OverflowError, UnicodeError:
         issue = FleetFrameIssue(
             reason_code=ProjectionCode.FLEET_FRAME_ENCODING_UNAVAILABLE,
             observed_bytes_at_least=None,
@@ -150,7 +150,7 @@ class FleetStream:
                     current_cursor = await asyncio.to_thread(
                         self._events.high_watermark
                     )
-                except (SQLAlchemyError, OSError, RuntimeError, TypeError, ValueError):
+                except SQLAlchemyError, OSError, RuntimeError, TypeError, ValueError:
                     yield self._unavailable_frame(0, retry=retry)
                     return
                 yield _event_frame(
@@ -184,7 +184,7 @@ class FleetStream:
                     # the gap; only a completed fresh capture lets the consumer
                     # advance its applied cursor and reconnect beyond this row.
                     return
-                except (SQLAlchemyError, OSError, RuntimeError, TypeError, ValueError):
+                except SQLAlchemyError, OSError, RuntimeError, TypeError, ValueError:
                     yield self._unavailable_frame(current_cursor, retry=retry)
                     return
                 reset_reason = self._reset_reason(current_cursor, replay)
@@ -223,7 +223,7 @@ class FleetStream:
                             )
                             for index, event in enumerate(replay.events)
                         ]
-                    except (OSError, RuntimeError, TypeError, ValueError):
+                    except OSError, RuntimeError, TypeError, ValueError:
                         yield self._unavailable_frame(
                             replay.high_watermark, retry=retry
                         )

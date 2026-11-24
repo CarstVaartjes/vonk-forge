@@ -34,7 +34,7 @@ def _stored_field[T: BaseModel](
         return None
     try:
         return read_stored_model(model, document)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -64,5 +64,5 @@ def _stored_result(parent: Job) -> AgentUpgradeRolloutResult:
         return AgentUpgradeRolloutResult()
     try:
         return read_stored_model(AgentUpgradeRolloutResult, parent.result)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return AgentUpgradeRolloutResult()

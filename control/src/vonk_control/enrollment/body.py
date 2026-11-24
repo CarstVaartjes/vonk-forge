@@ -49,7 +49,7 @@ def _decode_bounded_json_string(
         return None
     try:
         decoded = json.loads(bytes(value[start:end]).decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
+    except UnicodeDecodeError, ValueError:
         return None
     if not isinstance(decoded, str) or len(decoded) > maximum_characters:
         return None

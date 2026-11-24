@@ -134,7 +134,7 @@ def _parent_identity(
                     owners.add(wire.build_id)
                 else:
                     return None
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         return owners.pop() if len(owners) == 1 else None
     if key == "owner_id":
@@ -200,7 +200,7 @@ def _catalog_recipe(document: object) -> RecipeDefinition | None:
         return None
     try:
         return read_recipe(document)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -250,7 +250,7 @@ def _recipe_model_identities(
             return None
         try:
             model = read_model(revision.document)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         result.append(
             (reference.content_sha256, f"{reference.publisher}/{reference.slug}")
@@ -319,7 +319,7 @@ def _role_phases(
     for node_id, payload in node_payloads:
         try:
             wire = reader.validate_json(canonical_message(payload))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         role = (
             wire.role
@@ -473,7 +473,7 @@ def _project_recipe_operation_progress(
                 observed = read_stored_model(
                     type(expected), canonical_message(child.payload), from_json=True
                 )
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 return None
             if canonical_message(observed) != canonical_message(expected):
                 return None

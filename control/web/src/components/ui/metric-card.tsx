@@ -1,6 +1,6 @@
+import { NoReading } from "./no-reading";
 import "./metric-card.css";
 import type { MetricRange, MetricSpec, MetricsSeriesResponse } from "../../api/types";
-import { NOT_REPORTED_TEXT } from "../../lib/fleet";
 import { UNITS, formatValue } from "../../lib/metric-units";
 import { AreaChart } from "../chart/area-chart";
 import { EstimateTag } from "./estimate";
@@ -43,7 +43,7 @@ export function MetricCard({
         <h3>
           {spec.title} <EstimateTag basis={spec.basis} />
         </h3>
-        <strong>{now ?? NOT_REPORTED_TEXT}</strong>
+        <strong>{now ?? <NoReading />}</strong>
       </header>
       {extra && (
         <p className="spark-chart-line">
@@ -56,7 +56,11 @@ export function MetricCard({
         </p>
       )}
       {data === undefined && <p role="status">Reading metrics…</p>}
-      {data === null && <p role="status">{NOT_REPORTED_TEXT}</p>}
+      {data === null && (
+        <p role="status">
+          <NoReading />
+        </p>
+      )}
       {data && (
         <AreaChart
           title={spec.title}

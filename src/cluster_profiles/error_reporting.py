@@ -181,8 +181,6 @@ class ErrorContext:
             raise ValueError("error request ID is invalid")
         if self.http_status is not None and not 100 <= self.http_status <= 599:
             raise ValueError("error HTTP status is invalid")
-        if self.errno is not None and not isinstance(self.errno, int):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-            raise ValueError("error errno is invalid")
         if self.path is not None and safe_path(self.path) != self.path:
             raise ValueError("error path is invalid")
 

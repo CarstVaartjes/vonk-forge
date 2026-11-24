@@ -708,7 +708,7 @@ def profile_claim_consumable(session: Session, claim: ResourceReservation) -> bo
             strict=True,
             from_json=True,
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     return progress.workload_intent_ordinal == node.workload_intent_ordinal
 

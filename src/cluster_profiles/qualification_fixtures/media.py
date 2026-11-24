@@ -291,13 +291,13 @@ def _ffprobe_metadata(path: Path) -> dict[str, object]:
         format_value.get("format_name", "")
     ).split(","):
         raise FixtureError("artifact output is not an MP4 container")
-    if isinstance(format_value, Mapping) and "duration" not in stream:  # pyright: ignore[reportUnnecessaryIsInstance]  # media probe output is checked before use
+    if "duration" not in stream:
         stream["duration"] = format_value.get("duration")
     return {
         "video": stream,
         "audio": audio,
         "streams": [dict(item) for item in streams],
-        "format": dict(format_value) if isinstance(format_value, Mapping) else {},  # pyright: ignore[reportUnnecessaryIsInstance]  # media probe output is checked before use
+        "format": dict(format_value),
     }
 
 

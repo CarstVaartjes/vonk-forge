@@ -420,14 +420,14 @@ alternative rollout path.
 
 ## Whole-fleet profile membership
 
-The current editor saves drafts and a profile load creates an application. The
-target contract has one durable selected-profile record in PostgreSQL pointing
-to the immutable accepted application snapshot. That snapshot is standing
+The editor saves drafts and a profile load creates an application. One durable
+selected-profile record in PostgreSQL points to the immutable accepted
+application snapshot. That snapshot is standing
 desired state for the whole enrolled, non-revoked fleet. Do not infer the
 selected record from latest application or audit history; unselected profiles
 do not drive fleet actions.
 
-The Controller worker must reconcile this snapshot when Spark enrollment or
+The Controller worker reconciles this snapshot when Spark enrollment or
 revocation changes membership; a roster event is not a new operator decision.
 An unassigned or newly enrolled Spark is idle. A removed Spark's independent
 assignment is ignored without changing the accepted snapshot. If its removal

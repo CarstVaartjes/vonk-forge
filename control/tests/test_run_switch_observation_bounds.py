@@ -26,7 +26,10 @@ from vonk_control.run_switch_contract.requests import (
 from vonk_control.run_switch_operations.constants import (
     _FINAL_VERIFICATION_MAX_SECONDS,
 )
-from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
+from vonk_control.run_switch_operations.errors import (
+    RunSwitchOperationConflict,
+    RunSwitchRetryLater,
+)
 from vonk_control.run_switch_operations.interfaces import PhaseExecution
 from vonk_control.run_switch_operations.observation_helpers import (
     _start_child_request_key,
@@ -133,6 +136,59 @@ def _pending_stop(tmp_path):
         actor="admin",
     )
     return service, operation, run_id
+
+
+def test_final_verification_conflict_retries_in_place_without_replanning(tmp_path):
+    """Catches a final verification that cannot observe re-planning its work.
+
+    A Stop has no Start, so only the phase itself tells the dispatcher this is
+    final verification: an unobservable check is looked at again in place.
+    """
+
+    service, operation, _run_id = _pending_stop(tmp_path)
+    sessions = service._sessions
+    with sessions.begin() as session:
+        job = session.get(Job, operation.operation_id)
+        assert job is not None
+        parent = read_row_column(job, "payload")
+        assert isinstance(parent, RunSwitchJobPayload)
+        progress = read_row_column(job, "result")
+        assert isinstance(progress, RunSwitchOperationResult)
+        final_verify = parent.plan.phases[-1]
+        assert final_verify.kind == "final_verify"
+        progress.phase_index = final_verify.index
+        progress.phase = final_verify.kind
+        progress.completed_phases = ["stop"]
+        progress.child_operation_id = None
+        job.result = progress.model_dump(mode="json")
+        job.state = LifecycleState.RUNNING
+        node_id = job.targets[0]
+
+    class UnobservableVerification:
+        def execute(self, plan, phase, **_kwargs):
+            raise RunSwitchOperationConflict("route withdrawal is not observed yet")
+
+    service._phase_executor = UnobservableVerification()
+    service._clock = lambda: NOW
+    assert service._advance(operation.operation_id)
+
+    with sessions() as session:
+        job = session.get(Job, operation.operation_id)
+        assert job is not None
+        progress = read_row_column(job, "result")
+        assert isinstance(progress, RunSwitchOperationResult)
+        assert job.state not in {LifecycleState.FAILED, LifecycleState.CANCELLED}
+        assert progress.phase == "final_verify"
+        assert progress.force_replan is False
+    # Verifying again in place never blocks the newest request.
+    fresh = service.apply(
+        RunSwitchApplyRequest(
+            **_request(sessions, node_id).model_dump(),
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    assert fresh.operation_id != operation.operation_id
 
 
 def test_a_stale_stop_preview_is_replanned_and_its_key_replays(tmp_path):

@@ -148,7 +148,7 @@ def _active_recipe_revision(
         return None
     try:
         recipe = read_recipe(revision.document)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return revision, recipe
 
@@ -365,9 +365,7 @@ def _proves_fresh_absence(run: RecipeRun, node: RunNode, now: datetime) -> bool:
         or run_nodes[0].endpoint_owner is not True
     ):
         return False
-    if node.observation_endpoint_ready is not False or not isinstance(  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-        node.observation_observed_at, datetime
-    ):
+    if node.observation_endpoint_ready is not False:
         return False
     observed_at = _aware(node.observation_observed_at)
     age = _aware(now) - observed_at

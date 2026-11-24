@@ -319,7 +319,7 @@ class _PostgresServer:
     def _running_port(state: Path) -> str | None:
         try:
             recorded = json.loads(state.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except OSError, ValueError:
             return None
         running = _run(
             ["docker", "inspect", "-f", "{{.State.Running}}", recorded["container"]],
@@ -374,7 +374,7 @@ class _PostgresServer:
         state = _session_state(os.getpid())
         try:
             recorded = json.loads(state.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except OSError, ValueError:
             return
         _run(["docker", "stop", recorded["container"]], timeout=30, check=False)
         state.unlink(missing_ok=True)

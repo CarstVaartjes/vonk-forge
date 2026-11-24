@@ -239,7 +239,7 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
                 return None
             try:
                 return project_child(session, child, self._clock())
-            except (TypeError, ValueError, RuntimeError):
+            except TypeError, ValueError, RuntimeError:
                 return _ChildView(
                     state=ProfileEffectState.UNKNOWN.value,
                     result=RunSwitchDistributionEndedResult(

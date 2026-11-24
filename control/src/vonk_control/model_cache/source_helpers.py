@@ -78,7 +78,7 @@ def _is_allowed_huggingface_redirect(value: str) -> bool:
     try:
         parsed = urlsplit(value)
         port = parsed.port
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     return bool(
         parsed.scheme == "https"
@@ -98,7 +98,7 @@ def _is_allowed_github_release_redirect(value: str) -> bool:
     try:
         parsed = urlsplit(value)
         port = parsed.port
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     return bool(
         parsed.scheme == "https"

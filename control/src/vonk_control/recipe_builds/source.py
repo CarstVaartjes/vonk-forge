@@ -444,13 +444,7 @@ def _resolve_once(
         image_digest = cached.image_digest
         oci_layout_sha256 = cached.oci_layout_sha256
         image_bytes = cached.image_bytes
-    if (
-        not isinstance(build_input_sha256, str)
-        or not isinstance(image_digest, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-        or not isinstance(oci_layout_sha256, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-        or not isinstance(image_bytes, int)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-        or isinstance(image_bytes, bool)
-    ):
+    if not isinstance(build_input_sha256, str) or isinstance(image_bytes, bool):
         # Incomplete receipt evidence is no cache: it is retired as unknown and
         # the resolution reports a stale receipt, so a fresh build replaces it
         # instead of the damaged record blocking the revision.

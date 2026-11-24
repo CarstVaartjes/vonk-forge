@@ -1152,7 +1152,7 @@ def _result(value: object) -> ManagedCatalogSyncResult:
     """
     try:
         return ManagedCatalogSyncResult.model_validate_json(canonical_message(value))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         unknown = _empty_result()
         unknown.state = CatalogSyncState.PARTIAL
         unknown.problems = [

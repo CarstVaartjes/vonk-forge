@@ -66,7 +66,7 @@ def install_artifacts_routes(
                     "offset": request.headers.get("x-vonk-upload-offset", "0"),
                 }
             )
-        except (ValueError, ValidationError):
+        except ValueError, ValidationError:
             raise HTTPException(
                 status_code=422, detail="image upload identity is invalid"
             ) from None

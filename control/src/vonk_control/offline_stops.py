@@ -21,7 +21,7 @@ def deferred_stop_nodes(job: Job) -> frozenset[str]:
             if job.payload.get("execution_mode") == "profile-jobrun-stop"
             else read_stored_model(RecipeStopParent, job.payload, from_json=True)
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return frozenset()
     intent = parent.offline_stop_intent
     return frozenset(intent.node_ids) if intent is not None else frozenset()

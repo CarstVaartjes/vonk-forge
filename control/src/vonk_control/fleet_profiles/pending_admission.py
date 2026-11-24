@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
-from pydantic import ValidationError
 from sqlalchemy import or_, select, true
 
 from vonk_agent_protocol.agent_words import (
@@ -51,8 +50,7 @@ from vonk_control.fleet_profiles.persistence import (
 )
 from vonk_control.fleet_profiles.projection_support import (
     _aware,
-    _digest,
-    _profile_document,
+    _saved_since_review,
 )
 from vonk_control.jobs import states as job_states
 from vonk_control.lifecycle.evidence import Residue
@@ -307,7 +305,7 @@ class FleetProfileService:
                     ),
                 )
                 return True
-            if self._superseded_by_saved_profile(application_id):
+            if self._superseded_by_saved_profile(application_id, plan.profile_revision):
                 return True
             self._defer_pending_application(
                 application_id,
@@ -341,14 +339,16 @@ class FleetProfileService:
         replaced. Every re-plan in the admission observer goes through here.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
-        if self._superseded_by_saved_profile(application_id):
+        if self._superseded_by_saved_profile(application_id, plan.profile_revision):
             return None
         return self._replan_blocked_application(application_id, plan, actor)
 
-    def _superseded_by_saved_profile(self, application_id: str) -> bool:
+    def _superseded_by_saved_profile(
+        self, application_id: str, accepted_revision: int | None
+    ) -> bool:
         """End a waiting load a newer profile save replaced; the newest steers."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
-        if not self._profile_saved_since_accepted(application_id):
+        if not self._profile_saved_since_accepted(application_id, accepted_revision):
             return False
         self._finish_pending_admission(
             application_id,
@@ -358,8 +358,10 @@ class FleetProfileService:
         )
         return True
 
-    def _profile_saved_since_accepted(self, application_id: str) -> bool:
-        """Whether the saved profile is no longer the one this load accepted."""
+    def _profile_saved_since_accepted(
+        self, application_id: str, accepted_revision: int | None
+    ) -> bool:
+        """Whether the profile was saved since this load accepted ``accepted_revision``."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         with self._sessions() as session:
             row = session.get(FleetProfileApplication, application_id)
@@ -370,12 +372,7 @@ class FleetProfileService:
             profile = session.get(FleetProfile, row.profile_id)
             if profile is None:
                 return True
-            try:
-                return _digest(_profile_document(profile)) != row.profile_digest
-            except ValidationError:
-                # An unreadable saved profile proves no edit: the ordinary
-                # review reports it.
-                return False
+            return _saved_since_review(accepted_revision, profile.revision)
 
     def _finish_pending_admission(
         self,

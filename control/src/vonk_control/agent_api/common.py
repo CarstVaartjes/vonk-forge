@@ -625,7 +625,7 @@ def _owned_artifact(
                 payload = read_stored_model(
                     PAYLOAD_MODELS[OperationKind(operation.kind)], operation.payload
                 )
-            except (KeyError, TypeError, ValueError):
+            except KeyError, TypeError, ValueError:
                 missing_evidence = True
                 continue
             if _references_digest(payload.model_dump(mode="json"), digest):

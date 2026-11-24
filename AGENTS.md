@@ -262,6 +262,13 @@ rules are in [Current contracts only](docs/agent-rules.md#current-contracts-only
   `# pyright: ignore[rule]  # reason`. Never add a `# type: ignore`, a
   file-level `# ruff: noqa`, or a per-file ignore; the per-file entries that
   exist are guard-blocked sites awaiting their class follow-up.
+- Python code targets 3.14. A file another interpreter runs (a container
+  image's Python, a runner's or host's `python3`), and every repository module
+  such a file imports, sits under a py313/py312 `per-file-target-version` entry
+  in `pyproject.toml` (`deploy/`, `scripts/`, `tests/nodes/`, `agent_protocol/`,
+  `tools/generated_contracts.py`, and `tests/acceptance/`, whose sources the
+  Spark lane parses with the runner's 3.12); it imports the 3.14 packages only
+  when uv runs it.
 - Every application route appears in the full OpenAPI schema; never use
   `include_in_schema=False` in production routes.
 - Consume wire and persisted JSON with the canonical model's JSON validation
@@ -303,8 +310,8 @@ SSH as the rollout path. `vonkctl` exposes one authorized upgrade command; there
 is no separate candidate/preview/apply or plan-digest subcommand:
 
 ```bash
-vonkctl fleet upgrade Atlas --strategy one-at-a-time --yes --json
-vonkctl fleet upgrade --all --strategy one-at-a-time --yes --json
+vonkctl fleet upgrade Atlas --yes --json
+vonkctl fleet upgrade --all --yes --json
 ```
 
 For a mounted controller project, consume the signed NAS installer from the
@@ -327,6 +334,9 @@ healthy. Its readers start once it is healthy and never poll for a staged file;
 see [Runtime staging](deploy/compose/README.md#runtime-staging-runtime-init).
 `control-api` runs as 10001 without capabilities or Compose secrets and reads
 staged copies only; under an older Compose file its pre-exec steps down from root.
+No NAS service mounts the Docker socket; daemon-level recovery (old images,
+lost networks) is an operator step, see
+[NAS Docker daemon](deploy/compose/README.md#nas-docker-daemon-old-images-and-lost-networks).
 
 Removal is documented in [docs/operations/uninstall.md](docs/operations/uninstall.md),
 derived from what the installers create. A change that makes an installer, the

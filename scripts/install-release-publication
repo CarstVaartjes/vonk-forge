@@ -2089,8 +2089,7 @@ def refresh(arguments: argparse.Namespace) -> None:
     except (UnicodeDecodeError, ValueError) as error:
         raise PublicationError("release object is invalid") from error
     if (
-        not isinstance(release, dict)  # pyright: ignore[reportUnnecessaryIsInstance]  # the canonical-JSON check also covers the dump
-        or verified["release_path"] != _canonical(release)
+        verified["release_path"] != _canonical(release)
         or release.get("channel") != manifest["channel"]
         or release.get("generation") != manifest["generation"]
         or release.get("source_sha") != manifest["source_sha"]

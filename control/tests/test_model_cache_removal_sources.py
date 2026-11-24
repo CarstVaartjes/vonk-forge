@@ -6,7 +6,7 @@ import hashlib
 import itertools
 import shutil
 import uuid
-from concurrent.futures import Future, wait
+from concurrent.futures import wait
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -734,9 +734,8 @@ def test_a_lost_background_failure_ack_counts_one_missing_file_observation(
         service.tick(limit=1)
         futures = service._background_operations[operation.id].futures
         assert isinstance(futures, list)
-        running = [future for future in futures if isinstance(future, Future)]  # pyright: ignore[reportUnnecessaryIsInstance]  # the isinstance is the test's runtime assertion
-        assert len(running) == len(futures) == 1
-        assert not wait(running, timeout=30).not_done
+        assert len(futures) == 1
+        assert not wait(futures, timeout=30).not_done
         with observe_unknown():
             observed = service.tick(limit=1)
             assert not observed

@@ -94,11 +94,6 @@ class CancellationMixin:
         with cache._session(write=True) as session:
             operation = session.scalar(
                 select(ModelCacheOperation)
-                .where(
-                    ModelCacheOperation.id == operation_id
-                    if operation_id is not None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
-                    else true()
-                )
                 .where(ModelCacheOperation.id == operation_id)
                 .with_for_update()
                 .execution_options(populate_existing=True)

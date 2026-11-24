@@ -21,28 +21,34 @@ from cluster_profiles.generated_control.models.recipe_revision_projection import
 )
 
 
-def _configure_option_target(
-    assignments: list[dict[str, object]], name: str | None
-) -> dict[str, object]:
+def _option_target_index(names: Sequence[str], name: str | None) -> int:
+    """The assignment ``--assignment NAME`` (or a profile's only one) names."""
     if name is None:
-        if not assignments:
+        if not names:
             raise ControlMalformedResponse("option assignment is not yet observed")
-        if len(assignments) != 1:
+        if len(names) != 1:
             raise SelectorError(
                 "profile configure --option needs --assignment NAME when the "
                 "profile does not have exactly one assignment"
             )
-        return assignments[0]
+        return 0
     matching = [
-        assignment
-        for assignment in assignments
-        if str(assignment.get("assignment_name", "")).casefold() == name.casefold()
+        index
+        for index, named in enumerate(names)
+        if named.casefold() == name.casefold()
     ]
     if not matching:
         raise ControlMalformedResponse("option assignment is not yet observed")
     if len(matching) != 1:
         raise SelectorError(f"ambiguous assignment named {name}")
     return matching[0]
+
+
+def _configure_option_target(
+    assignments: list[dict[str, object]], name: str | None
+) -> dict[str, object]:
+    names = [str(assignment.get("assignment_name", "")) for assignment in assignments]
+    return assignments[_option_target_index(names, name)]
 
 
 def _parse_option_flags(values: Sequence[str]) -> dict[str, str]:

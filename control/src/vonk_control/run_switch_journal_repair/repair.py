@@ -149,7 +149,7 @@ def _try_repair_once(
                 return JournalRepairDisposition.DEFERRED
             try:
                 witnesses = _prove(session, job, progress, now, purpose)
-            except (KeyError, TypeError, ValueError, UnknownOutcomeError):
+            except KeyError, TypeError, ValueError, UnknownOutcomeError:
                 witnesses = None
             if witnesses is None:
                 job.status_reason = f"{REPAIR_WAIT}: waiting for exact accepted zero-transfer/native sample evidence; existing observation deadline remains unchanged"

@@ -285,7 +285,7 @@ class EnrollmentCore:
                     purpose=purpose,
                     token=token,
                 )
-            except (SQLAlchemyError, EnrollmentIssuanceUncertain):
+            except SQLAlchemyError, EnrollmentIssuanceUncertain:
                 # Observe the winner after rollback, preserving the exact
                 # request identity and never minting an unrelated grant.
                 continue
@@ -342,7 +342,7 @@ class EnrollmentCore:
                 time.sleep(delay)
             try:
                 return self._revoke_grant_once(grant_id, actor=actor)
-            except (SQLAlchemyError, EnrollmentIssuanceUncertain):
+            except SQLAlchemyError, EnrollmentIssuanceUncertain:
                 pass
         return EnrollmentObservationOutcome(
             category=ErrorCategory.UNKNOWN,
@@ -548,7 +548,7 @@ class EnrollmentCore:
             if accepted.state == EnrollmentRecordState.CERTIFICATE_ISSUED:
                 try:
                     return _issued(accepted)
-                except (RuntimeError, ValueError, UnicodeError):
+                except RuntimeError, ValueError, UnicodeError:
                     accepted.state = EnrollmentRecordState.ISSUING
         try:
             issued = self._authority.observe_node(
@@ -598,7 +598,7 @@ class EnrollmentCore:
                 if enrollment.state == EnrollmentRecordState.CERTIFICATE_ISSUED:
                     try:
                         return _issued(enrollment)
-                    except (RuntimeError, ValueError, UnicodeError):
+                    except RuntimeError, ValueError, UnicodeError:
                         pass
                 enrollment.state = EnrollmentRecordState.ISSUING
                 existing = session.get(AgentCertificate, issued.serial)
@@ -660,13 +660,13 @@ class EnrollmentCore:
             if enrollment.state == EnrollmentRecordState.CERTIFICATE_ISSUED:
                 try:
                     return _issued(enrollment)
-                except (RuntimeError, ValueError, UnicodeError):
+                except RuntimeError, ValueError, UnicodeError:
                     pass
             enrollment.state = EnrollmentRecordState.ISSUING
             try:
                 purpose = EnrollmentPurpose(grant.purpose)
                 material = enrollment.csr_pem.encode("ascii")
-            except (ValueError, UnicodeError):
+            except ValueError, UnicodeError:
                 retain_ended_effect(
                     session,
                     _issuance_binding(enrollment.provider_request),

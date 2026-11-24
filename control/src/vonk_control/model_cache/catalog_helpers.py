@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import assert_never
 
 from vonk_forge_contracts import (
     ModelDefinition,
@@ -15,7 +14,6 @@ from vonk_forge_contracts.model import (
     GitHubLfsSource,
     GitHubReleaseSource,
     ModelReference,
-    ModelSource,
 )
 
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
@@ -44,11 +42,11 @@ def _source_for_catalog_artifact(
     repository = artifact.repository
     path = artifact.path
     revision = artifact.revision
-    if not isinstance(repository, str) or not repository:  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+    if not repository:
         raise ModelCacheResolutionInvalid(
             ModelCacheCode.SOURCE_INVALID, "catalog artifact repository is invalid"
         )
-    if not isinstance(path, str) or not path:  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+    if not path:
         raise ModelCacheResolutionInvalid(
             ModelCacheCode.ARTIFACT_INVALID, "catalog artifact path is invalid"
         )
@@ -112,11 +110,7 @@ def _recipe_model_content_digests(
     result: list[str] = []
     for selection in raw_models:
         digest = selection.model.content_sha256
-        if (
-            not isinstance(digest, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-            or not _is_hex(digest)
-            or len(digest) != _DIGEST_LENGTH
-        ):
+        if not _is_hex(digest) or len(digest) != _DIGEST_LENGTH:
             raise ModelCacheResolutionInvalid(
                 ModelCacheCode.MODEL_PIN_INVALID,
                 "canonical recipe model pin is invalid",
@@ -165,14 +159,12 @@ def _canonical_model_artifacts(row: CatalogDocumentRevision) -> list[CatalogArti
         release_id = None
         assets = {}
         provider_kind = ProviderKind.GITHUB_LFS_OBJECT
-    elif isinstance(source, ModelSource):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+    else:
         repository = source.repository
         revision = source.revision
         release_id = None
         assets = {}
         provider_kind = ProviderKind.HUGGINGFACE_FILE
-    else:
-        assert_never(source)
     result: list[CatalogArtifact] = []
     result.extend(
         CatalogArtifact(
@@ -215,7 +207,7 @@ def _same_model_artifact_identity(
             )
             for item in _canonical_model_artifacts(row)
         }
-    except (KeyError, TypeError, ValueError, ModelCacheResolutionError):
+    except KeyError, TypeError, ValueError, ModelCacheResolutionError:
         return False
     selected = {
         item.artifact_id: (item.path, item.sha256, item.expected_bytes)

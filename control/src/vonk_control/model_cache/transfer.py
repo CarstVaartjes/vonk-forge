@@ -95,7 +95,7 @@ class TransferMixin:
         path = cache._object_path(digest)
         try:
             metadata = path.lstat()
-        except (FileNotFoundError, NotADirectoryError):
+        except FileNotFoundError, NotADirectoryError:
             return 0
         except OSError:
             return 0

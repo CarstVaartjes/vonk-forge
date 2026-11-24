@@ -18,7 +18,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Mapping
 from enum import StrEnum
-from typing import TypedDict
+from typing import TypedDict, Unpack
 
 
 class DocumentKind(StrEnum):
@@ -79,10 +79,37 @@ class CliErrorType(StrEnum):
     ENROLLMENT_DELIVERY = "enrollment_delivery"
 
 
-def failure_document(message: str, error_type: CliErrorType, **fields) -> dict:  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
+class FailureFields(TypedDict, total=False):
+    """The optional fields a failure document is built with (``ErrorDocument``).
+
+    A field is on the wire only when it is passed; the caller drops nulls.
+    """
+
+    code: str
+    detail: str
+    recovery_actions: list[str]
+    usage: str
+    retryable: bool
+    retry_time: str | None
+    retry_after_seconds: int | None
+    preserved: str | None
+    required_bytes: int | None
+    free_bytes: int | None
+    shortfall_bytes: int | None
+    log_excerpt: str | None
+
+
+class FailureDocument(FailureFields):
+    error: str
+    error_type: CliErrorType
+
+
+def failure_document(
+    message: str, error_type: CliErrorType, **fields: Unpack[FailureFields]
+) -> FailureDocument:
     """The one constructor of a failure document: ``error``, ``error_type``, extras."""
 
-    return dict(error=message, error_type=error_type, **fields)
+    return FailureDocument(error=message, error_type=error_type, **fields)
 
 
 #: Kinds whose Controller model owns its ``schema_version``; the stamp never

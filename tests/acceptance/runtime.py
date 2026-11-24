@@ -463,25 +463,17 @@ def https_over_command(
         or any(character in path for character in "\0\r\n")
         or (client_certificate is None) != (client_key is None)
         or method not in {"DELETE", "GET", "PATCH", "POST", "PUT"}
-        or (body is not None and not isinstance(body, bytes))  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
         or (body is not None and len(body) > MAXIMUM_HTTPS_BODY_BYTES)
         or (method == "GET" and body is not None)
         or not allowed_statuses
         or any(
-            not isinstance(status, int)  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
-            or isinstance(status, bool)
-            or not 100 <= status <= 599
+            isinstance(status, bool) or not 100 <= status <= 599
             for status in allowed_statuses
         )
         or any(
             not name
             or any(character in name for character in "\0\r\n:")
             or any(character in value for character in "\0\r\n")
-            for name, value in request_headers.items()
-            if isinstance(name, str) and isinstance(value, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
-        )
-        or any(
-            not isinstance(name, str) or not isinstance(value, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
             for name, value in request_headers.items()
         )
         or any(

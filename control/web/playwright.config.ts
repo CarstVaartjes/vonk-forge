@@ -7,6 +7,7 @@ export default defineConfig({
   testDir: "./e2e",
   outputDir: "./test-results",
   reporter: [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]],
+  forbidOnly: !!process.env.CI,
   workers: 2,
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   use: {

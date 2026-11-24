@@ -145,7 +145,7 @@ class ResumeMixin:
             invalid_plan = "stored agent upgrade plan is invalid"
             try:
                 stored = AgentUpgradeRolloutPayload.model_validate(parent.payload)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 service._retire_rollout(parent, now, invalid_plan)
                 return
             order = stored.node_order

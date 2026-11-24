@@ -195,7 +195,7 @@ class OciImageStore:
                 metadata = self.blob_path(digest).stat()
                 if not stat.S_ISREG(metadata.st_mode) or metadata.st_size != size:
                     return None
-            except (FileNotFoundError, NotADirectoryError):
+            except FileNotFoundError, NotADirectoryError:
                 return None
             except OSError as error:
                 return StoreUnknown(

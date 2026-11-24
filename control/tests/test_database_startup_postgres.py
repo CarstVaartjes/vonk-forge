@@ -202,7 +202,7 @@ def test_contact_move_rolls_back_on_interruption_and_restarts(
             management_observed_at = '2026-10-25T13:00:00Z',
             recipe_observation_http_status = 204,
             recipe_observation_status_at = '2026-10-25T11:00:00Z'
-            WHERE node_id = '{legacy}'""")  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
+            WHERE node_id = '{legacy}'""")  # noqa: S608 -- test literal node id, never user input
     initialize_database(url)
     readopted = contact(legacy)
     assert (

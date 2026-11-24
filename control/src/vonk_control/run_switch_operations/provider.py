@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
 from typing import (
     TYPE_CHECKING,
 )
@@ -62,14 +61,8 @@ class RunSwitchOperationProvider:
                 reason=InvalidRequestReason.OUT_OF_RANGE,
             )
         state = query.state
-        if state is not None and not isinstance(state, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # operation query values from a caller are checked
-            raise InvalidValue("operation provider state filter is invalid")
         node_id = query.node_id
-        if node_id is not None and not isinstance(node_id, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-            raise InvalidValue("operation provider node filter is invalid")
         request_id = query.request_id
-        if request_id is not None and not isinstance(request_id, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-            raise InvalidValue("operation provider request filter is invalid")
         after = query.after
         with self._service._sessions() as session:
             base_filters: list[ColumnElement[bool]] = [Job.kind.in_(_OPERATION_KINDS)]
@@ -79,13 +72,6 @@ class RunSwitchOperationProvider:
                 base_filters.append(Job.request_id == request_id)
             if node_id is not None:
                 base_filters.append(cast(Job.targets, String).contains(f'"{node_id}"'))
-            if after is not None and (
-                not isinstance(after, tuple)  # pyright: ignore[reportUnnecessaryIsInstance]  # operation query values from a caller are checked
-                or len(after) != 2
-                or not isinstance(after[0], datetime)  # pyright: ignore[reportUnnecessaryIsInstance]  # operation query values from a caller are checked
-                or not isinstance(after[1], str)  # pyright: ignore[reportUnnecessaryIsInstance]  # operation query values from a caller are checked
-            ):
-                raise InvalidValue("operation provider cursor is invalid")
             filters = list(base_filters)
             boundary = _activity_keyset_filter(
                 Job.created_at,

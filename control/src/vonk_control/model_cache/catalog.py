@@ -175,24 +175,6 @@ class CatalogMixin:
         raw_digest = value.sha256
         raw_bytes = value.download_bytes
         roles = value.roles
-        if (
-            not isinstance(raw_id, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-            or not isinstance(raw_path, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-            or not isinstance(raw_kind, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-        ):
-            raise ModelCacheResolutionInvalid(
-                ModelCacheCode.ARTIFACT_INVALID,
-                "catalog artifact identity is incomplete",
-            )
-        if (
-            not isinstance(raw_digest, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-            or not isinstance(raw_bytes, int)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-            or not isinstance(roles, list)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-        ):
-            raise ModelCacheResolutionInvalid(
-                ModelCacheCode.ARTIFACT_INVALID,
-                "catalog artifact integrity metadata is incomplete",
-            )
         provider = PROVIDERS.get(raw_kind)
         if (provider is None or not provider.production) and not cache._fixture_sources:
             raise ModelCacheResolutionRefused(
@@ -208,7 +190,7 @@ class CatalogMixin:
             artifact_id=raw_id,
             path=raw_path,
             kind=raw_kind,
-            repository=(None if value.repository is None else str(value.repository)),  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
+            repository=value.repository,
             source=source,
             revision=revision,
             sha256=raw_digest,

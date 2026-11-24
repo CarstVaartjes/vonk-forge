@@ -146,8 +146,6 @@ def _local_state_snapshot(
     except (*AVAILABILITY_ERRORS, RuntimeError, TypeError, ValueError):
         _note_unreadable("local-state", "provider", "observation is unavailable")
         return None
-    if not isinstance(candidate, Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]  # a provider's observation is checked before use
-        return None
     snapshot: dict[str, LibraryLocalState] = {}
     for digest in digests:
         raw = candidate.get(digest)
@@ -158,7 +156,7 @@ def _local_state_snapshot(
                     if isinstance(raw, LibraryLocalState)
                     else LibraryLocalState.model_validate_json(canonical_message(raw))
                 )
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 snapshot[digest] = LibraryLocalState(
                     controller=cast(
                         LibraryControllerState, AssetAvailability.UNKNOWN.value
@@ -180,12 +178,10 @@ def _local(
     observed = snapshot.get(digest)
     raw = observed.model_dump(mode="json") if observed is not None else {}
     try:
-        if not isinstance(raw, Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]  # a provider's observation is checked before use
-            raise TypeError("local observation is not a mapping")
         return LibraryLocalState.model_validate_json(
             canonical_message(raw or {"controller": "not_cached"})
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         _note_unreadable(kind, digest, "local observation is unavailable")
         return LibraryLocalState(
             controller=cast(LibraryControllerState, AssetAvailability.UNKNOWN.value)
@@ -313,7 +309,7 @@ def _database_local_state(
                 continue
             try:
                 resolved = resolve_recipe_set(session, revision_id).digest
-            except (ModelCacheError, TypeError, ValueError):
+            except ModelCacheError, TypeError, ValueError:
                 # A refusal for one recipe leaves that recipe unknown; it does
                 # not fail the page.
                 _note_unreadable(

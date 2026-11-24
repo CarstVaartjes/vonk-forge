@@ -140,7 +140,7 @@ def _observe_zero_transfer_journal(
         if code is not None and (code.startswith("28") or code == "42501"):
             raise
         result = JournalRepairDisposition.DEFERRED
-    except (TypeError, ValueError, UnknownOutcomeError):
+    except TypeError, ValueError, UnknownOutcomeError:
         result = JournalRepairDisposition.DEFERRED
     with sessions.begin() as session:
         job = session.scalar(

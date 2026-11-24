@@ -1,3 +1,4 @@
+import { NoReading } from "../ui/no-reading";
 import { useId } from "react";
 import type { VisualFleetNode } from "../../api/types";
 import { HISTORY_SECONDS, type HistoryPoint } from "../../hooks/use-telemetry-history";
@@ -40,7 +41,7 @@ export function SparkMemory({
       <header>
         <h2 id={id}>Unified memory</h2>
         <span>one pool for GPU and CPU</span>
-        <strong>{nodeVitals(node).memory.text}</strong>
+        <strong>{nodeVitals(node).memory.text ?? <NoReading />}</strong>
       </header>
       <MemoryIngot label={`${name} unified memory`} memory={memory} size="tall" />
       {memory?.modelsBytes != null && memory.systemBytes != null && (

@@ -80,7 +80,7 @@ def consume_orphan_cleanup(
                 RecipeReconcilePayload, operation.payload, from_json=True
             )
             exact = cleanup.installation_id == owner_id
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         # The valid peer receipt remains recorded; its target is re-observed by
         # later exact owner reconciliation, never counted as freed capacity.
         pass
@@ -158,7 +158,7 @@ def consume_orphan_cleanup(
             if not failures and exact
             else "cleanup target observation ended",
         )
-    if projected and recorded is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
+    if projected:
         job.result = serialize_json_value(
             recorded.model_copy(update={"node_evidence": receipts})
         )

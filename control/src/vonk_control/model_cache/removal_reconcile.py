@@ -726,7 +726,7 @@ class RemovalReconcileMixin:
                             now=cache._clock(),
                         )
                     )
-            except (_ArtifactWriterBusy, ArtifactLifecycleError, OSError):
+            except _ArtifactWriterBusy, ArtifactLifecycleError, OSError:
                 continue  # the queued request retries; no transfer slot is held
         return changed
 

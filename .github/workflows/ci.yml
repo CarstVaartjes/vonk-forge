@@ -207,7 +207,7 @@ jobs:
       - name: Install pinned Node.js with admin web dependency cache
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "26"
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: |
             control/web/package-lock.json
@@ -269,18 +269,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare the protocol environment for Cargo builds
         uses: ./.github/actions/protocol-env
-      - name: Install pinned Rust toolchain
-        shell: bash
-        run: |
-          set -euo pipefail
-          rustup set profile minimal
-          scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --component clippy,rustfmt
-      - name: Restore Rust dependency cache
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
         with:
           shared-key: linux-amd64
-          add-job-id-key: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Fetch locked crates
         run: scripts/retry-dependency-fetch cargo fetch --locked
       - name: Verify Rust formatting
@@ -299,19 +291,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare the protocol environment for Cargo builds
         uses: ./.github/actions/protocol-env
-      - name: Install pinned Rust toolchain
-        shell: bash
-        run: |
-          set -euo pipefail
-          rustup set profile minimal
-          # rustfmt formats generated wire types during build.
-          scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --component rustfmt
-      - name: Restore Rust dependency cache
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
         with:
           shared-key: linux-amd64
-          add-job-id-key: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Fetch locked crates
         run: scripts/retry-dependency-fetch cargo fetch --locked
       - name: Check deterministic wire generation
@@ -365,14 +348,10 @@ jobs:
         uses: ./.github/actions/recipe-library
         with:
           build: "true"
-      - name: Install pinned Rust toolchain
-        run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal --component rustfmt
-      - name: Restore Rust dependency cache
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
         with:
           shared-key: linux-amd64
-          add-job-id-key: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Fetch locked crates
         run: scripts/retry-dependency-fetch cargo fetch --locked
       - name: Generate the Rust wire peers for the installed protocol tests
@@ -437,18 +416,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare the locked Python environment
         uses: ./.github/actions/python-env
-      - name: Install pinned Rust toolchain
-        shell: bash
-        run: |
-          set -euo pipefail
-          rustup set profile minimal
-          scripts/retry-dependency-fetch rustup toolchain install 1.98.1
-      - name: Restore Rust dependency cache
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
         with:
           shared-key: linux-amd64
-          add-job-id-key: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Fetch locked crates
         run: scripts/retry-dependency-fetch cargo fetch --locked
       - name: Install Spark-compatible rootless Podman
@@ -553,7 +524,7 @@ jobs:
       - name: Install pinned Node.js with generator dependency cache
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "26"
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: tools/openapi-client/package-lock.json
       - name: Check deterministic control client generation
@@ -756,20 +727,15 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare the protocol environment for Cargo builds
         uses: ./.github/actions/protocol-env
-      - name: Install pinned Rust toolchain
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-arm64
+      - name: Add the aarch64 target
         run: |
           set -euo pipefail
           test "$(uname -m)" = aarch64
-          rustup set profile minimal
-          rustup toolchain install 1.98.1
-          rustup default 1.98.1
           rustup target add aarch64-unknown-linux-gnu
-      - name: Restore Rust dependency cache
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: linux-arm64
-          add-job-id-key: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install lifecycle test dependencies
         uses: ./.github/actions/apt-install
         with:
@@ -989,14 +955,10 @@ jobs:
         uses: ./.github/actions/recipe-library
         with:
           build: "true"
-      - name: Install pinned Rust toolchain
-        run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal
-      - name: Restore read-only Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
         with:
           shared-key: linux-amd64
-          add-job-id-key: "false"
-          save-if: "false"
       - name: Build actual canonical parser, HTTP client and state probe
         shell: bash
         run: |
@@ -1229,7 +1191,7 @@ jobs:
       - name: Install pinned Node.js with admin web dependency cache
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "26"
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: |
             control/web/package-lock.json
@@ -1471,7 +1433,11 @@ jobs:
       - name: Prepare pinned browser consumer toolchain
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "26"
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: |
+            control/web/package-lock.json
+            tools/openapi-client/package-lock.json
       - name: Generate consumers from the current cancellation owner
         run: |
           scripts/retry-dependency-fetch npm ci --prefix tools/openapi-client

@@ -459,14 +459,10 @@ def _model_removal_assets(
         assets = cast(
             ModelCacheRemovalCoordinator, self._model_cache
         ).removal_asset_status(scope)
-    except (TypeError, ValueError):
-        return unknown()
-    if not isinstance(assets, Sequence) or isinstance(assets, (str, bytes)):  # pyright: ignore[reportUnnecessaryIsInstance]  # an unexpected value is treated as unknown, not trusted
+    except TypeError, ValueError:
         return unknown()
     observed: dict[tuple[str, str], CacheRemovalAsset] = {}
     for asset in assets:
-        if not isinstance(asset, CacheRemovalAsset):  # pyright: ignore[reportUnnecessaryIsInstance]  # an unexpected value is treated as unknown, not trusted
-            return unknown()
         identity = (asset.kind, asset.sha256)
         if identity in observed or expected.get(identity) != asset.disposition:
             return unknown()

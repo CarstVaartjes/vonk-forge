@@ -71,7 +71,7 @@ def _node_result(
         result = parse_recipe_lifecycle_result(
             kind, {"node_evidence": {node_id: evidence}}
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if (
         isinstance(result, RecipeOperationProgressResult)
@@ -97,7 +97,7 @@ def _evidence_is_acceptable(kind: str, node_id: str, evidence: object) -> bool:
 
     try:
         parse_recipe_lifecycle_result(kind, {"node_evidence": {node_id: evidence}})
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     return True
 

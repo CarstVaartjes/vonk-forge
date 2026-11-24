@@ -636,7 +636,7 @@ def test_nas_startup_diagnostics_identify_unhealthy_service_and_redact_secret(
 
     diagnostics = acceptance.compose_startup_diagnostics(tmp_path)
 
-    assert commands[-1][-2:] == ["tailscale-configurator", "image-janitor"]
+    assert commands[-1][-1] == "tailscale-configurator"
     assert secret not in diagnostics
     assert "authentication failed for <redacted>" in diagnostics
     assert "postgres=running/healthy/exit-0" in diagnostics

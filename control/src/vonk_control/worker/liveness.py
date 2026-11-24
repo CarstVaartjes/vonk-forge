@@ -244,11 +244,7 @@ class WorkerHeartbeatRecorder:
     def completed_loop(self) -> None:
 
         completed_at = self._clock()
-        if (
-            not isinstance(completed_at, datetime)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-            or completed_at.tzinfo is None
-            or completed_at.utcoffset() is None
-        ):
+        if completed_at.tzinfo is None or completed_at.utcoffset() is None:
             raise ValueError("worker heartbeat clock must be timezone-aware")
         with self._sessions.begin() as session:
             heartbeat = session.scalar(

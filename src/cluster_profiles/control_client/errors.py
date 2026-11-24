@@ -498,7 +498,7 @@ def _structured_http_error_fields(
     retryable = None
     try:
         bounded = BoundedErrorResponse.from_dict(dict(problem))
-    except (KeyError, TypeError, ValueError, AttributeError):
+    except KeyError, TypeError, ValueError, AttributeError:
         pass
     else:
         if (

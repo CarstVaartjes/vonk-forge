@@ -186,7 +186,7 @@ def validate_profile_stop_owner(
                 raise ProfileStopAuthorityError(
                     "profile replacement does not own this current Stop phase"
                 )
-    except (ProfileStopAuthorityError, BookkeepingUnknown):
+    except ProfileStopAuthorityError, BookkeepingUnknown:
         raise
     except (TypeError, ValueError) as error:
         raise ProfileStopAuthorityError(

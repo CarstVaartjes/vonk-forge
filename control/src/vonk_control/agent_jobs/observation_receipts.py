@@ -68,7 +68,7 @@ def receipt_state(kind: str, receipt: object) -> AgentResultState:
     if kind == AgentOperation.RECIPE_JOB_RUN:
         try:
             job = RecipeJobRunResult.model_validate_json(canonical_message(receipt))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pass
         else:
             if job.ending is not None:
@@ -78,7 +78,7 @@ def receipt_state(kind: str, receipt: object) -> AgentResultState:
     if kind in _FAILURE_OBSERVATION_KINDS:
         try:
             failure = AgentFailureResult.model_validate_json(canonical_message(receipt))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pass
         else:
             if (
@@ -115,7 +115,7 @@ def retained_observation_receipt(
                 state=receipt_state(operation.kind, attempt.result),
             ),
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -214,7 +214,7 @@ def adopt_observation_receipt(
         return False
     try:
         validated = validate_result_for_operation(operation.kind, receipt, state=state)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     if validated != receipt:
         return False

@@ -1,3 +1,4 @@
+import { NoReading } from "../ui/no-reading";
 import { type JobWorkloadApi, useJobWorkload, WorkloadKind } from "../../hooks/use-workload-jobs";
 import { ENGINE_FIGURES, type WorkloadReads } from "../../hooks/use-workload-reads";
 import {
@@ -8,7 +9,7 @@ import {
   UNITS,
   windowPoints,
 } from "../../lib/metric-units";
-import { NOT_REPORTED_TEXT, type WorkloadGroup } from "../../lib/fleet";
+import type { WorkloadGroup } from "../../lib/fleet";
 import { AreaChart } from "../chart/area-chart";
 import { Estimate, EstimateTag } from "../ui/estimate";
 import { StatusPill } from "../ui/status-pill";
@@ -93,12 +94,16 @@ export function WorkloadHero({
                 </p>
               </>
             ) : (
-              !pending && <p className="hero-num hero-missing">{NOT_REPORTED_TEXT}</p>
+              !pending && (
+                <p className="hero-num hero-missing">
+                  <NoReading />
+                </p>
+              )
             )}
             <dl className="hero-figures">
               <div>
                 <dt>Requests</dt>
-                <dd>{queue === undefined ? null : (queue ?? NOT_REPORTED_TEXT)}</dd>
+                <dd>{queue === undefined ? null : (queue ?? <NoReading />)}</dd>
               </div>
               {ENGINE_FIGURES.map((metric, index) => {
                 const spec = reads.specs.find((entry) => entry.metric === metric);
@@ -111,7 +116,7 @@ export function WorkloadHero({
                     <dt>{spec.title}</dt>
                     <dd>
                       {read === undefined ? null : latest == null ? (
-                        NOT_REPORTED_TEXT
+                        <NoReading />
                       ) : (
                         <Estimate basis={spec.basis}>
                           {formatValue(Number(latest) / scale, symbol)}

@@ -119,7 +119,7 @@ class JobActivationMixin:
             if revision is not None:
                 try:  # noqa: SIM105 -- contextlib.suppress would re-add a malformed-value-becomes-absent guard finding
                     recipe = _catalog_recipe(read_row_column(revision, "document"))
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     pass
             adapters = (
                 [interface.adapter for interface in recipe.interfaces]
@@ -146,7 +146,7 @@ class JobActivationMixin:
                     profile_application_id=profile_application_id,
                     workload_intent_ordinal=workload_intent_ordinal,
                 )
-            except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
+            except SecurityRefusalError, InvalidRequestError, UnknownOutcomeError:
                 raise
             except (RuntimeError, ValueError, TypeError, OSError) as error:
                 raise retry_later_unless_deterministic(

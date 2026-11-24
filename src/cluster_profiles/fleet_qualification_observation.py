@@ -114,9 +114,9 @@ def _durable_deadline(
                 expiry = float(path.read_text())
                 if not math.isfinite(expiry):
                     return clock()
-            except (OSError, ValueError):
+            except OSError, ValueError:
                 return clock()
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return clock()
     return clock() + max(0, expiry - time.time())
 
@@ -183,11 +183,11 @@ def _observe(work, deadline, clock, sleeper, interval):
     while clock() < deadline:
         try:
             return work()
-        except (ControlUnauthorized, ControlForbidden):
+        except ControlUnauthorized, ControlForbidden:
             raise
         except FixtureError:
             raise
-        except (ControlClientError, OSError, ValueError, KeyError, TypeError):
+        except ControlClientError, OSError, ValueError, KeyError, TypeError:
             remaining = deadline - clock()
             if remaining > 0:
                 sleeper(min(interval, remaining))

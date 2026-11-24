@@ -121,8 +121,6 @@ class DownloadMixin:
                             chunk = next(stream, b"")
                         if not chunk:
                             break
-                        if not isinstance(chunk, bytes):  # pyright: ignore[reportUnnecessaryIsInstance]  # streamed download chunks come from the network
-                            chunk = bytes(chunk)
                         next_received = received + len(chunk)
                         if next_received > spec.expected_bytes:
                             raise ModelCacheStorageUnknown(
@@ -145,7 +143,7 @@ class DownloadMixin:
                         # Completion/interruption syncs once; a crash resumes from
                         # the actual retained file length, never a progress counter.
                         observe(received)
-                except (OSError, httpx2.HTTPError, ModelCacheError):
+                except OSError, httpx2.HTTPError, ModelCacheError:
                     # Preserve even a sub-MiB tail when a source fails. Never
                     # publish its byte count until the sync has succeeded.
                     if received > durable_received:
