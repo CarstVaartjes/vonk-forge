@@ -262,6 +262,10 @@ rules are in [Current contracts only](docs/agent-rules.md#current-contracts-only
   `# pyright: ignore[rule]  # reason`. Never add a `# type: ignore`, a
   file-level `# ruff: noqa`, or a per-file ignore; the per-file entries that
   exist are guard-blocked sites awaiting their class follow-up.
+- Python code targets 3.14. A file another interpreter runs (a container
+  image's Python, a runner's or host's `python3`) sits under a py313/py312
+  `per-file-target-version` glob in `pyproject.toml` (`deploy/`, `scripts/`,
+  `tests/nodes/`, `agent_protocol/`); it imports the 3.14 packages only when uv runs it.
 - Every application route appears in the full OpenAPI schema; never use
   `include_in_schema=False` in production routes.
 - Consume wire and persisted JSON with the canonical model's JSON validation
