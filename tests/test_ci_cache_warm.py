@@ -33,10 +33,8 @@ PINNED_CHANNEL = tomllib.loads((ROOT / "rust-toolchain.toml").read_text())["tool
 
 
 def _restored_keys(job: dict[str, Any]) -> list[str]:
-    """Shared keys a ci.yml job restores: inline rust-cache or the setup-rust action."""
-    return [s["with"]["shared-key"] for s in _steps(job, RUST_CACHE)] + [
-        s["with"]["shared-key"] for s in _steps(job, SETUP_RUST)
-    ]
+    """Shared keys a ci.yml job restores through the setup-rust action."""
+    return [s["with"]["shared-key"] for s in _steps(job, SETUP_RUST)]
 
 
 def _warms_the_pinned_toolchain(job: dict[str, Any]) -> bool:
