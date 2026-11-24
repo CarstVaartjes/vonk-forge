@@ -15,9 +15,8 @@ from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.admission import InstallAdmissionCode
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
-
-from ..operations.blockers import SwapShortfallEvidence
-from ..recipe_operations.execution_contract import (
+from vonk_control.operations.blockers import SwapShortfallEvidence
+from vonk_control.recipe_operations.execution_contract import (
     StoredAdmissionReason,
     StoredInstallationPlan,
     parse_stored_installation_plan,

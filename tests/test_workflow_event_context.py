@@ -44,7 +44,7 @@ def test_workflows_do_not_race_on_the_shared_event_payload() -> None:
 
 
 @pytest.mark.parametrize(
-    "source, expected",
+    ("source", "expected"),
     [
         ("steps:\n  - parallel:\n      - uses: actions/attest@pin\n", [2]),
         # Run-only groups also rewrite the event file before a later action.

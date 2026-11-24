@@ -5,20 +5,35 @@ from __future__ import annotations
 from concurrent.futures import Future
 from datetime import timedelta
 from pathlib import Path
-from threading import RLock
+from threading import Event, RLock
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+
+from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
 )
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
+from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.phase_results import RunSwitchRuntimeImageResult
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
+from vonk_control.run_switch_operations.constants import (
+    _FINAL_VERIFICATION_MAX_SECONDS,
+)
+from vonk_control.run_switch_operations.result_helpers import _read_progress
+from vonk_control.run_switch_operations.results import _persisted_result
+from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 
+from .run_switch_operations_support import _runtime_receipt
 from .test_run_switch_bookkeeping import _accepted
 
 
@@ -110,16 +125,6 @@ def test_stalled_ended_parent_cannot_monopolize_unrelated_preparation(
     tmp_path: Path, monkeypatch
 ) -> None:
     """Catches the single executor thread keeping later requests behind old I/O."""
-    from threading import Event
-
-    from vonk_agent_protocol.agent_words import ProfileChildPhase
-    from vonk_control.agent_jobs.service import AgentJobService
-    from vonk_control.distribution.service import DistributionService
-    from vonk_control.distribution.sources import MemoryObjectSource
-    from vonk_control.run_switch_contract.evidence import RunSwitchPhase
-    from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
-
-    from .run_switch_operations_support import _runtime_receipt
 
     accepted = _accepted(tmp_path)
     executor = CompositeDistributionPhaseExecutor(
@@ -132,8 +137,6 @@ def test_stalled_ended_parent_cannot_monopolize_unrelated_preparation(
     )
     old_entered, fresh_entered, release = Event(), Event(), Event()
     old_key = accepted.operation.request_key
-    from vonk_agent_protocol.contracts import canonical_message
-    from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 
     receipt = RuntimeImageReceipt.model_validate_json(
         canonical_message(
@@ -209,7 +212,8 @@ def test_stalled_ended_parent_cannot_monopolize_unrelated_preparation(
             request_key=fresh.request_key,
             progress=progress,
         )
-        assert not result.waiting and result.result is not None
+        assert not result.waiting
+        assert result.result is not None
         assert not old_future.done()
     finally:
         release.set()
@@ -239,11 +243,6 @@ def test_background_collection_uses_the_parents_recovery_deadline(
     tmp_path: Path,
 ) -> None:
     """Catches collection discarding a completed result inside its owned budget."""
-    from vonk_control.run_switch_operations.constants import (
-        _FINAL_VERIFICATION_MAX_SECONDS,
-    )
-    from vonk_control.run_switch_operations.result_helpers import _read_progress
-    from vonk_control.run_switch_operations.results import _persisted_result
 
     accepted = _accepted(tmp_path)
     executor = _executor(accepted)

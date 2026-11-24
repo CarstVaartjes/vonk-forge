@@ -2,10 +2,13 @@
 
 import json
 from datetime import timedelta
+from threading import Event, Thread
 from uuid import uuid4
 
 import pytest
-from vonk_agent_protocol.contracts import AgentFailureKind, AgentOperation, AgentResult
+
+from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentOperation
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     TERMINAL_LIFECYCLE_STATES,
     AgentResultState,
@@ -31,6 +34,7 @@ from vonk_control.agent_jobs.contracts import _GRANT_LIFETIME
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
 
 from .agent_fences import fenced_operation
 from .agent_jobs_support import NODE_A, parent
@@ -92,7 +96,8 @@ def exercise_unknown_cleanup(
     if failure is None:
         with sessions() as session:
             stored = session.get(Job, owner.id)
-            assert stored is not None and stored.state == LifecycleState.QUEUED
+            assert stored is not None
+            assert stored.state == LifecycleState.QUEUED
         # The immutable recovery deadline survives recreation and later attempts.
         clock.now += _GRANT_LIFETIME + timedelta(seconds=1)
         # Its Spark is present the whole time: an unknown it does not resolve
@@ -103,7 +108,8 @@ def exercise_unknown_cleanup(
     # A definite failure (no transient kind) ends at once; it is not reissued.
     with sessions() as session:
         stored = session.get(Job, owner.id)
-        assert stored is not None and stored.state in TERMINAL_LIFECYCLE_STATES
+        assert stored is not None
+        assert stored.state in TERMINAL_LIFECYCLE_STATES
         assert stored.state != LifecycleState.SUCCEEDED
     fresh_owner = parent(sessions, clock)
     fresh = jobs.enqueue(fresh_owner.id, NODE_A, operation_kind, "a" * 64, payload)
@@ -127,7 +133,8 @@ def exercise_unknown_cleanup(
     )
     with sessions() as session:
         stored = session.get(Job, fresh_owner.id)
-        assert stored is not None and stored.state == LifecycleState.SUCCEEDED
+        assert stored is not None
+        assert stored.state == LifecycleState.SUCCEEDED
 
 
 @pytest.mark.parametrize(
@@ -172,7 +179,6 @@ def test_delayed_first_claim_does_not_consume_recovery_budget(service) -> None:
     assert claim is not None
     clock.now += timedelta(seconds=11)
     jobs.reconcile_orders()
-    from vonk_control.models.operations import AgentOperation as StoredOperation
 
     with sessions() as session:
         stored = session.get(StoredOperation, operation.id)
@@ -193,7 +199,6 @@ def test_delayed_first_claim_does_not_consume_recovery_budget(service) -> None:
 
 
 def test_observation_lock_contention_is_a_nonblocking_miss(service) -> None:
-    from threading import Event, Thread
 
     jobs, sessions, clock = service
     with sessions.begin() as session:
@@ -258,7 +263,6 @@ def test_live_retry_crosses_its_recovery_deadline_without_losing_ownership(
     service,
 ) -> None:
     jobs, sessions, clock = service
-    from vonk_control.models.operations import AgentOperation as StoredOperation
 
     with sessions.begin() as session:
         certificate = session.get(AgentCertificate, "serial-a")
@@ -295,7 +299,8 @@ def test_live_retry_crosses_its_recovery_deadline_without_losing_ownership(
     jobs.reconcile_orders()
     with sessions() as session:
         stored = session.get(StoredOperation, operation.id)
-        assert stored is not None and stored.state == LifecycleState.RUNNING
+        assert stored is not None
+        assert stored.state == LifecycleState.RUNNING
     jobs.record_result(
         AgentResult(
             fence=retry.fence,
@@ -353,7 +358,8 @@ def test_explicit_helper_denial_has_no_reissue_and_allows_fresh_admission(
     )
     with sessions() as session:
         ended = session.get(Job, owner.id)
-        assert ended is not None and ended.state in TERMINAL_LIFECYCLE_STATES
+        assert ended is not None
+        assert ended.state in TERMINAL_LIFECYCLE_STATES
     jobs.reconcile_orders()
     assert claim_agent(jobs, NODE_A, "serial-a") is None
     fresh_owner = parent(sessions, clock)
@@ -361,10 +367,8 @@ def test_explicit_helper_denial_has_no_reissue_and_allows_fresh_admission(
         fresh_owner.id, NODE_A, AgentOperation.RECIPE_UNINSTALL, "a" * 64, payload
     )
     independent = claim_agent(jobs, NODE_A, "serial-a")
-    assert (
-        independent is not None
-        and fenced_operation(sessions, independent).id == fresh.id
-    )
+    assert independent is not None
+    assert fenced_operation(sessions, independent).id == fresh.id
 
 
 def test_an_order_waits_for_its_spark_to_return_past_the_old_budget(service) -> None:
@@ -374,7 +378,6 @@ def test_an_order_waits_for_its_spark_to_return_past_the_old_budget(service) -> 
     long, and the window restarts when it is back (then a present Spark that
     leaves the order unresolved for a whole window ends it).
     """
-    from vonk_control.models.operations import AgentOperation as StoredOperation
 
     jobs, sessions, clock = service
     with sessions.begin() as session:
@@ -413,7 +416,8 @@ def test_an_order_waits_for_its_spark_to_return_past_the_old_budget(service) -> 
         assert stored is not None
         assert stored.state not in TERMINAL_LIFECYCLE_STATES
         job = session.get(Job, owner.id)
-        assert job is not None and job.state not in TERMINAL_LIFECYCLE_STATES
+        assert job is not None
+        assert job.state not in TERMINAL_LIFECYCLE_STATES
     # Back, and it stays unresolved there for a whole window: it has stalled.
     _present(sessions, clock.now)
     clock.now += _GRANT_LIFETIME + timedelta(seconds=1)
@@ -421,7 +425,8 @@ def test_an_order_waits_for_its_spark_to_return_past_the_old_budget(service) -> 
     jobs.reconcile_orders()
     with sessions() as session:
         job = session.get(Job, owner.id)
-        assert job is not None and job.state in TERMINAL_LIFECYCLE_STATES
+        assert job is not None
+        assert job.state in TERMINAL_LIFECYCLE_STATES
     fresh_owner = parent(sessions, clock)
     jobs.enqueue(
         fresh_owner.id, NODE_A, AgentOperation.RECIPE_UNINSTALL, "a" * 64, payload

@@ -5,15 +5,14 @@ from __future__ import annotations
 import os
 import stat
 from pathlib import Path
+from typing import override
 
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
-
-from ..oci_image_store import IMAGE_CACHE_DIRECTORY
-from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from .types import (
+from vonk_control.distribution.types import (
     DistributionError,
     DistributionRefused,
     DistributionUnknown,
@@ -21,6 +20,8 @@ from .types import (
     _artifact_set_digest,
     contained_content,
 )
+from vonk_control.oci_image_store import IMAGE_CACHE_DIRECTORY, StoreUnknown
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 
 class FilesystemObjectSource:
@@ -138,13 +139,13 @@ class RecipeBuildObjectSource(FilesystemObjectSource):
         # The runtime-image cache whose receipts prove the stored archives.
         self._runtime_storage = FilesystemRuntimeImageStorage(artifact_root)
 
+    @override
     def verify_artifact_set(
         self, artifact_set_sha256: str, objects: tuple[DistributionObject, ...]
     ) -> bool:
         return False
 
     def verify_runtime_image(self, image_digest: str, archive_sha256: str) -> bool:
-        from ..oci_image_store import StoreUnknown
 
         stored = self._runtime_storage.layout.read(f"sha256:{archive_sha256}")
         return (
@@ -153,6 +154,7 @@ class RecipeBuildObjectSource(FilesystemObjectSource):
             and stored.manifest_digest == image_digest
         )
 
+    @override
     def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         raise DistributionUnknown(
             DistributionCode.OBJECT_UNAVAILABLE,

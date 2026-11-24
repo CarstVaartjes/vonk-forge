@@ -64,18 +64,19 @@ def _cache_package(cache_root: Path, archive: bytes, digest: str) -> Path:
     """Store the archive where the Controller's package reader caches it."""
     target = cache_root / digest[:2] / f"{digest}.tar.gz"
     target.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(
+    descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{digest}.", suffix=".tmp", dir=target.parent
     )
+    temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(archive)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, target)
+        temporary.replace(target)
     finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+        if temporary.exists():
+            temporary.unlink()
     return target
 
 

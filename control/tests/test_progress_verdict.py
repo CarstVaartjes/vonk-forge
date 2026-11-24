@@ -98,7 +98,9 @@ def test_owner_arms_name_live_and_ended_owners(tmp_path: Path):
         stored.state = "failed"
         stored.updated_at = now + timedelta(minutes=5)
         ended = owner(session, OwnerRef(OwnerKind.JOB, job_id))
-        assert not ended.live and ended.ended_at == now + timedelta(minutes=5)
+        assert not ended.live
+        assert ended.ended_at == now + timedelta(minutes=5)
         spark_row.revoked_at = now
         revoked = owner(session, OwnerRef(OwnerKind.NODE, nodes[0]))
-        assert not revoked.live and revoked.ended_at == now
+        assert not revoked.live
+        assert revoked.ended_at == now

@@ -11,7 +11,9 @@ import httpx2
 import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.artifact_reference_scan.model_sets import model_set_objects
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService
@@ -29,7 +31,6 @@ from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.models.jobs import Job
 from vonk_control.recipe_operations.runtime_specs import compile_runtime_spec
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .display_fixtures import reword
 from .recipe_image_availability_support import _runtime, _service
@@ -189,7 +190,8 @@ def test_shared_catalog_files_resume_the_same_parent_after_producer_repair(
     with sessions() as session:
         child = session.get(ModelCacheOperation, child_id)
         accepted_parent = session.get(Job, parent.id)
-        assert child is not None and accepted_parent is not None
+        assert child is not None
+        assert accepted_parent is not None
         assert accepted_parent.request_id == request_key
         assert isinstance(child.payload, dict)
         payload = ModelCacheDownloadPayload.model_validate_json(
@@ -263,7 +265,8 @@ def test_shared_catalog_files_resume_the_same_parent_after_producer_repair(
     service.run_pending(limit=1)
     completed = service.get(parent.id)
     assert completed.state == "succeeded", completed.failure
-    assert completed.model_child is not None and completed.model_child["id"] == child_id
+    assert completed.model_child is not None
+    assert completed.model_child["id"] == child_id
     assert (
         cache.resolve_artifact_set(
             model_content_sha256=single.model_content_sha256

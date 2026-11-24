@@ -5,7 +5,10 @@ from __future__ import annotations
 import errno
 import hashlib
 import os
+import stat
+import threading
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,15 +16,19 @@ from types import SimpleNamespace
 import httpx2
 import pytest
 from sqlalchemy import select
+from vonk_forge_contracts import document_sha256
+
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.model_cache.artifacts import ArtifactSetManifest
+from vonk_control.model_cache.checkpoints import PROGRESS_CHECKPOINT_SECONDS
 from vonk_control.model_cache.constants import _CHUNK_BYTES
 from vonk_control.model_cache.contract import (
     ModelCacheCounters,
     ModelCacheDownloadResult,
 )
+from vonk_control.model_cache.progress import cache_progress, project_cache_progress
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.cache import (
     ModelCacheOperation,
@@ -33,7 +40,6 @@ from vonk_control.models.catalog import (
     CatalogDocumentRevision,
 )
 from vonk_control.models.fleet import AgentNode
-from vonk_forge_contracts import document_sha256
 
 from .model_cache_support import (
     NOW,
@@ -52,8 +58,6 @@ from .non_blocking import assert_ended_without_blocking
 def test_sampled_progress_writes_once_per_interval_and_rate_survives_restart(
     cache, tmp_path
 ):
-    from vonk_control.model_cache.checkpoints import PROGRESS_CHECKPOINT_SECONDS
-    from vonk_control.model_cache.progress import project_cache_progress
 
     service, sessions = cache
     clock = [datetime.now(UTC)]
@@ -137,7 +141,6 @@ def test_sampled_streams_share_one_progress_write_without_storage_reads(
     cache, tmp_path, streams
 ):
     """Every stream samples once per second; the cost per window stays flat."""
-    from vonk_control.model_cache.checkpoints import PROGRESS_CHECKPOINT_SECONDS
 
     service, sessions = cache
     clock = [datetime.now(UTC)]
@@ -222,7 +225,6 @@ def test_sampled_streams_share_one_progress_write_without_storage_reads(
 
 
 def test_cache_measurements_handle_unknown_total_and_observation_gap():
-    from vonk_control.model_cache.progress import cache_progress, project_cache_progress
 
     def snapshot(count: int, total: int | None = 100) -> ModelCacheCounters:
         return ModelCacheCounters(
@@ -257,7 +259,6 @@ def test_cache_measurements_handle_unknown_total_and_observation_gap():
 def test_large_model_keeps_exact_aggregate_without_truncated_member_list(
     cache, tmp_path
 ):
-    from dataclasses import replace
 
     service, _ = cache
     raw = _artifact(tmp_path, b"x")
@@ -534,7 +535,6 @@ def test_fragmented_http_shutdown_preserves_sub_chunk_tail(
 def test_fragmented_http_tail_checkpoint_never_exceeds_synced_bytes(
     cache, tmp_path, monkeypatch, ending
 ):
-    import stat
 
     _existing, sessions = cache
     payload = b"t" * 8192
@@ -603,7 +603,6 @@ def test_fragmented_http_tail_checkpoint_never_exceeds_synced_bytes(
 
 
 def test_progress_is_sampled_while_source_read_is_blocked(cache, tmp_path, monkeypatch):
-    import threading
 
     _existing, sessions = cache
     payload = b"s" * 8192
@@ -652,7 +651,6 @@ def test_progress_is_sampled_while_source_read_is_blocked(cache, tmp_path, monke
 def test_download_resyncs_retained_bytes_after_disk_failure(
     cache, tmp_path, monkeypatch, complete_tail
 ):
-    import stat
 
     _existing, sessions = cache
     payload = b"r" * 8192

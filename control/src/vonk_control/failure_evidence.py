@@ -25,6 +25,7 @@ from pydantic import (
 )
 from sqlalchemy import String, and_, cast, or_, select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.failure_evidence import (
     LOG_TAIL_BYTES,
@@ -38,25 +39,28 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     SecurityRefusalReason,
 )
-
-from . import agent_operation_states
-from .artifact_jobs import states as ajs
-from .bounded_json import BoundedJSONError, require_integer, sequence
-from .logging import redact_text
-from .models.cache import ModelCacheOperation
-from .models.fleet import FleetProfileApplication
-from .models.jobs import Job
-from .models.operations import AgentOperation, AgentOperationAttempt
-from .operations.blockers import OperationBlocker, read_blockers
-from .operations.contract import OperationEvidenceDownload
-from .operations.item_contract import (
+from vonk_control import agent_operation_states
+from vonk_control.artifact_jobs import states as ajs
+from vonk_control.bounded_json import BoundedJSONError, require_integer, sequence
+from vonk_control.fleet_profiles.operation_projection import _operation_item
+from vonk_control.jobs.documents import AvailabilityJobPayload
+from vonk_control.lifecycle.job_ranks import ended_artifact_job
+from vonk_control.lifecycle.run_switch import _stored_child
+from vonk_control.logging import redact_text
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operations.blockers import OperationBlocker, read_blockers
+from vonk_control.operations.contract import OperationEvidenceDownload
+from vonk_control.operations.item_contract import (
     OperationItem,
     OperationResultFacts,
     operation_item,
 )
-from .stored.json_values import read_row_column
-from .strict_json import StrictJSONModel, read_stored_model
-from .summary_cut import summary_cut
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import StrictJSONModel, read_stored_model
+from vonk_control.summary_cut import summary_cut
 
 MAX_LOG_BYTES = LOG_TAIL_BYTES
 MAX_LOG_LINES = 32
@@ -441,8 +445,7 @@ def sanitize_diagnostics(value: object) -> FailureDiagnostics:
     document["collector_errors"] = [
         safe_text(error)[:256] for error in document["collector_errors"]
     ]
-    diagnostics = read_stored_model(FailureDiagnostics, document)
-    return diagnostics
+    return read_stored_model(FailureDiagnostics, document)
 
 
 def collect_failure(item: FailedAttempt, *, now: datetime) -> FailureEvidenceBundle:
@@ -645,8 +648,6 @@ class FailureEvidenceService:
             job = session.get(Job, operation_id)
             ended = None
             if job is not None and job.state not in FAILED_ATTEMPT_STATES:
-                from .lifecycle.job_ranks import ended_artifact_job
-
                 # A multi-rank artifact job fails when its owner rank reports;
                 # the parent Job ends only after the siblings stop, so the
                 # artifact job's own end is the failure and its words the cause.
@@ -675,9 +676,6 @@ class FailureEvidenceService:
                 elif not (result.reason or result.summary) and job.status_reason:
                     result = result.model_copy(update={"reason": job.status_reason})
                 if result.diagnostics is None and not result.diagnostics_invalid:
-                    from .jobs.documents import AvailabilityJobPayload
-                    from .lifecycle.run_switch import _stored_child
-
                     # A run-switch phase issues its Spark work through a child
                     # Job, so the receipt hangs one level below that child.
                     parents = [job.id]
@@ -744,11 +742,7 @@ class FailureEvidenceService:
                 )
             application = session.get(FleetProfileApplication, operation_id)
             if application is not None and application.state in FAILED_ATTEMPT_STATES:
-                from .fleet_profiles.service import FleetProfileService
-
-                projected = operation_item(
-                    FleetProfileService._operation_item(application)
-                )
+                projected = operation_item(_operation_item(application))
                 if projected.attempt != attempt:
                     return None
                 result = (

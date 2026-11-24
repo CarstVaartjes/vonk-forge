@@ -12,18 +12,29 @@ import pytest
 from sqlalchemy import create_engine, select, text, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+
+from tests.observation_transfer_peer import observation_document
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.host_tuning import MemoryFragmentation
-from vonk_agent_protocol.inventory import InventoryRequest
+from vonk_agent_protocol.host_tuning import HostTuning, MemoryFragmentation
+from vonk_agent_protocol.inventory import HostSettings, InventoryRequest
 from vonk_agent_protocol.reason_codes.admission import InstallDegradedReason
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.state_machines import InstallationState, NodeIdentityState
+from vonk_agent_protocol.store_cleanup import StoreRetentionFailure
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_contacts import record_contact
+from vonk_control.fleet_projection import service
 from vonk_control.fleet_projection.common import (
     FleetNode,
     FleetSnapshot,
     RecipePresence,
     _install_partial_warnings,
+    telemetry_point,
+)
+from vonk_control.fleet_projection.host_checks import (
+    SERVICE_UNITS,
+    HostCheck,
+    host_checks,
 )
 from vonk_control.fleet_projection.memory_fragmentation import assess
 from vonk_control.fleet_projection.service import FleetProjection
@@ -51,8 +62,7 @@ from vonk_control.models.telemetry import (
     NodeTelemetrySample,
 )
 from vonk_control.recipe_operations.execution_contract import installation_plan_document
-
-from tests.observation_transfer_peer import observation_document
+from vonk_control.telemetry.samples import TelemetrySampleView
 
 from .fleet_projection_support import (
     NODE_A,
@@ -69,6 +79,7 @@ from .runtime_identity_support import (
     inventory_items_fixture,
     set_inventory_hostname,
 )
+from .test_operation_api import _client
 
 
 def test_projection_preserves_all_current_installation_groups_beyond_512() -> None:
@@ -664,7 +675,8 @@ def _cpu_clock_codes(
 def test_low_cpu_clock_is_raised_only_when_sustained_and_hot_or_loaded() -> None:
     codes, details = _cpu_clock_codes(span_seconds=80)
     assert codes == ["cpu.low-clock"]
-    assert "2000 of 3900 MHz" in details[0] and "85" in details[0]
+    assert "2000 of 3900 MHz" in details[0]
+    assert "85" in details[0]
 
     # Loaded but cool also counts.
     assert _cpu_clock_codes(span_seconds=80, temperature=50, gpu_util=90.0)[0] == [
@@ -889,7 +901,6 @@ def test_wired_unknown_or_unreported_nas_route_raises_no_warning() -> None:
 @pytest.mark.usefixtures("damaged_json_rows")
 @pytest.mark.parametrize("damaged", ["inventory", "telemetry"])
 def test_fleet_api_isolates_damaged_observation_and_recovers(tmp_path, damaged) -> None:
-    from .test_operation_api import _client
 
     engine = create_engine(f"sqlite:///{tmp_path / 'observations.sqlite'}")
     Base.metadata.create_all(engine)
@@ -943,7 +954,8 @@ def test_fleet_api_isolates_damaged_observation_and_recovers(tmp_path, damaged) 
     nodes = {node.id: node for node in observed_snapshot.nodes}
     assert set(nodes) == {NODE_A, NODE_B}
     healthy_inventory = nodes[NODE_B].inventory
-    assert healthy_inventory is not None and healthy_inventory.disk_free_bytes == 750
+    assert healthy_inventory is not None
+    assert healthy_inventory.disk_free_bytes == 750
     if damaged == "inventory":
         inventory_state = nodes[NODE_A].inventory
         assert inventory_state is not None
@@ -1129,7 +1141,6 @@ def _shared_tuning() -> dict[str, object]:
 def test_host_tuning_reaches_the_fleet_node_as_advice_never_attention() -> None:
     # Catches a fact lost in storage, or a host check raised as a warning
     # (which would mark every stock Spark as needing attention).
-    from vonk_control.fleet_projection.host_checks import HostCheck
 
     headless: dict[str, object] = {
         "display_manager_active": False,
@@ -1149,12 +1160,6 @@ def test_host_tuning_reaches_the_fleet_node_as_advice_never_attention() -> None:
 
 
 def test_each_host_check_cites_its_reading_and_unknown_or_tuned_gives_none() -> None:
-    from vonk_agent_protocol.host_tuning import HostTuning
-    from vonk_control.fleet_projection.host_checks import (
-        SERVICE_UNITS,
-        HostCheck,
-        host_checks,
-    )
 
     tuning = HostTuning.model_validate(_shared_tuning())
     advice = {item.check: item for item in host_checks(tuning)}
@@ -1198,9 +1203,6 @@ def test_retention_failure_survives_inventory_storage_and_projects_one_warning()
     None
 ):
     # Catches journal-only faults and duplicating attention on every retry.
-    from vonk_agent_protocol.inventory import HostSettings
-    from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
-    from vonk_agent_protocol.store_cleanup import StoreRetentionFailure
 
     host = HostSettings(
         display_manager_active=False,
@@ -1249,7 +1251,6 @@ def test_contact_committed_between_clock_read_and_postgres_snapshot_stays_online
     postgres_engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Inject the scheduling gap that lets a later contact enter the snapshot."""
-    from vonk_control.fleet_projection import service
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -1301,8 +1302,6 @@ def test_contact_committed_between_clock_read_and_postgres_snapshot_stays_online
 def test_system_memory_is_everything_in_use_outside_gpu_processes(
     changes: dict[str, int | None], expected: int | None
 ) -> None:
-    from vonk_control.fleet_projection.common import telemetry_point
-    from vonk_control.telemetry.samples import TelemetrySampleView
 
     vector = json.loads(
         (

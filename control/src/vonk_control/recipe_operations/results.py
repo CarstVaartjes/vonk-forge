@@ -4,13 +4,9 @@ from __future__ import annotations
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.recipes import RecipeOperationCode
-
-from ..lifecycle.evidence import (
-    Residue,
-    read_or_rebuild,
-)
-from .errors import RecipeRequestInvalid
-from .lifecycle_contract import (
+from vonk_control.lifecycle.evidence import Residue, read_or_rebuild
+from vonk_control.recipe_operations.errors import RecipeRequestInvalid
+from vonk_control.recipe_operations.lifecycle_contract import (
     LifecycleCodeFailureResult,
     LifecycleNodeResult,
     RecipeLifecycleResult,

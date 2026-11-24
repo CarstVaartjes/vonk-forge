@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+from cluster_profiles.cli_states_generated import DISPOSITION_WAIT
+from cluster_profiles.control_client.common import observation_disposition
+from cluster_profiles.control_client.errors import ControlHTTPError
 from vonk_control.model_cache.api import model_cache_http_error
 from vonk_control.model_cache.errors import (
     ModelCacheConflictInvalid,
     ModelCacheConflictUnknown,
 )
-from vonk_control.strict_json import ControllerAPIRoute
-
-from cluster_profiles.cli_states_generated import DISPOSITION_WAIT
-from cluster_profiles.control_client.common import observation_disposition
-from cluster_profiles.control_client.errors import ControlHTTPError
+from vonk_control.operator_acceptance import ControllerAPIRoute
 
 
 def _app(error: BaseException) -> TestClient:

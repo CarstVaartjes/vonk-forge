@@ -2,7 +2,7 @@
 
 from sqlalchemy import Sequence
 
-from ..model_primitives import Base
+from vonk_control.model_primitives import Base
 
 REPEATED_EVIDENCE_SEQUENCE = Sequence(
     "repeated_evidence_sequence", metadata=Base.metadata

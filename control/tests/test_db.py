@@ -1,27 +1,38 @@
 import socket
 import subprocess
 import sys
+import threading
+import time
 import zipfile
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine
+from alembic import command
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, ProgrammingError
+
+from vonk_control import db
 from vonk_control.db import connections as connection_owner
+from vonk_control.db.connections import (
+    build_engine,
+    run_with_database_startup_retry,
+    upgrade_schema,
+    wait_for_database,
+)
+from vonk_control.db.constants import _ALEMBIC_CONFIG
+from vonk_control.model_primitives import Base
 
 
 def test_default_alembic_config_is_packaged_with_the_control_library() -> None:
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
-    from vonk_control import db
-    from vonk_control.db.constants import _ALEMBIC_CONFIG
 
     module_config = Path(db.__file__).resolve().parents[1] / "alembic.ini"
     source_config = Path(db.__file__).resolve().parents[3] / "alembic.ini"
-    assert _ALEMBIC_CONFIG == (
+    assert (
         module_config if module_config.is_file() else source_config
-    )
+    ) == _ALEMBIC_CONFIG
     assert _ALEMBIC_CONFIG.is_file()
     scripts = ScriptDirectory.from_config(Config(str(_ALEMBIC_CONFIG)))
     assert scripts.get_current_head() is not None
@@ -53,8 +64,6 @@ def test_built_wheel_contains_alembic_config_next_to_installed_module(
     wheel = next(tmp_path.glob("*.whl"))
     with zipfile.ZipFile(wheel) as package:
         package.extractall(tmp_path / "installed")
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
 
     scripts = ScriptDirectory.from_config(
         Config(str(tmp_path / "installed" / "vonk_control" / "alembic.ini"))
@@ -66,8 +75,6 @@ def test_built_wheel_contains_alembic_config_next_to_installed_module(
 def test_upgrade_schema_runs_the_linear_alembic_head(
     monkeypatch, tmp_path: Path
 ) -> None:
-    from alembic import command
-    from vonk_control.db.connections import upgrade_schema
 
     config_file = tmp_path / "alembic.ini"
     config_file.write_text("[alembic]\nscript_location = migrations\n")
@@ -91,7 +98,6 @@ def test_upgrade_schema_runs_the_linear_alembic_head(
 def test_database_startup_retry_is_bounded_and_logs_only_connection_failures(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from vonk_control.db.connections import run_with_database_startup_retry
 
     now = 0.0
     calls = 0
@@ -131,7 +137,6 @@ def test_database_startup_retry_is_bounded_and_logs_only_connection_failures(
 
 
 def test_database_startup_retry_re_raises_after_deadline() -> None:
-    from vonk_control.db.connections import run_with_database_startup_retry
 
     now = 0.0
     waits: list[float] = []
@@ -158,14 +163,12 @@ def test_database_startup_retry_re_raises_after_deadline() -> None:
 
 
 def test_database_startup_retry_rejects_an_unbounded_timeout() -> None:
-    from vonk_control.db.connections import run_with_database_startup_retry
 
     with pytest.raises(Exception) as _ending:
         run_with_database_startup_retry(lambda: None, timeout_seconds=901)
 
 
 def test_database_startup_retry_does_not_mask_permission_failures() -> None:
-    from vonk_control.db.connections import run_with_database_startup_retry
 
     calls = 0
 
@@ -186,8 +189,6 @@ def test_build_engine_bounds_every_wait_only_on_postgres(monkeypatch) -> None:
     PostgreSQL accepts the per-connection timeout options; SQLite rejects both
     the server options and an explicit pool size, so it keeps the default pool.
     """
-
-    from vonk_control.db.connections import build_engine
 
     calls: list[tuple[str, dict[str, object]]] = []
     engines: list[Engine] = []
@@ -238,8 +239,6 @@ def test_build_engine_bounds_every_wait_only_on_postgres(monkeypatch) -> None:
 def test_build_engine_sets_every_finite_budget_on_the_server(postgres_engine) -> None:
     """The bounds must reach PostgreSQL, not just the engine's argument list."""
 
-    from vonk_control.db.connections import build_engine
-
     engine = build_engine(postgres_engine.url.render_as_string(hide_password=False))
     try:
         with engine.connect() as connection:
@@ -262,7 +261,6 @@ def test_build_engine_sets_every_finite_budget_on_the_server(postgres_engine) ->
 
 
 def _startup_log(error: Exception, capsys: pytest.CaptureFixture[str]) -> str:
-    from vonk_control.db.connections import run_with_database_startup_retry
 
     now = 0.0
 
@@ -319,7 +317,8 @@ def test_startup_log_names_a_real_refused_connection(
         capsys,
     )
 
-    assert "127.0.0.1" in log and str(port) in log
+    assert "127.0.0.1" in log
+    assert str(port) in log
     assert "refused" in log.lower()
     assert "s3cretpw" not in log
 
@@ -349,7 +348,8 @@ def test_startup_log_redacts_a_password_inside_the_driver_message(
 
     log = _startup_log(OperationalError("connect", {}, driver), capsys)
 
-    assert "s3cret" not in log and "p@ss" not in log
+    assert "s3cret" not in log
+    assert "p@ss" not in log
     assert "postgres:5432" in log
 
 
@@ -366,8 +366,6 @@ def test_worker_database_wait_holds_until_the_api_commits_the_schema(
     postgres_engine, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Catches a worker that starts on an empty database and crashes instead."""
-    from vonk_control.db.connections import wait_for_database
-    from vonk_control.model_primitives import Base
 
     sleeps: list[float] = []
 
@@ -387,8 +385,6 @@ def test_worker_database_wait_holds_until_the_api_commits_the_schema(
 
 def test_worker_database_wait_needs_every_mapped_column(postgres_engine) -> None:
     """Catches a worker that runs on a schema the API has not reconciled yet."""
-    from vonk_control.db.connections import wait_for_database
-    from vonk_control.model_primitives import Base
 
     Base.metadata.create_all(postgres_engine)
     with postgres_engine.begin() as connection:
@@ -413,12 +409,6 @@ def test_worker_database_wait_never_deadlocks_the_api_schema_upgrade(
     already read. A probe in one transaction would hold that read and deadlock
     the upgrade; one statement per transaction lets the upgrade go on.
     """
-    import threading
-    import time
-
-    from sqlalchemy import text
-    from vonk_control.db.connections import wait_for_database
-    from vonk_control.model_primitives import Base
 
     Base.metadata.create_all(postgres_engine)
     first, last = Base.metadata.sorted_tables[0], Base.metadata.sorted_tables[-1]
@@ -467,7 +457,6 @@ def test_worker_database_wait_never_deadlocks_the_api_schema_upgrade(
 
 def test_worker_database_wait_keeps_other_refusals_fatal(monkeypatch) -> None:
     """Catches a wait that retries a permission refusal as if schema were late."""
-    from sqlalchemy.exc import ProgrammingError
 
     class _PermissionDenied(Exception):
         sqlstate = "42501"

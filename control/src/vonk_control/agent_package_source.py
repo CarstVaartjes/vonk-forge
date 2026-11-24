@@ -1,13 +1,15 @@
 """Exact published source package resolution; no version or current-release fallback."""
 
+import re
+
 import httpx2
+
 from vonk_agent_protocol.package_source import AgentPackageSource
 
 
 def load_package_source(
     client: httpx2.Client, channel: str, build_digest: str, binary_digest: str
 ) -> AgentPackageSource:
-    import re
 
     if (
         channel not in {"dev", "stable"}

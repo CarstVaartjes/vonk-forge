@@ -6,6 +6,7 @@ import io
 from pathlib import Path
 
 import pytest
+
 from vonk_agent_protocol.installer_setup import NasInstallTemplate
 from vonk_nas_setup.prompts import PromptIo
 from vonk_nas_setup.setup import prepare

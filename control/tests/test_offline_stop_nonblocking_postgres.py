@@ -4,7 +4,8 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     LifecycleState,
@@ -13,6 +14,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import OutcomeDone
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.state_machines import ReservationState, RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
@@ -38,7 +40,7 @@ from .recipe_operations_support import (
     started_recipe,
 )
 from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service
-from .test_profile_continuity_postgres import (
+from .test_profile_claim_restore import (
     _assessment_with_promises,
     _SQLCancellationAdapter,
 )
@@ -63,7 +65,8 @@ def test_offline_stop_ends_admits_healthy_work_and_reconciles_exact_stop(
     with sessions.begin() as session:
         offline = session.get(AgentNode, nodes[0])
         healthy = session.get(AgentNode, nodes[1])
-        assert offline is not None and healthy is not None
+        assert offline is not None
+        assert healthy is not None
         contact_row(offline).last_seen_at = NOW - timedelta(hours=2)
         contact_row(healthy).last_seen_at = NOW
     coordinator = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
@@ -130,14 +133,16 @@ def test_offline_stop_ends_admits_healthy_work_and_reconciles_exact_stop(
     assert admitted.node_ids == [nodes[1]]
     with sessions() as session:
         stop = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
-        assert stop is not None and stop.state == LifecycleState.SUCCEEDED
+        assert stop is not None
+        assert stop.state == LifecycleState.SUCCEEDED
         parent = RecipeStopParent.model_validate_json(canonical_message(stop.payload))
         assert parent.offline_stop_intent is not None
         assert parent.offline_stop_intent.node_ids == [nodes[0]]
         pending = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == stop.id)
         )
-        assert pending is not None and pending.state == LifecycleState.QUEUED
+        assert pending is not None
+        assert pending.state == LifecycleState.QUEUED
         assert is_deferred_stop(stop, pending)
         exact_payload = pending.payload
         pending.payload = {**exact_payload, "run_id": _uuid(19199)}
@@ -145,11 +150,9 @@ def test_offline_stop_ends_admits_healthy_work_and_reconciles_exact_stop(
         pending.payload = exact_payload
         pending_id = pending.id
         stored = session.get(RecipeRun, run.owner_id)
-        assert (
-            stored is not None
-            and stored.state == RunState.STOPPING
-            and stored.stopped_at is None
-        )
+        assert stored is not None
+        assert stored.state == RunState.STOPPING
+        assert stored.stopped_at is None
         assert (
             session.scalar(
                 select(ResourceReservation.id).where(
@@ -192,7 +195,8 @@ def test_offline_stop_ends_admits_healthy_work_and_reconciles_exact_stop(
     )
     with sessions() as session:
         stored = session.get(RecipeRun, run.owner_id)
-        assert stored is not None and stored.state == RunState.STOPPED
+        assert stored is not None
+        assert stored.state == RunState.STOPPED
         assert (
             session.scalar(
                 select(ResourceReservation.id).where(

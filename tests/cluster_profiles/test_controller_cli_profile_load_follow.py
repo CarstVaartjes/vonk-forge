@@ -159,7 +159,8 @@ def test_lost_profile_cancel_reconciles_without_replaying_an_effect(repair) -> N
         assert result["id"] == application_id
     else:
         observation = result["observation"]
-        assert isinstance(observation, dict) and observation["status"] == "timed_out"
+        assert isinstance(observation, dict)
+        assert observation["status"] == "timed_out"
     fresh_key = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
     client.responses[("POST", path)] = _accepted_profile_cancellation(
         application_id, fresh_key
@@ -179,7 +180,8 @@ def test_lost_profile_cancel_reconciles_without_replaying_an_effect(repair) -> N
         ),
         client,
     )
-    assert status == 0 and result["id"] == application_id
+    assert status == 0
+    assert result["id"] == application_id
 
 
 def test_profile_load_follows_the_application_it_submitted() -> None:
@@ -218,7 +220,8 @@ def test_profile_load_follows_the_application_it_submitted() -> None:
         client,
     )
 
-    assert status == 0 and payload["state"] == "succeeded"
+    assert status == 0
+    assert payload["state"] == "succeeded"
     assert [call[1] for call in client.calls] == [
         "/api/profile/1/load",
         f"/api/profile/applications/{application_id}",
@@ -252,7 +255,8 @@ def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route(
     assert status != 0
     assert [call[0] for call in client.calls] == ["POST", "GET", "GET", "GET", "GET"]
     observation = payload["observation"]
-    assert isinstance(observation, dict) and observation["status"] == "timed_out"
+    assert isinstance(observation, dict)
+    assert observation["status"] == "timed_out"
     assert not any(call[1].endswith("/progress") for call in client.calls)
 
     fresh_key = "22222222-2222-4222-8222-222222222222"
@@ -275,7 +279,8 @@ def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route(
         ),
         client,
     )
-    assert status == 0 and result["request_key"] == fresh_key
+    assert status == 0
+    assert result["request_key"] == fresh_key
 
 
 def test_profile_progress_follow_stops_at_current_terminal_state() -> None:
@@ -298,7 +303,8 @@ def test_profile_progress_follow_stops_at_current_terminal_state() -> None:
         ("profile", "progress", "--follow", "--interval-seconds", "0.1", "--json"),
         client,
     )
-    assert status == 0 and payload["state"] == "succeeded"
+    assert status == 0
+    assert payload["state"] == "succeeded"
     assert len(client.calls) == 2
 
 
@@ -335,7 +341,8 @@ def test_profile_application_selector_uses_owner_without_a_second_profile_gate()
         client,
     )
 
-    assert status == 0 and payload["id"] == application_id
+    assert status == 0
+    assert payload["id"] == application_id
     assert payload["profile_id"] == other_profile_id
     assert [call[1] for call in client.calls] == [
         f"/api/profile/applications/{application_id}",
@@ -359,7 +366,8 @@ def test_global_profile_application_selector_needs_no_profile_selection() -> Non
         client,
     )
 
-    assert status == 0 and payload["id"] == application_id
+    assert status == 0
+    assert payload["id"] == application_id
     assert [call[1] for call in client.calls] == [
         f"/api/profile/applications/{application_id}"
     ]
@@ -395,7 +403,8 @@ def test_profile_application_selector_accepts_selected_profile_owner() -> None:
         client,
     )
 
-    assert status == 0 and payload["id"] == application_id
+    assert status == 0
+    assert payload["id"] == application_id
 
 
 def test_profile_progress_follow_discards_wrong_identity_until_original_repairs() -> (
@@ -428,7 +437,8 @@ def test_profile_progress_follow_discards_wrong_identity_until_original_repairs(
         client,
     )
 
-    assert status == 0 and payload["id"] == selected_application
+    assert status == 0
+    assert payload["id"] == selected_application
     assert [call[1] for call in client.calls] == [path, path, path]
 
 
@@ -458,7 +468,8 @@ def test_initial_application_identity_is_reobserved_until_original_repairs() -> 
         client,
     )
 
-    assert status == 0 and payload["id"] == requested_application
+    assert status == 0
+    assert payload["id"] == requested_application
     assert [call[0] for call in client.calls] == ["GET", "GET"]
 
 
@@ -485,7 +496,8 @@ def test_follow_survives_lost_connections_and_reports_the_durable_outcome() -> N
         client,
     )
 
-    assert status == 0 and payload["state"] == "succeeded"
+    assert status == 0
+    assert payload["state"] == "succeeded"
     assert "reconnecting" not in payload
     assert len(client.calls) == 4
 
@@ -520,7 +532,8 @@ def test_follow_adopts_the_successor_of_a_superseded_application() -> None:
     )
 
     assert status == 0
-    assert payload["id"] == second and payload["state"] == "succeeded"
+    assert payload["id"] == second
+    assert payload["state"] == "succeeded"
     assert payload["supersedes_chain"] == [first]
 
 
@@ -630,7 +643,8 @@ def test_lost_mutation_response_still_names_the_request_key() -> None:
         ),
         client,
     )
-    assert status == 0 and result["request_key"] == fresh_key
+    assert status == 0
+    assert result["request_key"] == fresh_key
 
 
 def test_accepted_load_with_lost_response_is_reconciled_by_request_key() -> None:
@@ -752,7 +766,8 @@ def test_progress_does_not_invent_percentage_for_unknown_total() -> None:
             "progress": {"phase": "building", "completed_items": 4, "total_items": 7},
         }
     )
-    assert "items 4 / 7" in line and "%" not in line
+    assert "items 4 / 7" in line
+    assert "%" not in line
     unknown_total = progress_line(
         {
             "state": "running",
@@ -763,7 +778,8 @@ def test_progress_does_not_invent_percentage_for_unknown_total() -> None:
             },
         }
     )
-    assert "20 B" in unknown_total and "total unknown" in unknown_total
+    assert "20 B" in unknown_total
+    assert "total unknown" in unknown_total
 
 
 def test_removal_flags_are_scoped_to_recipe_model_dependency() -> None:

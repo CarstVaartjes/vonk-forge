@@ -11,8 +11,14 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from .contracts import CanonicalUUID
-from .wire_model import MAX_RUN_GENERATION, Digest, WireEnum, WireModel, typed_tag
+from vonk_agent_protocol.wire_model import (
+    MAX_RUN_GENERATION,
+    CanonicalUUID,
+    Digest,
+    WireEnum,
+    WireModel,
+    typed_tag,
+)
 
 OciDigest = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
 NoNulText = Annotated[str, Field(pattern=r"^[^\x00]*$")]

@@ -1,10 +1,24 @@
 """Wrong implementations: handwritten and stale selections."""
 
+import ast
+import importlib
+import importlib.machinery
+import importlib.util
+import json
+import re
+import shutil
+import subprocess
+import sys
+import tomllib
 from pathlib import Path
+from typing import Any
 
 import pytest
+import yaml
+from pydantic import ValidationError
 
-from tools.single_source_values import violations
+from tests.scripts.test_verify_supply_chain import _copy
+from tools.single_source_values import tracked_files, violations
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -13,7 +27,7 @@ def test_registered_values_have_one_owner() -> None:
     assert violations(ROOT) == []
 
 
-@pytest.mark.parametrize("suffix", (".py", ".yml", "Dockerfile", ".md", ""))
+@pytest.mark.parametrize("suffix", [".py", ".yml", "Dockerfile", ".md", ""])
 def test_guard_rejects_copied_policy_in_executable_surfaces(
     tmp_path: Path, suffix: str
 ) -> None:
@@ -53,11 +67,6 @@ def test_missing_owner_and_duplicate_registration_fail(tmp_path: Path) -> None:
 
 def test_mirror_matrix_follows_changed_lock(tmp_path: Path) -> None:
     # Wrong implementation: the workflow mirrors a stale, independently pinned Tailscale.
-    import json
-    import subprocess
-    import sys
-
-    import yaml
 
     lock_path = tmp_path / "deploy/compose/images.lock.json"
     lock_path.parent.mkdir(parents=True)
@@ -89,9 +98,6 @@ def test_mirror_matrix_follows_changed_lock(tmp_path: Path) -> None:
 
 @pytest.fixture
 def registered_tree(tmp_path: Path) -> Path:
-    import shutil
-
-    from tools.single_source_values import tracked_files
 
     files = tracked_files(ROOT)
     for file in files:
@@ -116,19 +122,19 @@ def fixture_files(root: Path) -> list[str]:
 
 @pytest.mark.parametrize(
     "consumer",
-    (
+    [
         "scripts/example",
         ".github/workflows/example.yml",
         "Dockerfile",
         "docs/example.md",
-    ),
+    ],
 )
 @pytest.mark.parametrize(
     "filename",
-    (
+    [
         "vonk_agent_protocol-0.0.1-py3-none-any.whl",
         "vonk_agent_protocol-999.0.0-py3-none-any.whl",
-    ),
+    ],
 )
 def test_guard_rejects_old_and_future_wheel_filenames(
     registered_tree: Path, consumer: str, filename: str
@@ -156,9 +162,8 @@ def test_unrelated_domains_are_not_floating_tag_policy(registered_tree: Path) ->
     assert violations(root, fixture_files(root)) == []
 
 
-@pytest.mark.parametrize("field", ("max_count = 6", "baseline = 6", "debt = 6"))
+@pytest.mark.parametrize("field", ["max_count = 6", "baseline = 6", "debt = 6"])
 def test_registry_refuses_debt_allowances(registered_tree: Path, field: str) -> None:
-    from pydantic import ValidationError
 
     root = registered_tree
     registry = root / "scripts/single-source-values.toml"
@@ -186,12 +191,6 @@ def test_all_image_policy_consumers_follow_owner_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Wrong implementation: a packager/verifier retains its own copy when policy changes.
-    import importlib
-    import importlib.machinery
-    import importlib.util
-    import json
-
-    from tests.scripts.test_verify_supply_chain import _copy
 
     monkeypatch.syspath_prepend(str(ROOT / "scripts"))
     policy = importlib.import_module("image_policy")
@@ -237,7 +236,6 @@ def test_owner_file_cannot_define_another_copy(registered_tree: Path) -> None:
 
 
 def _memory_admission_delegates(source: str) -> bool:
-    import ast
 
     tree = ast.parse(source)
     sites = [
@@ -311,7 +309,6 @@ def _hand_rolled_memory_fits(
     source: str, *, allowed: frozenset[str] = frozenset()
 ) -> list[int]:
     """Lines subtracting a reserved or occupied figure and the memory floor."""
-    import ast
 
     def names(node: ast.AST) -> set[str]:
         return {
@@ -370,8 +367,6 @@ def test_no_controller_module_reimplements_the_memory_fit() -> None:
 
 def uv_pin_violations(root: Path, files: list[str]) -> list[str]:
     """One owner, including stale and future literals, across executable inputs."""
-    import re
-    import tomllib
 
     owner_file = root / ".tool-versions"
     rows = (
@@ -412,8 +407,6 @@ def uv_pin_violations(root: Path, files: list[str]) -> list[str]:
             ):
                 errors.append(f"{file}:{number}: uv version belongs in .tool-versions")
         if file.endswith((".yml", ".yaml")) and "setup-uv@" in text:
-            import yaml
-
             document = yaml.safe_load(text)
             groups = (
                 [document["runs"]["steps"]]
@@ -436,7 +429,6 @@ def uv_pin_violations(root: Path, files: list[str]) -> list[str]:
 
 
 def test_uv_has_one_version_owner() -> None:
-    from tools.single_source_values import tracked_files
 
     files = tracked_files(ROOT)
     assert uv_pin_violations(ROOT, files) == []
@@ -498,7 +490,6 @@ def test_uv_guard_rejects_inconsistent_or_exact_project_requirements(
 
 def bootstrap_pip_violations(root: Path, files: list[str]) -> list[str]:
     """Bootstrap installs must not bypass the reviewed wheel identities."""
-    import re
 
     errors = []
     for file in files:
@@ -517,7 +508,6 @@ def bootstrap_pip_violations(root: Path, files: list[str]) -> list[str]:
 
 
 def test_bootstrap_installs_require_hashes() -> None:
-    from tools.single_source_values import tracked_files
 
     assert bootstrap_pip_violations(ROOT, tracked_files(ROOT)) == []
 
@@ -558,23 +548,22 @@ def isolated_wheel_build_violations(root: Path, files: list[str]) -> list[str]:
     bytes follow upstream releases and a digest check on them breaks without
     any change here. Ship the reviewed wheel by its locked digest instead.
     """
-    import re
 
     errors = []
     for file in files:
         if Path(file).name != "Dockerfile":
             continue
         logical = re.sub(r"\\\r?\n\s*", " ", (root / file).read_text())
-        for command in re.split(r"&&|;|\n", logical):
-            if re.search(r"\bpip\s+wheel\b", command) and (
-                "--no-build-isolation" not in command
-            ):
-                errors.append(f"{file}: pip wheel resolves its build backend")
+        errors.extend(
+            f"{file}: pip wheel resolves its build backend"
+            for command in re.split(r"&&|;|\n", logical)
+            if re.search(r"\bpip\s+wheel\b", command)
+            and "--no-build-isolation" not in command
+        )
     return errors
 
 
 def test_images_do_not_rebuild_wheels_with_a_floating_backend() -> None:
-    from tools.single_source_values import tracked_files
 
     assert isolated_wheel_build_violations(ROOT, tracked_files(ROOT)) == []
 
@@ -598,13 +587,12 @@ def test_isolated_wheel_build_guard_rejects_a_rebuilt_contract_wheel(
 def test_python_targets_agree_across_projects() -> None:
     """CI runs Python 3.14; the agent protocol wheel also runs on adapter 3.12.
 
-    So three projects require 3.14, the protocol wheel requires 3.12, and the
-    one repository-wide ruff target is the lowest of them (see the
-    protocol-consumer step in ci.yml).
+    So three projects require 3.14 and the protocol wheel requires 3.12. Ruff
+    checks the protocol at its own 3.12 floor and everything else at 3.13 (the
+    3.14 target would make the formatter rewrite every `except (A, B):`).
     """
-    import tomllib
 
-    def load(path: str) -> dict:
+    def load(path: str) -> dict[str, Any]:
         return tomllib.loads((ROOT / path).read_text())
 
     root = load("pyproject.toml")
@@ -616,5 +604,12 @@ def test_python_targets_agree_across_projects() -> None:
         assert load(path)["project"]["requires-python"] == ">=3.14", path
     protocol = load("agent_protocol/pyproject.toml")
     assert protocol["project"]["requires-python"] == ">=3.12"
-    assert root["tool"]["ruff"]["target-version"] == "py312"
+    assert root["tool"]["ruff"]["per-file-target-version"] == {
+        "agent_protocol/**": "py312"
+    }
+    assert root["tool"]["ruff"]["target-version"] in {"py312", "py313", "py314"}
+    environments = root["tool"]["pyright"]["executionEnvironments"]
+    assert {"root": "agent_protocol/src", "pythonVersion": "3.12"}.items() <= (
+        environments[0].items()
+    )
     assert root["tool"]["pyright"]["pythonVersion"] == "3.14"

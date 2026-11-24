@@ -9,21 +9,21 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.contracts import AgentOperation
+
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.route_activation import SupervisorPhase
 from vonk_agent_protocol.state_machines import RoutePublicationState, RunState
 from vonk_agent_protocol.state_machines import RouteState as RunRouteState
-
-from ..gateway.litellm import LiteLlmGeneration, ServedModelInfo
-from ..gateway.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
-from ..logging import log_event
-from ..models.execution import RecipeRun
-from ..models.jobs import Job
-from ..models.routes import RoutePublication, RoutePublicationOwner
-from ..persisted_waits import schedule_wait
-from ..recipe_operations.execution_contract import RouteWithdrawalFollowUp
-from .shared import (
+from vonk_control.gateway.litellm import LiteLlmGeneration, ServedModelInfo
+from vonk_control.gateway.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
+from vonk_control.logging import log_event
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.jobs import Job
+from vonk_control.models.routes import RoutePublication, RoutePublicationOwner
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recipe_operations.execution_contract import RouteWithdrawalFollowUp
+from vonk_control.recipe_routes.shared import (
     _FOLLOW_UP_REASONS,
     _HEALTH_RECOVERY_ERROR,
     _LOGGER,
@@ -42,7 +42,7 @@ from .shared import (
 )
 
 if TYPE_CHECKING:
-    from .service import RecipeRouteService
+    from vonk_control.recipe_routes.service import RecipeRouteService
 
 
 def withdraw_run(
@@ -133,12 +133,11 @@ def _withdraw_runs_once(
         withdrawal = self.prepare_withdrawal_in_session(session, run_ids, served)
         if before_withdrawal is not None:
             before_withdrawal(session)
-        publication = self._withdrawal_publication(
+        return self._withdrawal_publication(
             session,
             withdrawal,
             after=record_reason if reason else None,
         )
-        return publication
 
     publication = self.decide_publication(decide)
     return self._execute(publication)

@@ -2,34 +2,30 @@
 
 import json
 import shutil
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+import httpx2
 import pytest
+import yaml
+from agent_package_source_publication import package_source
+from test_agent_deb import (
+    PACKAGE_BINARIES,
+    _aarch64_fixture,
+    _build,
+    _release_key,
+)
+
+from vonk_control.agent_package_source import load_package_source
 
 pytestmark = [pytest.mark.linux_only, pytest.mark.needs_dpkg_deb]
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path[:0] = [
-    str(ROOT / path)
-    for path in ("scripts", "agent_protocol/src", "control/src", "tests/scripts")
-]
-import httpx2
-import yaml
-from agent_package_source_publication import package_source
-from vonk_control.agent_package_source import load_package_source
 
 
 class PackageSourcePublicationTests(unittest.TestCase):
     def test_signed_deb_producer_bytes_are_consumed_at_exact_binary_lookup(self):
-        from test_agent_deb import (
-            PACKAGE_BINARIES,
-            _aarch64_fixture,
-            _build,
-            _release_key,
-        )
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -56,7 +52,7 @@ class PackageSourcePublicationTests(unittest.TestCase):
                 version=version,
                 acceptance_baseline=True,
             )
-            self.assertEqual(built.returncode, 0, built.stderr)
+            assert built.returncode == 0, built.stderr
             # Consume only the files actually uploaded by the production action.
             action = yaml.safe_load(
                 (ROOT / ".github/actions/agent-package-build/action.yml").read_text()
@@ -89,26 +85,26 @@ class PackageSourcePublicationTests(unittest.TestCase):
                 loaded = load_package_source(
                     client, "dev", source.build_digest, source.package.binary_sha256
                 )
-                self.assertEqual(loaded, source)
-                self.assertEqual(requested, ["/" + source.object_key("dev")])
-                with self.assertRaises(Exception):  # noqa: B017 -- rejection followed by verified reuse
+                assert loaded == source
+                assert requested == ["/" + source.object_key("dev")]
+                with pytest.raises(Exception):  # noqa: B017 -- rejection followed by verified reuse
                     load_package_source(client, "dev", source.build_digest, "a" * 64)
-                self.assertEqual(
+                assert (
                     load_package_source(
                         client, "dev", source.build_digest, source.package.binary_sha256
-                    ),
-                    source,
+                    )
+                    == source
                 )
             provenance = package.with_suffix(".provenance.json")
             verified_provenance = provenance.read_bytes()
             document = json.loads(verified_provenance)
             document["subject"][1]["digest"]["sha256"] = "f" * 64
             provenance.write_text(json.dumps(document))
-            with self.assertRaises(Exception):  # noqa: B017 -- rejection followed by verified reuse
+            with pytest.raises(Exception):  # noqa: B017 -- rejection followed by verified reuse
                 package_source(package, version=version)
-            self.assertTrue(package.is_file())
+            assert package.is_file()
             provenance.write_bytes(verified_provenance)
-            self.assertEqual(package_source(package, version=version), source)
+            assert package_source(package, version=version) == source
 
 
 if __name__ == "__main__":

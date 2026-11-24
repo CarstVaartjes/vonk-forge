@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.state_machines import NodeIdentityState
@@ -31,6 +32,8 @@ from vonk_control.workload_intent import (
     raise_workload_intent,
     take_workload_intent,
 )
+
+from .insert_collision_support import Rendezvous
 
 NODES = ("spk_" + "a" * 32, "spk_" + "b" * 32)
 INTENTS = 8
@@ -72,12 +75,12 @@ def test_concurrent_intents_on_one_node_get_distinct_increasing_ordinals(
     event.listen(postgres_engine, "before_cursor_execute", record)
     taken: list[int] = []
     guard = threading.Lock()
-    start = threading.Barrier(INTENTS)
+    start = Rendezvous(INTENTS)
     errors: list[BaseException] = []
 
     def allocate() -> None:
         try:
-            start.wait(timeout=30)
+            start.wait()
             with sessions.begin() as session:
                 session.execute(text("SET LOCAL lock_timeout = '20s'"))
                 ordinal = allocate_workload_intent(session, NODES[:1])
@@ -118,7 +121,7 @@ def test_intent_reads_do_not_wait_for_a_held_agent_node_row(sessions, postgres_e
 
 def test_a_numbering_that_lost_the_race_changes_nothing(sessions):
     with sessions.begin() as session:
-        seen = {node: 3 for node in NODES}
+        seen: dict[str, int] = dict.fromkeys(NODES, 3)
         newer = allocate_workload_intent(session, NODES[:1])
     assert newer == 4
     with sessions.begin() as session:
@@ -159,7 +162,7 @@ def test_a_revoked_spark_is_a_definite_refusal_not_a_wait(sessions):
         error = refused.value
         assert disposition(error) is not Disposition.WAIT
         assert error.typed_reason is InvalidRequestReason.CONFLICT
-        _, taken = take_workload_intent(session, {node: 3 for node in NODES})
+        _, taken = take_workload_intent(session, dict.fromkeys(NODES, 3))
         assert taken == (NODES[0],)
 
 

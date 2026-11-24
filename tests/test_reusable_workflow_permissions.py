@@ -8,6 +8,7 @@ on main stops before any job runs.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -16,7 +17,7 @@ WORKFLOWS = ROOT / ".github/workflows"
 RANK = {"none": 0, "read": 1, "write": 2}
 
 
-def _excess(path: Path, granted: dict | None, chain: str) -> list[str]:
+def _excess(path: Path, granted: dict[str, Any] | None, chain: str) -> list[str]:
     workflow = yaml.safe_load(path.read_text()) or {}
     default = workflow.get("permissions")
     found: list[str] = []

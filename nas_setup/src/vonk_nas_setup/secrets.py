@@ -10,6 +10,7 @@ from urllib.parse import quote
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 from vonk_agent_protocol.installer_setup import (
     NasGeneratedSecrets,
     NasInstallTemplate,
@@ -17,8 +18,13 @@ from vonk_agent_protocol.installer_setup import (
     NasStepCaControllerRequest,
     single_line,
 )
-
-from .filesystem import ObservationUnavailable, SetupError, read_member, retry
+from vonk_nas_setup.filesystem import (
+    ObservationUnavailable,
+    SetupError,
+    read_member,
+    retry,
+)
+from vonk_nas_setup.pki import load_ed25519_private_key, normalize_intermediate_key
 
 
 def generated(payload: NasInstallTemplate) -> NasGeneratedSecrets:
@@ -101,7 +107,7 @@ def generate_missing(payload: NasInstallTemplate, members: dict[str, bytes]) -> 
             )
     for request in requests.postgres_urls:
         if request.password_file not in members:
-            raise ObservationUnavailable()
+            raise ObservationUnavailable
         # URLs are generated projections of the actual password, so repair them.
         members[request.file] = postgres_url(request, members[request.password_file])
 
@@ -141,8 +147,6 @@ def repair_stored_members(
                 except ValueError:
                     damaged.add(name)
         if paths.controller_server_private_key in members:
-            from .pki import load_ed25519_private_key
-
             try:
                 load_ed25519_private_key(members[paths.controller_server_private_key])
             except (ValueError, TypeError):
@@ -159,11 +163,9 @@ def repair_stored_members(
                 damaged.add(paths.provisioner_public_jwk)
     for name in damaged:
         if name not in retained:
-            raise ObservationUnavailable()
+            raise ObservationUnavailable
         members[name] = retained[name]
     if payload.step_ca_controller:
-        from .pki import normalize_intermediate_key
-
         request = payload.step_ca_controller
         paths = payload.step_ca_controller.files
         try:
@@ -195,7 +197,7 @@ def repair_stored_members(
                 ):
                     raise ValueError("different signer")
             except (KeyError, ValueError, TypeError):
-                raise ObservationUnavailable() from None
+                raise ObservationUnavailable from None
             members[paths.intermediate_private_key] = encrypted
             members[paths.password] = retained[paths.password]
 

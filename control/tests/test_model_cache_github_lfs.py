@@ -20,6 +20,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
 from vonk_agent_protocol.http_failure import TransientReason
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
@@ -185,10 +186,12 @@ def _assert_no_link_secret(nas: _Nas, caplog: pytest.LogCaptureFixture) -> None:
 def test_recorded_batch_vector_reads_through_the_cache_contract() -> None:
     batch = _GitHubLfsBatch.model_validate(VECTOR["body"])
     found, missing = batch.objects
-    assert found.actions is not None and found.actions.download is not None
+    assert found.actions is not None
+    assert found.actions.download is not None
     assert found.actions.download.href.startswith(f"https://{OBJECT_HOST}/")
     assert found.actions.download.expires_in == 3600
-    assert missing.error is not None and missing.error.code == 404
+    assert missing.error is not None
+    assert missing.error.code == 404
     assert VECTOR["headers"]["content-type"].startswith("application/json")
 
 
@@ -304,12 +307,13 @@ def test_parallel_range_workers_share_one_batch_call(
     assert nas.view(operation).state == LifecycleState.SUCCEEDED
     assert nas.placed() == DATA
     ranges = sorted(request.headers["range"] for request in nas.github.link_requests)
-    assert len(ranges) == 4 and len(set(ranges)) == 4
+    assert len(ranges) == 4
+    assert len(set(ranges)) == 4
     assert nas.github.batch_calls == 1
 
 
 @pytest.mark.parametrize(
-    "answer,earliest",
+    ("answer", "earliest"),
     [
         pytest.param(
             lambda: rate_limited_until(NOW + timedelta(seconds=1800)),
@@ -482,7 +486,8 @@ def test_a_rate_limit_is_the_providers_wait_and_holds_fresh_requests(
     assert nas.retries(first) == 0  # a provider wait spends no retry
     assert nas.next_check(first) >= reset
     cooldown = nas.service._provider_cooldown([ProviderKind.GITHUB_LFS_OBJECT])
-    assert cooldown is not None and cooldown >= reset
+    assert cooldown is not None
+    assert cooldown >= reset
     calls = nas.github.batch_calls
 
     fresh = nas.start().id

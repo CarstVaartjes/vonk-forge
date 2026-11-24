@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import copy
+import errno
 from datetime import timedelta
 from pathlib import Path
 
 import pytest
 from sqlalchemy import Table, select
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_forge_contracts import RecipeDefinition
+
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.outcome import SecurityRefusalError
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,
 )
@@ -27,11 +32,13 @@ from vonk_control.recipe_builds.common import (
     _build_effective_settings,
 )
 from vonk_control.recipe_builds.service import RecipeBuildService
+from vonk_control.recipe_image_availability.contracts import (
+    availability_disposition,
+)
 from vonk_control.recipe_operations.observation_helpers import record_build_evidence
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import RecipeDefinition
 
 from .recipe_builds_support import (
     RecordingQueue,
@@ -120,7 +127,8 @@ def test_build_result_refreshes_upload_evidence_after_a_retried_attempt(
     stale_session = sessions()
     try:
         stale_build = stale_session.get(RecipeBuild, plan.build_id)
-        assert stale_build is not None and stale_build.image_digest == old_image
+        assert stale_build is not None
+        assert stale_build.image_digest == old_image
         with sessions.begin() as upload_session:
             uploaded = upload_session.get(RecipeBuild, plan.build_id)
             assert uploaded is not None
@@ -265,15 +273,9 @@ def test_persisted_canonical_settings_preserve_build_identity_and_rebuild_change
             "knobs.count": 0,
             "knobs.label": "",
         },
-        "change_effects": {
-            name: "rebuild"
-            for name in (
-                "knobs.compiler",
-                "knobs.enabled",
-                "knobs.count",
-                "knobs.label",
-            )
-        },
+        "change_effects": dict.fromkeys(
+            ("knobs.compiler", "knobs.enabled", "knobs.count", "knobs.label"), "rebuild"
+        ),
     }
     assert (
         service.plan(selected.id, node_id, now=now).build_input_sha256
@@ -292,7 +294,6 @@ def test_persisted_canonical_settings_preserve_build_identity_and_rebuild_change
 def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
     tmp_path, monkeypatch
 ):
-    import errno
 
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     rederived = []
@@ -359,7 +360,8 @@ def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
             == ()
         )
         parent = session.get(Job, queued.id)
-        assert parent is not None and parent.request_id == "source-read-recovery"
+        assert parent is not None
+        assert parent.request_id == "source-read-recovery"
         bound_digest = parent.payload["build_input_sha256"]
     first.close()
     fault[0] = False
@@ -380,14 +382,10 @@ def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
         assert len(children) == 1
         assert children[0].payload["plan_digest"] == bound_digest
         parent = session.get(Job, queued.id)
-        assert parent is not None and parent.request_id == "source-read-recovery"
+        assert parent is not None
+        assert parent.request_id == "source-read-recovery"
     assert rederived == []
     fault[0] = "permission"
-    from vonk_agent_protocol.agent_words import Disposition
-    from vonk_agent_protocol.outcome import SecurityRefusalError
-    from vonk_control.recipe_image_availability.contracts import (
-        availability_disposition,
-    )
 
     with pytest.raises(SecurityRefusalError) as denied:
         builds.reusable_build_id(revision.id)
@@ -513,7 +511,8 @@ def test_succeeded_build_with_lost_result_is_reprepared(
     assert repaired.build_input_sha256 == plan.build_input_sha256
     with sessions() as session:
         build = session.get(RecipeBuild, repaired.build_id)
-        assert build is not None and build.state != LifecycleState.SUCCEEDED
+        assert build is not None
+        assert build.state != LifecycleState.SUCCEEDED
     service.record_success(
         repaired.build_id,
         build_input_sha256=repaired.build_input_sha256,

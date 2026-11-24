@@ -12,8 +12,12 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.wire_model import OperationMemberProgress, OperationProgress
+
+from vonk_agent_protocol.wire_model import (
+    OperationMemberProgress,
+    OperationProgress,
+    canonical_message,
+)
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
@@ -117,7 +121,8 @@ def test_installed_activity_byte_continuation_and_aggregate_fact_recovery(
         clock=lambda: now,
         cursors=codec.cursor_codec(),
     )
-    assert source.list_operations is not None and source.get_operation is not None
+    assert source.list_operations is not None
+    assert source.get_operation is not None
     unbounded = source.list_operations(None, 20, None, None, None)
     full = OperationsResponse(
         operations=[operation_detail_response(row) for row in unbounded.items],
@@ -220,9 +225,12 @@ def test_installed_activity_byte_continuation_and_aggregate_fact_recovery(
         assert response.status_code == 200
         assert len(response.content) <= MAX_CONTROL_DOCUMENT_BYTES
         unknown = response.json()
-        assert unknown["id"] == affected and unknown["kind"] == "node.probe"
-        assert unknown["state"] == "running" and unknown["attempt"] == 1
-        assert unknown["node_ids"] == [NODE] and unknown.get("progress") is None
+        assert unknown["id"] == affected
+        assert unknown["kind"] == "node.probe"
+        assert unknown["state"] == "running"
+        assert unknown["attempt"] == 1
+        assert unknown["node_ids"] == [NODE]
+        assert unknown.get("progress") is None
         assert unknown["projection_issues"][0]["field"] == "progress"
         assert (
             unknown["projection_issues"][0]["observed_bytes"]
@@ -291,7 +299,8 @@ def test_installed_activity_byte_continuation_and_aggregate_fact_recovery(
             headers=headers,
             params={"limit": 20},
         )
-        assert resumed.status_code == 200 and resumed.json()["total"] == 20
+        assert resumed.status_code == 200
+        assert resumed.json()["total"] == 20
         assert (
             resumed.json()["operations"][0]["id"]
             == operation_item(unbounded.items[0]).id
@@ -299,7 +308,6 @@ def test_installed_activity_byte_continuation_and_aggregate_fact_recovery(
         healed = api.get(
             f"/api/operations/{operation_item(unbounded.items[1]).id}", headers=headers
         )
-        assert (
-            healed.status_code == 200 and not healed.json()["observation_unavailable"]
-        )
+        assert healed.status_code == 200
+        assert not healed.json()["observation_unavailable"]
     engine.dispose()

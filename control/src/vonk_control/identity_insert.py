@@ -5,14 +5,14 @@ from __future__ import annotations
 from sqlalchemy import inspect, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
-
-from . import (
+from vonk_control import (
     models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
 )
-from .model_primitives import Base
-from .stored.json_values import validate_row_write
+from vonk_control.model_primitives import Base
+from vonk_control.stored.json_values import validate_row_write
 
 
 def insert_identity[Row: Base](

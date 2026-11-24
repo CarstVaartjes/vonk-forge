@@ -12,6 +12,11 @@ import pytest
 from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
+from vonk_forge_contracts import (
+    EndpointAlias,
+)
+from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.route_activation import SupervisorPhase
@@ -29,6 +34,7 @@ from vonk_control.fleet_profile_contract.endpoints import (
 from vonk_control.gateway.litellm import LiteLlmGeneration, ServedModelInfo
 from vonk_control.gateway.route_runtime import (
     AtomicRouteBundlePublisher,
+    verify_active_route_bundle,
 )
 from vonk_control.models.execution import (
     RecipeRun,
@@ -41,6 +47,7 @@ from vonk_control.models.routes import (
     RoutePublication,
     RoutePublicationOwner,
 )
+from vonk_control.operation_api import durable as operation_projection
 from vonk_control.operation_api.durable import durable_operation_services
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
@@ -50,11 +57,8 @@ from vonk_control.recipe_routes.shared import (
     RecipeRouteNotReady,
     route_publication_owner_lock_statement,
 )
-from vonk_forge_contracts import (
-    EndpointAlias,
-)
-from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
+from .insert_collision_support import Rendezvous
 from .node_contacts import contact_row
 from .observed_actions import observe_action
 from .recipe_routes_support import (
@@ -321,7 +325,7 @@ def test_disjoint_sqlite_withdrawals_serialize_one_global_candidate(
     second_generation = service.publish_run(second_run)
     overlap = OverlapPublisher(second_generation.generation)
     service._publisher = overlap
-    start = threading.Barrier(2)
+    start = Rendezvous(2)
 
     def withdraw(run_id: str) -> None:
         start.wait()
@@ -505,7 +509,8 @@ def test_invalid_publication_ends_immediately_with_its_evidence(tmp_path: Path) 
         assert run.state == RunState.RUNNING
         assert run.route_state == RouteState.FAILED
         assert run.next_action_at is None
-        assert run.route_error is not None and str(error) in run.route_error
+        assert run.route_error is not None
+        assert str(error) in run.route_error
     assert routes.attempts == 1
 
 
@@ -774,7 +779,6 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     routes = json.loads((directory / "routes.json").read_text())
     assert routes["generation"] == generation.generation
     assert routes["state"] == "published"
-    from vonk_control.gateway.route_runtime import verify_active_route_bundle
 
     verified = verify_active_route_bundle(tmp_path / "live")
     assert not isinstance(verified, UnknownError)
@@ -796,8 +800,10 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
         assert owner.owner_generation == generation.generation
         publication = session.get(RoutePublication, owner.authority_id)
         authority = session.get(RecipeRouteAuthority, owner.authority_id)
-        assert publication is not None and publication.state == "completed"
-        assert authority is not None and authority.authority_id == owner.authority_id
+        assert publication is not None
+        assert publication.state == "completed"
+        assert authority is not None
+        assert authority.authority_id == owner.authority_id
 
     def profile_endpoint_intent(session, number):
         run = session.get(RecipeRun, run_id)
@@ -874,8 +880,6 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     assert wrong_owner_endpoint.assignments is not None
     assert wrong_owner_endpoint.assignments[0].state == "withdrawn"
     assert wrong_owner_endpoint.assignments[0].endpoint is None
-
-    from vonk_control.operation_api import durable as operation_projection
 
     verify_bundle = operation_projection.verify_active_route_bundle
     renewed_during_verification = False
@@ -1020,9 +1024,8 @@ def test_worker_republishes_from_fresh_all_rank_evidence_and_recovers_owner(
         run = _recipe_run(session, run_id)
         owner = _publication_owner(session)
         publication = _publication(session, owner.authority_id)
-        assert (
-            run.route_generation is not None and run.route_generation > first.generation
-        )
+        assert run.route_generation is not None
+        assert run.route_generation > first.generation
         assert publication.generation == run.route_generation
 
 
@@ -1095,4 +1098,5 @@ def test_a_serving_route_outlives_missing_rank_reports(
     kept = [
         r for r in caplog.messages if "recipe.route.kept_without_current_evidence" in r
     ]
-    assert len(kept) == 1 and "evidence is 301s old" in kept[0]
+    assert len(kept) == 1
+    assert "evidence is 301s old" in kept[0]

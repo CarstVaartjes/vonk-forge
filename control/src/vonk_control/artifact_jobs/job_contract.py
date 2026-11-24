@@ -18,14 +18,10 @@ from functools import partial
 
 from pydantic import Field, model_validator
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.state_machines import RunState
 from vonk_forge_contracts import EndpointAlias
 
-from ..compiled_artifact_contract import CompiledArtifactContract
-from ..library.contract import UuidId
-from ..lifecycle.evidence import Damaged
-from ..models.execution import RecipeInstallation, RecipeRun
-from .contracts import (
+from vonk_agent_protocol.state_machines import RunState
+from vonk_control.artifact_jobs.contracts import (
     ArtifactJobContractModel,
     ArtifactJobError,
     _active_recipe_revision,
@@ -33,6 +29,10 @@ from .contracts import (
     _recipe_display,
     _recipe_interface,
 )
+from vonk_control.compiled_artifact_contract import CompiledArtifactContract
+from vonk_control.identifiers import UuidId
+from vonk_control.lifecycle.evidence import Damaged
+from vonk_control.models.execution import RecipeInstallation, RecipeRun
 
 
 class JobContractState(StrEnum):

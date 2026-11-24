@@ -17,27 +17,32 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 from dataclasses import asdict, dataclass, field
 
-from ..cli_outcome import SubmissionAcceptance
-from ..cli_render.dispatch import render_payload
-from ..cli_states import PARTIAL_FIELD
-from ..control_client.errors import (
+from cluster_profiles.cli_outcome import SubmissionAcceptance
+from cluster_profiles.cli_render.dispatch import render_payload
+from cluster_profiles.cli_states import PARTIAL_FIELD
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlConflict,
     ControlMalformedResponse,
 )
-from ..generated_control.models.cache_removal_review import CacheRemovalReview
-from ..generated_control.models.fleet_model_removal_effects import (
-    FleetModelRemovalEffects,
-)
-from .cache_removal import (
-    _cache_operation_id,
+from cluster_profiles.controller_cli.cache_removal import (
     _cache_removal_review,
     _model_removal_reconnect,
     _submit_model_removal,
 )
-from .common import ControllerClient, _query
-from .confirmation import _can_prompt, _confirm_action
-from .selection import _library_pages
+from cluster_profiles.controller_cli.common import (
+    ControllerClient,
+    _cache_operation_id,
+    _query,
+)
+from cluster_profiles.controller_cli.confirmation import _can_prompt, _confirm_action
+from cluster_profiles.controller_cli.selection import _library_pages
+from cluster_profiles.generated_control.models.cache_removal_review import (
+    CacheRemovalReview,
+)
+from cluster_profiles.generated_control.models.fleet_model_removal_effects import (
+    FleetModelRemovalEffects,
+)
 
 _LIST_BUDGET_SECONDS = 60.0
 _REVIEW_WORKERS = 4
@@ -92,7 +97,7 @@ class UnusedRemoval:
     totals: Totals
     submissions: list[Outcome] | None = field(default=None)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict:  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
         document = asdict(self)
         if self.submissions is None:
             del document["submissions"]
@@ -118,7 +123,7 @@ def _cached_selectors(client: ControllerClient) -> list[str]:
     return list(dict.fromkeys(selectors))
 
 
-def _reviewed(selector: str, document: dict) -> ReviewedModel:
+def _reviewed(selector: str, document: dict) -> ReviewedModel:  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
     review = CacheRemovalReview.from_dict(document)
     fleet = review.fleet
     if not isinstance(fleet, FleetModelRemovalEffects):
@@ -252,7 +257,7 @@ def _remove_unused(
     client: ControllerClient,
     args: argparse.Namespace,
     factory: Callable[[], str],
-) -> dict:
+) -> dict:  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
     if args.selector is not None or args.request_key is not None:
         raise ValueError("model remove --unused takes no selector or request key")
     if getattr(args, "fleet", False):
@@ -272,10 +277,11 @@ def _remove_unused(
             render_payload(document.to_dict(), "model", action="preview")
         _confirm_action(args, f"Remove {len(document.removals)} unused models?")
     submissions: list[Outcome] = []
-    for entry in document.removals:
-        # Sequential on purpose: Controller acceptance holds the cache lock and
-        # shared objects make the order matter (a later review sees the earlier).
-        submissions.append(_submit_one(client, args, factory, entry))
+    # Sequential on purpose: Controller acceptance holds the cache lock and
+    # shared objects make the order matter (a later review sees the earlier).
+    submissions.extend(
+        _submit_one(client, args, factory, entry) for entry in document.removals
+    )
     return UnusedRemoval(
         document.unused_removal,
         document.removals,

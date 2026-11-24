@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_control.agent_operation_facts import aware
 from vonk_control.artifact_reference_scan.image_references import (
     runtime_image_reference_findings,
@@ -251,7 +252,8 @@ def test_removing_a_model_that_is_already_gone_ends_with_nothing_removed(
         first = _settle_removal(
             service, service.get_operation(_remove(service, selector))
         )
-        assert first.state == "succeeded" and not object_path.exists()
+        assert first.state == "succeeded"
+        assert not object_path.exists()
 
         again = _settle_removal(
             service, service.get_operation(_remove(service, selector))

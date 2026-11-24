@@ -10,20 +10,21 @@ from email.message import Message
 from typing import NoReturn, Self
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
+
+from cluster_profiles import cli
+from cluster_profiles.control_client.transfers import ControlClient
 from vonk_control import build_identity
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.build_identity import RuntimeBuildIdentity
+from vonk_control.cli_update_contract import summarize_cli_update_contract
 from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import ControlProcessHeartbeat
 from vonk_control.observation import platform as platform_observation
 from vonk_control.observation.platform import PlatformObserver
 from vonk_control.worker.liveness import WorkerHeartbeatRecorder
-
-from cluster_profiles import cli
-from cluster_profiles.control_client.transfers import ControlClient
 
 
 class Jobs:
@@ -122,7 +123,8 @@ def test_platform_worker_fault_repair_through_authenticated_native_cli(
     assert repaired["workers"][0]["source_sha"] == "b" * 40
     with sessions() as session:
         row = session.scalar(select(ControlProcessHeartbeat))
-        assert row is not None and row.source_sha == "b" * 40
+        assert row is not None
+        assert row.source_sha == "b" * 40
     engine.dispose()
 
 
@@ -170,8 +172,6 @@ def test_platform_names_the_slow_step_while_the_heartbeat_is_stale(
     assert observation.workers[0].running_step == "catalog-sync"
     assert observation.workers[0].step_started_at == started
 
-    from vonk_control.cli_update_contract import summarize_cli_update_contract
-
     contract = summarize_cli_update_contract(observer.capture())
     assert contract.worker_issue == "worker-observation-unavailable"
 
@@ -186,7 +186,6 @@ def test_worker_observation_filters_only_on_the_indexed_completed_at(
     tmp_path, monkeypatch
 ) -> None:
     """The heartbeat table grows per process; step_started_at has no index."""
-    from sqlalchemy import event
 
     engine = create_engine(f"sqlite:///{tmp_path / 'sql.sqlite'}")
     Base.metadata.create_all(engine)

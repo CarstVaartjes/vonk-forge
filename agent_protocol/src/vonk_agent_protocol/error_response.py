@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field
 
-from .wire_model import StrictJSONModel
+from vonk_agent_protocol.wire_model import StrictJSONModel
 
 
 class _ErrorModel(StrictJSONModel):

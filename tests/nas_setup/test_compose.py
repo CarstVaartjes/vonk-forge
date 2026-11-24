@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 import yaml
+
 from vonk_nas_setup.compose import resolve_compose
 from vonk_nas_setup.filesystem import SetupError
 

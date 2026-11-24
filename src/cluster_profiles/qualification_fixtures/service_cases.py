@@ -6,8 +6,15 @@ import json
 import re
 from collections.abc import Mapping
 
-from .contracts import _DIGEST, _KEY, _NAME, FixtureError, ServiceCase, ServiceRecipe
-from .values import _integer, _object
+from cluster_profiles.qualification_fixtures.contracts import (
+    _DIGEST,
+    _KEY,
+    _NAME,
+    FixtureError,
+    ServiceCase,
+    ServiceRecipe,
+)
+from cluster_profiles.qualification_fixtures.values import _integer, _object
 
 
 def _parse_service_case(key: object, raw: object) -> ServiceCase:

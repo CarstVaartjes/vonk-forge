@@ -15,9 +15,13 @@ from typing import Any
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_control.catalog.entities import recipe_document_projection
-from vonk_control.catalog.revision_contract import write_catalog_projection
+from vonk_control.catalog.revision_contract import (
+    recipe_document_projection,
+    write_catalog_projection,
+)
 from vonk_control.jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityRetry,
@@ -53,7 +57,6 @@ from vonk_control.runtime_image_preparation.contracts import (
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import serialize_json_value
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .display_fixtures import reworded
 from .runtime_image_fixtures import place_test_image

@@ -7,7 +7,10 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select, text, update
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.state_machines import ObservedAssignmentState
+from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
@@ -18,6 +21,18 @@ from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchChildState,
     FleetProfileVerificationResult,
 )
+from vonk_control.fleet_profiles import (
+    cancellation,
+    capacity,
+    control_effects,
+    endpoint_projection,
+    persistence,
+    profile_projection,
+    reconcile,
+)
+from vonk_control.fleet_profiles.assignment_assessment import _assignment_state
+from vonk_control.fleet_profiles.operation_projection import _operation_item
+from vonk_control.fleet_profiles.persistence import _intended_profile
 from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.lifecycle.evidence import Residue
@@ -25,6 +40,7 @@ from vonk_control.models.fleet import (
     FleetProfile,
     FleetProfileApplication,
 )
+from vonk_control.operation_api.durable import durable_operation_services
 
 from .fleet_profiles_support import (
     NOW,
@@ -59,7 +75,8 @@ def test_profile_progress_and_results_are_closed_nested_contracts() -> None:
     assert isinstance(step_result, FleetProfileVerificationResult)
     assert step_result.verified is True
     application_result = FleetProfileApplicationResult(changed=True, completed_steps=1)
-    assert application_result.changed and application_result.completed_steps == 1
+    assert application_result.changed
+    assert application_result.completed_steps == 1
     adapter_result = FleetProfileSwitchAdapterResult(
         children=[
             FleetProfileSwitchChildState(
@@ -281,7 +298,7 @@ def test_profile_operation_projection_uses_bound_scope_and_canonical_phase() -> 
     with sessions() as session:
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None
-        item = service._operation_item(row).model_dump(mode="json")
+        item = _operation_item(row).model_dump(mode="json")
 
     assert item["id"] == application.id
     assert item["parent_id"] is None
@@ -314,14 +331,20 @@ def test_profile_view_projects_the_loaded_assignment_state(monkeypatch) -> None:
     )
     assert service.get(profile.id).assignments[0].observed_state == "Not placed"
 
-    real_state = FleetProfileService._assignment_state.__func__
-
-    def running(cls, session, assignment, **kwargs):
-        state = real_state(cls, session, assignment, **kwargs)
-        state.current_state = "running"
+    def running(session, assignment, **kwargs):
+        state = _assignment_state(session, assignment, **kwargs)
+        state.current_state = ObservedAssignmentState.RUNNING
         return state
 
-    monkeypatch.setattr(FleetProfileService, "_assignment_state", classmethod(running))
+    for consumer in (
+        cancellation,
+        capacity,
+        control_effects,
+        endpoint_projection,
+        profile_projection,
+        reconcile,
+    ):
+        monkeypatch.setattr(consumer, "_assignment_state", running)
     view = service.get(profile.id)
     assert view.status == "loaded"
     assert view.assignments[0].observed_state == "Running"
@@ -336,8 +359,6 @@ def test_profile_view_projects_the_loaded_assignment_state(monkeypatch) -> None:
 
 def test_an_endpoint_read_parses_a_first_loads_documents_once(monkeypatch) -> None:
     """A load that reviewed itself is its own root: no second parse of its documents."""
-
-    from vonk_control.fleet_profiles import persistence
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
@@ -443,7 +464,7 @@ def test_profile_endpoint_intent_uses_loaded_application_after_saved_edits() -> 
             assert row is not None
             # The strict reader names the damaged field and retires the intent
             # as unknown (a Residue); it never raises into a read.
-            retired = service._intended_profile(row, session=session)
+            retired = _intended_profile(row, session=session)
             assert isinstance(retired, Residue)
 
         assert unreadable.application_id == application.id
@@ -467,7 +488,7 @@ def test_profile_endpoint_intent_uses_loaded_application_after_saved_edits() -> 
         unavailable = service.endpoint_intent(session, profile.number)
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None
-        assert isinstance(service._intended_profile(row, session=session), Residue)
+        assert isinstance(_intended_profile(row, session=session), Residue)
 
     assert unavailable.application_id == application.id
     assert unavailable.application_state == "succeeded"
@@ -483,8 +504,6 @@ def test_profile_observation_does_not_depend_on_damaged_bookkeeping(
     damage: str,
     tmp_path: Path,
 ) -> None:
-    from vonk_control.auth import TokenCodec
-    from vonk_control.operation_api.durable import durable_operation_services
 
     sessions = _database()
     _, revision_id = _seed(sessions)

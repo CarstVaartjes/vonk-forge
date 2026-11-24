@@ -12,8 +12,8 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
-    from ..fleet_projection.common import FleetSnapshot, TelemetryPoint
-    from ..telemetry.samples import LiveEngineReading
+    from vonk_control.fleet_projection.common import FleetSnapshot, TelemetryPoint
+    from vonk_control.telemetry.samples import LiveEngineReading
 
 
 class Reading(NamedTuple):

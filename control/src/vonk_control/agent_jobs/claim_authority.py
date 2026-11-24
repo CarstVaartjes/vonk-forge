@@ -3,65 +3,85 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from vonk_agent_protocol.agent_operations import AgentFailureResult, AgentOperation
 from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import (
-    AgentFailureResult,
-    AgentOperation,
-    AgentResult,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentResult, AgentUpgradePayload
 from vonk_agent_protocol.lifecycle_vocabulary import (
     FailureCode,
     InvalidRequestReason,
     LifecycleState,
+    RunAdmissionCode,
     WaitReason,
 )
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.state_machines import NodeIdentityState
-
-from .. import agent_operation_states
-from ..disk_reservations import outstanding_disk_charges
-from ..gpu.health import gpu_health_reason
-from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS, InventoryRepository
-from ..jobs import states as job_states
-from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..lifecycle.types import Outcome, Reported
-from ..models.cache import RecipeBuild
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..offline_stops import is_deferred_stop
-from ..own_cleanup import CLEANUP_KINDS
-from ..recipe_builds.common import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.contracts import _TERMINAL_PARENT_STATES
+from vonk_control.agent_jobs.endings import end_unobserved_order
+from vonk_control.agent_jobs.evidence import _failure_result
+from vonk_control.agent_jobs.predicates import _claim_refusal_reason
+from vonk_control.agent_jobs.retry import (
+    _retry_authorized_for_current_attempt,
+    schedule_agent_upgrade_retry,
+)
+from vonk_control.agent_jobs.stored import (
+    column_field,
+    column_is_document,
+    column_value,
+)
+from vonk_control.agent_operation_facts import (
+    _WORKLOAD_INTENT_OPERATIONS,
+    aware,
+    fencing_intent,
+)
+from vonk_control.cancelled_runtime import cancellation_stop_current
+from vonk_control.disk_reservations import outstanding_disk_charges
+from vonk_control.gpu.health import gpu_health_reason
+from vonk_control.inventory.repository import (
+    INVENTORY_MAX_AGE_SECONDS,
+    InventoryRepository,
+)
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.agent_operation import (
+    AgentOperationAdapter,
+    set_parent_state,
+)
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.lifecycle.types import Outcome, Reported
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.offline_stops import is_deferred_stop
+from vonk_control.operations.blockers import make_blocker
+from vonk_control.own_cleanup import CLEANUP_KINDS
+from vonk_control.package_activation import matches_receipt
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recipe_builds.common import (
     BUILD_ARTIFACT_FORMAT,
     _build_disk_envelope,
     _build_disk_reserve,
 )
-from ..recipe_operations.execution_contract import (
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_policy,
 )
-from ..spark_disk import spark_free_bytes
-from .contracts import (
-    _TERMINAL_PARENT_STATES,
-    _WORKLOAD_INTENT_OPERATIONS,
-    fencing_intent,
-)
-from .endings import end_unobserved_order
-from .evidence import _failure_result
-from .retry import _retry_authorized_for_current_attempt, schedule_agent_upgrade_retry
-from .stored import column_field, column_is_document, column_value
+from vonk_control.recipe_operations.observation_helpers import reinstall_in_flight
+from vonk_control.recovery_policy import WAIT_STEP
+from vonk_control.spark_disk import spark_free_bytes
 
 if TYPE_CHECKING:
-    from .service import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
 
 
 def recipe_build_disk_wait(
@@ -111,7 +131,6 @@ def _reconcile_agent_upgrade(
     self: AgentJobService,
     session: Session,
     node_id: str,
-    certificate_serial: str,
     now: datetime,
     runtime_identity: AgentRuntimeIdentity,
     *,
@@ -134,9 +153,6 @@ def _reconcile_agent_upgrade(
         .execution_options(populate_existing=True)
         .limit(1)
     )
-    from vonk_agent_protocol.contracts import AgentUpgradePayload
-
-    from ..package_activation import matches_receipt
 
     receipt = runtime_identity.package_activation
     if operation is None or operation.current_attempt == 0 or receipt is None:
@@ -375,7 +391,6 @@ def _claim_has_authority(
             kind=current_operation.kind,
         )
         return False
-    from ..cancelled_runtime import cancellation_stop_current
 
     if not cancellation_stop_current(session, job, current_operation):
         self._record_claim_refusal(
@@ -443,19 +458,6 @@ def dispatch_wait(
     behind it (the reinstall, queued before the job), and the wait is bounded
     like any agent order.
     """
-    from datetime import timedelta
-
-    from vonk_agent_protocol.lifecycle_vocabulary import RunAdmissionCode
-    from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
-
-    from ..agent_operation_facts import (
-        aware,
-    )
-    from ..operations.blockers import make_blocker
-    from ..persisted_waits import schedule_wait
-    from ..recipe_operations.observation_helpers import reinstall_in_flight
-    from ..recovery_policy import WAIT_STEP
-    from .predicates import _claim_refusal_reason
 
     if operation.kind not in {
         AgentOperation.RECIPE_START,

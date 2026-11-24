@@ -7,22 +7,37 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
+
+from vonk_agent_protocol.agent_operations import (
+    AgentFailureKind,
+    AgentFailureResult,
+    RecipeStartResult,
+)
+from vonk_agent_protocol.agent_operations import AgentOperation as Kind
+from vonk_agent_protocol.agent_words import FailureStage
 from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentPayload,
     AgentResult,
     AgentResultPayload,
-    RecipeStartResult,
-    canonical_message,
 )
-from vonk_agent_protocol.contracts import AgentOperation as Kind
+from vonk_agent_protocol.host_helper import (
+    ContainerRuntimeAction,
+    ExecuteContainerRuntimeRequestOperation,
+)
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
+    FailureCode,
     LifecycleState,
     ObservationCause,
+    OutcomeKind,
+    WaitReason,
 )
+from vonk_agent_protocol.outcome import OutcomeUnknown
 from vonk_agent_protocol.recipe_jobs import (
+    RecipeJobEnding,
     RecipeJobEvidence,
     RecipeJobOutputManifest,
     RecipeJobRunRequest,
@@ -31,18 +46,42 @@ from vonk_agent_protocol.recipe_jobs import (
 from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
-from vonk_agent_protocol.recipe_operations import RecipeStopResult
+from vonk_agent_protocol.recipe_operations import (
+    RecipeStartPayload,
+    RecipeStopPayload,
+    RecipeStopResult,
+)
+from vonk_agent_protocol.state_machines import RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.contracts import StaleAgentFence
+from vonk_control.agent_jobs.observation_receipts import OBSERVATION_KINDS
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.agent_jobs.stored import column_value
+from vonk_control.host_helper_authority import (
+    HostHelperAuthorityError,
+    HostHelperGrantIssuer,
+    HostRuntimeAuthorityService,
+)
 from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.models.execution import ArtifactJob, RecipeRun
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
 from . import test_agent_jobs_postgres as fixtures
+from .agent_grant_requests import own_stop_payload, stop_grant_request
+from .agent_jobs_support import canonical_start_payload
+from .artifact_jobs_support import (
+    MutableClock,
+    artifact_create_request,
+    create_artifact_job,
+    running_artifact_service,
+    submitted_artifact_job,
+)
 from .node_contacts import contact_row
+from .recipe_operations_support import NOW
 from .runtime_identity_support import claim_agent
-from .test_agent_jobs_postgres import COMMIT, NODE_A, parent
+from .test_agent_jobs_postgres import COMMIT, NODE_A, Clock, parent
 
 
 @pytest.fixture
@@ -60,11 +99,6 @@ def _runtime(kind: Kind) -> tuple[AgentPayload, AgentResultPayload]:
     ).read_bytes()
     claim = AgentClaim.model_validate_json(raw)
     if kind is Kind.RECIPE_START:
-        from vonk_agent_protocol.recipe_operations import RecipeStartPayload
-
-        from .agent_jobs_support import canonical_start_payload
-        from .test_agent_jobs_postgres import Clock
-
         return RecipeStartPayload.model_validate_json(
             canonical_message(
                 canonical_start_payload(
@@ -74,7 +108,6 @@ def _runtime(kind: Kind) -> tuple[AgentPayload, AgentResultPayload]:
         ), RecipeStartResult()
     if kind is Kind.RECIPE_STOP:
         assert isinstance(claim.payload, RecipeJobRunRequest)
-        from .agent_grant_requests import own_stop_payload
 
         return own_stop_payload(
             claim.payload, cancel_pending_start=True
@@ -93,8 +126,6 @@ def _runtime(kind: Kind) -> tuple[AgentPayload, AgentResultPayload]:
                 manifest_sha256=recipe_job_manifest_sha256(()),
             ),
         )
-    if kind is Kind.RECIPE_START:
-        return claim.payload, RecipeStartResult()
     return claim.payload, RecipeStopResult()
 
 
@@ -116,7 +147,8 @@ def _accepted(service, kind: Kind = Kind.RECIPE_START):
         with sessions.begin() as session:
             row = session.get(AgentOperation, operation.id)
             job = session.get(Job, owner.id)
-            assert row is not None and job is not None
+            assert row is not None
+            assert job is not None
             attempt = AgentOperationAdapter(session).start_attempt(
                 row,
                 job,
@@ -167,11 +199,13 @@ def test_lost_runtime_report_adopts_after_lease_without_reexecution_or_renewal(
                 AgentOperationAttempt.fence == claim.fence
             )
         )
-        assert row is not None and row.state == LifecycleState.SUCCEEDED
+        assert row is not None
+        assert row.state == LifecycleState.SUCCEEDED
         assert attempt is not None
         assert attempt.lease_deadline == deadline
         node = session.get(AgentNode, NODE_A)
-        assert node is not None and contact_row(node).last_seen_at == contact
+        assert node is not None
+        assert contact_row(node).last_seen_at == contact
     assert claim_agent(queue, NODE_A, "serial-a") is None
 
 
@@ -194,7 +228,9 @@ def test_late_runtime_receipt_rejects_changed_authority(service, kind, change):
         row = session.get(AgentOperation, operation.id)
         node = session.get(AgentNode, NODE_A)
         job = session.get(Job, owner.id)
-        assert row is not None and node is not None and job is not None
+        assert row is not None
+        assert node is not None
+        assert job is not None
         if change == "identity":
             row.authority_revision = "f" * 64
         elif change == "revoked":
@@ -205,13 +241,16 @@ def test_late_runtime_receipt_rejects_changed_authority(service, kind, change):
             job.state = LifecycleState.CANCELLED
         else:
             node.workload_intent_ordinal += 1
+    refusal: StaleAgentFence | None = None
     try:
         queue.record_late_result(receipt)
     except StaleAgentFence as error:
-        assert str(error)
+        refusal = error
+    assert refusal is None or str(refusal)
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
-        assert row is not None and row.state != LifecycleState.SUCCEEDED
+        assert row is not None
+        assert row.state != LifecycleState.SUCCEEDED
 
 
 def test_another_runs_load_keeps_a_jobruns_late_receipt(service):
@@ -227,7 +266,8 @@ def test_another_runs_load_keeps_a_jobruns_late_receipt(service):
     assert queue.record_late_result(receipt)
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
-        assert row is not None and row.state == LifecycleState.SUCCEEDED
+        assert row is not None
+        assert row.state == LifecycleState.SUCCEEDED
 
 
 @pytest.mark.parametrize("kind", RUNTIME_KINDS)
@@ -254,26 +294,17 @@ def test_worker_adopts_retained_runtime_receipt_without_contact(service, kind, p
     assert queue.reconcile_orders()
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
-        assert row is not None and row.state == LifecycleState.SUCCEEDED
+        assert row is not None
+        assert row.state == LifecycleState.SUCCEEDED
 
 
 def test_shared_observer_covers_every_kind():
     # A newly added enum member must participate in stored receipt observation.
-    from vonk_control.agent_jobs.observation_receipts import OBSERVATION_KINDS
 
-    assert OBSERVATION_KINDS == set(Kind)
+    assert set(Kind) == OBSERVATION_KINDS
 
 
 def _cancelled_job(tmp_path, postgres_engine):
-    from vonk_agent_protocol.lifecycle_vocabulary import OutcomeKind, WaitReason
-    from vonk_agent_protocol.outcome import OutcomeUnknown
-
-    from .artifact_jobs_support import (
-        MutableClock,
-        running_artifact_service,
-        submitted_artifact_job,
-    )
-    from .recipe_operations_support import NOW
 
     sessions, operations, _queue, artifacts, run_id, node_id = running_artifact_service(
         tmp_path, engine=postgres_engine
@@ -323,9 +354,6 @@ def test_terminal_uncertain_cancel_independently_drives_only_its_exact_stop(
 ):
     # Wrong implementation: terminal cancellation is excluded from idle worker
     # discovery, so its runtime is stopped only after another operator request.
-    from vonk_agent_protocol.recipe_operations import RecipeStopPayload
-    from vonk_agent_protocol.state_machines import RunState
-    from vonk_control.models.execution import ArtifactJob, RecipeRun
 
     sessions, operations, artifacts, queue, _clock, job, run_id, node_id = (
         _cancelled_job(tmp_path, postgres_engine)
@@ -342,9 +370,11 @@ def test_terminal_uncertain_cancel_independently_drives_only_its_exact_stop(
             (row.kind, row.state, row.status_reason)
             for row in session.scalars(select(AgentOperation))
         ]
-    assert stop is not None and stop.operation == Kind.RECIPE_STOP, debug
+    assert stop is not None, debug
+    assert stop.operation == Kind.RECIPE_STOP, debug
     assert isinstance(stop.payload, RecipeStopPayload)
-    assert stop.payload.target_runtime_id == job.id and stop.payload.run_id == run_id
+    assert stop.payload.target_runtime_id == job.id
+    assert stop.payload.run_id == run_id
     queue.record_result(
         AgentResult(
             fence=stop.fence,
@@ -356,11 +386,15 @@ def test_terminal_uncertain_cancel_independently_drives_only_its_exact_stop(
         artifact = session.get(ArtifactJob, job.id)
         run = session.get(RecipeRun, run_id)
         node = session.get(AgentNode, node_id)
-        assert artifact is not None and artifact.state == LifecycleState.CANCELLED
-        assert run is not None and run.state == RunState.RUNNING
-        assert node is not None and node.workload_intent_ordinal == ordinal
+        assert artifact is not None
+        assert artifact.state == LifecycleState.CANCELLED
+        assert run is not None
+        assert run.state == RunState.RUNNING
+        assert node is not None
+        assert node.workload_intent_ordinal == ordinal
     evidence = artifacts.get(job.id).result_evidence
-    assert evidence is not None and evidence.active_scope_may_remain is False
+    assert evidence is not None
+    assert evidence.active_scope_may_remain is False
     assert claim_agent(queue, node_id, "serial-0") is None
 
 
@@ -386,8 +420,6 @@ def test_cancel_cleanup_cannot_adopt_a_revoked_node(tmp_path, postgres_engine):
 def test_worker_recovers_retained_output_receipt_as_delivery_only(service, exit_code):
     # Wrong implementation: only live ingress redrove completed output custody,
     # so a retained receipt needed another report or repeated inference.
-    from vonk_agent_protocol.agent_words import FailureStage
-    from vonk_agent_protocol.recipe_jobs import RecipeJobEnding
 
     queue, sessions, clock, _owner, operation, claim, receipt = _accepted(
         service, Kind.RECIPE_JOB_RUN
@@ -415,16 +447,17 @@ def test_worker_recovers_retained_output_receipt_as_delivery_only(service, exit_
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
         assert row is not None
-        from vonk_control.agent_jobs.stored import column_value
 
         request = column_value(row, "payload")
-        assert isinstance(request, RecipeJobRunRequest) and request.output_delivery_only
+        assert isinstance(request, RecipeJobRunRequest)
+        assert request.output_delivery_only
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.fence == claim.fence
             )
         )
-        assert attempt is not None and attempt.lease_deadline == deadline
+        assert attempt is not None
+        assert attempt.lease_deadline == deadline
 
 
 def test_a_load_on_the_spark_never_holds_a_cancelled_jobs_exact_cleanup(
@@ -434,18 +467,6 @@ def test_a_load_on_the_spark_never_holds_a_cancelled_jobs_exact_cleanup(
     # intent, so another run's load (before it was queued, or while it ran)
     # left the cancelled job's container behind. A JobRun's container belongs
     # to its job and run, never to the Spark's intent.
-    from cryptography.hazmat.primitives.asymmetric import ed25519
-    from vonk_agent_protocol.host_helper import (
-        ContainerRuntimeAction,
-        ExecuteContainerRuntimeRequestOperation,
-    )
-    from vonk_agent_protocol.recipe_operations import RecipeStopPayload
-    from vonk_control.host_helper_authority import (
-        HostHelperGrantIssuer,
-        HostRuntimeAuthorityService,
-    )
-
-    from .agent_grant_requests import stop_grant_request
 
     sessions, operations, artifacts, queue, clock, job, _run_id, node_id = (
         _cancelled_job(tmp_path, postgres_engine)
@@ -460,7 +481,8 @@ def test_a_load_on_the_spark_never_holds_a_cancelled_jobs_exact_cleanup(
     newer_load()
     assert operations.reconcile_pending_service_stops()
     stop = claim_agent(queue, node_id, "serial-0")
-    assert stop is not None and isinstance(stop.payload, RecipeStopPayload)
+    assert stop is not None
+    assert isinstance(stop.payload, RecipeStopPayload)
     assert stop.payload.target_runtime_id == job.id
     request = stop_grant_request(stop.payload, fence=stop.fence)
     newer_load()
@@ -486,7 +508,8 @@ def test_a_load_on_the_spark_never_holds_a_cancelled_jobs_exact_cleanup(
         )
     )
     evidence = artifacts.get(job.id).result_evidence
-    assert evidence is not None and evidence.active_scope_may_remain is False
+    assert evidence is not None
+    assert evidence.active_scope_may_remain is False
 
 
 @pytest.mark.parametrize("change", ["revoked", "identity", "document"])
@@ -495,23 +518,14 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
 ):
     # Wrong implementation: an accepted cancellation's Stop kept its grant or
     # receipt after its node was revoked or its exact document changed.
-    from cryptography.hazmat.primitives.asymmetric import ed25519
-    from vonk_agent_protocol.host_helper import ContainerRuntimeAction
-    from vonk_agent_protocol.recipe_operations import RecipeStopPayload
-    from vonk_control.host_helper_authority import (
-        HostHelperAuthorityError,
-        HostHelperGrantIssuer,
-        HostRuntimeAuthorityService,
-    )
-
-    from .agent_grant_requests import stop_grant_request
 
     sessions, operations, artifacts, queue, clock, job, run_id, node_id = (
         _cancelled_job(tmp_path, postgres_engine)
     )
     assert operations.reconcile_pending_service_stops()
     stop = claim_agent(queue, node_id, "serial-0")
-    assert stop is not None and isinstance(stop.payload, RecipeStopPayload)
+    assert stop is not None
+    assert isinstance(stop.payload, RecipeStopPayload)
     request = stop_grant_request(stop.payload, fence=stop.fence)
     authority = HostRuntimeAuthorityService(
         sessions,
@@ -528,10 +542,10 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
         action=ContainerRuntimeAction.STOP,
         **arguments,
     )
-    from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
 
     assert isinstance(grant.claims.operation, ExecuteContainerRuntimeRequestOperation)
     assert grant.claims.operation.runtime_target_id == stop.payload.target_runtime_id
+    operation = None
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
@@ -580,18 +594,20 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
             assert operation is not None
             if operation.state == LifecycleState.CANCELLED:
                 break
+    assert operation is not None
     assert operation.state == LifecycleState.CANCELLED
     evidence = artifacts.get(job.id).result_evidence
-    assert evidence is not None and evidence.active_scope_may_remain
+    assert evidence is not None
+    assert evidence.active_scope_may_remain
 
     # A refused historical cleanup does not poison fresh job authoring.
-    from .artifact_jobs_support import artifact_create_request, create_artifact_job
 
     fresh = create_artifact_job(
         artifacts,
         **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000999"),
     )
-    assert fresh.id != job.id and fresh.operation_id is None
+    assert fresh.id != job.id
+    assert fresh.operation_id is None
 
 
 @pytest.mark.parametrize("kind", RUNTIME_KINDS)
@@ -599,8 +615,6 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
 def test_definite_runtime_exit_or_refusal_survives_lost_report(service, kind, retained):
     # Wrong implementation: the observer's definite exit/refusal becomes an
     # unending observation after the lease, or another effect attempt.
-    from vonk_agent_protocol.contracts import AgentFailureKind, AgentFailureResult
-    from vonk_agent_protocol.lifecycle_vocabulary import FailureCode
 
     queue, sessions, clock, _owner, operation, claim, _receipt = _accepted(
         service, kind
@@ -637,13 +651,9 @@ def test_definite_runtime_exit_or_refusal_survives_lost_report(service, kind, re
         assert queue.record_late_result(receipt)
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
-        assert (
-            row is not None
-            and row.state == LifecycleState.FAILED
-            and row.current_attempt == 1
-        )
-
-        from vonk_control.agent_jobs.stored import column_value
+        assert row is not None
+        assert row.state == LifecycleState.FAILED
+        assert row.current_attempt == 1
 
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
@@ -662,9 +672,6 @@ def test_retained_measured_exit_delivers_storage_failure_without_reexecution(
 ):
     # Wrong implementation: only delivery-stage receipts could be observed,
     # so a retained exit with a storage fault was ignored until another report.
-    from vonk_agent_protocol.agent_words import FailureStage
-    from vonk_agent_protocol.recipe_jobs import RecipeJobEnding
-    from vonk_control.agent_jobs.stored import column_value
 
     queue, sessions, clock, _owner, operation, claim, receipt = _accepted(
         service, Kind.RECIPE_JOB_RUN
@@ -688,9 +695,8 @@ def test_retained_measured_exit_delivers_storage_failure_without_reexecution(
     consumed: list[RecipeJobRunResult] = []
 
     def consume(_session, _operation, _attempt, message):
-        assert isinstance(message, AgentResult) and isinstance(
-            message.result, RecipeJobRunResult
-        )
+        assert isinstance(message, AgentResult)
+        assert isinstance(message.result, RecipeJobRunResult)
         consumed.append(message.result)
 
     queue.set_result_consumer(consume)
@@ -713,9 +719,7 @@ def test_retained_measured_exit_delivers_storage_failure_without_reexecution(
     assert reason_code == FailureStage.JOB_STATE
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
-        assert (
-            row is not None
-            and row.state == LifecycleState.FAILED
-            and row.current_attempt == 1
-        )
+        assert row is not None
+        assert row.state == LifecycleState.FAILED
+        assert row.current_attempt == 1
     assert claim_agent(queue, NODE_A, "serial-a") is None

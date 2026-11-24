@@ -5,26 +5,51 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+
+from vonk_agent_protocol.contracts import AgentResult
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    AgentResultState,
+    LifecycleState,
+    OutcomeKind,
+)
+from vonk_agent_protocol.outcome import OutcomeDone
+from vonk_agent_protocol.recipe_operations import RecipeStopResult
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.fleet_profiles.persistence import _persisted_profile_plan
+from vonk_control.fleet_profiles.run_switch_adapter import (
+    RunSwitchFleetProfileAdapter,
+)
+from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
-from vonk_control.models.fleet import AgentNode
+from vonk_control.models.fleet import AgentNode, FleetProfileApplication
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
+from vonk_control.presence import ManagementAddressPolicy
+from vonk_control.recipe_operations.errors import RecipeRetryLater
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
+from vonk_control.recipe_routes.service import RecipeRouteService
 
+from .agent_fences import fenced_operation
+from .fleet_profiles_support import _uuid
+from .profile_stop_readmission_support import start_on_released_gang
 from .recipe_operations_support import (
     NOW,
     ConcurrentPublisher,
+    _issue_exact_stop_grant,
     bind_route_publications,
     installed_recipe,
     mark_current_exact_observations,
     setup_services,
     started_recipe,
 )
+from .run_switch_operations_support import RecordingArtifactExecutor, _service
+from .test_profile_adapter_parallel_postgres import _stored
+from .test_profile_stop_effect_adoption_postgres import _pending_stop
 
 
 @pytest.fixture
@@ -76,13 +101,15 @@ def test_accepted_service_stop_resumes_same_review_after_withdrawal_restart(
     with sessions() as session:
         accepted = session.scalar(select(Job).where(Job.request_id == request))
         run = session.get(RecipeRun, run_id)
-        assert accepted is not None and run is not None
+        assert accepted is not None
+        assert run is not None
         accepted_id = accepted.id
         retained = canonical_message(
             accepted.payload["service_stop_review"]["exact_payloads"]
         )
         ordinal = accepted.payload["workload_intent_ordinal"]
-        assert accepted.state == "running" and accepted.payload.get("phases") is None
+        assert accepted.state == "running"
+        assert accepted.payload.get("phases") is None
         assert accepted.payload["plan_digest"] == preview.plan_digest
         assert accepted.payload["service_stop_review"]["stage"] == "withdrawal-claimed"
         assert run.route_state == "withdrawn" and run.state == "running"
@@ -127,7 +154,8 @@ def test_accepted_service_stop_resumes_same_review_after_withdrawal_restart(
     worker.tick()
     with sessions() as session:
         accepted = session.get(Job, accepted_id)
-        assert accepted is not None and accepted.state == "running"
+        assert accepted is not None
+        assert accepted.state == "running"
         assert accepted.payload["plan_digest"] == preview.plan_digest
         assert accepted.payload["workload_intent_ordinal"] == ordinal
         assert accepted.payload["service_stop_review"]["stage"] == "dispatched"
@@ -142,7 +170,8 @@ def test_accepted_service_stop_resumes_same_review_after_withdrawal_restart(
                 )
             )
         )
-        assert native and {row.node_id for row in native} <= set(nodes)
+        assert native
+        assert {row.node_id for row in native} <= set(nodes)
         manifest = {(row.id, row.payload_digest) for row in native}
     generation = len(publisher.aliases)
     replay = restarted.stop(
@@ -308,25 +337,6 @@ def test_pending_service_stop_stops_its_run_at_a_newer_generation(
 def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
     postgres_engine, tmp_path, monkeypatch, replacement
 ):
-    from vonk_agent_protocol.contracts import AgentResult
-    from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, OutcomeKind
-    from vonk_agent_protocol.outcome import OutcomeDone
-    from vonk_agent_protocol.recipe_operations import RecipeStopResult
-    from vonk_control.agent_jobs.service import AgentJobService
-    from vonk_control.fleet_profiles.persistence import _persisted_profile_plan
-    from vonk_control.fleet_profiles.run_switch_adapter import (
-        RunSwitchFleetProfileAdapter,
-    )
-    from vonk_control.models.fleet import FleetProfileApplication
-
-    from .agent_fences import fenced_operation
-    from .fleet_profiles_support import _uuid
-    from .profile_stop_readmission_support import start_on_released_gang
-    from .recipe_operations_support import _issue_exact_stop_grant
-    from .run_switch_operations_support import RecordingArtifactExecutor, _service
-    from .test_profile_adapter_parallel_postgres import _stored
-    from .test_profile_stop_effect_adoption_postgres import _pending_stop
-
     route_owner = []
     publishers = []
     blocked = [True]
@@ -343,8 +353,6 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
 
         def dispatch(*args, **kwargs):
             if blocked[0]:
-                from vonk_control.recipe_operations.errors import RecipeRetryLater
-
                 raise RecipeRetryLater(
                     "injected unavailable dispatch after exact withdrawal"
                 )
@@ -377,7 +385,8 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
         issue_grant=False,
         initial_now=NOW,
     )
-    assert native_id is None and claim is None
+    assert native_id is None
+    assert claim is None
     before_claims = claims(
         sessions, _stored(sessions, original.id).queue[stop_index].id
     )
@@ -390,12 +399,14 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
                 == _stored(sessions, original.id).queue[stop_index].id,
             )
         )
-        assert accepted is not None and accepted.state == "running"
+        assert accepted is not None
+        assert accepted.state == "running"
         accepted_parent = RecipeStopParent.model_validate_json(
             canonical_message(accepted.payload), strict=True
         )
         review = accepted_parent.service_stop_review
-        assert review is not None and review.profile_stop_owner is not None
+        assert review is not None
+        assert review.profile_stop_owner is not None
         accepted_id, accepted_key = accepted.id, accepted.request_id
         reviewed_digest = accepted_parent.plan_digest
         reviewed_payloads = canonical_message(review.exact_payloads)
@@ -405,6 +416,8 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
         run = session.get(RecipeRun, run_id)
         assert run is not None
         installation_id = run.installation_id
+    desired = None
+    selected = None
     for index in range(2):
         desired = profile(f"pre-dispatch-adoption-{index}")
         preview = profiles.preview(desired.id)
@@ -413,14 +426,15 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
             for item in preview.effects.adopted
             if item.application_id == original.id
         ]
-        assert (
-            link.plan_digest == profile_digest
-            and link.workload_intent_ordinal == ordinal
-        )
-        assert link.node_ids == [nodes[0]] and link.assignment_ids == []
+        assert link.plan_digest == profile_digest
+        assert link.workload_intent_ordinal == ordinal
+        assert link.node_ids == [nodes[0]]
+        assert link.assignment_ids == []
         [effect] = link.stops
-        assert effect.operation_id == stop_id and effect.request_key == request_key
-        assert effect.queue_index == stop_index and effect.effect.run_id == run_id
+        assert effect.operation_id == stop_id
+        assert effect.request_key == request_key
+        assert effect.queue_index == stop_index
+        assert effect.effect.run_id == run_id
         assert effect.effect.node_ids == [nodes[0]]
         selected = profiles.apply(
             desired.id, request_key=_uuid(19710 + index), actor="admin"
@@ -432,8 +446,11 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
             assert not isinstance(selected_plan, Residue)
             assert selected_plan.effects.adopted == preview.effects.adopted
             node = session.get(AgentNode, nodes[0])
-            assert node is not None and node.workload_intent_ordinal == ordinal
+            assert node is not None
+            assert node.workload_intent_ordinal == ordinal
     if replacement == "cancel":
+        assert desired is not None
+        assert selected is not None
         profiles.cancel(
             selected.id,
             profile_number=desired.number,
@@ -472,10 +489,8 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
         )
         review = accepted_parent.service_stop_review
         assert review is not None
-        assert (
-            accepted.request_id == accepted_key
-            and accepted_parent.plan_digest == reviewed_digest
-        )
+        assert accepted.request_id == accepted_key
+        assert accepted_parent.plan_digest == reviewed_digest
         assert canonical_message(review.exact_payloads) == reviewed_payloads
         native = tuple(
             session.scalars(
@@ -514,7 +529,8 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
     fresh, stop, _grant = _issue_exact_stop_grant(
         sessions, node_id=nodes[0], certificate_serial="serial-0", grant_now=clock[0]
     )
-    assert fenced_operation(sessions, fresh).id == native_id and stop.run_id == run_id
+    assert fenced_operation(sessions, fresh).id == native_id
+    assert stop.run_id == run_id
     jobs.record_result(
         AgentResult(
             fence=fresh.fence,
@@ -558,25 +574,13 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
     )
     with sessions() as session:
         fresh_run = session.get(RecipeRun, fresh_run_id)
-        assert fresh_run is not None and fresh_run.installation_id == installation_id
+        assert fresh_run is not None
+        assert fresh_run.installation_id == installation_id
 
 
 def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
     published_service_run, tmp_path, monkeypatch
 ):
-    from vonk_agent_protocol.contracts import AgentResult
-    from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, OutcomeKind
-    from vonk_agent_protocol.outcome import OutcomeDone
-    from vonk_agent_protocol.recipe_operations import RecipeStopResult
-    from vonk_control.agent_jobs.service import AgentJobService
-    from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
-    from vonk_control.presence import ManagementAddressPolicy
-    from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
-    from vonk_control.recipe_routes.service import RecipeRouteService
-
-    from .agent_fences import fenced_operation
-    from .profile_stop_readmission_support import start_on_released_gang
-    from .recipe_operations_support import _issue_exact_stop_grant
 
     sessions, service, _jobs, _old_routes, _stand_in, run_id, nodes = (
         published_service_run
@@ -608,7 +612,8 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
                 Job.payload["owner_id"].as_string() == run_id,
             )
         )
-        assert history is not None and history.state == "succeeded"
+        assert history is not None
+        assert history.state == "succeeded"
         lost_start_id = history.id
         session.delete(history)
         for member in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
@@ -620,7 +625,8 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
     routes.maintain()
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.route_state == "published"
+        assert run is not None
+        assert run.route_state == "published"
         assert session.get(Job, lost_start_id) is None
     assert runtime.inspect() == published_marker
     assert claims(sessions, run_id) == before_claims
@@ -643,7 +649,8 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
         )
     with sessions() as session:
         accepted = session.scalar(select(Job).where(Job.request_id == request))
-        assert accepted is not None and accepted.state == "running"
+        assert accepted is not None
+        assert accepted.state == "running"
         accepted_id = accepted.id
         exact_payloads = canonical_message(
             accepted.payload["service_stop_review"]["exact_payloads"]
@@ -686,7 +693,8 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
     claim, stop, _grant = _issue_exact_stop_grant(
         sessions, node_id=nodes[0], certificate_serial="serial-0", grant_now=clock
     )
-    assert stop.run_id == run_id and stop.run_generation == accepted_generation
+    assert stop.run_id == run_id
+    assert stop.run_generation == accepted_generation
     assert stop.plan_digest == accepted_run_digest
     assert fenced_operation(sessions, claim).parent_job_id == accepted_id
     jobs.record_result(
@@ -702,11 +710,13 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
     )
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "stopped"
+        assert run is not None
+        assert run.state == "stopped"
     fresh_plan = restarted.preview_run(installation_id, "after-lost-service-cleanup")
     assert fresh_plan.allowed
     after_available = fresh_plan.nodes[0].available_memory_bytes
-    assert after_available is not None and after_available > before_available
+    assert after_available is not None
+    assert after_available > before_available
     fresh_run_id = start_on_released_gang(
         sessions,
         restarted,

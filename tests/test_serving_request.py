@@ -96,7 +96,8 @@ def test_switch_route_gets_its_off_value_at_its_declared_placement() -> None:
     top = bounded_chat_check(
         CHECK, _switch("top_level", ["thinking", "think"], off="none")
     )
-    assert _body(top)["thinking"] == "none" and _body(top)["think"] == "none"
+    assert _body(top)["thinking"] == "none"
+    assert _body(top)["think"] == "none"
     assert "chat_template_kwargs" not in _body(top)
 
 
@@ -178,11 +179,11 @@ class _ThinkingEngine(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
-    def log_message(self, _format: str, *_args: object) -> None:
+    def log_message(self, format: str, *args: object) -> None:
         return
 
 
-@pytest.fixture()
+@pytest.fixture
 def engine():
     server = ThreadingHTTPServer(("127.0.0.1", 0), _ThinkingEngine)
     thread = Thread(target=server.serve_forever, daemon=True)

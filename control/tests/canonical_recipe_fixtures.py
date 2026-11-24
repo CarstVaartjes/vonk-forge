@@ -6,8 +6,9 @@ import json
 from importlib.resources import files
 from typing import Any
 
-from vonk_control.recipe_builds.common import _source_policy_document
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+
+from vonk_control.recipe_builds.common import _source_policy_document
 
 SYNTHETIC_VLLM_EXECUTABLE = "/opt/vonk/bin/vllm"
 

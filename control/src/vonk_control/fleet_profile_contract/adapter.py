@@ -5,14 +5,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Protocol
 
-from .applications import FleetProfileChildOperation
-from .definitions import FleetProfileAssignment
-from .review import FleetProfilePreview
+from vonk_control.fleet_profile_contract.applications import FleetProfileChildOperation
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
-    from ..lifecycle.evidence import Residue
+    from vonk_control.lifecycle.evidence import Residue
 
 
 class FleetProfileSwitchAdapter(Protocol):

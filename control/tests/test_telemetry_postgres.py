@@ -9,9 +9,19 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import event, func, insert, select, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol.contracts import canonical_message
+from sqlalchemy.orm import Session, sessionmaker
+
+from vonk_agent_protocol.gpu_clock import (
+    GpuClockApplyState,
+    GpuClockMetric,
+    GpuClockObservation,
+    GpuClockUnavailable,
+    GpuClockUnavailableReason,
+    default_gpu_clock,
+)
 from vonk_agent_protocol.telemetry import HostResourceSample, TelemetrySample
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.db.schema import reconcile_schema
 from vonk_control.inventory.items_contract import InventorySnapshotKind
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentNode
@@ -28,7 +38,7 @@ BOOT_B = uuid.UUID("00000000-0000-4000-8000-000000000002")
 NOW = datetime(2026, 8, 3, 12, tzinfo=UTC)
 
 
-def _repository(engine: Engine) -> tuple[TelemetryRepository, sessionmaker]:
+def _repository(engine: Engine) -> tuple[TelemetryRepository, sessionmaker[Session]]:
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -141,15 +151,6 @@ def test_gpu_clock_observation_roundtrips_postgres_and_old_rows_remain_null(
 ) -> None:
     """Catches untyped JSON, missing observation writes and upgrade row rewrites."""
 
-    from vonk_agent_protocol.gpu_clock import (
-        GpuClockApplyState,
-        GpuClockMetric,
-        GpuClockObservation,
-        GpuClockUnavailable,
-        GpuClockUnavailableReason,
-        default_gpu_clock,
-    )
-
     repository, sessions = _repository(postgres_engine)
     first = _sample(boot_id=BOOT_A, sequence=1, observed_at=NOW - timedelta(seconds=2))
     repository.record_batch(NODE_A, (first,))
@@ -184,7 +185,6 @@ def test_gpu_clock_observation_roundtrips_postgres_and_old_rows_remain_null(
             )
         )
         assert rows[0].gpu_clock is None
-        from sqlalchemy import text
 
         assert (
             session.scalar(
@@ -203,8 +203,6 @@ def test_gpu_clock_nullable_column_is_added_in_place_without_rewriting_old_sampl
     postgres_engine: Engine,
 ) -> None:
     """The approved upgrade preserves old samples and the existing latest pointer."""
-    from sqlalchemy import text
-    from vonk_control.db.schema import reconcile_schema
 
     repository, _sessions = _repository(postgres_engine)
     value = _sample(boot_id=BOOT_A, sequence=1, observed_at=NOW - timedelta(seconds=1))

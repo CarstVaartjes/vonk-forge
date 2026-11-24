@@ -16,7 +16,8 @@ from types import SimpleNamespace
 import httpx2
 import pytest
 from sqlalchemy.exc import OperationalError
-from vonk_agent_protocol.contracts import AgentFailureKind
+
+from vonk_agent_protocol.agent_operations import AgentFailureKind
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
 from vonk_control.failure_evidence import FailureEvidenceService
 from vonk_control.models.jobs import Job
@@ -179,7 +180,7 @@ def test_a_deterministic_advance_error_fails_once_through_the_tick_guard(
         calls.append(operation_id)
         raise TypeError("'NoneType' object is not subscriptable")
 
-    harness.service._advance = broken  # type: ignore[method-assign]
+    harness.service._advance = broken
     for _ in range(4):
         harness.service.tick()
         harness.advance_to_due()

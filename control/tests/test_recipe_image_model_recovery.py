@@ -11,6 +11,8 @@ from typing import Any
 import httpx2
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService
@@ -23,7 +25,6 @@ from vonk_control.recipe_image_availability.service import (
 )
 from vonk_control.runtime_image_preparation.contracts import PulledImageEvidence
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .runtime_image_fixtures import place_test_image
 

@@ -3,7 +3,7 @@
 from sqlalchemy import Exists, select
 from sqlalchemy.orm import defer
 
-from ..models.catalog import CatalogDocumentHead, CatalogDocumentRevision
+from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
 
 
 def active_head_revision() -> Exists:

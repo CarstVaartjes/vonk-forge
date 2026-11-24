@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import struct
 
-from .common import (
+from cluster_profiles.glb_validation.common import (
     BIN_CHUNK,
     COMPONENT_TYPES,
     COMPONENTS,

@@ -11,7 +11,8 @@ import hashlib
 from copy import deepcopy
 
 from sqlalchemy import select, update
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     LifecycleState,
@@ -20,6 +21,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import OutcomeUnknown
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
@@ -120,16 +122,16 @@ def test_postgres_reviewed_parked_receipt_remains_bound_when_restarted_new_load_
     with sessions() as session:
         accepted = session.get(FleetProfileApplication, replacement.id)
         retained = session.get(FleetProfileApplication, parked.id)
-        assert accepted is not None and retained is not None
+        assert accepted is not None
+        assert retained is not None
         accepted_plan = _persisted_profile_plan(accepted)
         assert isinstance(accepted_plan, FleetProfilePreview), accepted_plan
         assert expected <= _superseded(accepted_plan)
         assert all(
             effect.id != replacement.id for effect in accepted_plan.effects.superseded
         )
-        assert (
-            retained.request_key == parked_key and retained.plan_digest == parked_digest
-        )
+        assert retained.request_key == parked_key
+        assert retained.plan_digest == parked_digest
         assert retained.plan == parked_plan
         assert retained.state == LifecycleState.SUPERSEDED
     replay = restarted.load(profile.number, request_key=_uuid(18801), actor="admin")
@@ -178,7 +180,8 @@ def test_postgres_unrelated_damaged_parked_evidence_does_not_starve_exact_gang_c
         reviewed_effects_digest=reviewed.effects_digest,
     )
     before = _held_run_claims(sessions, run.owner_id)
-    assert before and {claim[1] for claim in before} == set(nodes)
+    assert before
+    assert {claim[1] for claim in before} == set(nodes)
     _child, stop_job = _start_profile_stop_child(
         sessions, switches, restarted, replacement
     )
@@ -187,10 +190,8 @@ def test_postgres_unrelated_damaged_parked_evidence_does_not_starve_exact_gang_c
         retained = session.get(FleetProfileApplication, parked.id)
         assert retained is not None
         assert retained.plan == damaged
-        assert (
-            retained.request_key == retained_key
-            and retained.plan_digest == retained_digest
-        )
+        assert retained.request_key == retained_key
+        assert retained.plan_digest == retained_digest
         assert retained.state not in {LifecycleState.FAILED, LifecycleState.SUCCEEDED}
     # No repair or terminal receipt is invented for the damaged sibling. The
     # actual unrelated gang cleanup can still claim both of its exact Stops.
@@ -203,10 +204,12 @@ def test_postgres_unrelated_damaged_parked_evidence_does_not_starve_exact_gang_c
             clock=lambda: now[0],
             jobs=jobs,
         )
-        assert claim is not None and claim.operation.value == "recipe.stop"
+        assert claim is not None
+        assert claim.operation.value == "recipe.stop"
         assert fenced_operation(sessions, claim).parent_job_id == stop_job
         stop = RecipeStopPayload.model_validate(claim.payload)
-        assert stop.run_id == run.owner_id and stop.target_runtime_id == run.owner_id
+        assert stop.run_id == run.owner_id
+        assert stop.target_runtime_id == run.owner_id
         jobs.record_result(_agent_result(claim, state="succeeded", result={}))
         if index == 0:
             assert _held_run_claims(sessions, run.owner_id), (
@@ -220,7 +223,8 @@ def test_postgres_unrelated_damaged_parked_evidence_does_not_starve_exact_gang_c
     assert not _held_run_claims(sessions, run.owner_id)
     with sessions() as session:
         retained = session.get(FleetProfileApplication, parked.id)
-        assert retained is not None and retained.plan == damaged
+        assert retained is not None
+        assert retained.plan == damaged
         assert retained.state != LifecycleState.FAILED
     start_on_released_gang(
         sessions,
@@ -265,7 +269,8 @@ def test_postgres_unknown_old_start_is_reviewed_but_only_exact_stop_releases_gan
         if candidate is not None:
             old_claim = candidate
             break
-    assert old_claim is not None and old_claim.operation.value == "recipe.start"
+    assert old_claim is not None
+    assert old_claim.operation.value == "recipe.start"
     jobs.record_result(
         AgentResult(
             fence=old_claim.fence,
@@ -302,7 +307,8 @@ def test_postgres_unknown_old_start_is_reviewed_but_only_exact_stop_releases_gan
     assert ("job", old_start.id, tuple(nodes)) in _superseded(reviewed)
     run_id = old_start.owner_id
     claims = _held_run_claims(sessions, run_id)
-    assert claims and {claim[1] for claim in claims} == set(nodes)
+    assert claims
+    assert {claim[1] for claim in claims} == set(nodes)
     assert reviewed.effects_digest is not None
     replacement = profiles.load(
         profile.number,
@@ -316,13 +322,16 @@ def test_postgres_unknown_old_start_is_reviewed_but_only_exact_stop_releases_gan
     with sessions() as session:
         accepted = session.get(FleetProfileApplication, replacement.id)
         old = session.get(Job, old_start.id)
-        assert accepted is not None and old is not None
+        assert accepted is not None
+        assert old is not None
         assert ("job", old_start.id, tuple(nodes)) in _superseded(
             _persisted_profile_plan(accepted)
         )
-        assert old.request_id == _uuid(18821) and old.kind == "recipe.start"
+        assert old.request_id == _uuid(18821)
+        assert old.kind == "recipe.start"
         stored_run = session.get(RecipeRun, run_id)
-        assert stored_run is not None and stored_run.state != "stopped"
+        assert stored_run is not None
+        assert stored_run.state != "stopped"
     assert fenced_attempt(sessions, old_claim).result == original_evidence
     assert fenced_operation(sessions, old_claim).payload == original_payload
     assert _held_run_claims(sessions, run_id) == claims
@@ -338,15 +347,18 @@ def test_postgres_unknown_old_start_is_reviewed_but_only_exact_stop_releases_gan
             clock=lambda: now[0],
             jobs=jobs,
         )
-        assert claim is not None and claim.operation.value == "recipe.stop"
+        assert claim is not None
+        assert claim.operation.value == "recipe.stop"
         assert fenced_operation(sessions, claim).parent_job_id == stop_job
         stop = RecipeStopPayload.model_validate(claim.payload)
-        assert stop.run_id == run_id and stop.target_runtime_id == run_id
+        assert stop.run_id == run_id
+        assert stop.target_runtime_id == run_id
         jobs.record_result(_agent_result(claim, state="succeeded", result={}))
         if index == 0:
             with sessions() as session:
                 stored_run = session.get(RecipeRun, run_id)
-                assert stored_run is not None and stored_run.state != "stopped"
+                assert stored_run is not None
+                assert stored_run.state != "stopped"
             assert _held_run_claims(sessions, run_id)
             with sessions() as session:
                 node = session.get(AgentNode, old_operation.node_id)
@@ -378,7 +390,9 @@ def test_postgres_unknown_old_start_is_reviewed_but_only_exact_stop_releases_gan
                 )
             )
             node = session.get(AgentNode, old_operation.node_id)
-            assert stop_parent is not None and receipt is not None and node is not None
+            assert stop_parent is not None
+            assert receipt is not None
+            assert node is not None
             if fault == "parent-digest":
                 stop_parent.payload_digest = "0" * 64
             elif fault == "child-digest":
@@ -469,7 +483,8 @@ def test_postgres_unknown_old_start_is_reviewed_but_only_exact_stop_releases_gan
         assert all(rank.state == "stopped" for rank in ranks)
         stored_run = session.get(RecipeRun, run_id)
         stored_start = session.get(Job, old_start.id)
-        assert stored_run is not None and stored_start is not None
+        assert stored_run is not None
+        assert stored_start is not None
         assert stored_run.state == "stopped"
         assert stored_start.request_id == _uuid(18821)
     assert fenced_attempt(sessions, old_claim).result == original_evidence

@@ -9,40 +9,36 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-from vonk_forge_contracts import RecipeDefinition
-
-from vonk_control.lifecycle.evidence import Residue
-
-from ..failure_classification import is_security_failure
-from ..jobs import states as job_states
-from ..jobs.documents import (
+from vonk_control.failure_classification import is_security_failure
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityJobResult,
     AvailabilityModelChild,
 )
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..lifecycle.image_availability import preparation_deadline
-from ..model_cache import states as model_cache_states
-from ..model_cache.errors import ModelCacheNotFound
-from ..models.cache import ModelCacheOperation
-from ..models.catalog import CatalogDocumentRevision
-from ..models.jobs import Job
-from ..operations.blockers import make_blocker
-from ..operations.contract import (
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
+)
+from vonk_control.lifecycle.image_availability import preparation_deadline
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.errors import ModelCacheNotFound
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.jobs import Job
+from vonk_control.operations.blockers import make_blocker
+from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
-from ..persisted_waits import schedule_wait, wait_due
-from ..recipe_operations.availability_intent import (
-    RecipeRetryIntent,
-)
-from ..stored.json_values import read_row_column
-from ..strict_json import serialize_json_value
-from ..worker.memory_contract import WorkerMemoryComponent
-from .contracts import (
+from vonk_control.persisted_waits import schedule_wait, wait_due
+from vonk_control.recipe_image_availability.contracts import (
     OPERATION_KIND,
     SCHEMA_VERSION,
     BuildUnsettled,
@@ -52,14 +48,20 @@ from .contracts import (
     _known_total,
     _read,
 )
-from .reader_contract import (
+from vonk_control.recipe_image_availability.reader_contract import (
     AvailabilityDownloadPreview,
     StoredAvailabilityIdentity,
     StoredModelChildCancellation,
 )
+from vonk_control.recipe_operations.availability_intent import RecipeRetryIntent
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import serialize_json_value
+from vonk_control.worker.memory_contract import WorkerMemoryComponent
 
 if TYPE_CHECKING:
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
 
 
 def run_claim(
@@ -132,7 +134,7 @@ def _claim_operation(
         or operation.kind != OPERATION_KIND
         or operation.state not in allowed_states
         or operation.current_attempt != claim.execution_attempt
-        or not isinstance(operation.payload, Mapping)
+        or not isinstance(operation.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
         or not isinstance(payload, AvailabilityJobPayload)
         or payload.claim_owner != claim.claim_owner
         or payload.removal_fence is not None
@@ -180,22 +182,23 @@ def _run(
     operation_id = claim.operation_id
     with self._sessions.begin() as session:
         operation = self._claim_operation(session, claim)
+        claimed = None
         if operation is not None:
             payload = self._payload(operation)
             if isinstance(payload, Residue):
                 return
-            operation_actor = operation.actor
-            operation_request_id = operation.request_id
+            claimed = (payload, operation.actor, operation.request_id)
             operation.updated_at = self._clock()
             self._set_progress(
                 operation,
                 "prepare",
                 total_bytes=_known_total(payload.runtime),
             )
-    if operation is None:
+    if claimed is None:
         self._release_cancelled_claim(claim)
         self._reconcile_availability_cancellation(operation_id)
         return
+    payload, operation_actor, operation_request_id = claimed
     heartbeat_stop = threading.Event()
     heartbeat = threading.Thread(
         target=self._renew_claim_loop,
@@ -228,7 +231,7 @@ def _run(
         if model_child is not None:
             child_state = model_child.state
             if not self._update_model_progress(claim, model_child):
-                raise _AvailabilityClaimLost()
+                raise _AvailabilityClaimLost
             if child_state in model_cache_states.ACTIVE:
                 model_pending = True
             elif child_state != "succeeded":
@@ -431,7 +434,7 @@ def _current_model_child(
             and isinstance(operation.artifact_set_sha256, str)
         ):
             recipe_revision_id = payload.recipe_revision_id
-            if not isinstance(recipe_revision_id, str):
+            if not isinstance(recipe_revision_id, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                 raise RecipeImageAvailabilityUnknown(
                     RecipeImageCode.MODEL_CACHE_INVALID,
                     "availability operation lacks its exact recipe revision",
@@ -494,7 +497,7 @@ def _update_model_progress(
     child_id = child.id
     with self._sessions.begin() as session:
         model_operation = None
-        if isinstance(child_id, str):
+        if isinstance(child_id, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             model_operation = session.scalar(
                 select(ModelCacheOperation)
                 .where(ModelCacheOperation.id == child_id)
@@ -520,13 +523,13 @@ def _update_model_progress(
             operation is None
             or not isinstance(payload, AvailabilityJobPayload)
             or operation.current_attempt != claim.execution_attempt
-            or not isinstance(operation.payload, Mapping)
+            or not isinstance(operation.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             or payload.claim_owner != claim.claim_owner
         ):
-            raise _AvailabilityClaimLost()
+            raise _AvailabilityClaimLost
         cancelling = operation.state in job_states.words(LifecycleState.OBSERVING)
         if not cancelling and operation.state != LifecycleState.RUNNING:
-            raise _AvailabilityClaimLost()
+            raise _AvailabilityClaimLost
         if (
             not cancelling
             and model_operation is not None

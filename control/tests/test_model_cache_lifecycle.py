@@ -11,13 +11,16 @@ harmless, and a missing object or a full disk is a wait that heals, never an end
 from __future__ import annotations
 
 import fcntl
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import NamedTuple
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_control.lifecycle.core import STOP_BUDGET, transition
 from vonk_control.lifecycle.model_cache import (
@@ -32,6 +35,8 @@ from vonk_control.lifecycle.types import (
     State,
     Tick,
 )
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.errors import ModelCacheStorageUnknown
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
 
@@ -105,7 +110,8 @@ def test_a_corrupt_document_never_raises_out_of_the_core(cache, tmp_path):
     )
     _edit(sessions, operation.id, state="running", payload={"schema_version": 7})
     row = service._lifecycle.adopt(_row(sessions, operation.id))
-    assert row.state is State.RUNNING and not row.cancel_requested
+    assert row.state is State.RUNNING
+    assert not row.cancel_requested
     # Bookkeeping is unknown, then reconciled: the sweep decides, it does not raise.
     now = _clock_at(service, datetime.now(UTC) + timedelta(minutes=5))
     service._reconciler.reconcile()
@@ -136,7 +142,8 @@ def test_no_event_parks_a_cache_operation_for_an_operator(cache, tmp_path, store
     adapter = service._lifecycle
     now = datetime.now(UTC) + timedelta(days=400)
     row = adapter.adopt(_row(sessions, operation.id))
-    assert adapter.actions(row) == () and not adapter.irreversible(row)
+    assert adapter.actions(row) == ()
+    assert not adapter.irreversible(row)
     for event in (
         LeaseLapsed(),
         Tick(),
@@ -163,11 +170,13 @@ def test_a_failed_attempt_is_retried_never_waits_for_a_person(cache, tmp_path):
     service._open_source = broken
     assert service.run_pending() == 1
     waiting = _row(sessions, operation.id)
-    assert waiting.state == "queued" and waiting.next_action_at is not None
+    assert waiting.state == "queued"
+    assert waiting.next_action_at is not None
     assert waiting.attempt == 1  # attempts are counted at claim
     assert waiting.lease_deadline is None
     view = service.get_operation(operation.id)
-    assert view.retryable and view.next_attempt_at is not None
+    assert view.retryable
+    assert view.next_attempt_at is not None
     service._open_source = open_source
     due = waiting.next_action_at
     assert due is not None
@@ -195,10 +204,12 @@ def test_cancelling_a_queued_download_ends_it_at_once(cache, tmp_path):
     )
     assert view.state == "cancelled"
     stored = _row(sessions, operation.id)
-    assert stored.completed_at is not None and stored.next_action_at is None
+    assert stored.completed_at is not None
+    assert stored.next_action_at is None
     with sessions() as session:
         cache_set = session.get(ModelCacheSet, str(operation.artifact_set_sha256))
-        assert cache_set is not None and cache_set.state == "incomplete"
+        assert cache_set is not None
+        assert cache_set.state == "incomplete"
     assert service._object_path(str(artifact["sha256"])).exists() is False
 
     assert_ended_without_blocking(
@@ -294,7 +305,8 @@ def test_a_cancel_ends_even_when_the_stop_is_never_confirmed(cache, tmp_path):
         fcntl.flock(held, fcntl.LOCK_UN)
     assert states[-1] == "cancelled", states
     stored = _row(sessions, operation.id)
-    assert stored.observe_count == 0 and stored.completed_at is not None
+    assert stored.observe_count == 0
+    assert stored.completed_at is not None
     assert service.get_operation(operation.id).state == "cancelled"
 
     assert_ended_without_blocking(
@@ -365,7 +377,8 @@ def test_a_restart_in_the_middle_of_a_transfer_is_harmless(cache, tmp_path):
     restarted.run_pending()
     assert restarted.get_operation(operation.id).state == "succeeded"
     done = _row(sessions, operation.id)
-    assert done.fence == restarted._claim_owner and done.attempt == 2
+    assert done.fence == restarted._claim_owner
+    assert done.attempt == 2
 
 
 def test_the_adapter_observes_the_objects_and_never_marks_work_done(cache, tmp_path):
@@ -386,7 +399,7 @@ def test_the_adapter_observes_the_objects_and_never_marks_work_done(cache, tmp_p
     assert incomplete.effect is Effect.NONE
     assert incomplete.reason == WaitReason.SET_INCOMPLETE
     # An unreadable storage is unknown, not a refusal.
-    service.objects_present = lambda payload: None  # type: ignore[method-assign]
+    service.objects_present = lambda payload: None
     assert service._lifecycle.observe(row).effect is Effect.UNKNOWN
 
 
@@ -489,11 +502,15 @@ def test_objects_that_are_complete_heal_a_set_that_says_otherwise(cache, tmp_pat
 def test_a_full_disk_queues_the_download_and_it_runs_when_space_returns(
     cache, tmp_path, monkeypatch
 ):
-    from collections import namedtuple
 
     service, sessions = cache
-    usage = namedtuple("usage", "total used free")
-    monkeypatch.setattr("shutil.disk_usage", lambda _: usage(100, 100, 0))
+
+    class DiskUsage(NamedTuple):
+        total: int
+        used: int
+        free: int
+
+    monkeypatch.setattr("shutil.disk_usage", lambda _: DiskUsage(100, 100, 0))
     operation, artifact = _queue(
         service, tmp_path, "00000000-0000-4000-8000-00000000a060", b"needs space"
     )
@@ -508,7 +525,7 @@ def test_a_full_disk_queues_the_download_and_it_runs_when_space_returns(
     assert not service._object_path(str(artifact["sha256"])).exists()
     monkeypatch.setattr(
         "shutil.disk_usage",
-        lambda _: usage(10**12, 0, 10**12),
+        lambda _: DiskUsage(10**12, 0, 10**12),
     )
     assert service.run_pending() == 1
     assert service.get_operation(operation.id).state == "succeeded"
@@ -525,7 +542,6 @@ def test_the_cache_writes_backoff_never_partial(cache, tmp_path):
     _edit(sessions, operation.id, state="running")
     service._lifecycle.reopen(_row(sessions, operation.id), datetime.now(UTC))
     assert LifecycleState.BACKOFF.value == "backoff"
-    from vonk_control.model_cache import states as model_cache_states
 
     assert model_cache_states.BACKOFF == "backoff"
 
@@ -535,8 +551,6 @@ def test_the_cache_writes_backoff_never_partial(cache, tmp_path):
 
 def _settle_background(service: ModelCacheService) -> None:
     """Tick the pool worker until its in-flight transfers have been settled."""
-
-    import time
 
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
@@ -550,7 +564,6 @@ def _settle_background(service: ModelCacheService) -> None:
 def test_a_background_transfer_with_an_unknown_outcome_is_kept_and_retried(
     threaded_cache, tmp_path
 ):
-    from vonk_control.model_cache.errors import ModelCacheStorageUnknown
 
     service, _sessions = threaded_cache
     now = _clock_at(service)
@@ -573,7 +586,8 @@ def test_a_background_transfer_with_an_unknown_outcome_is_kept_and_retried(
     # The unknown outcome keeps the operation: queued with a bounded retry, not
     # failed, and nobody is asked to resubmit.
     assert waiting.state == "queued"
-    assert waiting.failure is not None and waiting.failure["retryable"] is True
+    assert waiting.failure is not None
+    assert waiting.failure["retryable"] is True
     assert waiting.next_attempt_at is not None
 
     unavailable = False

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 
-from vonk_control.library_projection.service import LibraryProjection
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from tests.catalog_launch_fixtures import INPUTS
+from vonk_control.library_projection.service import LibraryProjection
 
 _GIB = 1 << 30
 

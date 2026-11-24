@@ -16,6 +16,9 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import document_sha256
+
+from vonk_control.model_cache import removal_execution
 from vonk_control.model_cache.contract import (
     ModelCacheRemovalPayload,
     ModelCacheRemovalResult,
@@ -24,7 +27,7 @@ from vonk_control.model_cache.contract import (
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_cache.views import CacheOperationView
 from vonk_control.models.cache import ModelCacheOperation
-from vonk_forge_contracts import document_sha256
+from vonk_control.persisted_waits import schedule_wait
 
 from .model_cache_support import _artifact, _download, _remove_model
 from .test_model_removal_reference_lifecycle import (
@@ -104,7 +107,8 @@ def _removal_payload(
 ) -> ModelCacheRemovalPayload:
     with sessions() as session:
         operation = session.get(ModelCacheOperation, operation_id)
-        assert operation is not None and operation.kind == "remove"
+        assert operation is not None
+        assert operation.kind == "remove"
         payload = parse_model_cache_payload("remove", operation.payload)
     assert isinstance(payload, ModelCacheRemovalPayload)
     return payload
@@ -128,7 +132,6 @@ def test_locked_removal_row_is_bounded_and_same_owner_retries_after_release(
     step_errors: list[Exception] = []
     step_results: list[bool] = []
     original_advance = service._advance_model_removal
-    from vonk_control.model_cache import removal_execution
 
     original_scan = removal_execution.model_set_reference_findings
     scans_while_locked = []
@@ -240,7 +243,6 @@ def test_held_and_not_due_first_removals_do_not_starve_unrelated_due_owner(
         waiting_payload = parse_model_cache_payload("remove", waiting_row.payload)
         assert isinstance(waiting_payload, ModelCacheRemovalPayload)
         waiting_document = waiting_payload.model_dump(mode="json")
-        from vonk_control.persisted_waits import schedule_wait
 
         schedule_wait(waiting_row, delayed_until)
         waiting_row.payload = waiting_document
@@ -357,7 +359,8 @@ raise AssertionError("removal worker did not reach the batch checkpoint")
         assert not object_path.exists()
         with sessions() as session:
             row = session.get(ModelCacheOperation, accepted.id)
-            assert row is not None and row.state in {"queued", "running"}
+            assert row is not None
+            assert row.state in {"queued", "running"}
             assert row.request_key == accepted.request_key
             crashed_payload = parse_model_cache_payload("remove", row.payload)
         assert isinstance(crashed_payload, ModelCacheRemovalPayload)
@@ -482,7 +485,8 @@ def test_contended_object_ends_the_batch_and_resumes_after_release(
         assert row.state != "succeeded"
         with sessions() as session:
             operation = session.get(ModelCacheOperation, accepted.id)
-            assert operation is not None and operation.next_action_at is not None
+            assert operation is not None
+            assert operation.next_action_at is not None
 
     settled = _settle_removal(service, accepted)
     assert settled.state == "succeeded"
@@ -507,7 +511,8 @@ def test_batch_budget_is_shared_and_each_removal_makes_progress(
     first = _removal_payload(sessions, accepted.id).object_index
     service.advance_removals(limit=1)
     second = _removal_payload(sessions, accepted.id).object_index
-    assert first == 1 and second == 2
+    assert first == 1
+    assert second == 2
     assert sum(path.exists() for path in paths) == 4
 
     # Two removals in one worker step share the spent budget: each still

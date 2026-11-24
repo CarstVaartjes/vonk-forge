@@ -9,55 +9,36 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_forge_contracts import RecipeDefinition
-
-from vonk_control.lifecycle.evidence import Residue
-
-from ..artifact_jobs.lifecycle import (
-    ArtifactIdentity,
-    RemovalOwnerKind,
-)
-from ..artifact_reference_scan.types import ArtifactReferenceFinding
-from ..cache_removal_review import (
+from vonk_control.artifact_jobs.lifecycle import ArtifactIdentity, RemovalOwnerKind
+from vonk_control.artifact_reference_scan.types import ArtifactReferenceFinding
+from vonk_control.cache_removal_review import (
     CacheRemovalAsset,
     CacheRemovalBlocker,
     CacheRemovalFinding,
     CacheRemovalReview,
 )
-from ..categorized_errors import InvalidValue
-from ..install_admission.contracts import InstallPlan
-from ..jobs import states as job_states
-from ..jobs.documents import (
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.install_admission.contracts import InstallPlan
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityModelChild,
     AvailabilityRuntime,
 )
-from ..lifecycle.image_availability import ImageAvailabilityAdapter
-from ..model_cache.views import ModelCacheRemovalScope
-from ..models.cache import ModelCacheOperation, RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.jobs import Job
-from ..operations.blockers import OperationBlocker
-from ..recipe_operations.availability_intent import (
-    RecipeAvailabilityIntent,
-    RecipeRevisionIntent,
-    RecipeSelectorIntent,
-)
-from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
-from ..recipe_update_batches.contract import RecipeUpdateResponse
-from ..runtime_image_preparation.contracts import (
-    OCIImageTransport,
-    RuntimeImageReceipt,
-    RuntimeImageReferenceIntent,
-)
-from ..worker.memory_contract import WorkerMemoryComponent
-from . import (
-    cancellation as cancellation_ops,
-)
-from . import (
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.image_availability import ImageAvailabilityAdapter
+from vonk_control.model_cache.views import ModelCacheRemovalScope
+from vonk_control.models.cache import ModelCacheOperation, RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.jobs import Job
+from vonk_control.operations.blockers import OperationBlocker
+from vonk_control.recipe_image_availability import cancellation as cancellation_ops
+from vonk_control.recipe_image_availability import (
     cancellation_reconcile,
     execution,
     failure_projection,
@@ -72,17 +53,17 @@ from . import (
     requests,
     scheduling,
 )
-from .contracts import (
+from vonk_control.recipe_image_availability.contracts import (
     BuildUnsettled,
     ModelCacheOperationHandle,
     RecipeImageAvailabilityClaim,
     RuntimeImageCacheStorage,
     _RecipeRemovalSelection,
 )
-from .reader_contract import (
+from vonk_control.recipe_image_availability.reader_contract import (
     StoredAvailabilityIdentity,
 )
-from .removal_contract import (
+from vonk_control.recipe_image_availability.removal_contract import (
     RecipeCacheRemovalIntent,
     RecipeCacheRemovalModelChild,
     RecipeCacheRemovalOwner,
@@ -90,13 +71,29 @@ from .removal_contract import (
     RecipeCacheRemovalResult,
     RecipeRemovalUnavailableView,
 )
-from .view_contract import (
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeCacheRemovalStatus,
     RecipeImageAvailabilityView,
 )
+from vonk_control.recipe_operations.availability_intent import (
+    RecipeAvailabilityIntent,
+    RecipeRevisionIntent,
+    RecipeSelectorIntent,
+)
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
+from vonk_control.recipe_update_batches.contract import RecipeUpdateResponse
+from vonk_control.recipe_update_batches.service import RecipeUpdateBatches
+from vonk_control.runtime_image_preparation.contracts import (
+    OCIImageTransport,
+    RuntimeImageReceipt,
+    RuntimeImageReferenceIntent,
+)
+from vonk_control.worker.memory_contract import WorkerMemoryComponent
 
 if TYPE_CHECKING:
-    from ..recipe_update_batches.helpers import RecipeUpdateClaim
+    from vonk_control.recipe_update_batches.helpers import RecipeUpdateClaim
 
 
 class RecipeImageAvailabilityService:
@@ -134,7 +131,6 @@ class RecipeImageAvailabilityService:
         self._identity_locks: dict[str, threading.Lock] = {}
         self._identity_locks_guard = threading.Lock()
         self._removal_lock = threading.RLock()
-        from ..recipe_update_batches.service import RecipeUpdateBatches
 
         self._updates = RecipeUpdateBatches(self, sessions)
 
@@ -197,10 +193,8 @@ class RecipeImageAvailabilityService:
     ) -> OperationProgress:
         return persistence._removal_progress_document(operation, owner)
 
-    def _read_removal_result(
-        self, operation: Job, intent: RecipeCacheRemovalIntent
-    ) -> RecipeCacheRemovalStatus:
-        return persistence._read_removal_result(self, operation, intent)
+    def _read_removal_result(self, operation: Job) -> RecipeCacheRemovalStatus:
+        return persistence._read_removal_result(self, operation)
 
     @staticmethod
     def _stored_removal_result(
@@ -284,7 +278,6 @@ class RecipeImageAvailabilityService:
         now: datetime,
     ) -> CacheRemovalReview:
         return removal_review._sealed_recipe_removal_review(
-            self,
             selector=selector,
             with_model=with_model,
             selection=selection,
@@ -329,11 +322,10 @@ class RecipeImageAvailabilityService:
         operation_id: str,
         observed_owner: RecipeCacheRemovalOwner,
         *,
-        now: datetime,
         deadline: float | None,
     ) -> bool:
         return removal_execution._advance_recipe_image_removal(
-            self, operation_id, observed_owner, now=now, deadline=deadline
+            self, operation_id, observed_owner, deadline=deadline
         )
 
     def _complete_recipe_image_removal(
@@ -716,7 +708,6 @@ class RecipeImageAvailabilityService:
         *,
         newer_revision: CatalogDocumentRevision,
         now: datetime,
-        limit: int = 64,
         current_operation_id: str | None = None,
     ) -> tuple[str, ...]:
         return scheduling._cancel_older_preparations(
@@ -724,7 +715,6 @@ class RecipeImageAvailabilityService:
             session,
             newer_revision=newer_revision,
             now=now,
-            limit=limit,
             current_operation_id=current_operation_id,
         )
 
@@ -844,7 +834,6 @@ class RecipeImageAvailabilityService:
         bytes_per_second: float | None = None,
         smoothed_bytes_per_second: float | None = None,
         eta_seconds: float | None = None,
-        detail: OperationProgress | None = None,
     ) -> None:
         return image_preparation._set_progress(
             self,
@@ -855,7 +844,6 @@ class RecipeImageAvailabilityService:
             bytes_per_second=bytes_per_second,
             smoothed_bytes_per_second=smoothed_bytes_per_second,
             eta_seconds=eta_seconds,
-            detail=detail,
         )
 
     def _update_progress(

@@ -8,12 +8,15 @@ import os
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NamedTuple
 
 import httpx2
 import pytest
 from pydantic import ValidationError
+
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.auth import TokenCodec
 from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
@@ -24,12 +27,22 @@ from vonk_control.model_cache.api import (
 )
 from vonk_control.model_cache.contract import (
     ModelCacheCounters,
+    ModelCacheRepairCheckpoint,
 )
 from vonk_control.model_cache.errors import (
     ModelCacheStorageError,
     _retry_after_seconds,
 )
+from vonk_control.model_cache.progress import cache_progress, progress_document
 from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.operation_api.contracts import (
+    OperationListPage,
+    OperationProvider,
+    OperationQuery,
+)
+from vonk_control.operation_api.contracts import (
+    OperationQuery as operation_api_OperationQuery,
+)
 from vonk_control.operations.item_contract import operation_item
 from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.worker.loop import Worker
@@ -41,14 +54,6 @@ from .test_model_cache_recovery_support import observe_unknown
 def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     cache, tmp_path: Path
 ) -> None:
-    from vonk_agent_protocol.wire_model import OperationProgress
-    from vonk_control.operation_api.contracts import (
-        OperationListPage,
-        OperationProvider,
-    )
-    from vonk_control.operation_api.contracts import (
-        OperationQuery as operation_api_OperationQuery,
-    )
 
     service, _sessions = cache
     cursor_codec = TokenCodec(b"c" * 32).cursor_codec()
@@ -154,7 +159,6 @@ def test_malformed_pagination_observation_is_partial_and_recovers(
     cache, monkeypatch, clears
 ) -> None:
     """The public provider observes at most three times and retains readable rows."""
-    from vonk_control.operation_api.contracts import OperationQuery
 
     service, _sessions = cache
     provider = ModelCacheOperationProvider(
@@ -181,7 +185,8 @@ def test_malformed_pagination_observation_is_partial_and_recovers(
     monkeypatch.setattr(service, "activity_operations", original)
     fresh = provider.list_operations(query)
     assert not fresh.continuation_unavailable
-    assert fresh.items == result.items and fresh.total == result.total
+    assert fresh.items == result.items
+    assert fresh.total == result.total
 
 
 def test_interrupted_download_checkpoint_resumes_after_service_restart(
@@ -324,7 +329,8 @@ def test_transient_download_failures_wait_on_a_bounded_cadence_until_success(
         assert service.run_pending() == 1
         waiting = service.get_operation(operation.id)
         assert waiting.state == "queued"
-        assert waiting.failure is not None and waiting.failure["retryable"] is True
+        assert waiting.failure is not None
+        assert waiting.failure["retryable"] is True
         delays.append(waiting.failure["retry_after_seconds"])
     # A network timeout is a wait: it is re-checked on the one bounded,
     # jittered wait cadence, never backed off by failures it did not spend and
@@ -375,7 +381,8 @@ def test_waiting_download_reports_queued_with_blockers_and_next_attempt(
     service.run_pending()
     done = service.get_operation(operation.id)
     assert done.state == "succeeded"
-    assert done.blockers == () and done.next_attempt_at is None
+    assert done.blockers == ()
+    assert done.next_attempt_at is None
 
 
 def test_operator_retry_of_a_failed_download_is_always_accepted(
@@ -720,7 +727,6 @@ def test_empty_http_support_artifact_does_not_issue_an_invalid_zero_range(
 
 
 def test_activity_progress_with_unknown_total_has_no_rate_or_eta_fields() -> None:
-    from vonk_control.model_cache.progress import cache_progress, progress_document
 
     value = progress_document(
         cache_progress(
@@ -815,7 +821,8 @@ def test_serving_one_object_does_not_inspect_the_rest_of_the_set(cache, tmp_path
 
     service._object_is_available = spy
     path, size, _ = service.cached_artifact_file(digest, first["sha256"], "a.bin")
-    assert path.read_bytes() == b"served" and size == 6
+    assert path.read_bytes() == b"served"
+    assert size == 6
     assert inspected == [first["sha256"]]
     # A damaged object is still refused when it is the one being served.
     service._object_path(second["sha256"]).unlink()
@@ -945,7 +952,6 @@ def test_ingress_rejects_bytes_that_do_not_match_the_pinned_digest(cache, tmp_pa
 def test_repair_capacity_admission_preserves_verified_object(
     cache, tmp_path, monkeypatch
 ):
-    from collections import namedtuple
 
     service, _ = cache
     artifact = _artifact(tmp_path, b"model")
@@ -956,8 +962,13 @@ def test_repair_capacity_admission_preserves_verified_object(
         request_key="00000000-0000-4000-8000-000000001006",
     )
     digest = downloaded.artifact_set_sha256
-    usage = namedtuple("usage", "total used free")
-    monkeypatch.setattr("shutil.disk_usage", lambda _: usage(100, 100, 0))
+
+    class DiskUsage(NamedTuple):
+        total: int
+        used: int
+        free: int
+
+    monkeypatch.setattr("shutil.disk_usage", lambda _: DiskUsage(100, 100, 0))
     # No capacity is a wait, not a refusal (top-10 #8): the repair is queued
     # behind a retryable blocker and nothing is touched until the space exists.
     queued = service.start_repair(
@@ -977,7 +988,7 @@ def test_repair_capacity_admission_preserves_verified_object(
     assert service._claim_operations(limit=1, respect_backoff=False) == []
     monkeypatch.setattr(
         "shutil.disk_usage",
-        lambda _: usage(10**12, 0, 10**12),
+        lambda _: DiskUsage(10**12, 0, 10**12),
     )
     assert service._claim_operations(limit=1, respect_backoff=False) == [
         (queued.id, "repair")
@@ -985,7 +996,6 @@ def test_repair_capacity_admission_preserves_verified_object(
 
 
 def test_repair_checkpoint_requires_exact_nested_contract():
-    from vonk_control.model_cache.contract import ModelCacheRepairCheckpoint
 
     valid = {"transfer_id": "a" * 32, "completed_objects": ["b" * 64]}
     assert (

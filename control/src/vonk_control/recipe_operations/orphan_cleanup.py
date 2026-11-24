@@ -6,7 +6,8 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_operations import (
     RecipeReconcilePayload,
@@ -14,21 +15,24 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeUninstallPayload,
 )
 from vonk_agent_protocol.state_machines import ReservationState
-
-from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..models.execution import RecipeInstallation, RecipeRun, ResourceReservation
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..stored.json_values import read_row_column
-from ..strict_json import read_stored_model, serialize_json_value
-from .lifecycle_contract import (
+from vonk_control.lifecycle.recipe_operation import RecipeOperationAdapter
+from vonk_control.models.execution import (
+    RecipeInstallation,
+    RecipeRun,
+    ResourceReservation,
+)
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_operations.lifecycle_contract import (
     LifecycleNodeResult,
     RecipeOperationCancellationResult,
     RecipeOperationProgressResult,
     RecipeOperationResult,
 )
-from .progress import _parent_identity
-from .results import _recorded_result
+from vonk_control.recipe_operations.progress import _parent_identity
+from vonk_control.recipe_operations.results import _recorded_result
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import read_stored_model, serialize_json_value
 
 
 def consume_orphan_cleanup(
@@ -154,7 +158,7 @@ def consume_orphan_cleanup(
             if not failures and exact
             else "cleanup target observation ended",
         )
-    if projected and recorded is not None:
+    if projected and recorded is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
         job.result = serialize_json_value(
             recorded.model_copy(update={"node_evidence": receipts})
         )

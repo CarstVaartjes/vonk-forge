@@ -13,6 +13,11 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, read_recipe
+from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
+from vonk_forge_contracts.model import ModelFile
+from vonk_forge_contracts.recipe import Scalar
+
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
@@ -23,32 +28,27 @@ from vonk_agent_protocol.outcome import (
     SecurityRefusalError,
     UnknownOutcomeError,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, read_recipe
-from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
-from vonk_forge_contracts.model import ModelFile
-from vonk_forge_contracts.recipe import Scalar
-
-from .compiled_execution_plan import (
+from vonk_control.compiled_execution_plan import (
     CompiledExecutionPlanError,
     DistributionObjectReceipt,
     VerifiedModelObject,
     VerifiedRuntimeImage,
     compile_verified_execution_plan,
 )
-from .distribution.sources import verified_model_receipts
-from .models.cache import RecipeBuild
-from .models.catalog import CatalogDocumentRevision
-from .models.mapping import ClusterMappingNode
-from .recipe_operations.runtime_specs import (
+from vonk_control.distribution.sources import verified_model_receipts
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.mapping import ClusterMappingNode
+from vonk_control.recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     ResolvedRecipe,
     compile_runtime_spec,
     resolve_recipe_entities,
     split_option_choices,
 )
-from .runtime.spec_contract import RuntimeSpec, SpecArtifact, SpecModelMount
-from .runtime_image_preparation.contracts import RuntimeImageReceipt
-from .stored.states import CatalogRevisionState, RecipeBuildState
+from vonk_control.runtime.spec_contract import RuntimeSpec, SpecArtifact, SpecModelMount
+from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
+from vonk_control.stored.states import CatalogRevisionState, RecipeBuildState
 
 
 def compile_job_invocation(
@@ -213,7 +213,6 @@ class ControllerExecutionPlanService:
         build: RecipeBuild | None,
         mapping_nodes: Sequence[ClusterMappingNode],
         parameters: Mapping[str, object] | None,
-        mapping: object | None = None,
         resolved_entities: ResolvedRecipe | None = None,
     ) -> dict[str, WireCompiledExecutionPlan]:
         """Compile one launch document per mapped Spark rank.
@@ -227,7 +226,7 @@ class ControllerExecutionPlanService:
         if (
             revision.kind != "recipe"
             or revision.state != CatalogRevisionState.ACTIVE
-            or revision.content_digest is None
+            or revision.content_digest is None  # pyright: ignore[reportUnnecessaryComparison]  # NOT NULL column; removing it would re-add a guarded line
         ):
             raise ExecutionPlanCompilationError("recipe revision digest is unavailable")
         try:
@@ -378,7 +377,7 @@ def _build_package(build: RecipeBuild) -> dict[str, object]:
     if (
         build.state != RecipeBuildState.SUCCEEDED
         or not isinstance(build.image_digest, str)
-        or not isinstance(build.build_input_sha256, str)
+        or not isinstance(build.build_input_sha256, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
     ):
         raise ExecutionPlanEvidenceUnknown(
             "successful Controller build receipt is unavailable"

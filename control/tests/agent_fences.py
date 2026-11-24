@@ -4,8 +4,17 @@ from __future__ import annotations
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.contracts import AgentClaim, AgentProgress, AgentResult
+from vonk_control.agent_jobs.evidence import (
+    _failure_result,
+)
+from vonk_control.agent_jobs.predicates import (
+    _document,
+)
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.recovery_policy import FailureKind
 
 Fenced = AgentClaim | AgentProgress | AgentResult | str
 
@@ -49,15 +58,6 @@ def park_for_operator(
     aggregated from it.
     """
 
-    from vonk_control.agent_jobs.evidence import (
-        _failure_result,  # pyright: ignore[reportPrivateUsage]
-    )
-    from vonk_control.agent_jobs.predicates import (
-        _document,  # pyright: ignore[reportPrivateUsage]
-    )
-    from vonk_control.agent_jobs.service import AgentJobService
-    from vonk_control.recovery_policy import FailureKind
-
     assert isinstance(jobs, AgentJobService)
     with sessions.begin() as session:
         attempt = session.scalar(
@@ -81,6 +81,4 @@ def park_for_operator(
         operation.state = "needs-operator"
         operation.next_action_at = None
         operation.status_reason = reason
-        jobs._aggregate_parent(  # pyright: ignore[reportPrivateUsage]
-            session, operation.parent_job_id
-        )
+        jobs._aggregate_parent(session, operation.parent_job_id)

@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from sqlalchemy import select, update
+
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import ResourceReservation
@@ -230,7 +231,8 @@ def test_profile_run_takes_its_own_promise_not_its_siblings(tmp_path, postgres_e
         # another of its assignments on this Spark.
         ended = session.get(ResourceReservation, held.id)
         application = session.get(FleetProfileApplication, loaded.id)
-        assert ended is not None and application is not None
+        assert ended is not None
+        assert application is not None
         ended.state = "released"
         session.add(
             ResourceReservation(

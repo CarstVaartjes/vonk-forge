@@ -8,7 +8,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from typing import Literal
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.reason_codes.admission import UninstallPlanCode
 from vonk_agent_protocol.reason_codes.runs import StopPlanCode
 from vonk_agent_protocol.state_machines import (
@@ -16,8 +15,8 @@ from vonk_agent_protocol.state_machines import (
     InstallationState,
     RunState,
 )
-
-from ..machine_states import rank_installed
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.machine_states import rank_installed
 
 SharedCachePolicy = Literal["retain-shared-download-cache"]
 

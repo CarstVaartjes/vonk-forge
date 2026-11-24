@@ -20,6 +20,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
 from vonk_agent_protocol.installer_setup import NasStepCaControllerRequest
 
 _VALIDITY = timedelta(days=397)
@@ -496,7 +497,7 @@ def validate_pki_material(
             files[paths.controller_server_private_key]
         )
         if (
-            not isinstance(server_key, ed25519.Ed25519PrivateKey)
+            not isinstance(server_key, ed25519.Ed25519PrivateKey)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             or server_key.public_key() != server.public_key()
         ):
             raise _invalid(

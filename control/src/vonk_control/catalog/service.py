@@ -12,10 +12,6 @@ from typing import IO, TYPE_CHECKING, Literal
 
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.reason_codes.catalog import CatalogCode
-from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
 from vonk_forge_contracts import (
     ModelDefinition,
     ModelDisplay,
@@ -34,32 +30,21 @@ from vonk_forge_contracts.qualification_status import (
     PublishedQualificationStatusView,
 )
 
-from vonk_control.models.catalog import CatalogDocumentRevision
-
-from ..admission_locking import ConstraintReplay, admitting
-from ..auth import CursorCodec
-from ..identity_insert import insert_identity
-from ..models.catalog import CatalogDocument, CatalogDocumentHead, RecipeSourceBundle
-from ..observed_run_memory import carry_measured_peaks
-from ..recipe_operations.runtime_specs import RecipeRuntimeSpecError, recipe_topology
-from ..source_bundles import (
-    SourceBundleError,
-    SourceBundleIntegrityRefused,
-    SourceBundleRefused,
-    SourceBundleStoreProtocol,
-    SourceBundleUnknown,
-    parse_source_bundle_manifest,
-)
-from ..stored.states import CatalogRevisionState
-from .entities import (
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+from vonk_agent_protocol.reason_codes.catalog import CatalogCode
+from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.admission_locking import ConstraintReplay, admitting
+from vonk_control.auth import CursorCodec
+from vonk_control.catalog.entities import (
     CatalogEntityService,
     CatalogValidationError,
     _head,
     _rederive_projection,
     display_title,
 )
-from .queries import active_head_revision
-from .revision_contract import (
+from vonk_control.catalog.queries import active_head_revision
+from vonk_control.catalog.revision_contract import (
     CatalogRevisionContractError,
     ModelRevisionProjection,
     RecipeRevisionProjection,
@@ -69,9 +54,30 @@ from .revision_contract import (
     rederive_projection,
     write_catalog_projection,
 )
+from vonk_control.identity_insert import insert_identity
+from vonk_control.models.catalog import (
+    CatalogDocument,
+    CatalogDocumentHead,
+    CatalogDocumentRevision,
+    RecipeSourceBundle,
+)
+from vonk_control.observed_run_memory import carry_measured_peaks
+from vonk_control.recipe_operations.runtime_specs import (
+    RecipeRuntimeSpecError,
+    recipe_topology,
+)
+from vonk_control.source_bundles import (
+    SourceBundleError,
+    SourceBundleIntegrityRefused,
+    SourceBundleRefused,
+    SourceBundleStoreProtocol,
+    SourceBundleUnknown,
+    parse_source_bundle_manifest,
+)
+from vonk_control.stored.states import CatalogRevisionState
 
 if TYPE_CHECKING:
-    from .sync_contract import ManagedCatalogSyncProblem
+    from vonk_control.catalog.sync_contract import ManagedCatalogSyncProblem
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")
@@ -240,8 +246,8 @@ class CatalogService:
     ) -> dict[tuple[str, str], RecipeCatalogLocalRevision]:
         requested = sorted(set(identities))
         if any(
-            not isinstance(publisher, str)
-            or not isinstance(slug, str)
+            not isinstance(publisher, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+            or not isinstance(slug, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             or not _SLUG.fullmatch(publisher)
             or not _SLUG.fullmatch(slug)
             for publisher, slug in requested

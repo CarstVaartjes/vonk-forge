@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, RootModel
 
-from .wire_model import WireModel
+from vonk_agent_protocol.wire_model import WireModel
 
 InstallerDigest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 InstallerImage = Annotated[

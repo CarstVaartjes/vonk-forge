@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -11,12 +11,13 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..inventory.repository import INVENTORY_MAX_AGE
-from ..logging import log_event
-from ..models.execution import InstallationNode, RecipeInstallation
-from ..oci_image_store import IMAGE_CACHE_DIRECTORY
-from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from ..settings import (
+from vonk_control.inventory.repository import INVENTORY_MAX_AGE
+from vonk_control.logging import log_event
+from vonk_control.models.execution import InstallationNode, RecipeInstallation
+from vonk_control.oci_image_store import IMAGE_CACHE_DIRECTORY
+from vonk_control.persisted_waits import read_wait
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
+from vonk_control.settings import (
     STORAGE_EVICTION_RESERVE_FLOOR_BYTES,
     STORAGE_EVICTION_RESERVE_FRACTION,
     STORAGE_INEFFECTIVE_COOLDOWN_SECONDS,
@@ -24,7 +25,7 @@ from ..settings import (
     STORAGE_LOW_FREE_FRACTION,
     STORAGE_SCAN_INTERVAL_SECONDS,
 )
-from ..storage_demands import (
+from vonk_control.storage_demands import (
     NAS_IMAGES,
     NAS_MODELS,
     STORAGE_EVICTING,
@@ -34,13 +35,13 @@ from ..storage_demands import (
     StorageRelief,
     spark_scope,
 )
-from ..worker.memory_contract import WorkerMemoryComponent
-from .common import (
+from vonk_control.unused_storage_collection.common import (
     _COLLECTABLE_STATES,
     _HOLDING_STATES,
     _KEPT_WORDS,
     _LOGGER,
     SWEEP_BUDGET_SECONDS,
+    EvictionCapacity,
     ImageBlobReclaimer,
     InstallationRemoval,
     Swept,
@@ -51,8 +52,16 @@ from .common import (
     _kept_sentence,
     _model_objects,
 )
-from .evidence import _CollectorEvidence, _Evidence, _Item, _Outcome, _Round
-from .pressure import (
+from vonk_control.unused_storage_collection.evidence import (
+    StorageItemKind,
+    _CollectorEvidence,
+    _DueRemovalTarget,
+    _Evidence,
+    _Item,
+    _Outcome,
+    _Round,
+)
+from vonk_control.unused_storage_collection.pressure import (
     _check_round,
     _nas_filesystems,
     _pressure,
@@ -62,15 +71,17 @@ from .pressure import (
     _remove,
     _remove_within_budget,
 )
-from .protected_objects import protected_model_objects
-from .references import (
+from vonk_control.unused_storage_collection.protected_objects import (
+    protected_model_objects,
+)
+from vonk_control.unused_storage_collection.references import (
     _installation_kept,
     _installation_last_used,
     _installation_pointing,
     _latest_snapshots,
     _spark_settling,
 )
-from .removal import (
+from vonk_control.unused_storage_collection.removal import (
     _damaged_manifest_bytes,
     _image_items,
     _model_items,
@@ -81,6 +92,7 @@ from .removal import (
     _stop_failed_runs,
     _uninstall,
 )
+from vonk_control.worker.memory_contract import WorkerMemoryComponent
 
 
 class UnusedStorageCollector:
@@ -176,8 +188,6 @@ class UnusedStorageCollector:
         return bool(result.installations or result.images or result.models)
 
     def redrive_installation(self, installation_id: str) -> bool:
-        from ..persisted_waits import read_wait
-        from .evidence import StorageItemKind, _DueRemovalTarget
 
         with self._sessions() as session:
             row = session.get(RecipeInstallation, installation_id)
@@ -193,7 +203,6 @@ class UnusedStorageCollector:
         )
 
     def redrive_artifact(self, artifact_kind: str, digest: str) -> bool:
-        from .evidence import StorageItemKind, _DueRemovalTarget
 
         kinds = {
             "runtime-image": StorageItemKind.IMAGE,
@@ -307,7 +316,7 @@ class UnusedStorageCollector:
                 continue
             if (
                 self._remove_within_budget(
-                    item, kept, outcome.removed, attempted, reached
+                    item, kept, outcome.removed, attempted, reached=reached
                 )
                 is None
             ):
@@ -555,3 +564,32 @@ class UnusedStorageCollector:
     _model_items = _model_items
     _remove_model_set = _remove_model_set
     _remove_model = _remove_model
+
+
+def spark_eviction_capacity(
+    session: Session,
+    node_id: str,
+    now: datetime,
+    superseded_applications: Collection[str] = (),
+) -> EvictionCapacity:
+    """What unused installations on a Spark could free, read-only, and what stays.
+
+    A review asks this to plan the eviction a load needs instead of refusing it:
+    the installations the collector can remove (no saved profile points to them
+    first, then pointed ones, least recently used first) and a sentence naming
+    what it must keep, so a refusal names what blocks. It registers no demand and
+    removes nothing. The loads the reviewed one supersedes keep nothing: they
+    end when it is accepted, before it waits for the eviction.
+    """
+
+    kept_bytes: Counter[str] = Counter()
+    items = UnusedStorageCollector._spark_items(
+        session,
+        node_id,
+        _Evidence.read(session, now, superseded_applications),
+        Counter(),
+        kept_bytes,
+    )
+    return EvictionCapacity(
+        sum(item.freeable for item in items), _kept_sentence(kept_bytes), tuple(items)
+    )

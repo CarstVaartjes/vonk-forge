@@ -13,18 +13,15 @@ import re
 from datetime import UTC, datetime
 from email.message import Message
 from pathlib import Path
+from typing import Any
 
 import jsonschema
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
-from vonk_control.fleet_profiles.service import FleetProfileService
-from vonk_control.fleet_projection.service import FleetProjection
-from vonk_control.jobs.queue import JobService
-from vonk_control.library.api import install_library_routes
-from vonk_control.operation_api.durable import durable_operation_services
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from cluster_profiles import cli
 from cluster_profiles.cli_json_contract import (
@@ -33,6 +30,14 @@ from cluster_profiles.cli_json_contract import (
     document_kind,
 )
 from cluster_profiles.control_client.transfers import ControlClient
+from vonk_control.api.application import create_app
+from vonk_control.auth import Actor, TokenCodec
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.fleet_projection.service import FleetProjection
+from vonk_control.jobs.queue import JobService
+from vonk_control.library.api import install_library_routes
+from vonk_control.model_primitives import Base
+from vonk_control.operation_api.durable import durable_operation_services
 
 from .conftest import load_tools_module
 from .test_catalog_entities import _model, _recipe
@@ -82,7 +87,7 @@ def _control_client(api: TestClient, tmp_path: Path, token: str) -> ControlClien
 
 def _published(
     client: ControlClient, capsys, kinds_seen: set[DocumentKind], *argv: str
-) -> dict:
+) -> dict[str, Any]:
     """Run a command, return its document after proving it against its schema."""
 
     status = cli.main(("--json", "--no-input", *argv), control_client=client)
@@ -95,7 +100,7 @@ def _published(
     return document
 
 
-def _prove(kind: DocumentKind, document: dict, printed: str) -> None:
+def _prove(kind: DocumentKind, document: dict[str, Any], printed: str) -> None:
     """The printed document satisfies its published schema and its strict model."""
 
     assert document["schema_version"] == schema_version(kind)
@@ -120,7 +125,7 @@ class _KeepsRunning:
         return document
 
 
-def _failed(client: object, capsys, *argv: str) -> dict:
+def _failed(client: object, capsys, *argv: str) -> dict[str, Any]:
     """Run a command that prints a failure or a followed-command observation."""
 
     status = cli.main(("--json", "--no-input", *argv), control_client=client)
@@ -136,20 +141,15 @@ def _failed(client: object, capsys, *argv: str) -> dict:
     return document
 
 
-def _kind_of(argv: tuple[str, ...], document: dict) -> DocumentKind:
+def _kind_of(argv: tuple[str, ...], document: dict[str, Any]) -> DocumentKind:
     args = cli._parser().parse_args(("--json", "--no-input", *argv))
     kind = document_kind(args, document, error=False)
     assert kind is not None, argv
     return kind
 
 
-def _world(tmp_path: Path) -> tuple[ControlClient, TestClient, dict]:
+def _world(tmp_path: Path) -> tuple[ControlClient, TestClient, dict[str, Any]]:
     """A real Controller API with one saved empty profile, and a CLI client for it."""
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    from sqlalchemy.pool import StaticPool
-    from vonk_control.model_primitives import Base
 
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
@@ -160,7 +160,10 @@ def _world(tmp_path: Path) -> tuple[ControlClient, TestClient, dict]:
     sessions = sessionmaker(engine, expire_on_commit=False)
     # Seeds one idle Spark into the sessions; the app it returns is not used.
     _profile_api(sessions, with_idle_spark=True)
-    clock = lambda: datetime(2026, 9, 10, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 9, 10, tzinfo=UTC)
+
     codec = TokenCodec(b"p" * 32)
     profiles = FleetProfileService(sessions, clock=clock)
     app = create_app(
@@ -318,7 +321,8 @@ def test_cancel_follow_and_controller_failures_match_their_published_schemas(
     # A Controller refusal: its code, detail and recovery actions are typed.
     refused = _failed(client, capsys, "--profile", "99", "profile", "load", "--review")
     assert refused["error_type"] == "control_api"
-    assert refused["code"] and refused["detail"]
+    assert refused["code"]
+    assert refused["detail"]
     assert isinstance(refused["recovery_actions"], list)
 
 
@@ -359,7 +363,7 @@ def test_incompatible_schema_edits_are_detected() -> None:
 
 
 def test_a_ref_to_the_old_definition_plus_optional_fields_keeps_the_version() -> None:
-    def doc(target: str, extra: dict) -> dict:
+    def doc(target: str, extra: dict[str, Any]) -> dict[str, Any]:
         return {
             "properties": {"knob": {"$ref": f"#/$defs/{target}"}},
             "$defs": {

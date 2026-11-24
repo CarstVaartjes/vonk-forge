@@ -8,6 +8,7 @@ import sys
 from datetime import UTC, datetime, timedelta
 
 import pytest
+
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProgressPhase
 from vonk_agent_protocol.host_helper import ContainerRuntimeAction
 from vonk_agent_protocol.lifecycle_vocabulary import (
@@ -98,7 +99,8 @@ def test_the_same_wait_is_an_alarm_after_a_whole_window_without_movement() -> No
     )
     assert is_stalled(stall, now=START + PROGRESS_STALL_WINDOW)
     alarm = stalled_blocker(stall)
-    assert alarm.code == ProgressAlarmCode.STALLED and alarm.severity == "error"
+    assert alarm.code == ProgressAlarmCode.STALLED
+    assert alarm.severity == "error"
     assert stall.detail in alarm.detail
     assert not is_stalled(None, now=START + PROGRESS_STALL_WINDOW)
 
@@ -161,7 +163,8 @@ def test_a_preparation_that_stopped_advancing_is_stalled_after_the_window(
         progress = _preparing(minute + 1, START, code)
         stall = _observe(stall, progress, at, before=before)
         before = progress
-    assert stall is not None and stall.first_seen_at == START + timedelta(minutes=1)
+    assert stall is not None
+    assert stall.first_seen_at == START + timedelta(minutes=1)
     assert not is_stalled(stall, now=stall.first_seen_at + timedelta(minutes=29))
     assert is_stalled(stall, now=stall.first_seen_at + PROGRESS_STALL_WINDOW)
 
@@ -175,7 +178,9 @@ def test_the_window_outlasts_a_preparations_own_stall_window() -> None:
 def test_one_observation_written_twice_counts_once() -> None:
     first = _observe(None, _waiting(), START)
     again = _observe(first, _waiting(), START)
-    assert again == first and again is not None and again.repeats == 1
+    assert again == first
+    assert again is not None
+    assert again.repeats == 1
 
 
 def _child_retrying(attempt: int, **extra):
@@ -194,7 +199,8 @@ def test_re_checks_within_one_attempt_never_count() -> None:
         stall = _observe(
             stall, progress, START + timedelta(seconds=6 * index), before=before
         )
-    assert stall is not None and stall.repeats == 1
+    assert stall is not None
+    assert stall.repeats == 1
     assert stall.first_seen_at == START
 
 
@@ -209,7 +215,8 @@ def test_every_child_retry_attempt_counts() -> None:
             stall, progress, START + timedelta(minutes=index), before=before
         )
         before = progress
-    assert stall is not None and stall.repeats == BURST
+    assert stall is not None
+    assert stall.repeats == BURST
     assert is_stalled(stall, now=START + PROGRESS_STALL_WINDOW)
 
 
@@ -222,7 +229,8 @@ def test_every_admission_attempt_counts_too() -> None:
             stall, progress, START + timedelta(minutes=index), before=before
         )
         before = progress
-    assert stall is not None and stall.repeats == BURST
+    assert stall is not None
+    assert stall.repeats == BURST
     assert is_stalled(stall, now=START + PROGRESS_STALL_WINDOW)
 
 
@@ -503,7 +511,8 @@ def test_a_fresh_last_progress_time_alone_is_not_movement() -> None:
     first = _observe(None, sample(START), START)
     later = START + timedelta(minutes=20)
     again = _observe(first, sample(later), later, before=_waiting(attempt=6))
-    assert again is not None and again.first_seen_at == START
+    assert again is not None
+    assert again.first_seen_at == START
     assert again.repeats == 2
 
 
@@ -544,7 +553,8 @@ def test_a_changing_symptom_of_the_same_wait_is_not_movement() -> None:
         stall = _observe(
             stall, checking(detail, phase), START + timedelta(minutes=minute)
         )
-        assert stall is not None and stall.first_seen_at == first_check
+        assert stall is not None
+        assert stall.first_seen_at == first_check
 
 
 def test_no_wait_or_an_ended_load_carries_no_stall() -> None:
@@ -561,7 +571,8 @@ def test_the_alarm_itself_is_not_part_of_the_wait() -> None:
     shown = _waiting(attempt=BURST + 2)
     shown.blockers.append(stalled_blocker(stall))
     after = _observe(stall, shown, START + timedelta(hours=1))
-    assert after is not None and after.first_seen_at == stall.first_seen_at
+    assert after is not None
+    assert after.first_seen_at == stall.first_seen_at
 
 
 _NODE = "spk_" + "0a1b2c3d" * 4
@@ -601,7 +612,8 @@ def test_a_wait_held_only_in_the_persisted_wait_is_an_alarm_after_a_window(
         stall = _wait_only(
             stall, idle, waiting, START + timedelta(minutes=minute), before=idle
         )
-    assert stall is not None and stall.first_seen_at == START
+    assert stall is not None
+    assert stall.first_seen_at == START
     assert stall.detail.startswith(f"{code}: ")
     assert not is_stalled(
         stall, now=START + PROGRESS_STALL_WINDOW - timedelta(seconds=1)
@@ -638,7 +650,8 @@ def test_movement_under_a_persisted_wait_keeps_it_from_the_alarm() -> None:
         later,
         before=before,
     )
-    assert moved is not None and moved.first_seen_at == later
+    assert moved is not None
+    assert moved.first_seen_at == later
     # The wait ends: nothing is left to be stalled.
     assert _wait_only(moved, before, [], later, before=before) is None
 

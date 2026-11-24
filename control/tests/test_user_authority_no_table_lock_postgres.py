@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
+
 from vonk_control.browser_auth import bootstrap_administrator
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.model_primitives import Base

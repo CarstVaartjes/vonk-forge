@@ -5,10 +5,25 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from .accessors import _accessors, _parse
-from .common import PROFILES, Accessor, _array, _finite, _index, _object
-from .meshes import _reachable_meshes, _triangle_primitive
-from .textures import _texture_index, _texture_source, _textures, _validate_materials
+from cluster_profiles.glb_validation.accessors import _accessors, _parse
+from cluster_profiles.glb_validation.common import (
+    PROFILES,
+    Accessor,
+    _array,
+    _finite,
+    _index,
+    _object,
+)
+from cluster_profiles.glb_validation.meshes import (
+    _reachable_meshes,
+    _triangle_primitive,
+)
+from cluster_profiles.glb_validation.textures import (
+    _texture_index,
+    _texture_source,
+    _textures,
+    _validate_materials,
+)
 
 
 def validate_mesh_glb_bytes(

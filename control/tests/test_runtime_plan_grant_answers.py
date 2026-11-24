@@ -19,7 +19,7 @@ from collections.abc import Callable
 
 import pytest
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
@@ -32,6 +32,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 from vonk_agent_protocol.state_machines import InstallationState, RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import host_helper_authority
 from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,
@@ -175,7 +176,8 @@ def _reissue_for_current_generation(session: Session) -> None:
     # generation, recorded in its parent's manifest.
     operation = session.get(AgentOperation, _OPERATION_ID)
     job = session.get(Job, _JOB_ID)
-    assert operation is not None and job is not None
+    assert operation is not None
+    assert job is not None
     start = RecipeStartPayload.model_validate_json(
         canonical_message(operation.payload)
     ).model_copy(update={"run_generation": _run(session).run_generation})

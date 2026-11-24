@@ -8,11 +8,11 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from .filesystem import RecipeBuildObjectSource
-from .model_cache import ModelCacheObjectSource
-from .service import DistributionService
-from .sources import CompositeObjectSource
-from .types import ObjectSource
+from vonk_control.distribution.filesystem import RecipeBuildObjectSource
+from vonk_control.distribution.model_cache import ModelCacheObjectSource
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.sources import CompositeObjectSource
+from vonk_control.distribution.types import ObjectSource
 
 
 def build_distribution_service(

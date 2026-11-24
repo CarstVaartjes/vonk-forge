@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.reason_codes.runtime import (
     RuntimePreflightCode,
     RuntimePreflightFindingCode,
@@ -17,6 +17,7 @@ from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
     RuntimePreflightResult,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.inventory.items_contract import PreflightInventoryItem
 from vonk_control.runtime.preflight import (
     admission_blockers,

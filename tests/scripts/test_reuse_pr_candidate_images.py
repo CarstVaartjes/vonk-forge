@@ -13,7 +13,10 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = "scripts/reuse-pr-candidate-images"
 ROLES = ("api", "worker", "litellm")
-DIGESTS = {role: "sha256:" + hex_digit * 64 for role, hex_digit in zip(ROLES, "abd")}
+DIGESTS = {
+    role: "sha256:" + hex_digit * 64
+    for role, hex_digit in zip(ROLES, "abd", strict=False)
+}
 RUN = "38921170575"
 TREE = "c" * 40
 

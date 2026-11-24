@@ -194,7 +194,7 @@ class _SharedSetup:
 
 @pytest.hookimpl(wrapper=True)
 def pytest_fixture_setup(
-    fixturedef: pytest.FixtureDef[object], request: pytest.FixtureRequest
+    fixturedef: pytest.FixtureDef[object],
 ) -> Generator[None, object, object]:
     if fixturedef.scope == "function":
         return (yield)
@@ -210,7 +210,7 @@ def pytest_fixture_setup(
 
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_makereport(
-    item: pytest.Item, call: pytest.CallInfo[None]
+    item: pytest.Item,
 ) -> Generator[None, pytest.TestReport, pytest.TestReport]:
     report = yield
     own_duration = max(0.0, report.duration - _SharedSetup.take())

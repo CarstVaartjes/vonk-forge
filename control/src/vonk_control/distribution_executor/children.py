@@ -6,34 +6,34 @@ import uuid
 from collections.abc import Mapping
 
 from sqlalchemy import select
+
+from vonk_agent_protocol.agent_operations import AgentOperation as AgentOperationKind
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileEffectState
-from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
 from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-
-from ..distribution_assignment import NodeDistributionAssignment
-from ..jobs.documents import (
+from vonk_control.distribution_assignment import NodeDistributionAssignment
+from vonk_control.distribution_executor.receipts import _child_receipt, _phase_receipt
+from vonk_control.distribution_executor.verification import DistributionVerification
+from vonk_control.jobs.documents import (
     DistributionJobIdentity,
     DistributionJobPayload,
     DistributionTransferProgress,
 )
-from ..lifecycle.job import JobAdapter
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..run_switch_contract.evidence import RunSwitchPhase
-from ..run_switch_contract.phase_results import (
+from vonk_control.lifecycle.job import JobAdapter
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+from vonk_control.run_switch_contract.phase_results import (
     RunSwitchDistributionChildResult,
     RunSwitchTargetTransferResult,
 )
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.progress import (
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.progress import (
     RunSwitchChildProgress,
     RunSwitchMemberReceipt,
 )
-from ..run_switch_operations.interfaces import PhaseExecution
-from ..strict_json import read_stored_model
-from .receipts import _child_receipt, _phase_receipt
-from .verification import DistributionVerification
+from vonk_control.run_switch_operations.interfaces import PhaseExecution
+from vonk_control.strict_json import read_stored_model
 
 
 class DistributionChildren(DistributionVerification):
@@ -134,7 +134,7 @@ class DistributionChildren(DistributionVerification):
             target_totals = {
                 node_id: target_bytes
                 if target_bytes is not None
-                else self._target_bytes(plan, node_id)
+                else self._target_bytes(plan)
                 for node_id in (*cached, *assignments)
             }
             total_bytes = sum(value for value in target_totals.values())

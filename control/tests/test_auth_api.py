@@ -4,6 +4,8 @@ import asyncio
 import base64
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from typing import cast
+from unittest.mock import Mock
 
 import pytest
 from fastapi import Depends, FastAPI
@@ -11,6 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
 from vonk_agent_protocol.error_response import BoundedErrorResponse
 from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
 from vonk_control.api.application import create_app
@@ -425,8 +428,6 @@ def test_cli_token_cannot_be_minted_with_a_bearer_or_without_csrf() -> None:
 def test_cli_token_checks_csrf_even_when_actor_dependency_already_authenticated():
     # Break caught: moving session authentication into another dependency can
     # accidentally remove the token-minting route's explicit CSRF check.
-    from typing import cast
-    from unittest.mock import Mock
 
     service = Mock()
     service.resolve.return_value = BrowserIdentity(

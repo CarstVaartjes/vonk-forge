@@ -15,15 +15,15 @@ import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from vonk_agent_protocol.agent_operations import AgentFailureKind
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import AgentFailureKind
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode
 
 FailureKind = AgentFailureKind
 
 
 def kind_for_failure_fields(
-    failure_kind: str | None, error_code: str | None, uncertain: bool = False
+    failure_kind: str | None, error_code: str | None, *, uncertain: bool = False
 ) -> FailureKind:
     """The same failure decision for already validated typed observations."""
     raw_kind = failure_kind

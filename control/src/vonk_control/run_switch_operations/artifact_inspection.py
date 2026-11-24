@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Generator, Iterable, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime
@@ -10,6 +10,7 @@ from typing import NamedTuple
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, load_only
+
 from vonk_agent_protocol.agent_words import (
     ProfileChildJobKind,
     ProfileReasonSeverity,
@@ -18,24 +19,23 @@ from vonk_agent_protocol.agent_words import (
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import PlacementInstallState
-
-from ..categorized_errors import BookkeepingUnknown
-from ..inventory.repository import INVENTORY_MAX_AGE, spark_model_objects
-from ..lifecycle.evidence import Residue
-from ..model_cache.artifacts import ArtifactSetManifest
-from ..model_cache.contract import ModelCacheDownloadPreviewResponse
-from ..model_cache.service import ModelCacheService
-from ..models.jobs import Job
-from ..run_switch_contract.evidence import RunSwitchReason
-from ..stored.json_values import read_row_column
-from .interfaces import ArtifactInspection
-from .planning_helpers import (
+from vonk_control.categorized_errors import BookkeepingUnknown
+from vonk_control.inventory.repository import INVENTORY_MAX_AGE, spark_model_objects
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.model_cache.artifacts import ArtifactSetManifest
+from vonk_control.model_cache.contract import ModelCacheDownloadPreviewResponse
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_contract.evidence import RunSwitchReason
+from vonk_control.run_switch_operations.interfaces import ArtifactInspection
+from vonk_control.run_switch_operations.planning_helpers import (
     _as_reason,
     _aware,
     _inspection_unavailable,
     _stored_job_plan,
 )
-from .result_helpers import _read_progress
+from vonk_control.run_switch_operations.result_helpers import _read_progress
+from vonk_control.stored.rows import read_row_column
 
 
 def spark_stores(
@@ -117,7 +117,7 @@ _FAILED_COPY_SCOPE: ContextVar[list[tuple[_FailedCopy, ...]] | None] = ContextVa
 
 
 @contextmanager
-def failed_copies_read_once() -> Iterator[None]:
+def failed_copies_read_once() -> Generator[None]:
     """Read the recent failed target copies once inside this read.
 
     The scan is independent of the model, so a pass that inspects many

@@ -4,10 +4,10 @@ from enum import StrEnum
 from typing import Literal, Self
 
 from pydantic import Field, model_validator
-from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName
 
-from .library.contract import UuidId
-from .strict_json import StrictModel
+from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName
+from vonk_control.identifiers import UuidId
+from vonk_control.strict_json import StrictModel
 
 
 class ReceiptCode(StrEnum):

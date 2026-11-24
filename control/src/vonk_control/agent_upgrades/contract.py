@@ -10,9 +10,9 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
-from vonk_agent_protocol.package_source import AgentPackageSource
 
-from ..strict_json import StrictJSONModel
+from vonk_agent_protocol.package_source import AgentPackageSource
+from vonk_control.strict_json import StrictJSONModel
 
 UuidText = Annotated[
     str,

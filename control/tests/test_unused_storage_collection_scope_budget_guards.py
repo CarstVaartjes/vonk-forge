@@ -12,10 +12,22 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
+from vonk_agent_protocol.capability_reply import ControllerCapability
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.state_machines import RunState
+from vonk_control.capabilities import CapabilityRegistry
 from vonk_control.catalog.revision_collection import GRACE
+from vonk_control.distributed_recovery.common import (
+    _settle_unrecoverable,
+    release_inactive_run_claims_in_session,
+)
+from vonk_control.fleet_profile_contract.effects import (
+    FleetProfileInstallationEffect,
+)
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.jobs.documents import RecipeInstallParent
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ArtifactLifecycleGate
@@ -34,6 +46,8 @@ from vonk_control.models.fleet import (
     FleetProfileSelection,
 )
 from vonk_control.models.jobs import Job
+from vonk_control.persisted_waits import read_wait
+from vonk_control.recipe_operations.errors import RecipeRetryLater
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.storage_demands import (
     NAS_MODELS,
@@ -41,11 +55,15 @@ from vonk_control.storage_demands import (
     spark_scope,
 )
 from vonk_control.unused_storage_collection import pressure as unused_storage_pressure
-from vonk_control.unused_storage_collection.common import ACTOR, spark_eviction_capacity
+from vonk_control.unused_storage_collection.common import ACTOR
 from vonk_control.unused_storage_collection.evidence import _Evidence
-from vonk_control.unused_storage_collection.service import UnusedStorageCollector
+from vonk_control.unused_storage_collection.service import (
+    UnusedStorageCollector,
+    spark_eviction_capacity,
+)
 
 from .model_cache_support import _artifact, _download
+from .recipe_operations_support import started_recipe
 from .test_catalog_revision_collection import NODE, NOW, Catalog
 from .unused_storage_collection_support import (
     _REAL_CLOCK,
@@ -71,8 +89,6 @@ from .unused_storage_collection_support import (
 
 def _queued_load(world: Catalog, installation_id: str) -> None:
     """A load that has been accepted and names this exact installation."""
-    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-    from vonk_control.jobs.documents import RecipeInstallParent
 
     with world.sessions.begin() as session:
         session.add(
@@ -112,9 +128,6 @@ def test_selected_application_releases_historical_installation_hold(
     ended: LifecycleState | None,
 ) -> None:
     """A selected snapshot must not retain obsolete effects after its owner ends."""
-    from vonk_control.fleet_profile_contract.effects import (
-        FleetProfileInstallationEffect,
-    )
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)
@@ -263,8 +276,6 @@ def test_unknown_removal_is_deferred_and_retried_without_blocking_other_items(
     world, monkeypatch
 ):
     """Catches treating temporary ownership uncertainty as a refusal or hot loop."""
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_control.recipe_operations.errors import RecipeRetryLater
 
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")
@@ -287,21 +298,23 @@ def test_unknown_removal_is_deferred_and_retried_without_blocking_other_items(
     result = collector.collect()
     assert lifecycle.removed == [second]
     assert _kept(result, "deferred") == 1
-    from vonk_control.persisted_waits import read_wait
 
     with world.sessions() as session:
         retained = session.get(RecipeInstallation, first)
-        assert retained is not None and read_wait(retained) is not None
+        assert retained is not None
+        assert read_wait(retained) is not None
     collector = _collector(world, lifecycle, now=world.now)
     _report_disk(world.sessions, GIB + 2, at=world.now)
     collector.collect()
     assert calls.count(first) == 1, "unknown outcome retried without backoff"
     world.now += collector._scan_interval
     collector.collect()
-    assert calls.count(first) == 2 and first in lifecycle.removed
+    assert calls.count(first) == 2
+    assert first in lifecycle.removed
     with world.sessions() as session:
         settled = session.get(RecipeInstallation, first)
-        assert settled is not None and read_wait(settled) is None
+        assert settled is not None
+        assert read_wait(settled) is None
 
 
 def test_a_sweep_that_runs_out_of_budget_continues_on_the_next_pass(
@@ -396,7 +409,7 @@ def test_a_slow_nas_inventory_step_never_spends_the_pass_budget(
             frozen_pass_budgets.advance(_PASS_BUDGET + 1)
             return measure(digest)
 
-        service.unused_set_bytes = slow_bytes  # type: ignore[method-assign]
+        service.unused_set_bytes = slow_bytes
     else:
         images = collector._image_items
 
@@ -404,7 +417,7 @@ def test_a_slow_nas_inventory_step_never_spends_the_pass_budget(
             frozen_pass_budgets.advance(_PASS_BUDGET + 1)
             return images(*args, **kwargs)
 
-        collector._image_items = slow_images  # type: ignore[method-assign]
+        collector._image_items = slow_images
 
     result = collector.collect()
 
@@ -445,7 +458,7 @@ def test_a_slow_inventory_step_still_attempts_an_installation_removal(
             UnusedStorageCollector, "_spark_items", staticmethod(slowed(original))
         )
     else:
-        collector._image_items = slowed(collector._image_items)  # type: ignore[method-assign]
+        collector._image_items = slowed(collector._image_items)
 
     result = collector.collect()
 
@@ -530,7 +543,7 @@ def test_many_scopes_share_one_attempt_budget_and_each_attempts_its_first_item(
             "_spark_items",
             staticmethod(slow(UnusedStorageCollector._spark_items)),
         )
-        collector._image_items = slow(collector._image_items)  # type: ignore[method-assign]
+        collector._image_items = slow(collector._image_items)
         before = frozen_pass_budgets.seconds
         result = collector.collect()
     finally:
@@ -612,13 +625,6 @@ def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load
     removable "insufficient" and removed nothing while relief told the load
     "evicting", so the load waited out its budget."""
 
-    from vonk_control.distributed_recovery.common import (
-        _settle_unrecoverable,
-        release_inactive_run_claims_in_session,
-    )
-
-    from .recipe_operations_support import started_recipe
-
     sessions, service, installation_id, nodes = _real_lifecycle(tmp_path, nodes=sparks)
     run_id = started_recipe(
         sessions, service, installation_id, nodes, request_id=str(uuid.uuid4())
@@ -636,7 +642,8 @@ def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load
                 InstallationNode.installation_id == installation_id
             )
         )
-    assert held is not None and held > 0
+    assert held is not None
+    assert held > 0
     before = _ordinals(sessions)
     collector = _real_collector(sessions, service, nodes)
     collector._demands = StorageDemands(lambda: _REAL_CLOCK)
@@ -665,7 +672,8 @@ def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load
 
     with sessions() as session:
         stop = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
-        assert stop is not None and stop.actor == ACTOR, first.scopes
+        assert stop is not None, first.scopes
+        assert stop.actor == ACTOR, first.scopes
         assert session.scalar(select(Job).where(Job.kind == "recipe.uninstall")) is None
     assert _ordinals(sessions) == before
     # The pass measures the load's gap, the one relief told the load.
@@ -754,7 +762,8 @@ def test_removal_a_guard_refuses_queues_nothing(tmp_path: Path) -> None:
     with sessions() as session:
         assert session.scalar(select(Job).where(Job.kind == "recipe.uninstall")) is None
         installation = session.get(RecipeInstallation, installation_id)
-        assert installation is not None and installation.state == "installed"
+        assert installation is not None
+        assert installation.state == "installed"
         assert session.scalar(select(func.count()).select_from(RecipeRun)) == 0
         assert session.scalar(
             select(func.count()).select_from(InstallationNode)
@@ -841,13 +850,6 @@ def test_a_failed_run_is_stopped_while_its_recipe_revision_row_is_held(
     without reading it, ended in a lock timeout pass after pass. Catches a Stop
     that waits on the revision row: it is queued while the row stays held."""
 
-    from vonk_control.distributed_recovery.common import (
-        _settle_unrecoverable,
-        release_inactive_run_claims_in_session,
-    )
-
-    from .recipe_operations_support import started_recipe
-
     sessions, service, installation_id, nodes = _real_lifecycle(
         tmp_path, engine=postgres_engine
     )
@@ -890,7 +892,8 @@ def test_a_failed_run_is_stopped_while_its_recipe_revision_row_is_held(
     assert "error" not in outcome, outcome
     with sessions() as session:
         stop = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
-        assert stop is not None and stop.actor == ACTOR, outcome
+        assert stop is not None, outcome
+        assert stop.actor == ACTOR, outcome
 
 
 def test_the_sweep_reads_its_evidence_on_postgres(
@@ -939,7 +942,7 @@ def test_receipt_no_recipe_needs_is_removed_when_disk_is_short_and_recent_ones_l
     path = _receipt(tmp_path, AN_IMAGE)
     recent = _receipt(tmp_path, "e" * 64, age=timedelta(hours=2))
     blobs = SimpleNamespace(calls=0)
-    blobs.collect = lambda: setattr(blobs, "calls", blobs.calls + 1)  # type: ignore[attr-defined]
+    blobs.collect = lambda: setattr(blobs, "calls", blobs.calls + 1)
     exact = {"reserve_floor_bytes": 0, "reserve_fraction": 0.0}
 
     # One byte short of the 100 GiB low line: the idle receipt covers it.
@@ -971,9 +974,6 @@ def test_an_unavailable_image_store_is_no_image_items_this_pass_then_heals(
 ) -> None:
     """Catches the guarded image store's unavailability escaping the sweep as a
     failure that ends the storage lane on the first flap of the cache mount."""
-
-    from vonk_agent_protocol.capability_reply import ControllerCapability
-    from vonk_control.capabilities import CapabilityRegistry
 
     path = _receipt(tmp_path, AN_IMAGE)
     now = [NOW]

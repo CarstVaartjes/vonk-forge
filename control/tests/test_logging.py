@@ -1,11 +1,18 @@
 import logging
 
 import pytest
+
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Damaged,
+    read_or_rebuild,
+)
 from vonk_control.logging import (
     configure_controller_logging,
     log_event,
     redact_text,
 )
+from vonk_control.operations.contract import sanitize_failure_evidence
 
 
 def test_structured_logger_redacts_secrets(caplog) -> None:
@@ -89,7 +96,6 @@ def test_model_access_url_without_credentials_remains_useful() -> None:
 
 
 def test_persisted_failure_evidence_does_not_retain_signed_download_queries() -> None:
-    from vonk_control.operations.contract import sanitize_failure_evidence
 
     safe = sanitize_failure_evidence(
         {
@@ -104,11 +110,6 @@ def test_retired_bookkeeping_names_subject_and_reason_in_production_output(
     capsys,
 ) -> None:
     """The runtime formatter drops extra fields; the cause must survive it."""
-    from vonk_control.lifecycle.evidence import (
-        BookkeepingReason,
-        Damaged,
-        read_or_rebuild,
-    )
 
     configure_controller_logging()
     read_or_rebuild(
@@ -141,6 +142,7 @@ def test_redact_text_masks_database_credentials(text: str) -> None:
     """Catches a redactor limited to http(s) URLs, unquoted assignments or a URL not preceded by a space."""
     safe = redact_text(text)
 
-    assert "s3cretpw" not in safe and "s3cr" not in safe
+    assert "s3cretpw" not in safe
+    assert "s3cr" not in safe
     assert "spaces" not in safe
     assert "db" in safe

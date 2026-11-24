@@ -11,30 +11,29 @@ from typing import (
 )
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.contracts import canonical_message
 
-from ..artifact_jobs.lifecycle import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     require_reference_open,
 )
-from ..artifact_reference_scan.model_sets import require_model_sets_open
-from ..lifecycle.evidence import (
+from vonk_control.artifact_reference_scan.model_sets import require_model_sets_open
+from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
     Residue,
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..models.jobs import Job
-from ..run_switch_contract.observation import (
-    RunSwitchStoredIdentity,
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_contract.observation import RunSwitchStoredIdentity
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.vocabulary import (
+    RunSwitchAction,
+    RunSwitchPlacementAction,
 )
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.vocabulary import RunSwitchAction, RunSwitchPlacementAction
-from ..strict_json import (
-    read_stored_document,
-)
-from .errors import RunSwitchRetryLater
+from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
+from vonk_control.strict_json import read_stored_document
 
 
 def _view_identity(

@@ -7,8 +7,10 @@ from typing import Literal
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import AgentClaim, AgentResult, canonical_message
+
+from vonk_agent_protocol.contracts import AgentClaim, AgentResult
 from vonk_agent_protocol.recipe_operations import RecipeReconcilePayload
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.models.jobs import Job
@@ -58,7 +60,7 @@ def pg_service(postgres_service):  # noqa: F811 - the imported fixture, requeste
 
 @pytest.mark.parametrize(
     "interruption",
-    ("temporary-failure", "agent-restart", "lease-expiry"),
+    ["temporary-failure", "agent-restart", "lease-expiry"],
     ids=("temporary-failure", "agent-restart-interrupted", "lease-expiry"),
 )
 def test_postgres_recipe_reconcile_retries_same_intent_and_fences_old_result(
@@ -128,7 +130,8 @@ def test_postgres_recipe_reconcile_retries_same_intent_and_fences_old_result(
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
         parent_row = session.get(Job, parent_job.id)
-        assert stored is not None and parent_row is not None
+        assert stored is not None
+        assert parent_row is not None
         assert stored.state in aos.PARKED
         assert stored.current_attempt == fenced_attempt(sessions, first).attempt
         assert stored.workload_intent_ordinal == 1
@@ -208,7 +211,8 @@ def test_postgres_recipe_reconcile_retries_same_intent_and_fences_old_result(
                 == fenced_attempt(sessions, second).attempt,
             )
         )
-        assert stored is not None and parent_row is not None
+        assert stored is not None
+        assert parent_row is not None
         assert stored.state == "succeeded"
         assert stored.current_attempt == fenced_attempt(sessions, second).attempt
         assert stored.workload_intent_ordinal == 1
@@ -226,5 +230,6 @@ def test_postgres_recipe_reconcile_retries_same_intent_and_fences_old_result(
             assert first_attempt.result is None
         else:
             assert first_attempt.result is not None
-        assert second_attempt is not None and second_attempt.state == "succeeded"
+        assert second_attempt is not None
+        assert second_attempt.state == "succeeded"
         assert second_attempt.result == {}

@@ -12,18 +12,20 @@ from pydantic import (
     model_serializer,
     model_validator,
 )
-from vonk_agent_protocol.compiled_execution_plan import MemoryKind
-from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
-from vonk_agent_protocol.inventory import MemoryPool
 from vonk_forge_contracts import EndpointAlias
 from vonk_forge_contracts.recipe import Scalar
 
-from ..mapping_parameters import MappingParameters
-from ..operations.blockers import SwapShortfallEvidence
-from ..strict_json import StrictModel
-from .identity import NodeId, UuidId
-from .requests import MemoryUsageUncertainty, SparkGroupNode
-from .vocabulary import (
+from vonk_agent_protocol.compiled_execution_plan import MemoryKind
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
+from vonk_agent_protocol.inventory import MemoryPool
+from vonk_control.mapping_parameters import MappingParameters
+from vonk_control.operations.blockers import SwapShortfallEvidence
+from vonk_control.run_switch_contract.identity import NodeId, UuidId
+from vonk_control.run_switch_contract.requests import (
+    MemoryUsageUncertainty,
+    SparkGroupNode,
+)
+from vonk_control.run_switch_contract.vocabulary import (
     Digest,
     PortNumber,
     RunSwitchBuildEvidenceState,
@@ -34,6 +36,7 @@ from .vocabulary import (
     RunSwitchReasonSeverity,
     RunSwitchSubphase,
 )
+from vonk_control.strict_json import StrictModel
 
 
 class RunSwitchReason(StrictModel):

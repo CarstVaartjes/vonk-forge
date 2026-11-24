@@ -15,6 +15,8 @@ from importlib.resources import files
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import RecipeApi
+
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.revision_contract import read_recipe_projection
 from vonk_control.catalog.service import CatalogService
@@ -26,7 +28,6 @@ from vonk_control.catalog.sync_contract import (
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot
-from vonk_forge_contracts import RecipeApi
 
 from .test_catalog_entities import _model, _recipe
 from .test_catalog_sync_topology import _item

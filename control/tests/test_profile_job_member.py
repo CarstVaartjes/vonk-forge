@@ -17,7 +17,10 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import func, select
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+
+from cluster_profiles.fleet_qualification_campaign_cli.contracts import Lane, Row
+from cluster_profiles.fleet_qualification_campaign_cli.profiles import _serving_run
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.recipe_jobs import (
@@ -30,6 +33,7 @@ from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
 from vonk_agent_protocol.state_machines import ReservationState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs import states as ajs
 from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
@@ -46,9 +50,6 @@ from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.phase_results import RunSwitchRuntimeInstallResult
 from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
-
-from cluster_profiles.fleet_qualification_campaign_cli.contracts import Lane, Row
-from cluster_profiles.fleet_qualification_campaign_cli.profiles import _serving_run
 
 from .artifact_jobs_support import _configure_artifact_recipe, submitted_artifact_job
 from .lifecycle_simulation.invariants import ENDED
@@ -145,7 +146,8 @@ def _finish_artifact_job(
                 AgentOperation.parent_job_id == job.operation_id
             )
         )
-        assert operation is not None and operation.kind == "recipe.job.run.v1"
+        assert operation is not None
+        assert operation.kind == "recipe.job.run.v1"
         node_id = operation.node_id
     service.put_output(
         job.id,
@@ -252,13 +254,16 @@ def test_a_profile_load_activates_a_job_recipe_and_a_later_load_stops_it(
                 )
             )
             run = session.get(RecipeRun, run_id)
-            assert stop is not None and run is not None
+            assert stop is not None
+            assert run is not None
             # The finished job left nothing on the Spark: the run is stopped
             # under the newer load's intent and its reservation released.
             assert stop.payload["execution_mode"] == "one-shot-jobs"
             stop_ordinal = stop.payload["workload_intent_ordinal"]
-            assert type(stop_ordinal) is int and stop_ordinal > ordinal
-            assert run.state == "stopped" and run.route_state == "withdrawn"
+            assert type(stop_ordinal) is int
+            assert stop_ordinal > ordinal
+            assert run.state == "stopped"
+            assert run.route_state == "withdrawn"
             assert (
                 session.scalar(
                     select(ResourceReservation.id).where(
@@ -349,7 +354,8 @@ def test_an_idle_job_member_reads_as_running_and_self_healing_leaves_it_alone(
                 == loads
             )
             held = session.get(RecipeRun, run_id)
-            assert held is not None and held.state == "running"
+            assert held is not None
+            assert held.state == "running"
             assert (
                 session.scalar(select(Job.id).where(Job.kind == "recipe.stop")) is None
             )
@@ -457,7 +463,8 @@ def test_a_job_that_ended_on_an_offline_spark_never_holds_a_later_load(
         assert ended.result_evidence.active_scope_may_remain is True
         with world.sessions() as session:
             run = session.get(RecipeRun, run_id)
-            assert run is not None and run.state != "running"
+            assert run is not None
+            assert run.state != "running"
         other, _number = world.create_profile(
             "Other member", [world.assignment(SOLO_B, spark)]
         )
@@ -469,7 +476,8 @@ def test_a_job_that_ended_on_an_offline_spark_never_holds_a_later_load(
         assert sim.settle(other_load) == "succeeded"
         with world.sessions() as session:
             run = session.get(RecipeRun, run_id)
-            assert run is not None and run.state == "stopped"
+            assert run is not None
+            assert run.state == "stopped"
             assert (
                 session.scalar(
                     select(ResourceReservation.id).where(
@@ -499,7 +507,7 @@ def test_a_resumed_start_phase_adopts_the_activation_it_already_made(
         sessions,
         memory_floor_bytes=0,
         lifecycle=lifecycle,
-        clock=lambda: lifecycle._clock(),
+        clock=lambda: lifecycle._clock(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
         artifact_phase_executor=RecordingArtifactExecutor(),
     )
@@ -592,7 +600,8 @@ def _job_in_flight_on_an_offline_spark(tmp_path: Path, world: World, sim: Simula
         runtime_identity={**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"},
         preflight_fingerprint=fingerprint,
     )
-    assert claim is not None and jobs.get(in_flight.id).state == ajs.RUNNING
+    assert claim is not None
+    assert jobs.get(in_flight.id).state == ajs.RUNNING
 
     offline = sim.sparks.by_node[spark]
     offline.down_steps = 1
@@ -602,7 +611,8 @@ def _job_in_flight_on_an_offline_spark(tmp_path: Path, world: World, sim: Simula
             # Offline, the member keeps its run and its memory: nothing else
             # can use that Spark.
             held = session.get(RecipeRun, run_id)
-            assert held is not None and held.state == "running"
+            assert held is not None
+            assert held.state == "running"
             assert (
                 session.scalar(
                     select(ResourceReservation.id).where(
@@ -630,13 +640,15 @@ def _assert_ended_and_stopped_exactly(
 
     ended = jobs.get(job_id)
     # The run's Stop cancels the live lost job; the exact Stop's receipt ends it.
-    assert ended.state == ajs.CANCELLED and ended.supported_actions == ()
+    assert ended.state == ajs.CANCELLED
+    assert ended.supported_actions == ()
     assert ended.result_evidence is not None
     assert ended.result_evidence.active_scope_may_remain is False
     assert not ended.result_evidence.scope_unproven
     with world.sessions() as session:
         order = session.get(Job, ended.operation_id)
-        assert order is not None and order.state in ENDED
+        assert order is not None
+        assert order.state in ENDED
         assert all(
             state in ENDED
             for state in session.scalars(
@@ -669,7 +681,8 @@ def test_a_spark_restart_mid_job_keeps_the_job_lost_and_the_member(
         )
 
         lost = jobs.get(job_id)
-        assert lost.state == ajs.OBSERVING and lost.run_id == run_id
+        assert lost.state == ajs.OBSERVING
+        assert lost.run_id == run_id
         assert lost.supported_actions == ("stop",)
         assert lost.result_evidence is not None
         assert lost.result_evidence.failure_kind == "agent-lease-expired"
@@ -682,7 +695,8 @@ def test_a_spark_restart_mid_job_keeps_the_job_lost_and_the_member(
         )
         with world.sessions() as session:
             run = session.get(RecipeRun, run_id)
-            assert run is not None and run.state == "running"
+            assert run is not None
+            assert run.state == "running"
             assert (
                 session.scalars(
                     select(func.count()).select_from(FleetProfileApplication)
@@ -743,7 +757,8 @@ def test_a_submission_after_a_lost_job_is_admitted_without_operator_action(
         assert ordinals() == before
         with world.sessions() as session:
             run = session.get(RecipeRun, lost)
-            assert run is not None and run.state == "running"
+            assert run is not None
+            assert run.state == "running"
             assert (
                 session.scalar(
                     select(Job.id).where(
@@ -795,7 +810,8 @@ def test_a_switch_from_a_job_member_with_a_lost_job_stops_it_and_serves_the_new_
         )
         with world.sessions() as session:
             stopped = session.get(RecipeRun, lost)
-            assert stopped is not None and stopped.state == "stopped"
+            assert stopped is not None
+            assert stopped.state == "stopped"
             assert (
                 session.scalar(
                     select(ResourceReservation.id).where(

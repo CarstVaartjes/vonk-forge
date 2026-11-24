@@ -15,20 +15,19 @@ from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OperatorActionName
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.state_machines import ModelFileState
-
-from ..bounded_retry import bounded_attempts
-from ..categorized_faults import OperationInterrupted
-from ..models.cache import ModelCacheOperation
-from ..worker.memory_contract import WorkerMemoryComponent
-from . import constants
-from .artifacts import ArtifactSpec
-from .constants import _CHUNK_BYTES, _TRANSFER_CLAIM_SECONDS
-from .contract import ModelCacheRepairPayload
-from .errors import ModelCacheStorageUnknown
-from .persistence import _operation_cancellation
+from vonk_control.bounded_retry import bounded_attempts
+from vonk_control.categorized_faults import OperationInterrupted
+from vonk_control.model_cache import constants
+from vonk_control.model_cache.artifacts import ArtifactSpec
+from vonk_control.model_cache.constants import _CHUNK_BYTES, _TRANSFER_CLAIM_SECONDS
+from vonk_control.model_cache.contract import ModelCacheRepairPayload
+from vonk_control.model_cache.errors import ModelCacheStorageUnknown
+from vonk_control.model_cache.persistence import _operation_cancellation
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.worker.memory_contract import WorkerMemoryComponent
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 #: The partials directory of a repair is this prefix plus its transfer id; a
@@ -63,7 +62,6 @@ class SplitTransferMixin:
         *,
         owner: str,
         operation_id: str,
-        force: bool,
         interrupt_after_bytes: int | None,
     ) -> None:
         """Ingest a file the source hosts only as ordered parts.
@@ -123,7 +121,6 @@ class SplitTransferMixin:
                 owner=owner,
                 operation_id=operation_id,
                 completed_artifacts=0,
-                force=force,
                 interrupt_after_bytes=interrupt_after_bytes,
                 fetch_only=True,
             )
@@ -160,7 +157,7 @@ class SplitTransferMixin:
             if not cache._publication_allowed(operation_id, set_digest, spec.sha256):
                 raise OperationInterrupted("model download was removed during assembly")
             cache._place_object(spec, assembled)
-            cache._mark_artifact_verified(spec, set_digest)
+            cache._mark_artifact_verified(set_digest)
 
     @staticmethod
     def _rehash_prefix(path: Path, length: int, digest: hashlib._Hash) -> bool:
@@ -395,7 +392,6 @@ class SplitTransferMixin:
         owner: str,
         operation_id: str,
         completed_artifacts: int,
-        force: bool,
         interrupt_after_bytes: int | None,
         fetch_only: bool = False,
     ) -> None:
@@ -433,7 +429,7 @@ class SplitTransferMixin:
                         "model download was removed during verification"
                     )
                 cache._publish_object(spec, part)
-                cache._mark_artifact_verified(spec, set_digest)
+                cache._mark_artifact_verified(set_digest)
             return
         if offset == spec.expected_bytes:
             part.unlink(missing_ok=True)

@@ -30,8 +30,9 @@ from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.exc import OperationalError as DatabaseOperationalError
 from sqlalchemy.exc import TimeoutError as DatabasePoolTimeout
 from sqlalchemy.orm.exc import StaleDataError
+
+from vonk_agent_protocol.agent_operations import AgentFailureKind
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import AgentFailureKind
 from vonk_agent_protocol.disposition import (
     FAILURE_KIND_DISPOSITION,
     WAIT_REASON_DISPOSITION,
@@ -43,8 +44,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
-
-from .security_edges import SECURITY_REFUSAL_EDGES
+from vonk_control.security_edges import SECURITY_REFUSAL_EDGES
 
 # The codes of a real security refusal, including the agent's `helper_<code>`
 # preflight codes, the helper's un-prefixed wire rejection codes, the agent's

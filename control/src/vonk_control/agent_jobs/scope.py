@@ -7,14 +7,14 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..admission_locking import AdmissionRowLock, lock_admission_rows
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from .stored import column_value
+from vonk_control.admission_locking import AdmissionRowLock, lock_admission_rows
+from vonk_control.agent_jobs.stored import column_value
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
 
 if TYPE_CHECKING:
-    from .service import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
 
 
 def _target_scope(targets: object) -> tuple[str, ...] | None:
@@ -75,7 +75,6 @@ def _lock_operation_scopes(
 
 
 def _lock_target_scopes(
-    cls: type[AgentJobService],
     session: Session,
     scopes: dict[str, tuple[str, tuple[str, ...]]],
     node_id: str,
@@ -151,6 +150,6 @@ def _lock_target_scopes(
     )
     return not any(
         parent_id not in parents
-        or cls._target_scope(column_value(parents[parent_id], "targets")) != scope
+        or _target_scope(column_value(parents[parent_id], "targets")) != scope
         for parent_id, scope in scopes.values()
     )

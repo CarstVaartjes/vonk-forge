@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
+
 from vonk_control.preparation_contract import RolloutPreparation
 
 NOW = datetime(2026, 9, 5, tzinfo=UTC)

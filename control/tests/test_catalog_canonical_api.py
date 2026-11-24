@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
+
 from vonk_control.auth import Actor
 from vonk_control.catalog.api import install_catalog_routes
 
@@ -11,11 +12,7 @@ def _administrator() -> Actor:
 
 def test_catalog_api_exposes_canonical_import_and_sync_only() -> None:
     app = FastAPI()
-    install_catalog_routes(
-        app,
-        actor_dependency=_administrator,
-        service=None,
-    )
+    install_catalog_routes(app, actor_dependency=_administrator)
 
     paths = app.openapi()["paths"]
     assert "/api/catalog/source-bundles/{sha256}" not in paths

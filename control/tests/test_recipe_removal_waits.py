@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
@@ -123,6 +124,7 @@ def test_a_removal_recovers_under_the_same_request_after_repeated_failures(
     contended = [10**6]
     engine, sessions, service, now, _recipe = _removal(tmp_path, monkeypatch, contended)
     try:
+        waiting = None
         for _ in range(RecoveryPolicy().max_failures + 2):
             service.advance_removals(limit=1)
             now[0] += timedelta(hours=1)
@@ -132,10 +134,12 @@ def test_a_removal_recovers_under_the_same_request_after_repeated_failures(
             assert waiting.failure.code == RuntimeImageCode.PUBLICATION_CONTENDED
             with sessions() as session:
                 row = session.get(Job, waiting.operation_id)
-                assert row is not None and row.next_action_at is not None
+                assert row is not None
+                assert row.next_action_at is not None
         contended[0] = 0
         for _ in range(4):
             service.advance_removals(limit=1)
+        assert waiting is not None
         assert _status(service).operation_id == waiting.operation_id
         assert _status(service).state == LifecycleState.SUCCEEDED
         _admit_fresh_preparation(service)
@@ -167,7 +171,8 @@ def test_a_wait_on_a_live_model_removal_child_never_exhausts(
             now[0] += timedelta(hours=1)
         waiting = _status(service)
         assert waiting.state == LifecycleState.BACKOFF
-        assert waiting.failure is not None and waiting.failure.retryable
+        assert waiting.failure is not None
+        assert waiting.failure.retryable
         for _ in range(4):
             service.advance_removals(limit=1)
         assert _status(service).state == "succeeded"

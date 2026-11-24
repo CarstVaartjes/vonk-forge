@@ -24,7 +24,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def _contract_fingerprint(document: object) -> str:
     path = ROOT / "control/src/vonk_control/build_identity.py"
     spec = importlib.util.spec_from_file_location("_vonk_build_identity", path)
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module  # dataclasses resolves its module by name
     spec.loader.exec_module(module)

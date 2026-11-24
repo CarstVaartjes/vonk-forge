@@ -1,9 +1,10 @@
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
 from vonk_control.api.common import SpaFiles
 
 
 def test_spa_falls_back_to_index_for_client_routes_but_not_assets(tmp_path) -> None:
-    from fastapi import FastAPI
 
     web = tmp_path / "web"
     web.mkdir()

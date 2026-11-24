@@ -8,28 +8,29 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select, true
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.recipes import RecipeUpdateCode
-
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.lifecycle.recipe_update_batch import CANCEL_BUDGET
+from vonk_control.lifecycle.types import State
+from vonk_control.logging import redact_text
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.jobs import Job
 from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
-
-from ..categorized_errors import InvalidValue
-from ..lifecycle.recipe_update_batch import CANCEL_BUDGET
-from ..lifecycle.types import State
-from ..logging import redact_text
-from ..models.catalog import CatalogDocumentRevision
-from ..models.jobs import Job
-from ..persisted_waits import schedule_wait, wait_due
-from ..recipe_image_availability.contracts import (
+from vonk_control.persisted_waits import schedule_wait, wait_due
+from vonk_control.recipe_image_availability.contracts import (
+    RecipeImageAvailabilityError,
     RecipeImageAvailabilityRefused,
     RecipeImageAvailabilityUnknown,
 )
-from ..recipe_operations.availability_intent import RecipeRevisionIntent
-from ..stall_window import progress_deadline
-from ..strict_json import serialize_json_value
-from .contract import (
+from vonk_control.recipe_image_availability.view_contract import (
+    RecipeImageAvailabilityView,
+)
+from vonk_control.recipe_operations.availability_intent import RecipeRevisionIntent
+from vonk_control.recipe_update_batches.contract import (
     UPDATE_KIND,
     RecipeUpdateChild,
     RecipeUpdateDocument,
@@ -37,11 +38,13 @@ from .contract import (
     UpdateChildState,
     read_update_document,
 )
+from vonk_control.stall_window import progress_deadline
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeUpdateBatches
+    from vonk_control.recipe_update_batches.service import RecipeUpdateBatches
 
-from .helpers import (
+from vonk_control.recipe_update_batches.helpers import (
     _OBSERVATION_INTERVAL,
     _SETTLED,
     RecipeUpdateClaim,
@@ -55,7 +58,6 @@ class ExecutionMixin:
         self, owner: str, requested_id: str | None = None
     ) -> RecipeUpdateClaim | None:
         service = cast("RecipeUpdateBatches", self)
-        from ..recipe_image_availability.contracts import RecipeImageAvailabilityError
 
         if not owner or len(owner) > 95:
             raise InvalidValue("update worker owner must contain 1 to 95 characters")
@@ -201,10 +203,6 @@ class ExecutionMixin:
 
     def _run_once(self, claim: RecipeUpdateClaim) -> None:
         service = cast("RecipeUpdateBatches", self)
-        from ..recipe_image_availability.contracts import RecipeImageAvailabilityError
-        from ..recipe_image_availability.view_contract import (
-            RecipeImageAvailabilityView,
-        )
 
         now = _now(service.owner._clock())
         with service.sessions.begin() as session:

@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from sqlalchemy import update
+
 from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.cache import ModelCacheSet
 from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.run_switch_operations.artifact_inspection import (
+    DatabaseRunSwitchArtifactInspector,
+)
 
 from .display_fixtures import reword
 from .test_canonical_cache_build_identity import (
@@ -171,14 +178,6 @@ def test_an_installation_of_an_unreadable_revision_does_not_stop_inspection(
     readable exact model bindings instead of failing unrelated inspection.
     """
 
-    from datetime import UTC, datetime
-
-    from vonk_control.models.cache import ModelCacheSet
-    from vonk_control.models.execution import RecipeInstallation
-    from vonk_control.run_switch_operations.artifact_inspection import (
-        DatabaseRunSwitchArtifactInspector,
-    )
-
     sessions = _sessions()
     now = datetime(2026, 9, 29, 12, tzinfo=UTC)
     file_digest = hashlib.sha256(b"model bytes!").hexdigest()
@@ -277,14 +276,18 @@ def test_an_installation_of_an_unreadable_revision_does_not_stop_inspection(
     cache.storage_summary()
     with sessions() as session:
         row = session.get(ModelCacheSet, "3" * 64)
-        assert row is not None and "recipe-installation" in row.protected_reasons
+        assert row is not None
+        assert "recipe-installation" in row.protected_reasons
         unknown = session.get(ModelCacheSet, "4" * 64)
-        assert unknown is not None and unknown.protected
+        assert unknown is not None
+        assert unknown.protected
     _replace_stored_document(sessions, old_id, recipe_document)
     cache.storage_summary()
     with sessions() as session:
         retained = session.get(ModelCacheSet, "3" * 64)
         unrelated = session.get(ModelCacheSet, "4" * 64)
-        assert retained is not None and retained.protected
-        assert unrelated is not None and not unrelated.protected
+        assert retained is not None
+        assert retained.protected
+        assert unrelated is not None
+        assert not unrelated.protected
     cache.close()

@@ -5,11 +5,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from ..cli_artifact_jobs import (
-    add_artifact_job_commands,
-)
-from ..cli_json_contract import Word
-from .common import (
+from cluster_profiles.cli_artifact_jobs import add_artifact_job_commands
+from cluster_profiles.cli_json_contract import Word
+from cluster_profiles.controller_cli.common import (
     MAX_LOG_LINES,
     _action_flags,
     _activity_cursor,

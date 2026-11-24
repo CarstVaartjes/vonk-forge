@@ -17,6 +17,12 @@ from alembic.migration import MigrationContext
 from sqlalchemy import inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+)
+
 from vonk_agent_protocol.recipe_operations import RecipeInstallPayload
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import (
@@ -31,11 +37,6 @@ from vonk_control.models.execution import (
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.recipe_operations.progress import _recipe_model_identities
-from vonk_forge_contracts import (
-    ModelDefinition,
-    RecipeDefinition,
-    document_sha256,
-)
 
 from .recipe_operations_support import (
     NOW,
@@ -86,7 +87,8 @@ def test_recipe_model_identities_include_canonical_companion_dependencies() -> N
     )
 
     class RevisionSession(Session):
-        def scalar(self, _statement: object) -> SimpleNamespace:
+        # A one-method fake: the reader only calls scalar(statement).
+        def scalar(self, _statement: object) -> SimpleNamespace:  # pyright: ignore[reportIncompatibleMethodOverride]
             return next(revisions)
 
     identities = _recipe_model_identities(
@@ -142,9 +144,12 @@ def test_restart_interrupted_install_result_keeps_lifecycle_pending_until_retry(
                 InstallationNode.node_id == nodes[0],
             )
         )
-        assert job is not None and job.state == "running"
-        assert installation is not None and installation.state == "installing"
-        assert node is not None and node.state != "failed"
+        assert job is not None
+        assert job.state == "running"
+        assert installation is not None
+        assert installation.state == "installing"
+        assert node is not None
+        assert node.state != "failed"
     view = service.get(installation_operation.id)
     assert view.retry_due_at == NOW + timedelta(seconds=2)
 
@@ -181,7 +186,8 @@ def test_restart_interrupted_install_result_keeps_lifecycle_pending_until_retry(
                 InstallationNode.node_id == nodes[0],
             )
         )
-        assert installation is not None and node is not None
+        assert installation is not None
+        assert node is not None
         if retry_state == "succeeded":
             assert installation.state == "installed"
             assert node.state == "installed"
@@ -223,8 +229,10 @@ def test_retry_scheduled_start_observation_failure_keeps_the_run_pending(
     with sessions() as session:
         run = session.get(RecipeRun, started.owner_id)
         node = session.scalar(select(RunNode).where(RunNode.run_id == started.owner_id))
-        assert run is not None and run.state == "starting"
-        assert node is not None and node.state != "failed"
+        assert run is not None
+        assert run.state == "starting"
+        assert node is not None
+        assert node.state != "failed"
     assert service.get(started.id).retry_due_at == NOW + timedelta(seconds=2)
 
 
@@ -369,8 +377,11 @@ def test_fresh_alembic_head_postgres_runs_canonical_recipe_lifecycle(
         assert canonical_revision.kind == "recipe"
         assert canonical_revision.state == "active"
 
-    with pytest.raises(IntegrityError), sessions.begin() as session:
+    def expected_failure(session):
         installation_row = session.get(RecipeInstallation, installation.owner_id)
         assert installation_row is not None
         installation_row.recipe_revision_id = "missing-canonical-revision"
         session.flush()
+
+    with pytest.raises(IntegrityError), sessions.begin() as session:
+        expected_failure(session)

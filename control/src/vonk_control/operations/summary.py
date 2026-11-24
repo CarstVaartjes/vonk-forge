@@ -12,11 +12,11 @@ from collections.abc import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
-from ..models.execution import RecipeRun
-from ..models.operations import AgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation as AgentOperationKind
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.operations import AgentOperation
 
 _KIND_PHRASES: dict[str, str] = {
     AgentOperationKind.RUNTIME_PREFLIGHT: "Runtime check",
@@ -49,10 +49,7 @@ def _words(value: str) -> str:
     """A kind or state as lowercase words, without a trailing schema version."""
 
     text = value.strip().lower()
-    parts = [
-        part
-        for part in text.replace(".", " ").replace("_", " ").replace("-", " ").split()
-    ]
+    parts = list(text.replace(".", " ").replace("_", " ").replace("-", " ").split())
     if len(parts) > 1 and parts[-1][0] == "v" and parts[-1][1:].isdigit():
         parts.pop()
     return " ".join(parts)
@@ -77,13 +74,12 @@ def workload_aliases(
 
     if not operations:
         return {}
-    return {
-        operation_id: alias
-        for operation_id, alias in session.execute(
+    return dict(
+        session.execute(
             select(AgentOperation.id, RecipeRun.alias)
             .join(
                 RecipeRun, RecipeRun.id == AgentOperation.payload["run_id"].as_string()
             )
             .where(AgentOperation.id.in_([operation.id for operation in operations]))
-        )
-    }
+        ).all()
+    )

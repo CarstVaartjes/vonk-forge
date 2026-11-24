@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, cast
@@ -9,8 +10,15 @@ from typing import Any, cast
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from vonk_agent_protocol.capability_reply import (
+    CapabilityReason,
+    ControllerCapability,
+)
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs.maintenance import ArtifactMaintenanceCadence
+from vonk_control.capabilities import CapabilityRegistry
+from vonk_control.capability_contract import CapabilityAvailability
 from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
@@ -22,6 +30,9 @@ from vonk_control.recipe_operations.operation_worker import RecipeOperationWorke
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runtime_image_preparation.storage import (
+    FilesystemRuntimeImageStorage,
+)
 from vonk_control.telemetry import maintenance as telemetry_maintenance
 from vonk_control.worker.assembly import assemble_production_worker
 from vonk_control.worker.loop import Worker
@@ -113,8 +124,6 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
     request,
     monkeypatch,
 ) -> None:
-    from vonk_agent_protocol.capability_reply import ControllerCapability
-    from vonk_control.capabilities import CapabilityRegistry
 
     registry = CapabilityRegistry()
     guard = registry.guard
@@ -128,7 +137,10 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     current = datetime(2026, 8, 6, tzinfo=UTC)
-    clock = lambda: current
+
+    def clock():
+        return current
+
     jobs = JobService(sessions, clock=clock)
     route_root = tmp_path / "routes"
     publisher = AtomicRouteBundlePublisher(
@@ -195,9 +207,11 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
     assert fleet_profiles._switch_adapter._run_switch is run_switches
     assert run_switches._artifact_phase_executor is not None
     image_production = next(
-        closer.__self__
-        for closer in worker._background_closers
-        if hasattr(getattr(closer, "__self__", None), "scheduler")
+        owner
+        for owner in (
+            getattr(closer, "__self__", None) for closer in worker._background_closers
+        )
+        if owner is not None and hasattr(owner, "scheduler")
     )
     assert image_production.scheduler is not None
     scheduler = image_production.scheduler
@@ -223,7 +237,10 @@ def test_production_worker_binds_build_reuse_to_the_image_cache_root(tmp_path) -
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     current = datetime(2026, 8, 6, tzinfo=UTC)
-    clock = lambda: current
+
+    def clock():
+        return current
+
     jobs = JobService(sessions, clock=clock)
     publisher = AtomicRouteBundlePublisher(tmp_path / "routes")
 
@@ -345,18 +362,12 @@ def test_unusable_image_cache_root_leaves_the_other_lanes_running_and_heals(
     tmp_path, monkeypatch
 ) -> None:
     """Catches an optional image store, built eagerly at assembly, ending the process."""
-    from vonk_agent_protocol.capability_reply import (
-        CapabilityReason,
-        ControllerCapability,
-    )
-    from vonk_control.capabilities import CapabilityRegistry
-    from vonk_control.capability_contract import CapabilityAvailability
-    from vonk_control.runtime_image_preparation.storage import (
-        FilesystemRuntimeImageStorage,
-    )
 
     now = [datetime(2026, 8, 6, tzinfo=UTC)]
-    clock = lambda: now[0]
+
+    def clock():
+        return now[0]
+
     registry = CapabilityRegistry(clock=clock)
     engine = create_engine(f"sqlite:///{tmp_path / 'optional-image-cache.sqlite'}")
     Base.metadata.create_all(engine)
@@ -433,7 +444,6 @@ def test_unusable_image_cache_root_leaves_the_other_lanes_running_and_heals(
 
 def test_the_production_worker_runs_the_first_catalog_sync(tmp_path) -> None:
     """Catches the automatic catalog sync wired to no process at all."""
-    import threading
 
     started = threading.Event()
 
@@ -451,7 +461,10 @@ def test_the_production_worker_runs_the_first_catalog_sync(tmp_path) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'worker.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 11, 20, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 11, 20, tzinfo=UTC)
+
     worker = assemble_production_worker(
         jobs=JobService(sessions, clock=clock),
         sessions=sessions,

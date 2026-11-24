@@ -11,7 +11,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from tools.generated_contracts import CLIENT_OUTPUTS, WIRE_OUTPUTS
+from tools.generated_contracts import (  # noqa: E402 -- the repository imports follow the repository root's sys.path entry
+    CLIENT_OUTPUTS,
+    WIRE_OUTPUTS,
+)
 
 
 def snapshot(outputs: tuple[str, ...]) -> dict[str, bytes]:

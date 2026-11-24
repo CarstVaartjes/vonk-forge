@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -15,9 +16,12 @@ from typing import TypedDict, Unpack
 
 import pytest
 import yaml
-from vonk_nas_setup.compose import resolve_compose
 
 from tests.acceptance.runtime import AcceptanceError, reclaim_gateway_journal
+from vonk_agent_protocol.installer_setup import NasInstallTemplate
+from vonk_nas_setup.compose import resolve_compose
+from vonk_nas_setup.prompts import PromptIo
+from vonk_nas_setup.setup import prepare
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tests/acceptance/test_fresh_nas_install.py"
@@ -72,7 +76,8 @@ def test_gateway_journal_cleanup_preserves_private_modes_and_siblings(
 
 def _acceptance_module():
     spec = importlib.util.spec_from_file_location("fresh_nas_acceptance", SCRIPT)
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -174,7 +179,6 @@ def test_nas_responses_answer_only_the_remaining_installer_prompts() -> None:
 
 def _installer_payload(tmp_path: Path):
     """The NAS installer payload this checkout publishes."""
-    from vonk_agent_protocol.installer_setup import NasInstallTemplate
 
     rendered = tmp_path / "rendered.yaml"
     _script_module(PRODUCTION_RENDERER, "acceptance_answers_renderer").render(
@@ -196,10 +200,6 @@ def test_lane_answers_are_the_installers_own_prompts_in_order(
     tmp_path: Path,
 ) -> None:
     """Catches lane answers drifting from the prompts the real installer asks."""
-    import io
-
-    from vonk_nas_setup.prompts import PromptIo
-    from vonk_nas_setup.setup import prepare
 
     acceptance = _acceptance_module()
     arguments = {
@@ -408,10 +408,10 @@ def test_operator_tailscale_assets_have_no_acceptance_service_or_policy() -> Non
 def test_tailscale_disabled_service_set_excludes_both_owners() -> None:
     acceptance = _acceptance_module()
 
-    assert acceptance.TAILSCALE_SERVICES == {
+    assert {
         "tailscale-configurator",
         "tailscale-gateway",
-    }
+    } == acceptance.TAILSCALE_SERVICES
     assert acceptance.LOCAL_SERVICES == (
         acceptance.DEFAULT_SERVICES - acceptance.TAILSCALE_SERVICES
     )
@@ -433,7 +433,7 @@ def test_tailscale_disabled_ps_contract_rejects_either_owner() -> None:
     for service in sorted(acceptance.TAILSCALE_SERVICES):
         with pytest.raises(AcceptanceError):
             acceptance.assert_tailscale_services_absent(
-                json.dumps(healthy + [{"Service": service}])
+                json.dumps([*healthy, {"Service": service}])
             )
 
 
@@ -627,7 +627,7 @@ def test_nas_startup_diagnostics_identify_unhealthy_service_and_redact_secret(
     outputs = iter((status, logs))
     commands: list[list[str]] = []
 
-    def run(_bundle: Path, command: list[str]) -> subprocess.CompletedProcess:
+    def run(_bundle: Path, command: list[str]) -> subprocess.CompletedProcess[str]:
         commands.append(command)
         return next(outputs)
 
@@ -921,7 +921,7 @@ def test_tailnet_serve_status_requires_the_exact_selected_routes() -> None:
     wrong_target = _serve_status()
     wrong_target["Services"]["svc:vonk-forge"]["Web"][  # type: ignore[index]
         "vonk-forge.acceptance.example.test:443"
-    ]["Handlers"]["/"]["Proxy"] = "http://other:8080"  # type: ignore[index]
+    ]["Handlers"]["/"]["Proxy"] = "http://other:8080"
     invalid.append(wrong_target)
     wrong_port = _serve_status()
     wrong_port["Services"]["svc:vonk-forge"]["TCP"] = {"8443": {"HTTPS": True}}  # type: ignore[index]
@@ -996,8 +996,8 @@ def test_tailnet_service_probe_uses_an_independent_host_client(
     ]
 
     local_status = _tailscale_status()
-    local_status["Self"]["CapMap"] = {}  # type: ignore[index]
-    local_status["Self"]["PrimaryRoutes"] = []  # type: ignore[index]
+    local_status["Self"]["CapMap"] = {}
+    local_status["Self"]["PrimaryRoutes"] = []
     responses = iter(
         (
             json.dumps(local_status),
@@ -1025,8 +1025,8 @@ def test_no_client_accepts_only_exact_pending_ephemeral_advertisement(
     compose.chmod(0o755)
     monkeypatch.setenv("VONK_ACCEPTANCE_REFERENCE_COMPOSE", str(compose))
     local_status = _tailscale_status()
-    local_status["Self"]["CapMap"] = {}  # type: ignore[index]
-    local_status["Self"]["PrimaryRoutes"] = []  # type: ignore[index]
+    local_status["Self"]["CapMap"] = {}
+    local_status["Self"]["PrimaryRoutes"] = []
 
     responses = iter((json.dumps(local_status), "{}", '{"version":"0.0.1"}'))
 

@@ -10,12 +10,11 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
-from vonk_agent_protocol.gpu_clock import GpuClockRange
 from vonk_forge_contracts import EndpointAlias
 
-from ..preparation_contract import RolloutPreparation
-from ..strict_json import StrictModel
-from .evidence import (
+from vonk_agent_protocol.gpu_clock import GpuClockRange
+from vonk_control.preparation_contract import RolloutPreparation
+from vonk_control.run_switch_contract.evidence import (
     ArtifactStorageImpact,
     ConditionalPostStopMemoryCheck,
     EffectiveSettingsSelection,
@@ -28,14 +27,15 @@ from .evidence import (
     SparkFit,
     StopImpact,
 )
-from .identity import UuidId
-from .requests import (
+from vonk_control.run_switch_contract.identity import UuidId
+from vonk_control.run_switch_contract.requests import (
     InvocationMetadata,
     RunSwitchProfileStopScope,
     RunSwitchReconciliationAuthority,
     SparkGroup,
 )
-from .vocabulary import Digest, RunSwitchAction
+from vonk_control.run_switch_contract.vocabulary import Digest, RunSwitchAction
+from vonk_control.strict_json import StrictModel
 
 
 class RunSwitchAssessment(StrictModel):

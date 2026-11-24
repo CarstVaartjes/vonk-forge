@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select, update
+
 from vonk_agent_protocol.state_machines import InstallationState
 from vonk_control import attempt_residues
 from vonk_control.attempt_residues import LEFTOVER_GRACE, AttemptResidueReconciler
@@ -155,7 +156,8 @@ def test_an_install_ended_before_any_claim_is_removed_by_the_sweep(
     ending(sessions, service, operation)
     with sessions() as session:
         ended = session.get(Job, operation.id)
-        assert ended is not None and ended.state == "cancelled"
+        assert ended is not None
+        assert ended.state == "cancelled"
     owner = operation.owner_id
 
     _residues(sessions, service, SETTLED).tick()
@@ -276,7 +278,8 @@ def test_a_relaunch_between_the_sweeps_read_and_write_is_not_undone(
     if relaunch is _by_preparation:  # re-launches this very row
         assert owner in owners
     else:  # a fresh install plans its own row; the old one is only ended
-        assert owners and owner not in owners
+        assert owners
+        assert owner not in owners
     assert "partial" not in {_state(sessions, str(owner)) for owner in owners}
 
 

@@ -8,6 +8,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
+
 from vonk_control.enrollment.bootstrap import EnrollmentBootstrapConfig
 
 
@@ -104,12 +105,12 @@ def test_from_paths_validates_the_private_controller_route(tmp_path: Path) -> No
 
 @pytest.mark.parametrize(
     ("address", "hostnames"),
-    (
+    [
         ("not-an-ip", ("agents.example.test", "enroll.example.test")),
         ("192.168.1.231", ("agents.example.test",)),
         ("192.168.1.231", ("AGENTS.example.test", "enroll.example.test")),
         (None, ("agents.example.test", "enroll.example.test")),
-    ),
+    ],
 )
 def test_private_controller_route_fails_closed(
     address: str | None,
@@ -188,7 +189,7 @@ def test_from_paths_rejects_non_https_controller_origin(tmp_path: Path) -> None:
         )
 
 
-@pytest.mark.parametrize("kind", ("missing", "symlink", "invalid"))
+@pytest.mark.parametrize("kind", ["missing", "symlink", "invalid"])
 def test_from_paths_requires_one_regular_public_pem_certificate(
     tmp_path: Path,
     kind: str,

@@ -11,6 +11,8 @@ import pytest
 from sqlalchemy import create_engine, delete, event, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.entities import (
     CatalogEntityService,
@@ -28,7 +30,6 @@ from vonk_control.models.catalog import (
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .display_fixtures import create_draft, reword
 
@@ -64,7 +65,8 @@ def _recipe(
 
 def _model_reference(recipe: dict[str, object]) -> dict[str, object]:
     models = recipe["models"]
-    assert isinstance(models, list) and models
+    assert isinstance(models, list)
+    assert models
     selection = models[0]
     assert isinstance(selection, dict)
     reference = selection["model"]
@@ -210,7 +212,8 @@ def test_recipe_resolution_requires_an_exact_active_model_revision(
             CatalogDocumentHead.kind == candidate.kind,
         )
     )
-    assert head is not None and head.active_revision_id is None
+    assert head is not None
+    assert head.active_revision_id is None
     service.fail_candidate(candidate.document_id)
     successor = service.revise(
         candidate.document_id,
@@ -474,7 +477,8 @@ def test_refresh_does_not_repair_a_projection_of_a_malformed_document(
         service.refresh_build_policy()
 
     revision = session.get(CatalogDocumentRevision, revision.id)
-    assert revision is not None and revision.projected == broken
+    assert revision is not None
+    assert revision.projected == broken
     identity = (revision.publisher, revision.slug)
     session.expunge_all()
     session.commit()
@@ -533,7 +537,8 @@ def test_refresh_leaves_a_superseded_old_contract_revision_alone_and_quiet(
         service.refresh_build_policy()
 
     first = session.get(CatalogDocumentRevision, first.id)
-    assert first is not None and first.projected == broken
+    assert first is not None
+    assert first.projected == broken
     assert first.id not in caplog.text
 
 
@@ -620,7 +625,6 @@ def test_imported_recipe_recreates_missing_lookup_root(
     session: Session,
     service: CatalogEntityService,
 ) -> None:
-    from vonk_control.catalog.service import CatalogService
 
     model = _model()
     _resolve(service, model)
@@ -647,7 +651,8 @@ def test_explicit_activation_restores_only_the_named_missing_selection(
     session.execute(delete(CatalogDocumentHead))
     assert service.resolve(revision.id, actor="operator").id == revision.id
     head = session.scalar(select(CatalogDocumentHead))
-    assert head is not None and head.active_revision_id == revision.id
+    assert head is not None
+    assert head.active_revision_id == revision.id
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

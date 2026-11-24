@@ -1,11 +1,12 @@
 """Hold concurrent test threads together, and make two real admissions collide.
 
-``Rendezvous`` is the only thread barrier control tests use (the added-line
-guard ``barriers`` flags a raw ``threading.Barrier``). A raw barrier placed in a
-patched product method waits again when the product calls that method a second
-time on the same thread (a replay after a unique-key conflict, a replan); that
-thread then waits alone until the timeout breaks the barrier, and the test fails
-at random with ``BrokenBarrierError`` instead of naming the re-entry.
+``Rendezvous`` is the only thread barrier control tests use (Ruff ``TID251``
+bans a raw ``threading.Barrier`` everywhere but this module). A raw barrier
+placed in a patched product method waits again when the product calls that
+method a second time on the same thread (a replay after a unique-key conflict,
+a replan); that thread then waits alone until the timeout breaks the barrier,
+and the test fails at random with ``BrokenBarrierError`` instead of naming the
+re-entry.
 """
 
 from __future__ import annotations

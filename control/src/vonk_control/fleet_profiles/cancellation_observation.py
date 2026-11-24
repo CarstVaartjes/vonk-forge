@@ -7,38 +7,43 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
-
-from ..agent_jobs.service import AgentJobService
-from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
-from ..fleet_profile_contract.review import FleetProfilePreview
-from ..lifecycle.evidence import Residue
-from ..lifecycle.fleet_profile import cancellation_state, doc_state
-from ..lifecycle.types import Effect as _LifecycleEffect
-from ..lifecycle.types import State as _LifecycleState
-from ..models.fleet import FleetProfileApplication
-from ..persisted_waits import schedule_wait
-from ..strict_json import read_stored_model
-from .contracts import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileChildPlanBlocked,
     FleetProfileConflict,
 )
-from .dependencies import _CANCELLATION_OBSERVATION_SECONDS, _CHILD_PENDING_STATES
-from .persistence import (
+from vonk_control.fleet_profiles.dependencies import (
+    _CANCELLATION_OBSERVATION_SECONDS,
+    _CHILD_PENDING_STATES,
+)
+from vonk_control.fleet_profiles.persistence import (
     _application_effect_scope,
     _persisted_profile_plan,
     _persisted_profile_progress,
     _stored_progress,
 )
-from .projection_support import (
-    _aware,
-)
+from vonk_control.fleet_profiles.projection_support import _aware
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.fleet_profile import cancellation_state, doc_state
+from vonk_control.lifecycle.types import Effect as _LifecycleEffect
+from vonk_control.lifecycle.types import State as _LifecycleState
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.strict_json import read_stored_model
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 class FleetProfileService:
@@ -310,7 +315,10 @@ class FleetProfileService:
         return _LifecycleEffect.UNKNOWN
 
     def _finish_cancel_records(
-        self, session: Session, row: FleetProfileApplication, residue: bool
+        self,
+        session: Session,
+        row: FleetProfileApplication,
+        residue: bool,  # noqa: FBT001 -- a positional callback or assert-style helper signature
     ) -> None:
         """Close the records of a cancel that ended: the cancellation, the child and
         the result.  The state itself was written by the lifecycle adapter."""

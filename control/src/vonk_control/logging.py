@@ -8,6 +8,7 @@ import re
 import sys
 from contextvars import ContextVar
 from datetime import UTC, datetime
+from typing import TextIO
 from urllib.parse import urlsplit, urlunsplit
 
 #: The API boundary binds each request's correlation id here, so a handler that
@@ -31,7 +32,7 @@ _HTTP_URL = re.compile(r"[a-z][a-z0-9+.-]{0,31}://[^\s<>\"']+", re.IGNORECASE)
 _MAX_FIELD = 4096
 
 
-class _CurrentStderrHandler(stdlib_logging.StreamHandler):
+class _CurrentStderrHandler(stdlib_logging.StreamHandler[TextIO]):
     """Follow the process stderr stream so test and supervisor capture stays live."""
 
     def emit(self, record: stdlib_logging.LogRecord) -> None:

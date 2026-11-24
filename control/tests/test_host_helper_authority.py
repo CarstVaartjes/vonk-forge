@@ -11,11 +11,14 @@ from typing import Any, TypedDict
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from pydantic import ValidationError
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, select
 from sqlalchemy import select as sa_select
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
+from vonk_agent_protocol.agent_operations import AgentOperation as AgentOperationKind
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
 from vonk_agent_protocol.host_helper import (
     MAX_HOST_HELPER_GRANT_SECONDS,
@@ -23,18 +26,28 @@ from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
     HostRuntimeRequest,
-    RecipeReconciliationIdentity,
     SignedHostHelperGrant,
     host_helper_grant_signing_bytes,
 )
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
+from vonk_agent_protocol.package_upgrade import (
+    PackageActivationOutcome,
+    PackageActivationPhase,
+    PackageActivationReceipt,
+)
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import (
+    RecipeReconciliationIdentity,
     RecipeStartPayload,
     RecipeUninstallPayload,
 )
 from vonk_agent_protocol.state_machines import RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_api.authority import issue_host_runtime_grant
+from vonk_control.agent_api.authority import (
+    issue_host_runtime_grant as request_grant,
+)
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.compiled_artifact_contract import compile_artifact_contract
 from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,
@@ -78,7 +91,6 @@ from vonk_control.recipe_operations.start_payloads import (
 from vonk_control.recipe_operations.stop_payloads import (
     stop_payload_from_start,
 )
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .agent_grant_requests import (
     JOB_RUN_GRANT_REQUESTS,
@@ -86,6 +98,7 @@ from .agent_grant_requests import (
     own_stop_grant_request,
     vector,
 )
+from .artifact_jobs_support import _configure_artifact_recipe
 
 NOW = datetime(2036, 7, 1, 12, 0, tzinfo=UTC)
 REQUEST_ID = "10000000-0000-4000-8000-000000000001"
@@ -113,7 +126,8 @@ def runtime_plan_binding(
     with service._sessions() as session:
         parent = session.get(Job, job_id)
         operation = session.get(AgentOperation, operation_id)
-        assert parent is not None and operation is not None
+        assert parent is not None
+        assert operation is not None
         binding = derive_runtime_plan_binding(
             session,
             parent=parent,
@@ -333,7 +347,7 @@ def test_controller_signs_exact_job_bound_container_runtime_request() -> None:
     }
 
 
-@pytest.mark.parametrize("seconds", (0, 301, True))
+@pytest.mark.parametrize("seconds", [0, 301, True])
 def test_controller_refuses_unbounded_host_grants(seconds: object) -> None:
     with pytest.raises(HostHelperAuthorityError):
         issuer().issue_grant(
@@ -398,8 +412,6 @@ def runtime_service(
     )
     recipe_raw["identity"].update(publisher="vonk-forge", slug="authority-test")
     if operation_kind == "recipe.job.run.v1":
-        from .artifact_jobs_support import _configure_artifact_recipe
-
         _configure_artifact_recipe(recipe_raw)
     recipe = RecipeDefinition.model_validate_json(canonical_message(recipe_raw))
     recipe_document = recipe_raw
@@ -984,7 +996,8 @@ def test_a_start_grant_binds_the_recipe_content_not_the_revision_row(
         assert installation is not None
         original = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         mapping = session.get(ClusterMapping, installation.mapping_id)
-        assert original is not None and original.content_digest is not None
+        assert original is not None
+        assert original.content_digest is not None
         assert mapping is not None
         sibling = "b1000000-0000-4000-8000-00000000000b"
         session.add(
@@ -1160,9 +1173,6 @@ def test_the_agents_job_run_grant_requests_are_granted_in_each_controller_state(
     )
 
     if state == "delivery-only":
-        from sqlalchemy import select
-        from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
-
         with service._sessions.begin() as session:
             row = session.scalar(
                 select(AgentOperation).where(
@@ -1417,12 +1427,6 @@ def upgrade_payload():
 
 
 def test_activation_grant_is_bound_to_live_source_candidate_nonce_and_identity():
-    from vonk_agent_protocol.claims import AgentRuntimeIdentity
-    from vonk_agent_protocol.package_upgrade import (
-        PackageActivationOutcome,
-        PackageActivationPhase,
-        PackageActivationReceipt,
-    )
 
     payload = upgrade_payload()
     service = runtime_service(
@@ -1764,10 +1768,6 @@ def test_live_grant_waits_for_lease_renewal_then_succeeds(
     Catches the security refusal of a current, exact request whose ten-second
     grant straddles the next heartbeat. Renewal recovers without a new attempt.
     """
-    from vonk_control.agent_api.authority import (
-        issue_host_runtime_grant as request_grant,
-    )
-    from vonk_control.agent_jobs.service import AgentJobService
 
     service = runtime_service(engine=postgres_engine, cancel_requested=cancel_requested)
     now = NOW + timedelta(seconds=55)

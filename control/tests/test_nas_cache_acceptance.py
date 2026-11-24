@@ -10,6 +10,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.distribution.filesystem import (
@@ -25,7 +27,11 @@ from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.models.fleet import AgentNode, FleetProfile
-from vonk_forge_contracts import RecipeDefinition, document_sha256
+from vonk_control.runtime_image_preparation.storage import (
+    FilesystemRuntimeImageStorage,
+)
+
+from .runtime_image_fixtures import place_test_image
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 NODE_A = "spk_" + "a" * 32
@@ -205,11 +211,6 @@ def _local_build_oci_source(sessions, root: Path, revision_id: str, payload: byt
     archive_root.mkdir(parents=True)
     archive_sha256 = hashlib.sha256(payload).hexdigest()
     image_digest = "sha256:" + archive_sha256
-    from vonk_control.runtime_image_preparation.storage import (
-        FilesystemRuntimeImageStorage,
-    )
-
-    from .runtime_image_fixtures import place_test_image
 
     place_test_image(FilesystemRuntimeImageStorage(root), archive_sha256, len(payload))
     with sessions.begin() as session:
@@ -650,10 +651,10 @@ def test_nonempty_artifact_pin_rejects_an_empty_source_body(
     # The short source never publishes; the download keeps retrying.
     assert failed.state == "queued"
     assert failed.attempt == 3  # attempts are counted at claim: three ran
-    assert failed.failure is not None and failed.failure["retryable"] is True
-    assert (
-        failed.last_error and "before the immutable artifact size" in failed.last_error
-    )
+    assert failed.failure is not None
+    assert failed.failure["retryable"] is True
+    assert failed.last_error
+    assert "before the immutable artifact size" in failed.last_error
     assert failed.result is None
     expected_progress = {
         "schema_version": 2,

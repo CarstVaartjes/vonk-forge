@@ -10,24 +10,32 @@ from enum import StrEnum
 
 from sqlalchemy import Select, or_, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
-from ..artifact_reference_scan.model_sets import _selectors_revisions
-from ..catalog.queries import active_head_revision
-from ..catalog.revision_collection import GRACE, operation_tokens, plan_tokens, tokens
-from ..content_identity import catalog_selector_membership
-from ..models.cache import RecipeBuild
-from ..models.catalog import (
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+from vonk_control.artifact_reference_scan.model_sets import _selectors_revisions
+from vonk_control.catalog.queries import active_head_revision
+from vonk_control.catalog.revision_collection import (
+    GRACE,
+    operation_tokens,
+    plan_tokens,
+    tokens,
+)
+from vonk_control.content_identity import catalog_selector_membership
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
 )
-from ..models.fleet import FleetProfileSelection
-from ..models.operations import ArtifactDistributionAssignment
-from ..owner_liveness import builds_in_flight
-from ..revision_images import revision_archives
-from ..stored.states import CatalogRevisionState
-from .references import _applied_revision_ids, _profile_pointers
+from vonk_control.models.fleet import FleetProfileSelection
+from vonk_control.models.operations import ArtifactDistributionAssignment
+from vonk_control.owner_liveness import builds_in_flight
+from vonk_control.revision_images import revision_archives
+from vonk_control.stored.states import CatalogRevisionState
+from vonk_control.unused_storage_collection.references import (
+    _applied_revision_ids,
+    _profile_pointers,
+)
 
 
 @dataclass(frozen=True, slots=True)

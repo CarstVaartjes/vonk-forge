@@ -9,29 +9,28 @@ import urllib.parse
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 
-from ..cli_outcome import (
-    Observation,
-    ObservationStatus,
-    operation_state,
+from cluster_profiles.cli_outcome import Observation, ObservationStatus, operation_state
+from cluster_profiles.control_client.common import (
+    observation_delay,
+    observation_unknown,
 )
-from ..control_client.common import observation_delay, observation_unknown
-from ..control_client.errors import (
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlMalformedResponse,
     ControlTransportError,
     ControlUnavailable,
 )
-from .cache_removal import _cache_operation_id
-from .common import (
+from cluster_profiles.controller_cli.common import (
     ControllerClient,
+    _cache_operation_id,
     _interval_seconds,
+    _known_http_refusal_status,
     _profile_number,
     _quoted,
     _request_key,
     _timeout_seconds,
     _WatchCallback,
 )
-from .submission import _known_http_refusal_status
 
 _TERMINAL_STATES = {
     "succeeded",
@@ -364,7 +363,7 @@ def _cache_progress(
         result,
         args,
         deadline=deadline,
-        validate=lambda observed: identity_for_operation(observed),
+        validate=identity_for_operation,
         terminal=lambda observed: (
             _state(observed) in _TERMINAL_STATES and observed.get("residue") is None
         ),

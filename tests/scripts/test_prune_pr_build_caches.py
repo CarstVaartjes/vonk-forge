@@ -9,6 +9,7 @@ import os
 import stat
 import subprocess
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/prune-pr-build-caches"
@@ -23,7 +24,9 @@ def _module():
     return module
 
 
-def _fake_gh(tmp_path: Path, versions: list[dict], states: dict[int, str]) -> Path:
+def _fake_gh(
+    tmp_path: Path, versions: list[dict[str, Any]], states: dict[int, str]
+) -> Path:
     """A ``gh`` that answers the package and pull request reads and records deletes."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -53,7 +56,7 @@ def _fake_gh(tmp_path: Path, versions: list[dict], states: dict[int, str]) -> Pa
     return bin_dir
 
 
-def _version(identifier: int, *tags: str) -> dict:
+def _version(identifier: int, *tags: str) -> dict[str, Any]:
     return {"id": identifier, "metadata": {"container": {"tags": list(tags)}}}
 
 

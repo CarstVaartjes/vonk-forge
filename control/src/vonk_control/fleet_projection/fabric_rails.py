@@ -27,8 +27,7 @@ from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.host_tuning import FabricDevice
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
-
-from .common import ProjectionReason
+from vonk_control.fleet_projection.common import ProjectionReason
 
 BUSY_BYTES_PER_SECOND = 8 * 1024 * 1024
 FLAT_SHARE_DENOMINATOR = 100

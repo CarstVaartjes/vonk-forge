@@ -8,6 +8,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -144,7 +145,7 @@ def test_nas_evidence_combiner_requires_both_exact_candidate_lanes(
 
 @pytest.mark.parametrize(
     ("field", "value"),
-    (
+    [
         ("channel", "dev"),
         ("gates", sorted(NAS_GATES - {"nas_workstation"})),
         ("generation", "c" * 64),
@@ -153,7 +154,7 @@ def test_nas_evidence_combiner_requires_both_exact_candidate_lanes(
         ("status", "failed"),
         ("tailscale_mode", "full"),
         ("version", "1.2.4"),
-    ),
+    ],
 )
 def test_nas_evidence_combiner_rejects_mismatched_lane_identity(
     tmp_path: Path,
@@ -518,12 +519,12 @@ def test_acceptance_authority_rejects_missing_native_package_object(
     assert not (tmp_path / "acceptance/acceptance.json").exists()
 
 
-def _proof(document: dict) -> dict:
+def _proof(document: dict[str, Any]) -> dict[str, Any]:
     return document["lifecycle"]["proof"]
 
 
 def _set(path: tuple[str, ...], value: object):
-    def tamper(document: dict) -> None:
+    def tamper(document: dict[str, Any]) -> None:
         target = _proof(document)
         for key in path[:-1]:
             target = target[key]
@@ -561,7 +562,7 @@ _SPARK_PROOF_TAMPERING = {
 
 @pytest.mark.parametrize("name", sorted(_SPARK_PROOF_TAMPERING))
 def test_acceptance_authority_rejects_fabricated_incomplete_or_changed_spark_proof(
-    accepted_spark_proof: tuple[Path, Path, dict],
+    accepted_spark_proof: tuple[Path, Path, dict[str, Any]],
     tmp_path: Path,
     name: str,
 ) -> None:
@@ -621,7 +622,7 @@ def test_acceptance_authority_rejects_incomplete_arm64_gate_ownership(
 def test_installer_acceptance_signer_requires_current_gate_report_set() -> None:
     publication = yaml.load(
         (ROOT / ".github/workflows/release-acceptance-core.yml").read_text(),
-        Loader=yaml.BaseLoader,
+        Loader=yaml.BaseLoader,  # noqa: S506 -- BaseLoader is deliberate
     )
     acceptance = publication["jobs"]["acceptance"]
     assert acceptance["needs"] == [
@@ -660,7 +661,7 @@ def test_workflow_nas_gate_report_is_accepted_and_gate_drift_is_rejected(
     plan = json.loads((publication / "publication-plan.json").read_text())
     workflow = yaml.load(
         (ROOT / ".github/workflows/release-acceptance-core.yml").read_text(),
-        Loader=yaml.BaseLoader,
+        Loader=yaml.BaseLoader,  # noqa: S506 -- BaseLoader is deliberate
     )
     step = next(
         step

@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import json
 import os
+import struct
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.machinery import SourceFileLoader
+from importlib.resources import files
+from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
 from threading import Thread
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from vonk_forge_contracts import read_recipe
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "qualify-recipe"
@@ -141,7 +147,7 @@ def test_qualifier_runs_declared_local_http_serving_checks() -> None:
             self.end_headers()
             self.wfile.write(encoded)
 
-        def log_message(self, _format: str, *_args: object) -> None:
+        def log_message(self, format: str, *args: object) -> None:
             return
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -213,7 +219,7 @@ def test_qualifier_reports_a_failed_local_http_serving_check() -> None:
             self.end_headers()
             self.wfile.write(encoded)
 
-        def log_message(self, _format: str, *_args: object) -> None:
+        def log_message(self, format: str, *args: object) -> None:
             return
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), FailureHandler)
@@ -352,8 +358,6 @@ if args[:1] == ['info']:
 
 
 def _qualify_module() -> Any:
-    from importlib.machinery import SourceFileLoader
-    from importlib.util import module_from_spec, spec_from_loader
 
     loader = SourceFileLoader("vonk_qualify_recipe_audio", str(SCRIPT))
     spec = spec_from_loader(loader.name, loader)
@@ -370,11 +374,6 @@ def test_qualifier_runs_the_audio_serving_checks_of_the_contract_example() -> No
     Reads the contract's own ``recipe-audio-serving`` example, so it runs in CI
     wherever the contracts are installed (the library-root tests above skip there).
     """
-    import struct
-    from importlib.resources import files
-    from types import SimpleNamespace
-
-    from vonk_forge_contracts import read_recipe
 
     rate = 16000
     data = b"\x00\x00" * rate
@@ -412,7 +411,7 @@ def test_qualifier_runs_the_audio_serving_checks_of_the_contract_example() -> No
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, _format: str, *_args: object) -> None:
+        def log_message(self, format: str, *args: object) -> None:
             return
 
     document = json.loads(

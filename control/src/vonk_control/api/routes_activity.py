@@ -15,31 +15,31 @@ from fastapi import (
 )
 from starlette.responses import StreamingResponse
 
+from vonk_control.api.common import _FleetEventStreamResponse
+from vonk_control.auth import Actor
+from vonk_control.bounded_json import BoundedJSONError
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-
-from ..auth import (
-    Actor,
+from vonk_control.failure_evidence import FailureEvidenceService
+from vonk_control.fleet_stream import parse_last_event_id
+from vonk_control.fleet_stream_contract import FLEET_SSE_EVENTS, FleetStreamEvent
+from vonk_control.metrics.prometheus_api import PrometheusReader
+from vonk_control.operation_api.contracts import (
+    OperationDetailResponse,
+    bounded_error_responses,
 )
-from ..bounded_json import BoundedJSONError
-from ..failure_evidence import FailureEvidenceService
-from ..fleet_stream import parse_last_event_id
-from ..fleet_stream_contract import FLEET_SSE_EVENTS, FleetStreamEvent
-from ..metrics.prometheus_api import PrometheusReader
-from ..operation_api.contracts import OperationDetailResponse, bounded_error_responses
-from ..operation_api.responses import operation_detail_response
-from ..operations.contract import OperationRecoveryAction
-from ..operations.item_contract import (
+from vonk_control.operation_api.responses import operation_detail_response
+from vonk_control.operations.contract import OperationRecoveryAction
+from vonk_control.operations.item_contract import (
     OperationOwnerReference,
     OperationRow,
     operation_item,
 )
-from ..operations.summary import UNREADABLE_SUMMARY
-from ..operator_projection_api.routes import install_operator_projection_routes
-from ..operator_projection_api.services import FleetOperatorServices
-from ..strict_json import read_stored_model, warn_unreadable_once
-from .common import (
-    _FleetEventStreamResponse,
+from vonk_control.operations.summary import UNREADABLE_SUMMARY
+from vonk_control.operator_projection_api.routes import (
+    install_operator_projection_routes,
 )
+from vonk_control.operator_projection_api.services import FleetOperatorServices
+from vonk_control.strict_json import read_stored_model, warn_unreadable_once
 
 
 def register_activity_routes(

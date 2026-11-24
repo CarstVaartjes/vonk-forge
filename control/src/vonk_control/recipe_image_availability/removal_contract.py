@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, model_validator
-from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 
-from ..model_cache.contract import DIGEST_PATTERN, UUID_PATTERN
-from ..operations.contract import AvailabilityOperationFailure
-from ..strict_json import StrictJSONModel
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
+from vonk_control.model_cache.contract import DIGEST_PATTERN, UUID_PATTERN
+from vonk_control.operations.contract import AvailabilityOperationFailure
+from vonk_control.strict_json import StrictJSONModel
 
 RECIPE_CACHE_REMOVE_KIND = "recipe.cache.remove.v2"
 RecipeCacheRemovalKind = Literal["recipe.cache.remove.v2"]

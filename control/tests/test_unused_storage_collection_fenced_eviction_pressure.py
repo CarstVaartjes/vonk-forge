@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import uuid
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -14,14 +15,31 @@ from typing import Any
 import pytest
 from sqlalchemy import Engine, create_engine, event, select, update
 from sqlalchemy.orm import sessionmaker
+
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
+from vonk_agent_protocol.agent_words import (
+    ProfileEffectState,
+    ProfileSwitchChildKind,
+)
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-from vonk_agent_protocol.state_machines import InstallationState, RunState
+from vonk_agent_protocol.recipe_operations import RecipeInstallPayload
+from vonk_agent_protocol.state_machines import (
+    InstallationState,
+    NodeIdentityState,
+    RunState,
+)
+from vonk_control.artifact_jobs.lifecycle import (
+    ArtifactIdentity,
+    require_reference_open,
+)
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileEffectProgress,
 )
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.jobs.documents import InstallPhaseOperation, RecipeInstallParent
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import (
@@ -46,6 +64,14 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import (
     ArtifactDistributionAssignment,
 )
+from vonk_control.persisted_waits import read_wait
+from vonk_control.recipe_operations.execution_contract import (
+    parse_stored_installation_plan,
+)
+from vonk_control.settings import (
+    FREE_SPACE_FOR_COLOCATED_SERVICES_FRACTION,
+    STORAGE_LOW_FREE_FRACTION,
+)
 from vonk_control.storage_demands import (
     NAS_MODELS,
     STORAGE_EVICTING,
@@ -53,9 +79,14 @@ from vonk_control.storage_demands import (
     StorageDemands,
     spark_scope,
 )
-from vonk_control.unused_storage_collection.common import ACTOR, spark_eviction_capacity
+from vonk_control.unused_storage_collection import evidence as collector_evidence
+from vonk_control.unused_storage_collection.common import ACTOR
 from vonk_control.unused_storage_collection.evidence import _Evidence
-from vonk_control.unused_storage_collection.service import UnusedStorageCollector
+from vonk_control.unused_storage_collection.references import _installation_kept
+from vonk_control.unused_storage_collection.service import (
+    UnusedStorageCollector,
+    spark_eviction_capacity,
+)
 
 from .model_cache_support import _artifact, _download
 from .removal_settle import release_ended_gates
@@ -143,7 +174,8 @@ def test_failed_removal_releases_gate_and_fresh_download_reuses_model(
                 ArtifactLifecycleGate,
                 {"artifact_kind": "model-set", "artifact_sha256": set_digest},
             )
-            assert gate is not None and gate.removal_owner_id == removal.id
+            assert gate is not None
+            assert gate.removal_owner_id == removal.id
     # A complete bounded inventory cycle revisits the previously busy gate.
     release_ended_gates(service)
     downloaded = _download(
@@ -163,10 +195,6 @@ def test_receipt_unlink_is_outside_sql_with_committed_fence_and_fresh_admission(
     postgres_engine: Engine, tmp_path: Path, monkeypatch, fault: str
 ) -> None:
     """Catches filesystem effects under SQL locks and gates leaked on failure."""
-    from vonk_control.artifact_jobs.lifecycle import (
-        ArtifactIdentity,
-        require_reference_open,
-    )
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)
@@ -186,7 +214,8 @@ def test_receipt_unlink_is_outside_sql_with_committed_fence_and_fresh_admission(
                 .where(ArtifactLifecycleGate.artifact_sha256 == archive)
                 .with_for_update(nowait=True)
             )
-            assert gate is not None and gate.removal_owner_id is not None
+            assert gate is not None
+            assert gate.removal_owner_id is not None
             blocked = False
             try:
                 require_reference_open(
@@ -216,7 +245,6 @@ def test_receipt_unlink_is_outside_sql_with_committed_fence_and_fresh_admission(
     if path.exists():
         # Ended sweep owns no gate; a fresh sweep observes bytes and completes.
         fresh = _collector(world, image_cache_root=tmp_path)
-        from vonk_control.persisted_waits import read_wait
 
         with world.sessions() as session:
             gate = session.get(
@@ -273,13 +301,6 @@ def test_live_two_spark_owner_does_not_pin_unrelated_installations(
     Catches node ownership or a profile scope retaining every installation.
     Exact installation/run references and a running workload must still survive.
     """
-    from vonk_agent_protocol.agent_words import (
-        ProfileEffectState,
-        ProfileSwitchChildKind,
-    )
-    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-    from vonk_agent_protocol.state_machines import NodeIdentityState
-    from vonk_control.jobs.documents import RecipeInstallParent
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)
@@ -392,11 +413,6 @@ def test_installation_content_references_hold_but_provenance_does_not(
 ) -> None:
     """Catches keeping only UUIDs, or treating recipe/build provenance as use."""
 
-    from vonk_control.recipe_operations.execution_contract import (
-        parse_stored_installation_plan,
-    )
-    from vonk_control.unused_storage_collection.references import _installation_kept
-
     sessions, _, installation_id, _ = _real_lifecycle(tmp_path, engine=postgres_engine)
     with sessions() as session:
         installation = _required(session.get(RecipeInstallation, installation_id))
@@ -429,7 +445,6 @@ def test_pressure_promises_profile_pointed_spark_objects_but_not_live_ones(
 ) -> None:
     """Saved profiles pin the NAS cache, not Spark copies (the agent frees
     them); only a live operation keeps a model's objects on the Spark."""
-    from collections import Counter
 
     _hard_linked_models(world)
 
@@ -458,13 +473,6 @@ def test_shared_file_does_not_pin_an_unrelated_installation(
     Catches retaining all of its gigabytes for one shared tokenizer file.
     Exact installation and aggregate model/image references still retain use.
     """
-    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-    from vonk_agent_protocol.recipe_operations import RecipeInstallPayload
-    from vonk_control.jobs.documents import InstallPhaseOperation, RecipeInstallParent
-    from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
-    from vonk_control.recipe_operations.execution_contract import (
-        parse_stored_installation_plan,
-    )
 
     sessions, _, installation_id, nodes = _real_lifecycle(
         tmp_path, engine=postgres_engine
@@ -557,8 +565,6 @@ def test_shared_file_does_not_pin_an_unrelated_installation(
             )
         )
     with sessions() as session:
-        from vonk_control.unused_storage_collection.references import _installation_kept
-
         evidence = _Evidence.read(session, _REAL_CLOCK)
         assert compiled.artifacts[0].sha256 in evidence.operations
         assert _installation_kept(session, installation_id, evidence) is None
@@ -591,10 +597,6 @@ def _wait_for_download_of(service: ModelCacheService, tmp_path: Path, size: int)
 
 def test_the_reserve_is_a_tenth_of_the_volume(tmp_path: Path, monkeypatch) -> None:
     """Catches a fixed 10 GiB reserve on a 10 TB volume shared with PostgreSQL."""
-    from vonk_control.settings import (
-        FREE_SPACE_FOR_COLOCATED_SERVICES_FRACTION,
-        STORAGE_LOW_FREE_FRACTION,
-    )
 
     volume = _Volume(tmp_path / "cache", 10_000)
     monkeypatch.setattr("shutil.disk_usage", volume.usage)
@@ -808,7 +810,8 @@ def test_an_unmet_spark_demand_uninstalls_only_as_far_as_the_line(
     relief = collector.relief_for_spark(
         NODE, 900 * GIB, source="profile-load", subject="p", reason="x"
     )
-    assert relief is not None and relief.code == STORAGE_INSUFFICIENT
+    assert relief is not None
+    assert relief.code == STORAGE_INSUFFICIENT
 
 
 def _inside_window(world: Catalog, service: ModelCacheService, **kwargs):
@@ -849,7 +852,8 @@ def test_an_image_a_run_that_ended_an_hour_ago_named_is_not_expired(
     path = _receipt(tmp_path, AN_IMAGE)
     free = TOTAL // 2
     result = _collector(world, image_cache_root=tmp_path, free=free).collect()
-    assert not path.exists() and result.images == 1
+    assert not path.exists()
+    assert result.images == 1
 
     path = _receipt(tmp_path, AN_IMAGE)
     world.job(
@@ -858,7 +862,8 @@ def test_an_image_a_run_that_ended_an_hour_ago_named_is_not_expired(
         updated=NOW - timedelta(hours=1),
     )
     result = _collector(world, image_cache_root=tmp_path, free=free).collect()
-    assert path.exists() and result.images == 0
+    assert path.exists()
+    assert result.images == 0
 
 
 def _world_none(world: Catalog, set_digest: str, tmp_path: Path) -> None:
@@ -929,7 +934,7 @@ def _switch_job(world: Catalog, set_digest: str, tmp_path: Path, *, state: str) 
     with sessions() as session:
         source = session.get(Job, parent.operation_id)
         assert source is not None
-        payload: dict[str, Any] = copy.deepcopy(source.payload)  # type: ignore[assignment]
+        payload: dict[str, Any] = copy.deepcopy(source.payload)
         kind, targets = source.kind, list(source.targets)
         authority, digest = source.authority_revision, source.payload_digest
     payload["plan"]["storage"]["artifact_set_sha256"] = set_digest
@@ -1030,8 +1035,6 @@ def test_a_pass_scans_operations_once_for_what_is_live_and_once_for_ordering(
     once (ordering only), and a removal's verify re-reads live operations once
     and never the last day."""
 
-    from vonk_control.unused_storage_collection import evidence as collector_evidence
-
     calls: list[bool] = []
     original = collector_evidence.operation_tokens
 
@@ -1070,8 +1073,11 @@ def test_an_image_a_run_that_ended_an_hour_ago_named_is_evicted_last_under_press
     result = _collector(
         world, image_cache_root=tmp_path, free=100 * GIB - 1, **exact
     ).collect()
-    assert recent.exists() and not idle.exists() and result.images == 1
+    assert recent.exists()
+    assert not idle.exists()
+    assert result.images == 1
     assert _kept(result, "live operation") == 0
 
     result = _collector(world, image_cache_root=tmp_path, free=GIB, **exact).collect()
-    assert not recent.exists() and result.images == 1
+    assert not recent.exists()
+    assert result.images == 1

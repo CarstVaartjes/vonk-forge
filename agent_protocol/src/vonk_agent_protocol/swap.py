@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import Field, field_validator
 
-from .wire_model import (
+from vonk_agent_protocol.wire_model import (
     MAX_RUN_GENERATION,
     MAX_TELEMETRY_CAPACITY_BYTES,
     WireEnum,

@@ -5,11 +5,16 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol.installer_setup import NasInstallTemplate
+
+from vonk_agent_protocol.installer_setup import (
+    NasGroupReadableSecrets,
+    NasInstallTemplate,
+)
 from vonk_nas_setup.cli import open_private_answers
 from vonk_nas_setup.filesystem import SetupError
 
@@ -83,19 +88,18 @@ def test_cli_rejects_secret_arguments_and_conflicting_flags(
 ) -> None:
     """Catch adding an argv secret surface or accepting an unknown option."""
     result = invoke(template, tmp_path, "--answers", "unsafe-value")
-    assert result.returncode != 0 and not (tmp_path / "vonk-forge").exists()
+    assert result.returncode != 0
+    assert not (tmp_path / "vonk-forge").exists()
     assert "unsafe-value" not in result.stdout + result.stderr
     result = invoke(template, tmp_path, "--enable-unknown")
-    assert result.returncode != 0 and not (tmp_path / "vonk-forge").exists()
+    assert result.returncode != 0
+    assert not (tmp_path / "vonk-forge").exists()
 
 
 def test_answers_file_permission_refusal_is_visible(
     tmp_path: Path, template: NasInstallTemplate
 ) -> None:
     """Catch buffering the OS group refusal away while claiming bundle readiness."""
-    import tempfile
-
-    from vonk_agent_protocol.installer_setup import NasGroupReadableSecrets
 
     template = template.model_copy(
         update={
@@ -142,6 +146,7 @@ def test_answers_file_permission_refusal_is_visible(
             timeout=10,
         )
         assert result.returncode == 0, result.stderr
-        assert "permission_denied" in result.stdout and "hf-token" in result.stdout
+        assert "permission_denied" in result.stdout
+        assert "hf-token" in result.stdout
         assert "private-answer" not in result.stdout + result.stderr
         assert (output / "vonk-forge/secrets/hf-token").stat().st_mode & 0o077 == 0

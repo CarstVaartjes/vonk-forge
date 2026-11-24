@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+from typing import Annotated, Literal
 
+import httpx2
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
+
 from vonk_agent_protocol.failure_evidence import MAX_DROPPED_COUNT, FailureLogTail
-from vonk_control.openapi_numbers import install_canonical_openapi
+from vonk_control.openapi_numbers import canonical_openapi, install_canonical_openapi
 
 
 @pytest.mark.parametrize("field", ["dropped_bytes", "dropped_lines"])
@@ -58,11 +61,6 @@ def test_nullable_physical_counter_keeps_exact_integer_openapi_bound(
 
 
 def test_openapi_numeric_constraints_reject_only_out_of_bound_values() -> None:
-    from typing import Annotated, Literal
-
-    from fastapi import Query
-    from pydantic import BaseModel, Field
-    from vonk_control.openapi_numbers import canonical_openapi
 
     class NumericRules(BaseModel):
         bounded: int = Field(ge=0, le=18446744073709551615)
@@ -96,7 +94,6 @@ def test_openapi_numeric_constraints_reject_only_out_of_bound_values() -> None:
     for value in (9223372036854775805, 9223372036854775808):
         assert not parameter.is_valid(value)
     validator = Draft202012Validator(schema)
-    import httpx2
 
     with TestClient(app) as client:
         for invalid in (9223372036854775805, 9223372036854775808):

@@ -3,65 +3,64 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
+
+from vonk_agent_protocol.agent_operations import AgentFailureResult
 from vonk_agent_protocol.agent_words import Disposition, ProfileChildPhase
-from vonk_agent_protocol.contracts import AgentFailureResult, canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
-    OutcomeKind,
     WaitReason,
 )
-from vonk_agent_protocol.wire_model import OperationProgress
-
-from ..bounded_json import require_mapping
-from ..distribution_assignment import NodeDistributionAssignment
-from ..failure_classification import disposition, error_detail, is_security_failure
-from ..lifecycle.evidence import (
-    Residue,
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.bounded_json import require_mapping
+from vonk_control.distribution_assignment import NodeDistributionAssignment
+from vonk_control.distribution_executor.receipts import _ChildView
+from vonk_control.failure_classification import (
+    disposition,
+    error_detail,
+    is_security_failure,
 )
-from ..models.jobs import Job
-from ..operations.blockers import OperationBlocker
-from ..operations.progress import sample_progress
-from ..persisted_waits import read_wait
-from ..recipe_operations.interfaces import RecipeOperationView
-from ..recipe_operations.lifecycle_contract import RecipeLifecycleResult
-from ..recovery_policy import (
-    FailureKind,
-    kind_for_failure_fields,
-)
-from ..run_switch_contract.evidence import RunSwitchPhase
-from ..run_switch_contract.observation import (
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.jobs import Job
+from vonk_control.operations.blockers import OperationBlocker
+from vonk_control.persisted_waits import read_wait
+from vonk_control.recipe_operations.interfaces import RecipeOperationView
+from vonk_control.recipe_operations.lifecycle_contract import RecipeLifecycleResult
+from vonk_control.recovery_policy import FailureKind, kind_for_failure_fields
+from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+from vonk_control.run_switch_contract.observation import (
     RunSwitchObservedEvidence,
     RunSwitchStoredLifecycle,
 )
-from ..run_switch_contract.operations import (
+from vonk_control.run_switch_contract.operations import (
     RunSwitchOperation,
     RunSwitchOperationResult,
 )
-from ..run_switch_contract.phase_results import (
+from vonk_control.run_switch_contract.phase_results import (
     RunSwitchDistributionChildResult,
     RunSwitchPhaseResult,
 )
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.progress import RunSwitchMemberReceipt
-from ..run_switch_contract.progress_view import RECOVERY_STALL_WINDOW
-from ..run_switch_contract.vocabulary import (
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.progress import RunSwitchMemberReceipt
+from vonk_control.run_switch_contract.progress_view import RECOVERY_STALL_WINDOW
+from vonk_control.run_switch_contract.vocabulary import (
     RunSwitchMemberState,
     RunSwitchPhaseKind,
-    RunSwitchProgressState,
     RunSwitchSubphase,
 )
-from ..stall_window import stall_deadline
-from .constants import (
+from vonk_control.run_switch_operations.constants import (
     _MEMBER_STATE_ADAPTER,
     _PHASES,
-    _PROGRESS_STATE_ADAPTER,
     _SUBPHASE_ADAPTER,
 )
-from .errors import RunSwitchRetryLater, retry_later_unless_deterministic
-from .results import _stored_result
+from vonk_control.run_switch_operations.errors import (
+    RunSwitchRetryLater,
+    retry_later_unless_deterministic,
+)
+from vonk_control.run_switch_operations.planning_helpers import _aware
+from vonk_control.run_switch_operations.results import _stored_result
+from vonk_control.stall_window import stall_deadline
 
 
 def _bound_workload_intent(progress: RunSwitchOperationResult) -> int:
@@ -85,25 +84,11 @@ def _progress_state(value: object) -> RunSwitchMemberState | None:
         return None
 
 
-def _progress_operation_state(value: object) -> RunSwitchProgressState:
-    try:
-        return _PROGRESS_STATE_ADAPTER.validate_python(value, strict=True)
-    except ValidationError:
-        return OutcomeKind.UNKNOWN
-
-
 def _progress_subphase(value: object) -> RunSwitchSubphase | None:
     try:
         return _SUBPHASE_ADAPTER.validate_python(value, strict=True)
     except ValidationError:
         return None
-
-
-def _observe_progress(
-    previous: OperationProgress | None, current: OperationProgress, now: datetime
-) -> OperationProgress:
-    """Sample the canonical operation meter without a JSON round trip."""
-    return sample_progress(previous, current, now)
 
 
 def _progress_phase(value: object) -> RunSwitchPhaseKind | None:
@@ -126,9 +111,7 @@ def _read_progress(value: object) -> RunSwitchOperationResult:
     return result if result is not None else RunSwitchOperationResult()
 
 
-def _wait_blockers(
-    job: Job, progress: RunSwitchOperationResult
-) -> list[OperationBlocker]:
+def _wait_blockers(job: Job) -> list[OperationBlocker]:
     wait = read_wait(job)
     return wait.blockers if wait else []
 
@@ -197,7 +180,6 @@ def _recover_progress(
         )
     except (TypeError, ValueError):
         retained = RunSwitchStoredLifecycle()
-    from .planning_helpers import _aware
 
     progress = RunSwitchOperationResult(
         workload_intent_ordinal=accepted.workload_intent_ordinal,
@@ -282,7 +264,6 @@ def _child_result(
     | None
 ):
     """Read the receipt retained by the owning canonical child DTO."""
-    from ..distribution_executor.receipts import _ChildView
 
     if isinstance(child, RecipeOperationView):
         return child.lifecycle_result
@@ -293,7 +274,6 @@ def _child_result(
 
 def _child_progress_payload(child: object) -> RunSwitchObservedEvidence:
     """Consume explicit executor DTOs at their typed observation boundary."""
-    from ..distribution_executor.receipts import _ChildView
 
     if isinstance(child, RecipeOperationView):
         result, state, reason = _child_result(child), child.state, child.status_reason
@@ -359,14 +339,14 @@ def _child_failure_kind(child: object) -> FailureKind:
         or payload.uncertain
     ):
         return kind_for_failure_fields(
-            payload.failure_kind, payload.error_code, payload.uncertain
+            payload.failure_kind, payload.error_code, uncertain=payload.uncertain
         )
     kinds = []
     for members in (payload.node_evidence, payload.launch_evidence):
         if members is not None:
             kinds.extend(
                 kind_for_failure_fields(
-                    item.failure_kind, item.error_code, item.uncertain is True
+                    item.failure_kind, item.error_code, uncertain=item.uncertain is True
                 )
                 if isinstance(item, AgentFailureResult)
                 else FailureKind.INVALID_CONTRACT

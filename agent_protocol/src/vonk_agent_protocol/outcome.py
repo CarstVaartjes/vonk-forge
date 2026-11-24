@@ -30,8 +30,7 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from .build_import import RecipeBuildCleanupEvidence, RecipeBuildEvidence
-from .contracts import (
+from vonk_agent_protocol.agent_operations import (
     AgentFailureKind,
     AgentFailureResult,
     AgentInstallResult,
@@ -39,8 +38,12 @@ from .contracts import (
     ArtifactDistributionResult,
     RecipeStartResult,
 )
-from .failure_evidence import FailureDiagnostics
-from .lifecycle_vocabulary import (
+from vonk_agent_protocol.build_import import (
+    RecipeBuildCleanupEvidence,
+    RecipeBuildEvidence,
+)
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     ErrorCategory,
     FailureCode,
@@ -49,15 +52,15 @@ from .lifecycle_vocabulary import (
     SecurityRefusalReason,
     WaitReason,
 )
-from .package_upgrade import PackageActivationReceipt
-from .recipe_jobs import RecipeJobEnding, RecipeJobRunResult
-from .recipe_operations import (
+from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
+from vonk_agent_protocol.recipe_jobs import RecipeJobEnding, RecipeJobRunResult
+from vonk_agent_protocol.recipe_operations import (
     RecipeReconcileResult,
     RecipeStopResult,
     RecipeUninstallResult,
 )
-from .runtime_preflight import RuntimePreflightResult
-from .wire_model import WireModel, typed_tag
+from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
+from vonk_agent_protocol.wire_model import WireModel, typed_tag
 
 OutcomeResult = (
     RuntimePreflightResult
@@ -194,7 +197,7 @@ def outcome_body(
 
     This is the shape the Controller persists and every downstream reader
     already understands (an operation's success model, an
-    :class:`~vonk_agent_protocol.contracts.AgentFailureResult`, or a job receipt), so a
+    :class:`~vonk_agent_protocol.agent_operations.AgentFailureResult`, or a job receipt), so a
     typed report changes nothing a stored row exposes.
     """
 

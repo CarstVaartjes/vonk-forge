@@ -13,15 +13,24 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import event, select
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
+import vonk_control.library.assessment as assessment_module
+from cluster_profiles.cli import main
+from cluster_profiles.cli_render.dispatch import render_payload
+from cluster_profiles.control_client.transfers import ControlClient
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.reason_codes.catalog import LibraryAssessmentCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
+from vonk_control.library import assessment as library_assessment
 from vonk_control.library.api import install_library_routes
 from vonk_control.library.assessment import LibraryAssessment
+from vonk_control.library.contract import RecipeReadinessCheck
 from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.model_cache.artifacts import ArtifactSetManifest
 from vonk_control.model_cache.service import ModelCacheService
@@ -33,11 +42,6 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import RecipeDefinition, document_sha256
-
-from cluster_profiles.cli import main
-from cluster_profiles.cli_render.dispatch import render_payload
-from cluster_profiles.control_client.transfers import ControlClient
 
 from .recipe_operations_support import NOW, setup_services
 from .run_switch_operations_support import RecordingArtifactExecutor
@@ -351,7 +355,8 @@ def test_fit_search_continues_after_an_ineligible_first_group(assessed_library):
     rows = projection.recipe_library(fits_fleet=True).recipes
     assert len(rows) == 1
     assessment = rows[0].assessment
-    assert assessment is not None and assessment.group is not None
+    assert assessment is not None
+    assert assessment.group is not None
     assert [node.node_id for node in assessment.group.nodes] == [later]
 
 
@@ -392,7 +397,8 @@ def test_a_later_spark_holding_what_the_nas_evicted_is_ready(
 
     assessment = projection.recipe_library(assess=True).recipes[0].assessment
 
-    assert assessment is not None and assessment.group is not None
+    assert assessment is not None
+    assert assessment.group is not None
     assert assessment.cache.state == "blocked"
     assert assessment.fleet_fit.state == "ready"
     assert assessment.readiness.state == "ready", assessment.readiness
@@ -419,9 +425,6 @@ def test_a_library_pass_reads_failed_copies_once_for_every_candidate(
     assessed_library, monkeypatch
 ):
     """Catches one jobs scan per candidate placement."""
-    from vonk_agent_protocol.reason_codes.catalog import LibraryAssessmentCode
-    from vonk_control.library import assessment as library_assessment
-    from vonk_control.library.contract import RecipeReadinessCheck
 
     projection, sessions, _, service, _, _, _, _, _, _ = assessed_library
     _add_fitting_spark(sessions, "spk_" + "0" * 32)
@@ -488,7 +491,6 @@ def test_a_failing_group_does_not_turn_a_holder_search_blocked(
 def test_late_assessment_is_discarded_and_selector_scan_does_not_assess(
     assessed_library, monkeypatch
 ):
-    import vonk_control.library.assessment as assessment_module
 
     projection, _, _, service, app, *_ = assessed_library
     clock = [0.0]

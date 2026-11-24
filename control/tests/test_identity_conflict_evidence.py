@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from vonk_forge_contracts import read_recipe
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_control.failure_evidence import FailureEvidenceService
@@ -24,7 +26,6 @@ from vonk_control.recipe_image_availability.service import (
 )
 from vonk_control.run_switch_contract.progress_view import RECOVERY_STALL_WINDOW
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import read_recipe
 
 from .recipe_operations_support import _CanonicalImageTransport
 from .run_switch_operations_support import _cold_compile_switch
@@ -49,7 +50,8 @@ def test_identity_conflict_names_both_build_inputs_through_the_evidence_download
         revision = session.get(
             CatalogDocumentRevision, switch.admitted.recipe_revision_id
         )
-        assert build is not None and revision is not None
+        assert build is not None
+        assert revision is not None
         assert build.build_input_sha256 is not None
         assert build.image_digest is not None
         assert build.oci_layout_sha256 is not None
@@ -103,6 +105,7 @@ def test_identity_conflict_names_both_build_inputs_through_the_evidence_download
 
     monkeypatch.setattr(switch.admission, "refresh_install_receipts", refresh)
 
+    view = None
     for _ in range(30):
         switch.drive()
         view = switch.service.get(switch.operation.operation_id)
@@ -112,6 +115,7 @@ def test_identity_conflict_names_both_build_inputs_through_the_evidence_download
     assert refusals, "the image preparation never refused"
     assert refusals[0].code == RecipeImageCode.IDENTITY_CONFLICT
     assert [item.identity_conflict for item in refusals[0].blockers] == [expected]
+    assert view is not None
     assert [item.identity_conflict for item in view.result.refusal] == [expected]
 
     # Whether the conflict ended the load at once or kept it waiting, once the

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -15,7 +15,13 @@ from typing import Literal
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
+from vonk_agent_protocol.runtime_preflight import (
+    RuntimePreflightRequest,
+    RuntimePreflightResult,
+)
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distribution_executor.receipts import _ChildView
 from vonk_control.install_admission.contracts import (
@@ -24,6 +30,7 @@ from vonk_control.install_admission.contracts import (
 from vonk_control.install_admission.identity import (
     installation_plan_digest_from_stored_document,
 )
+from vonk_control.inventory.items import record_preflight
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
@@ -65,13 +72,12 @@ from vonk_control.run_switch_operations.interfaces import (
 from vonk_control.run_switch_operations.result_helpers import _phase_result
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime.adapters import resolve_runtime_adapter
-from vonk_forge_contracts import RecipeDefinition, document_sha256
+from vonk_control.runtime.preflight import mandatory_capabilities
 
 from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .runtime_identity_support import (
     set_inventory_fingerprint,
 )
-from .test_lifecycle_preflight import _finish
 
 _FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 
@@ -737,7 +743,7 @@ def _cold_compile_switch(
     lifecycle._clock = clock
     admission = lifecycle._install_admission
     inventory = InventoryRepository(sessions, clock=clock)
-    hooks: list = []
+    hooks: list[Callable[[], None]] = []
 
     def during_compile() -> None:
         # The agent keeps reporting the same authenticated capacity; only the
@@ -905,7 +911,7 @@ def _parked_start_switch(tmp_path: Path, *, healthy: bool):
         sessions,
         memory_floor_bytes=0,
         lifecycle=observing,
-        clock=lambda: lifecycle._clock(),
+        clock=lambda: lifecycle._clock(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
         artifact_phase_executor=RecordingArtifactExecutor(),
     )
@@ -975,7 +981,8 @@ def _make_install_specs_missing_placement_authority(
                 Job.payload["owner_id"].as_string() == installation_id,
             )
         )
-        assert install_job is not None and install_job.result is not None
+        assert install_job is not None
+        assert install_job.result is not None
         operations = tuple(
             session.scalars(
                 select(AgentOperation)
@@ -1097,7 +1104,7 @@ def planner_world(
         RecordingArtifactExecutor(),
         phase_executor=SynchronousPhaseExecutor(),
     )
-    original_group = planner.preview_stop(run_id, actor="admin").spark_group
+    original_group = planner.preview_stop(run_id).spark_group
     incoming = _request(sessions, nodes[0], action="switch")
     with sessions.begin() as session:
         original = session.get(CatalogDocumentRevision, incoming.recipe_revision_id)
@@ -1170,3 +1177,56 @@ def planner_world(
         )
     finally:
         engine.dispose()
+
+
+def _pending(checkpoint):
+    return next(iter(checkpoint.pending_jobs.values()), None)
+
+
+def _finish(
+    sessions, checkpoint, now, *, failed=None, fingerprint="a" * 64, observed_at=None
+):
+    with sessions.begin() as session:
+        job = session.get(Job, _pending(checkpoint))
+        operation = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+        )
+        request = RuntimePreflightRequest.model_validate(operation.payload)
+        job.state = operation.state = "succeeded"
+        operation.current_attempt = 1
+        operation.updated_at = now
+        result = RuntimePreflightResult.model_validate_json(
+            canonical_message(
+                {
+                    "fingerprint": fingerprint,
+                    "observed_at": int((observed_at or now).timestamp()),
+                    "findings": [
+                        {
+                            "capability": capability,
+                            "status": "failed" if capability == failed else "passed",
+                            "code": "probe_failed"
+                            if capability == failed
+                            else "available",
+                        }
+                        for capability in mandatory_capabilities(request)
+                    ],
+                }
+            )
+        )
+        session.add(
+            AgentOperationAttempt(
+                operation_id=operation.id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                lease_deadline=now + timedelta(seconds=60),
+                agent_certificate_serial="serial-0",
+                state="succeeded",
+                result=result.model_dump(mode="json"),
+            )
+        )
+        record_preflight(
+            session.get(AgentNode, operation.node_id),
+            operation.payload_digest,
+            result,
+            now,
+        )

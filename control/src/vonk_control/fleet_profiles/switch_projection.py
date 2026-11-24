@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import (
     ProfileChildPhase,
     ProfileReasonSeverity,
@@ -16,46 +17,46 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
 )
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
-
-from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract.applications import FleetProfileChildOperation
-from ..fleet_profile_contract.definitions import FleetProfileAssignment
-from ..fleet_profile_contract.effects import (
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.fleet_profile_contract.applications import FleetProfileChildOperation
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profile_contract.effects import (
     FleetProfileChildProgress,
     FleetProfileEffects,
 )
-from ..fleet_profile_contract.switch_state import (
+from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileAssignmentFailure,
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchChildResult,
     FleetProfileSwitchQueueItem,
 )
-from ..jobs import states as job_states
-from ..lifecycle.fleet_profile import doc_state
-from ..models.fleet import FleetProfileApplication
-from ..operations.blockers import PHASE_RETRY_CODE, STALL_RETRY_ATTEMPT
-from ..persisted_waits import read_wait
-from ..preparation_contract import RuntimeImageIdentity
-from ..run_switch_contract.operations import RunSwitchOperation
-from .assessment_support import (
-    _operation_state,
+from vonk_control.fleet_profiles.assessment_support import _operation_state
+from vonk_control.fleet_profiles.continuing_effects import _adopted_application_scope
+from vonk_control.fleet_profiles.contracts import FleetProfileInvalid
+from vonk_control.fleet_profiles.control_effects import _control_effects
+from vonk_control.fleet_profiles.dependencies import (
+    _PROFILE_PHASE_ADAPTER,
+    _PROFILE_PHASE_BY_RUN_PHASE,
 )
-from .contracts import (
-    FleetProfileInvalid,
-)
-from .dependencies import _PROFILE_PHASE_ADAPTER, _PROFILE_PHASE_BY_RUN_PHASE
-from .persistence import (
+from vonk_control.fleet_profiles.persistence import (
     _canonical_progress,
     _persisted_profile_progress,
 )
-from .projection_support import (
+from vonk_control.fleet_profiles.projection_support import (
     _state_receipt,
     _switch_queue,
     _validate_remaining_effects,
 )
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.fleet_profile import doc_state
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.operations.blockers import PHASE_RETRY_CODE, STALL_RETRY_ATTEMPT
+from vonk_control.persisted_waits import read_wait
+from vonk_control.preparation_contract import RuntimeImageIdentity
+from vonk_control.run_switch_contract.operations import RunSwitchOperation
 
 if TYPE_CHECKING:
-    from .run_switch_adapter import (
+    from vonk_control.fleet_profiles.run_switch_adapter import (
         RunSwitchFleetProfileAdapter as _RunSwitchFleetProfileAdapter,
     )
 
@@ -77,7 +78,6 @@ class RunSwitchFleetProfileAdapter:
         An assignment on a Spark the reviewed plan leaves to an adopted load
         has no child here; it is recorded as a failure, never dropped.
         """
-        from .service import FleetProfileService
 
         self = _typing_cast("_RunSwitchFleetProfileAdapter", self)  # noqa: PLW0642 -- assembled mixin interface
         adopted_assignment_ids = {
@@ -100,7 +100,7 @@ class RunSwitchFleetProfileAdapter:
         continuing_scope = (
             None
             if application is None
-            else FleetProfileService._adopted_application_scope(session, application)
+            else _adopted_application_scope(session, application)
         )
         if continuing_scope is not None:
             scope_node_ids = tuple(
@@ -111,7 +111,7 @@ class RunSwitchFleetProfileAdapter:
                 for item in assignments
                 if {node.node_id for node in item.nodes} <= set(continuing_scope)
             )
-        control = FleetProfileService._control_effects(
+        control = _control_effects(
             session,
             assignments,
             set(scope_node_ids),

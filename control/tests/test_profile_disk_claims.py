@@ -1,18 +1,27 @@
 """Accepted installation capacity survives handoff and parent restart."""
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_control.install_admission.contracts import InstallAdmissionBusy
+from vonk_control.inventory.repository import MAX_INVENTORY_FUTURE_SKEW
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.execution import RecipeInstallation, ResourceReservation
-from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.fleet import AgentNode, FleetProfileApplication
 from vonk_control.models.jobs import Job
 from vonk_control.models.mapping import ClusterMapping
 from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.runtime_image_preparation.storage import (
+    FilesystemRuntimeImageStorage,
+)
 
+from .recipe_operations_support import NOW, installed_recipe
+from .test_disk_reservations import _record_disk
+from .test_fleet_profile_recovery_identity import _complete_rebuild
 from .test_profile_capacity_admission import _capacity_profile
 from .test_profile_installed_execution import _drive_to_job
 
@@ -34,7 +43,8 @@ def test_profile_disk_claim_blocks_competing_install_and_is_inherited(
         inventory.disk_free_bytes = required
         mapping_id = session.scalar(select(ClusterMapping.id))
         build_id = session.scalar(select(RecipeBuild.id))
-        assert mapping_id is not None and build_id is not None
+        assert mapping_id is not None
+        assert build_id is not None
     review = api.post(f"/api/profile/{profile.number}/preview", headers=headers).json()
     assert review["allowed"], review
     response = api.post(
@@ -95,8 +105,10 @@ def test_profile_disk_claim_blocks_competing_install_and_is_inherited(
     with sessions() as session:
         application = session.get(FleetProfileApplication, application_id)
         claim = session.get(ResourceReservation, claim_id)
-        assert application is not None and application.state == LifecycleState.CANCELLED
-        assert claim is not None and claim.state == "active"
+        assert application is not None
+        assert application.state == LifecycleState.CANCELLED
+        assert claim is not None
+        assert claim.state == "active"
         assert claim.owner_id == child.owner_id
 
 
@@ -132,6 +144,7 @@ def test_busy_disk_handoff_releases_transaction_and_resumes_original_claim(
         )
         assert claim is not None
         claim_id = claim.id
+        operation = None
         for _ in range(12):
             planner.tick()
             profiles.tick()
@@ -141,6 +154,7 @@ def test_busy_disk_handoff_releases_transaction_and_resumes_original_claim(
                 and operation.result.retry_reason == "install.capacity_busy"
             ):
                 break
+        assert operation is not None
         assert operation.state == LifecycleState.RUNNING
         assert operation.result is not None
         assert operation.result.retry_reason == "install.capacity_busy"
@@ -152,26 +166,22 @@ def test_busy_disk_handoff_releases_transaction_and_resumes_original_claim(
         with sessions() as observer:
             assert not tuple(observer.scalars(select(RecipeInstallation)))
             visible = observer.get(ResourceReservation, claim_id)
-            assert visible is not None and visible.owner_id == application_id
+            assert visible is not None
+            assert visible.owner_id == application_id
     lifecycle = planner._lifecycle
     assert lifecycle is not None
-    after_due = (
-        due + timedelta(seconds=1)
-        if isinstance(due, datetime)
-        else datetime.fromisoformat(due) + timedelta(seconds=1)
-    )
+    after_due = due + timedelta(seconds=1)
     planner._clock = profiles._clock = lifecycle._clock = lambda: after_due
     child_id = _drive_to_job(profiles, planner, sessions, "recipe.install")
     child = lifecycle.get(child_id)
     with sessions() as session:
         claim = session.get(ResourceReservation, claim_id)
-        assert claim is not None and claim.owner_id == child.owner_id
+        assert claim is not None
+        assert claim.owner_id == child.owner_id
         assert claim.state == "active"
     resumed = planner.get(operation_id)
-    assert (
-        resumed.result is not None
-        and resumed.result.retry_reason != "install.capacity_busy"
-    )
+    assert resumed.result is not None
+    assert resumed.result.retry_reason != "install.capacity_busy"
 
 
 def test_supersession_releases_claims_but_unknown_dispatch_retains_them(
@@ -200,7 +210,8 @@ def test_supersession_releases_claims_but_unknown_dispatch_retains_them(
     second = load(next_review)
     with sessions() as session:
         prior = session.get(FleetProfileApplication, first)
-        assert prior is not None and prior.state == "superseded"
+        assert prior is not None
+        assert prior.state == "superseded"
         claims = tuple(
             session.scalars(
                 select(ResourceReservation).where(
@@ -218,7 +229,8 @@ def test_supersession_releases_claims_but_unknown_dispatch_retains_them(
     assert profiles.tick()
     with sessions() as session:
         current = session.get(FleetProfileApplication, second)
-        assert current is not None and current.state == LifecycleState.RUNNING
+        assert current is not None
+        assert current.state == LifecycleState.RUNNING
         claims = tuple(
             session.scalars(
                 select(ResourceReservation).where(
@@ -243,14 +255,6 @@ def test_profile_disk_handoff_preserves_materialized_install_headroom(
     usage, its staging headroom remains promised, and the new profile's claim
     is excluded only for its own child. A competing install must still fail.
     """
-    from vonk_control.inventory.repository import MAX_INVENTORY_FUTURE_SKEW
-    from vonk_control.runtime_image_preparation.storage import (
-        FilesystemRuntimeImageStorage,
-    )
-
-    from .recipe_operations_support import NOW, installed_recipe
-    from .test_disk_reservations import _record_disk
-    from .test_fleet_profile_recovery_identity import _complete_rebuild
 
     sessions, profiles, planner, profile, _api, _headers, _, nodes = _capacity_profile(
         tmp_path, postgres_engine
@@ -260,7 +264,8 @@ def test_profile_disk_handoff_preserves_materialized_install_headroom(
     with sessions() as session:
         mapping_id = session.scalar(select(ClusterMapping.id))
         build_id = session.scalar(select(RecipeBuild.id))
-        assert mapping_id is not None and build_id is not None
+        assert mapping_id is not None
+        assert build_id is not None
     original = lifecycle.preview_install(mapping_id, build_id)
     old = installed_recipe(
         lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
@@ -330,7 +335,8 @@ def test_profile_disk_handoff_preserves_materialized_install_headroom(
         assert replacement is not None
         assert replacement.plan_digest == install_plan.plan_digest
         old_installation = session.get(RecipeInstallation, old.owner_id)
-        assert old_installation is not None and old_installation.state == "installed"
+        assert old_installation is not None
+        assert old_installation.state == "installed"
 
 
 @pytest.mark.parametrize("held_owner", ["mapping", "node", "build"])
@@ -338,9 +344,6 @@ def test_install_admission_reschedules_contended_dependencies_without_partial_cl
     tmp_path, postgres_engine, held_owner
 ):
     """Contention before the reservation query is still a retryable admission wait."""
-    from sqlalchemy import text
-    from vonk_control.install_admission.contracts import InstallAdmissionBusy
-    from vonk_control.models.fleet import AgentNode
 
     sessions, _profiles, planner, _profile, _api, _headers, _, nodes = (
         _capacity_profile(tmp_path, postgres_engine)
@@ -350,7 +353,8 @@ def test_install_admission_reschedules_contended_dependencies_without_partial_cl
     with sessions() as session:
         mapping_id = session.scalar(select(ClusterMapping.id))
         build_id = session.scalar(select(RecipeBuild.id))
-        assert mapping_id is not None and build_id is not None
+        assert mapping_id is not None
+        assert build_id is not None
     plan = lifecycle.preview_install(mapping_id, build_id)
     assert plan.allowed
     owner, identity = {
@@ -360,13 +364,17 @@ def test_install_admission_reschedules_contended_dependencies_without_partial_cl
     }[held_owner]
     with sessions.begin() as holder:
         assert holder.get(owner, identity, with_for_update=True) is not None
-        with pytest.raises(InstallAdmissionBusy), sessions.begin() as admission:
+
+        def expected_failure(admission):
             # The wrong implementation waits and raises a raw SQL error. Bound
             # the regression itself; production configures this centrally.
             admission.execute(text("SET LOCAL lock_timeout = '100ms'"))
             lifecycle._install_admission.accept_install_in_session(
                 admission, plan, actor="admin", now=lifecycle._clock()
             )
+
+        with pytest.raises(InstallAdmissionBusy), sessions.begin() as admission:
+            expected_failure(admission)
         with sessions() as observer:
             assert not tuple(observer.scalars(select(RecipeInstallation)))
             assert not tuple(observer.scalars(select(ResourceReservation)))

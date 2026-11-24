@@ -36,16 +36,13 @@ from typing import Any
 
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitOwnerKind
-
-from ..agent_operation_facts import aware
-from ..categorized_errors import InvalidValue
-from ..jobs import states as job_states
-from ..models.jobs import Job
-from ..persisted_waits import initialize_wait, lifecycle_wait, wait_due
-from .adapter import Dispatch
-from .core import transition
-from .evidence import keep_recorded_outcome
-from .types import (
+from vonk_control.agent_operation_facts import aware
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.adapter import Dispatch
+from vonk_control.lifecycle.core import transition
+from vonk_control.lifecycle.evidence import keep_recorded_outcome
+from vonk_control.lifecycle.types import (
     TERMINAL_STATES,
     CancelRequested,
     Decision,
@@ -57,6 +54,8 @@ from .types import (
     State,
     StopResult,
 )
+from vonk_control.models.jobs import Job
+from vonk_control.persisted_waits import initialize_wait, lifecycle_wait, wait_due
 
 KIND = "recipe-operation"
 _MAX_REASON = 1024
@@ -137,27 +136,27 @@ class RecipeOperationAdapter:
 
     # ----------------------------------------------------- the kind's facts
 
-    def irreversible(self, row: Lifecycle) -> bool:
+    def irreversible(self, _row: Lifecycle) -> bool:
         """A composite has no effect of its own: its orders own theirs."""
 
         return False
 
-    def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
+    def retry_not_before(self, _row: Lifecycle, _now: datetime) -> datetime | None:
         return None
 
-    def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
+    def execute(self, _row: Lifecycle, _attempt: int) -> Dispatch:
         return Dispatch(issued=False)  # the Spark claims its own orders
 
-    def observe(self, row: Lifecycle) -> Observed:
+    def observe(self, _row: Lifecycle) -> Observed:
         return Observed(Effect.UNKNOWN, "the orders own the effect")
 
-    def stop(self, row: Lifecycle) -> StopResult:
+    def stop(self, _row: Lifecycle) -> StopResult:
         return StopResult.UNCONFIRMED  # the orders are stopped by their own core
 
-    def actions(self, row: Lifecycle) -> tuple[str, ...]:
+    def actions(self, _row: Lifecycle) -> tuple[str, ...]:
         return ()
 
-    def children(self, row: Lifecycle) -> tuple[Lifecycle, ...]:
+    def children(self, _row: Lifecycle) -> tuple[Lifecycle, ...]:
         return ()
 
     # ---------------------------------------------------------------- writes
@@ -176,7 +175,7 @@ class RecipeOperationAdapter:
 
     @staticmethod
     def _write(
-        job: Job, after: Lifecycle, now: datetime, reason: str | None, keep: bool
+        job: Job, after: Lifecycle, now: datetime, reason: str | None, *, keep: bool
     ) -> None:
         if job_states.core(job.state) in TERMINAL_STATES:
             # A recorded end is final: a later decision is evidence, not a new
@@ -212,7 +211,7 @@ class RecipeOperationAdapter:
         if before.terminal:
             job.updated_at = aware(now)
             return
-        self._write(job, replace(before, state=State.RUNNING), now, reason, keep)
+        self._write(job, replace(before, state=State.RUNNING), now, reason, keep=keep)
 
     def finish(
         self,
@@ -237,7 +236,7 @@ class RecipeOperationAdapter:
             else Reported(Outcome.DONE, reason=reason)
         )
         decision = transition(before, event, self, aware(now))
-        self._write(job, decision.row, now, reason, False)
+        self._write(job, decision.row, now, reason, keep=False)
         return decision
 
     def cancelled(
@@ -258,7 +257,7 @@ class RecipeOperationAdapter:
             self,
             aware(now),
         )
-        self._write(job, decision.row, now, reason, keep)
+        self._write(job, decision.row, now, reason, keep=keep)
         return decision
 
     def request_cancel(
@@ -281,7 +280,7 @@ class RecipeOperationAdapter:
         decision = transition(
             before, CancelRequested(request_key, reason), self, aware(now)
         )
-        self._write(job, decision.row, now, reason, False)
+        self._write(job, decision.row, now, reason, keep=False)
         return decision.row
 
     def cancel_race(self, job: Job, now: datetime) -> Lifecycle:
@@ -298,7 +297,7 @@ class RecipeOperationAdapter:
             else replace(before, cancel_requested_at=aware(now))
         )
         decision = transition(flagged, Observed(Effect.UNKNOWN), self, aware(now))
-        self._write(job, decision.row, now, None, True)
+        self._write(job, decision.row, now, None, keep=True)
         return decision.row
 
     def heal(self, job: Job, now: datetime) -> bool:
@@ -310,7 +309,7 @@ class RecipeOperationAdapter:
         ):
             return False
         before = self.lifecycle(job, issued=True, now=now)
-        self._write(job, replace(before, state=State.OBSERVING), now, None, True)
+        self._write(job, replace(before, state=State.OBSERVING), now, None, keep=True)
         return True
 
 

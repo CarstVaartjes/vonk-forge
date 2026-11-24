@@ -5,10 +5,12 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
@@ -17,7 +19,11 @@ from vonk_control.lifecycle.image_availability import (
     CANCEL_BUDGET,
     PREPARATION_STALL_WINDOW,
 )
+from vonk_control.model_cache.contract import ModelCacheCounters
+from vonk_control.model_cache.errors import ModelCacheNotFound
+from vonk_control.model_cache.progress import cache_progress, progress_document
 from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.models.fleet import User
 from vonk_control.models.jobs import Job
 from vonk_control.recipe_image_availability.contracts import (
@@ -32,6 +38,9 @@ from .recipe_image_availability_support import (
     _add_revision,
     _availability_payload,
     _builder,
+    _download_preview,
+    _manifest,
+    _persist_fake_model_cache_child,
     _recipe,
     _runtime,
     _service,
@@ -103,7 +112,8 @@ def test_deep_history_has_no_admission_or_cancellation_barrier(tmp_path, history
     assert service.ensure_preparation("request-revision", actor="operator")
     with sessions() as session:
         current = session.scalar(select(Job).where(Job.request_id == request))
-        assert current is not None and current.state == LifecycleState.QUEUED.value
+        assert current is not None
+        assert current.state == LifecycleState.QUEUED.value
         current_id = current.id
     assert service.cancel_profile_preparation(
         "request-revision", actor="operator", reason="selected application ended"
@@ -188,7 +198,8 @@ def test_same_revision_force_supersedes_old_claim_and_late_effects(tmp_path, iss
         assert row is not None
         payload = service._payload(row)
         assert isinstance(payload, AvailabilityJobPayload)
-        assert payload.claim_owner is None and payload.claim_until is None
+        assert payload.claim_owner is None
+        assert payload.claim_until is None
     assert service.run_pending() == 1
     assert service.get(newer.id).artifact is not None
     fresh = service.start(
@@ -219,7 +230,8 @@ def test_busy_identity_releases_claim_then_reuses_exact_verified_content(tmp_pat
         assert row is not None
         payload = service._payload(row)
         assert isinstance(payload, AvailabilityJobPayload)
-        assert payload.claim_owner is None and payload.claim_until is None
+        assert payload.claim_owner is None
+        assert payload.claim_until is None
         assert row.next_action_at is not None
     # Another request can prepare the content during the contender's backoff.
     unrelated = service.start(
@@ -379,18 +391,6 @@ def test_new_request_supersedes_parked_verified_image_without_losing_bytes(
 
 def test_lost_model_projection_is_reconciled_by_same_request_and_reuses_image(tmp_path):
     """Catch missing-child observations being overridden into permanent failures."""
-    from types import SimpleNamespace
-
-    from vonk_control.model_cache.contract import ModelCacheCounters
-    from vonk_control.model_cache.errors import ModelCacheNotFound
-    from vonk_control.model_cache.progress import cache_progress, progress_document
-    from vonk_control.models.cache import ModelCacheOperation
-
-    from .recipe_image_availability_support import (
-        _download_preview,
-        _manifest,
-        _persist_fake_model_cache_child,
-    )
 
     engine, sessions, service, now, transport = _owner(tmp_path)
     model_digest = next(
@@ -485,7 +485,8 @@ def test_lost_model_projection_is_reconciled_by_same_request_and_reuses_image(tm
     assert completed.artifact is not None
     assert completed.model_preparation is not None
     assert completed.model_preparation.id == child.id
-    assert len(requests) == 2 and requests[0] == requests[1]
+    assert len(requests) == 2
+    assert requests[0] == requests[1]
     assert transport.calls == 1
     fresh = service.start(
         "request-revision", actor="operator", request_id=str(uuid.uuid4())
@@ -529,7 +530,8 @@ def test_child_observation_fault_cannot_skip_cancellation_deadline_or_healthy_wo
         assert row is not None
         payload = service._payload(row)
         assert isinstance(payload, AvailabilityJobPayload)
-        assert payload.claim_owner is None and payload.claim_until is None
+        assert payload.claim_owner is None
+        assert payload.claim_until is None
     fresh = service.start(
         "request-revision", actor="operator", request_id=str(uuid.uuid4())
     )

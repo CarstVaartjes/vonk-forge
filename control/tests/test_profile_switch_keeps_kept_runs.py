@@ -12,6 +12,7 @@ import uuid
 
 import pytest
 from sqlalchemy import select
+
 from vonk_control.fleet_profiles.control_effects import switch_step_scope
 from vonk_control.models.execution import RecipeRun, RunNode
 

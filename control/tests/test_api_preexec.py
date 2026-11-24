@@ -7,9 +7,13 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
+
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_control import api_preexec
 from vonk_control.browser_auth import (
     BrowserAuthService,
 )
+from vonk_control.categorized_errors import UnsettledOutcome
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import User
 
@@ -20,7 +24,6 @@ def test_startup_never_runs_the_api_as_root(
 ) -> None:
     # Catches an older Compose file (user 0:0) leaving the API root, which
     # would write root-owned files into volumes the 10001 worker shares.
-    from vonk_control import api_preexec
 
     events: list[object] = []
     monkeypatch.setattr(api_preexec.os, "geteuid", lambda: euid)
@@ -49,7 +52,6 @@ def test_owned_state_initializes_database_then_the_single_administrator(
 ) -> None:
     # Catches the API refusing to start when an older Compose file staged no
     # administrator password (the administrator already exists then).
-    from vonk_control import api_preexec
 
     (tmp_path / "database-url").write_text("postgresql://control/database\n")
     if staged:
@@ -85,7 +87,6 @@ def test_owned_state_initializes_database_then_the_single_administrator(
 def test_administrator_initialization_creates_one_login_on_postgres(
     postgres_engine: Engine, tmp_path: Path
 ) -> None:
-    from vonk_control import api_preexec
 
     Base.metadata.create_all(postgres_engine)
     password = "correct horse battery staple"
@@ -116,7 +117,6 @@ def test_administrator_initialization_creates_one_login_on_postgres(
 def test_administrator_initialization_rejects_malformed_secret_before_db_access(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from vonk_control import api_preexec
 
     password_path = tmp_path / "admin-password"
     password_path.write_text("missing final newline", encoding="utf-8")
@@ -132,9 +132,6 @@ def test_administrator_initialization_rejects_malformed_secret_before_db_access(
 
 @pytest.mark.parametrize("fault", ["typed", "io"])
 def test_startup_storage_unknown_ends_and_fresh_startup_executes(monkeypatch, fault):
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_control import api_preexec
-    from vonk_control.categorized_errors import UnsettledOutcome
 
     observations = []
     launches = []

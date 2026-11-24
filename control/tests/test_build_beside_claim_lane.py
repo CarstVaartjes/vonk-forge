@@ -14,11 +14,14 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.build_import import RecipeBuildEvidence
-from vonk_agent_protocol.contracts import AgentClaim, AgentOperation, canonical_message
+from vonk_agent_protocol.contracts import AgentClaim
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.contracts import OFF_LANE_OPERATIONS
 from vonk_control.agent_jobs.waits import refresh_queue_waits
 from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
@@ -74,7 +77,8 @@ def _compiling_build(jobs, sessions, clock) -> tuple[StoredOperation, AgentClaim
     with sessions.begin() as session:
         row = session.get(StoredOperation, build.id)
         job = session.get(Job, owner.id)
-        assert row is not None and job is not None
+        assert row is not None
+        assert job is not None
         attempt = AgentOperationAdapter(session).start_attempt(
             row,
             job,
@@ -150,7 +154,8 @@ def test_dual_load_progresses_on_the_spark_whose_build_compiles(service) -> None
         assert queued is not None
         wait = read_wait(queued)
     # Queued beside a build it waits only for the next poll, never "for" it.
-    assert wait is not None and wait.reason == WaitReason.OBSERVATION_UNAVAILABLE
+    assert wait is not None
+    assert wait.reason == WaitReason.OBSERVATION_UNAVAILABLE
     assert all(blocker.operation is None for blocker in wait.blockers)
 
     claimed = _poll(jobs, clock, build_claim, NODE_B, AgentOperation.RECIPE_STOP)
@@ -158,7 +163,8 @@ def test_dual_load_progresses_on_the_spark_whose_build_compiles(service) -> None
     jobs.succeed(claimed, RecipeStopResult())
     with sessions() as session:
         compiling = session.get(StoredOperation, build.id)
-        assert compiling is not None and compiling.state == "running"
+        assert compiling is not None
+        assert compiling.state == "running"
     _admit_a_fresh_probe(jobs, sessions, clock, build_claim)
 
 
@@ -247,7 +253,8 @@ def test_work_that_would_end_a_build_waits_for_it_with_a_named_reason(
             else {}
         ),
     )
-    assert released is not None and released.operation == kind
+    assert released is not None
+    assert released.operation == kind
 
 
 def test_work_held_by_the_build_never_holds_back_the_load_behind_it(service) -> None:
@@ -288,9 +295,11 @@ def test_work_held_by_the_build_never_holds_back_the_load_behind_it(service) -> 
     with sessions.begin() as session:
         refresh_queue_waits(session, clock.now, node_id=NODE_B)
         queued = session.get(StoredOperation, upgrade.id)
-        assert queued is not None and queued.state == "queued"
+        assert queued is not None
+        assert queued.state == "queued"
         wait = read_wait(queued)
-    assert wait is not None and wait.reason == WaitReason.SPARK_BUSY
+    assert wait is not None
+    assert wait.reason == WaitReason.SPARK_BUSY
     assert wait.blockers[0].operation == BlockingOperation(
         id=build.id, kind=AgentOperation.RECIPE_BUILD.value
     )

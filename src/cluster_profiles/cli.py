@@ -15,37 +15,37 @@ from io import StringIO
 from pathlib import Path
 from typing import Any, NoReturn, cast, overload
 
-from .build_identity import current_build
-from .cli_artifact_jobs import _may_have_completed
-from .cli_auth import AuthAction, run_auth
-from .cli_auth import render as render_auth
-from .cli_completion import completion_script
-from .cli_help import (
+from cluster_profiles.build_identity import current_build
+from cluster_profiles.cli_artifact_jobs import _may_have_completed
+from cluster_profiles.cli_auth import AuthAction, run_auth
+from cluster_profiles.cli_auth import render as render_auth
+from cluster_profiles.cli_completion import completion_script
+from cluster_profiles.cli_help import (
     GROUP_VIEWS,
     command_help,
     group_help,
     subcommands,
     usage_error,
 )
-from .cli_json_contract import (
+from cluster_profiles.cli_json_contract import (
     CliErrorType,
     Reconcile,
     Word,
     failure_document,
     stamp_document,
 )
-from .cli_outcome import (
+from cluster_profiles.cli_outcome import (
     CommandOutcome,
     EnrollmentDeliveryError,
     Observation,
     ObservationStatus,
     Submission,
 )
-from .cli_presentations import PRESENTATIONS
-from .cli_render.common import terminal_text
-from .cli_render.dispatch import render_payload
-from .cli_render.follow import FollowFeed
-from .cli_update import (
+from cluster_profiles.cli_presentations import PRESENTATIONS
+from cluster_profiles.cli_render.common import terminal_text
+from cluster_profiles.cli_render.dispatch import render_payload
+from cluster_profiles.cli_render.follow import FollowFeed
+from cluster_profiles.cli_update import (
     CliUpdateError,
     begin_interactive_update_check,
     cache_update_notice,
@@ -53,8 +53,8 @@ from .cli_update import (
     interactive_notice,
     run_update,
 )
-from .control_client.connection import resolve_credential
-from .control_client.errors import (
+from cluster_profiles.control_client.connection import resolve_credential
+from cluster_profiles.control_client.errors import (
     CommandInterrupted,
     ControlClientError,
     ControlNotConfigured,
@@ -63,13 +63,13 @@ from .control_client.errors import (
     ControlUnavailable,
     LocalInputError,
 )
-from .control_client.transfers import ControlClient
-from .controller_cli.common import ControllerClient, NoLoadedProfile
-from .controller_cli.confirmation import ActionDeclined
-from .controller_cli.dispatch import run_controller
-from .controller_cli.parser import add_controller_commands
-from .error_reporting import ClientCode
-from .runtime_identity import packaged_runtime_identity
+from cluster_profiles.control_client.transfers import ControlClient
+from cluster_profiles.controller_cli.common import ControllerClient, NoLoadedProfile
+from cluster_profiles.controller_cli.confirmation import ActionDeclined
+from cluster_profiles.controller_cli.dispatch import run_controller
+from cluster_profiles.controller_cli.parser import add_controller_commands
+from cluster_profiles.error_reporting import ClientCode
+from cluster_profiles.runtime_identity import packaged_runtime_identity
 
 _MAX_TEXT_CHARS = 1_024
 _SENSITIVE_ASSIGNMENT = re.compile(
@@ -309,7 +309,7 @@ def _control_error(
         else ClientCode.CONTROL_API_ERROR.value
     )
     detail = getattr(error, "detail", str(error))
-    message = _plain_language_error(code, detail)
+    message = _plain_language_error(detail)
     message = (
         "control API unavailable"
         if isinstance(error, (ControlUnavailable, ControlTransportError, OSError))
@@ -564,7 +564,7 @@ def _control_error(
     return result
 
 
-def _plain_language_error(code: object, detail: object) -> str:
+def _plain_language_error(detail: object) -> str:
     """Translate common operator refusals while retaining the wire detail."""
     return _sanitize_text(detail)
 
@@ -572,10 +572,9 @@ def _plain_language_error(code: object, detail: object) -> str:
 def _plain_language_document(value: object) -> object:
     """Preserve owner diagnostics while sanitizing terminal text."""
     if isinstance(value, Mapping):
-        code = value.get("code")
         return {
             str(key): (
-                _plain_language_error(code, item)
+                _plain_language_error(item)
                 if key == "detail" and isinstance(item, str)
                 else _plain_language_document(item)
             )
@@ -615,9 +614,8 @@ def _emit(
         print(_json_text(stamp_document(args, safe, error=error)))
         return
     if error:
-        code = safe.get("code")
         if isinstance(safe.get("detail"), str):
-            safe["detail"] = _plain_language_error(code, safe["detail"])
+            safe["detail"] = _plain_language_error(safe["detail"])
             if safe["detail"] == safe.get("error"):
                 del safe["detail"]  # never print the same sentence twice
     else:
@@ -676,7 +674,7 @@ def _emit(
         )
 
 
-def _json_text(document: Mapping) -> str:
+def _json_text(document: object) -> str:
     """One versioned JSON document: indented for a person, compact for a pipe."""
 
     if sys.stdout.isatty():

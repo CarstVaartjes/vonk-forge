@@ -4,14 +4,15 @@ import hashlib
 from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BeforeValidator, Field, field_validator
+
 from vonk_agent_protocol.state_machines import CatalogSyncState, machine_adopter
 from vonk_agent_protocol.wire_model import WireEnum
-
-from ..library.contract import UuidId
-from ..strict_json import StrictModel
+from vonk_control.identifiers import UuidId
+from vonk_control.recipe_library_types import _snapshot_content
+from vonk_control.strict_json import StrictModel
 
 if TYPE_CHECKING:
-    from ..recipe_library_types import RecipeLibrarySnapshot
+    from vonk_control.recipe_library_types import RecipeLibrarySnapshot
 
 
 class CatalogSyncTrigger(WireEnum):
@@ -41,7 +42,6 @@ class ManagedCatalogSyncRequest(StrictModel):
 
 def reviewed_catalog_content(snapshot: "RecipeLibrarySnapshot") -> str:
     """Bind content, accepting identical publication under another commit."""
-    from ..recipe_packages.contracts import _snapshot_content
 
     return hashlib.sha256(_snapshot_content(snapshot)).hexdigest()
 

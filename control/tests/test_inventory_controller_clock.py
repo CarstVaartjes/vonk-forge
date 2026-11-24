@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import delete, select
+
 from vonk_control.inventory.repository import InventoryRepository
 from vonk_control.models.fleet import AgentCertificate, AgentNodeContact
 from vonk_control.models.telemetry import NodeInventorySnapshot
@@ -51,7 +52,7 @@ def _post(client, clock, *, collected_ago: timedelta) -> None:
 
 
 @pytest.mark.parametrize(
-    "collected_ago", (timedelta(minutes=6), timedelta(minutes=10)), ids=("6m", "10m")
+    "collected_ago", [timedelta(minutes=6), timedelta(minutes=10)], ids=("6m", "10m")
 )
 def test_report_received_now_is_fresh_whatever_the_agent_stamp(
     agent_system, collected_ago
@@ -98,7 +99,7 @@ def _feed_through_the_endpoint(tmp_path: Path, sessions, node_id, now, payload) 
                 AgentCertificate.node_id == node_id
             )
         ).first()
-        serial, fingerprint = found if found else (None, None)
+        serial, fingerprint = found or (None, None)
         if session.get(AgentNodeContact, node_id) is None:
             session.add(AgentNodeContact(node_id=node_id, last_seen_at=now))
         if serial is None:

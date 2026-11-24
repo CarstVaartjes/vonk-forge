@@ -11,21 +11,18 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
+
 from vonk_agent_protocol.agent_words import ProfileAction
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
-
-from ..operations.blockers import OperationBlocker
-from ..strict_json import StrictModel
-from ..wait_contract import QueueWait
-from .applications import (
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationCancellationView,
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
 )
-from .assessment import (
+from vonk_control.fleet_profile_contract.assessment import (
     FleetProfileAdmissionDecision,
     FleetProfileAssignmentAssessment,
     FleetProfileAssignmentPreparation,
@@ -36,15 +33,21 @@ from .assessment import (
     FleetProfileReason,
     FleetProfileScopePreview,
 )
-from .definitions import FleetProfileAssignment, FleetProfileDefinition
-from .effects import FleetProfileEffects
-from .vocabulary import (
+from vonk_control.fleet_profile_contract.definitions import (
+    FleetProfileAssignment,
+    FleetProfileDefinition,
+)
+from vonk_control.fleet_profile_contract.effects import FleetProfileEffects
+from vonk_control.fleet_profile_contract.vocabulary import (
     Digest,
     FleetProfileOperationState,
     FleetProfileSupersedeCode,
     Name,
     UuidId,
 )
+from vonk_control.operations.blockers import OperationBlocker
+from vonk_control.strict_json import StrictModel
+from vonk_control.wait_contract import QueueWait
 
 
 class ProfileLoadAction(StrEnum):

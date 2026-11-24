@@ -15,6 +15,7 @@ from pathlib import Path
 from threading import Event, Lock
 
 import httpx2
+
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 
@@ -58,7 +59,8 @@ def range_partial_bytes(target: Path, expected_bytes: int, *, workers: int = 4) 
             min(path.stat().st_size, end - start + 1)
             if not path.is_symlink() and path.is_file()
             else 0,
-            max(0, min(prefix, end + 1) - start),
+            0,
+            min(prefix, end + 1) - start,
         )
         for start, end, path in _segments(target, expected_bytes, workers)
     )
@@ -194,7 +196,7 @@ def download_ranges(
         response = open_range(offset, end)
         try:
             if response.status_code == 200:
-                raise _RangeIgnored()
+                raise _RangeIgnored
             response.raise_for_status()
             match = re.fullmatch(
                 r"bytes (\d+)-(\d+)/(\d+)", response.headers.get("content-range", "")
@@ -293,7 +295,7 @@ def download_ranges(
                             on_assembled_bytes(chunk)
             output.flush()
             os.fsync(output.fileno())
-        os.replace(assembly, target)
+        assembly.replace(target)
     finally:
         assembly.unlink(missing_ok=True)
     cleanup_ranges(target, expected_bytes, workers=workers)

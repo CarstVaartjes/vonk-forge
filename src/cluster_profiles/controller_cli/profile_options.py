@@ -7,12 +7,18 @@ import sys
 import time
 from collections.abc import Mapping, Sequence
 
-from ..cli_render.common import terminal_text
-from ..cli_select import SelectorError
-from ..control_client.errors import ControlMalformedResponse
-from ..control_client.schema import validate_control_document
-from .common import ControllerClient, _quoted
-from .selection import _observe_selection, _selection_remaining
+from cluster_profiles.cli_render.common import terminal_text
+from cluster_profiles.cli_select import SelectorError
+from cluster_profiles.control_client.errors import ControlMalformedResponse
+from cluster_profiles.control_client.schema import validate_control_document
+from cluster_profiles.controller_cli.common import ControllerClient, _quoted
+from cluster_profiles.controller_cli.selection import (
+    _observe_selection,
+    _selection_remaining,
+)
+from cluster_profiles.generated_control.models.recipe_revision_projection import (
+    RecipeRevisionProjection,
+)
 
 
 def _configure_option_target(
@@ -85,10 +91,6 @@ def _apply_option_choices(
         return
     selector = str(assignment["recipe_selector"])
     deadline = time.monotonic() + getattr(args, "timeout_seconds", 30)
-
-    from ..generated_control.models.recipe_revision_projection import (
-        RecipeRevisionProjection,
-    )
 
     def recipe_options():
         detail = client.request(

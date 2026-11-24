@@ -11,15 +11,14 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import (
-    AgentInstallResult,
-    AgentResult,
-    canonical_message,
-)
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+
+from vonk_agent_protocol.agent_operations import AgentInstallResult
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 from vonk_agent_protocol.state_machines import RouteState, RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.models.execution import (
     RecipeInstallation,
@@ -262,7 +261,7 @@ def test_multirank_role_phases_persist_recover_and_stop_in_reverse_order(
 
 @pytest.mark.parametrize(
     "start_order",
-    (("worker", "entrypoint"), ("entrypoint", "worker")),
+    [("worker", "entrypoint"), ("entrypoint", "worker")],
 )
 @pytest.mark.parametrize("startup_budget", [60, 1800])
 def test_distributed_start_launches_all_ranks_then_checks_collective(

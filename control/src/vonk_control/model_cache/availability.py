@@ -9,22 +9,26 @@ from typing import TYPE_CHECKING, cast
 
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-
-from ..bounded_retry import bounded_attempts
-from ..categorized_errors import InvalidValue
-from ..models.cache import ModelCacheSet
-from .artifacts import ArtifactSetManifest, _optional_digest
-from .constants import _LOGGER, _RETRY_BASE_SECONDS, _REVERIFY_ACTOR, SCHEMA_VERSION
-from .contract import ModelCacheSetState
-from .errors import (
+from vonk_control.bounded_retry import bounded_attempts
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, _optional_digest
+from vonk_control.model_cache.constants import (
+    _LOGGER,
+    _RETRY_BASE_SECONDS,
+    _REVERIFY_ACTOR,
+    SCHEMA_VERSION,
+)
+from vonk_control.model_cache.contract import ModelCacheSetState
+from vonk_control.model_cache.errors import (
     ModelCacheConflictUnknown,
     ModelCacheNotFound,
     ModelCacheNotFoundInvalid,
 )
-from .source_helpers import _valid_relative_path
+from vonk_control.model_cache.source_helpers import _valid_relative_path
+from vonk_control.models.cache import ModelCacheSet
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class AvailabilityMixin:
@@ -69,7 +73,7 @@ class AvailabilityMixin:
             cache._reverified_at[manifest.digest] = now
         try:
             present = cache._objects_present(manifest)
-            if present is None:
+            if present is None:  # pyright: ignore[reportUnnecessaryComparison]  # test doubles of _objects_present return None
                 return
             with cache._session(write=True) as session:
                 row = session.get(ModelCacheSet, manifest.digest)
@@ -272,8 +276,8 @@ class AvailabilityMixin:
         artifact_sha256: str,
         artifact_path: str,
         *,
-        offset: int = 0,
-        maximum_bytes: int = 8 * 1024 * 1024,
+        offset: object = 0,
+        maximum_bytes: object = 8 * 1024 * 1024,
     ) -> bytes:
         """Read a bounded range from a complete verified cache set."""
         cache = cast("ModelCacheService", self)

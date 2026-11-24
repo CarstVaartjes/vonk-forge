@@ -8,11 +8,14 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+
 from vonk_agent_protocol.route_activation import (
     ROUTE_ACK_TIMEOUT_SECONDS,
     ActivationMarker,
+    SupervisorAcknowledgement,
     SupervisorPhase,
 )
 from vonk_control.gateway.litellm import render_empty_config
@@ -24,11 +27,10 @@ from vonk_control.gateway.route_runtime import (
     verify_active_route_bundle,
 )
 
+from .observed_actions import observe_action
+
 NOW = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
 ROOT = Path(__file__).resolve().parents[2]
-
-
-from .observed_actions import observe_action
 
 
 def _encoded(value):
@@ -81,8 +83,10 @@ def _publish(
             litellm=render_empty_config(),
         )
         marker = ActivationMarker.model_validate_json(marker.model_dump_json())
-        uncertainty = publisher._require_supervisor_ack(marker, SupervisorPhase.READY)
-        assert uncertainty is None
+        acknowledgement = publisher._require_supervisor_ack(
+            marker, SupervisorPhase.READY
+        )
+        assert acknowledgement is None
         return marker
 
 
@@ -211,9 +215,9 @@ def test_ack_failure_is_reported_and_exact_persisted_marker_can_be_inspected(tmp
 def test_restart_verifies_exact_marker_and_publishes_next_generation(tmp_path):
     first = _publish(_publisher(tmp_path))
     restarted = _publisher(tmp_path)
-    assert _inspected(restarted, expected=first) == first
+    assert _inspected(restarted) == first
     assert _publish(restarted).generation == 2
-    assert _inspected(restarted, expected=first).generation == 2
+    assert _inspected(restarted).generation == 2
     assert _publish(restarted).generation == 3
 
 
@@ -350,7 +354,6 @@ def test_a_drained_ack_completes_a_withdrawal_but_never_a_publication(
 def test_delayed_supervisor_ack_uses_the_shared_activation_budget(
     tmp_path, monkeypatch, ack_after
 ):
-    from types import SimpleNamespace
 
     marker = _publish(_publisher(tmp_path))
     supervisor = _supervisor(monkeypatch, tmp_path / "runtime")
@@ -379,7 +382,6 @@ def test_delayed_supervisor_ack_uses_the_shared_activation_budget(
 
 @pytest.mark.parametrize("failure", ["generation", "stale", "unknown"])
 def test_longer_ack_budget_still_rejects_invalid_authority(tmp_path, failure):
-    from vonk_agent_protocol.route_activation import SupervisorAcknowledgement
 
     marker = _publish(_publisher(tmp_path))
     path = tmp_path / "ack.json"

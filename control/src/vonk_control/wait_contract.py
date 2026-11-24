@@ -4,16 +4,17 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import AwareDatetime, Field
+from pydantic import AwareDatetime, Field, TypeAdapter, ValidationError
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     OperatorActionName,
     WaitOwnerKind,
     WaitResumeCondition,
 )
 from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
-
-from .operations.blockers import BlockingOperation, OperationBlocker
-from .strict_json import StrictModel
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.operations.blockers import BlockingOperation, OperationBlocker
+from vonk_control.strict_json import StrictModel
 
 
 class WaitEvidence(StrictModel):
@@ -44,3 +45,14 @@ class QueueWait(WaitEvidence):
     """
 
     next_check: AwareDatetime
+
+
+_REASON = TypeAdapter(OperationReason)
+
+
+def typed_wait_reason(value: str | None, fallback: OperationReason) -> OperationReason:
+    """Adopt a declared code, never classify the human-readable detail."""
+    try:
+        return _REASON.validate_json(canonical_message(value))
+    except ValidationError:
+        return fallback

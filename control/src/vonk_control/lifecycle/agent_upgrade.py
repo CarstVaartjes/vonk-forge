@@ -32,16 +32,13 @@ from typing import Any
 
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitOwnerKind
-
-from ..agent_operation_facts import aware
-from ..jobs import states as job_states
-from ..models.jobs import Job, JobAttempt
-from ..persisted_waits import lifecycle_wait, wait_due
-from .adapter import Dispatch
-from .core import transition
-from .reconciler import Settled
-from .reconciler import settle as settle_event
-from .types import (
+from vonk_control.agent_operation_facts import aware
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.adapter import Dispatch
+from vonk_control.lifecycle.core import transition
+from vonk_control.lifecycle.reconciler import Settled
+from vonk_control.lifecycle.reconciler import settle as settle_event
+from vonk_control.lifecycle.types import (
     Decision,
     Effect,
     Event,
@@ -52,6 +49,8 @@ from .types import (
     State,
     StopResult,
 )
+from vonk_control.models.jobs import Job, JobAttempt
+from vonk_control.persisted_waits import lifecycle_wait, wait_due
 
 KIND = "agent-upgrade"
 _MAX_REASON = 512
@@ -126,31 +125,31 @@ class AgentUpgradeAdapter:
 
     # ----------------------------------------------------- the kind's facts
 
-    def irreversible(self, row: Lifecycle) -> bool:
+    def irreversible(self, _row: Lifecycle) -> bool:
         """A composite has no effect of its own: its orders own theirs."""
 
         return False
 
-    def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
+    def retry_not_before(self, _row: Lifecycle, _now: datetime) -> datetime | None:
         """The dpkg fence belongs to the orders (``AGENT_UPGRADE_RECOVERY_FENCE``)."""
 
         return None
 
-    def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
+    def execute(self, _row: Lifecycle, _attempt: int) -> Dispatch:
         return Dispatch(issued=False)  # the rollout dispatches through its owner
 
-    def observe(self, row: Lifecycle) -> Observed:
+    def observe(self, _row: Lifecycle) -> Observed:
         return Observed(Effect.UNKNOWN, "the rollout follows its orders")
 
-    def stop(self, row: Lifecycle) -> StopResult:
+    def stop(self, _row: Lifecycle) -> StopResult:
         return StopResult.CONFIRMED  # the orders are stopped by their own adapter
 
-    def actions(self, row: Lifecycle) -> tuple[str, ...]:
+    def actions(self, _row: Lifecycle) -> tuple[str, ...]:
         """None: a rollout has no ``resume`` of its own; its orders retry by themselves."""
 
         return ()
 
-    def children(self, row: Lifecycle) -> tuple[Lifecycle, ...]:
+    def children(self, _row: Lifecycle) -> tuple[Lifecycle, ...]:
         return ()  # read through the owner, which holds the session
 
     # ----------------------------------------------------------------- apply
@@ -158,7 +157,6 @@ class AgentUpgradeAdapter:
     def apply(
         self,
         job: Job,
-        before: Lifecycle,
         after: Lifecycle,
         now: datetime,
         *,
@@ -194,8 +192,8 @@ class AgentUpgradeAdapter:
         now = aware(now)
         row = self.adopt(job)
 
-        def save(before: Lifecycle, after: Lifecycle) -> bool:
-            self.apply(job, before, after, now, reason=reason)
+        def save(_before: Lifecycle, after: Lifecycle) -> bool:
+            self.apply(job, after, now, reason=reason)
             return True
 
         return settle_event(
@@ -220,7 +218,7 @@ class AgentUpgradeAdapter:
         if before.terminal:
             return before
         after = replace(before, state=State.QUEUED)
-        self.apply(job, before, after, now, reason=reason)
+        self.apply(job, after, now, reason=reason)
         return after
 
     def succeed(
@@ -256,7 +254,7 @@ class AgentUpgradeAdapter:
 
         before = self.adopt(job)
         after = replace(before, state=State.QUEUED, effect=Effect.ISSUED)
-        self.apply(job, before, after, now, reason=reason)
+        self.apply(job, after, now, reason=reason)
         return after
 
     def expire_worker_attempt(self, attempt: JobAttempt) -> None:

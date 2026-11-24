@@ -30,6 +30,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledArtifact,
     CompiledArtifactMount,
@@ -44,6 +45,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledSecurity,
     CompiledSecurityMount,
     CompiledTopology,
+    validate_compiled_execution_plan,
 )
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
@@ -51,14 +53,13 @@ from vonk_agent_protocol.compiled_execution_plan import (
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledRuntimeImage as WireCompiledRuntimeImage,
 )
-from vonk_agent_protocol.contracts import (
+from vonk_agent_protocol.document_limits import (
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
-    canonical_message,
 )
-
-from .content_identity import same_model_object
-from .runtime.spec_contract import RuntimeSpec
-from .strict_json import StrictModel
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.content_identity import same_model_object
+from vonk_control.runtime.spec_contract import RuntimeSpec
+from vonk_control.strict_json import StrictModel
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
@@ -524,9 +525,6 @@ def compile_verified_execution_plan(
 
 def validate_compiled_launch_payload(value: object) -> WireCompiledExecutionPlan:
     """Enforce canonical schema/security validation and the transport ceiling."""
-    from vonk_agent_protocol.compiled_execution_plan import (
-        validate_compiled_execution_plan,
-    )
 
     try:
         encoded = canonical_message(value)

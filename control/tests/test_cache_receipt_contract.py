@@ -3,15 +3,30 @@
 # ruff: noqa: F811 - pytest fixture is imported by name
 
 import pytest
-from vonk_agent_protocol.outcome import UnknownOutcomeError
+from sqlalchemy import delete, select
+
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_control.compiled_execution_plan import (
     VerifiedRuntimeImage,
 )
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
+from vonk_control.distribution.sources import verified_model_receipts
 from vonk_control.execution_plan_service import _runtime_image_receipt
+from vonk_control.failure_classification import disposition
+from vonk_control.models.cache import (
+    ModelCacheOperation,
+    ModelCacheSet,
+    ModelCacheSetArtifact,
+)
 from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 
-from .test_nas_cache_acceptance import controller  # noqa: F401 - shared cache fixture
+from .test_nas_cache_acceptance import (
+    _artifact,
+    _download,
+    controller,  # noqa: F401 - shared cache fixture
+)
 
 
 def test_runtime_receipt_projection_keeps_exact_launch_identity():
@@ -49,7 +64,6 @@ def test_a_damaged_object_triggers_preparation_and_reuses_repaired_content(
 
     The copy to a Spark is what reads the NAS bytes, so it owns this repair.
     """
-    from .test_nas_cache_acceptance import _artifact, _download
 
     _database, _engine, sessions, cache = controller
     artifact = _artifact(
@@ -72,9 +86,6 @@ def test_a_damaged_object_triggers_preparation_and_reuses_repaired_content(
     cache._object_path(object_digest).write_bytes(b"short")
     with pytest.raises(UnknownOutcomeError):
         ModelCacheObjectSource.from_service(cache).objects_for_set(digest)
-    from sqlalchemy import select
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_control.models.cache import ModelCacheOperation
 
     with sessions() as session:
         repairs = list(
@@ -101,15 +112,6 @@ def test_a_set_the_nas_evicted_still_compiles_without_a_download(
     """Catches compilation that needs the NAS copy of a model every target
     Spark already holds: after eviction that waited or downloaded it again.
     A set over bytes the NAS still holds is recorded for a later copy."""
-    from sqlalchemy import delete, select
-    from vonk_control.distribution.sources import verified_model_receipts
-    from vonk_control.models.cache import (
-        ModelCacheOperation,
-        ModelCacheSet,
-        ModelCacheSetArtifact,
-    )
-
-    from .test_nas_cache_acceptance import _artifact, _download
 
     _database, _engine, sessions, cache = controller
     artifact = _artifact(
@@ -158,11 +160,6 @@ def test_bad_ingress_digest_refuses_and_fresh_valid_ingress_is_admitted(
     controller, tmp_path
 ):
     """Local misses must not weaken verification when new bytes enter storage."""
-    from vonk_agent_protocol.agent_words import Disposition
-    from vonk_agent_protocol.outcome import SecurityRefusalError
-    from vonk_control.failure_classification import disposition
-
-    from .test_nas_cache_acceptance import _artifact, _download
 
     _database, _engine, _sessions, cache = controller
     artifact = _artifact(

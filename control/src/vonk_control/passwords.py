@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from argon2 import PasswordHasher, Type
 from argon2.exceptions import InvalidHashError, VerificationError
+
 from vonk_agent_protocol.outcome import InvalidRequestError
 
 
@@ -25,7 +26,7 @@ class PasswordVerification:
     needs_rehash: bool
 
 
-def _bounded(password: str) -> str:
+def _bounded(password: object) -> str:
     if not isinstance(password, str) or not 1 <= len(password.encode("utf-8")) <= 256:
         raise PasswordPolicyError("password is invalid")
     return password

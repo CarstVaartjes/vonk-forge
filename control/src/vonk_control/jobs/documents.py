@@ -24,6 +24,8 @@ from pydantic import (
     StringConstraints,
     field_validator,
 )
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.build_import import (
     RecipeBuildCleanupRequest,
     RecipeBuildRequest,
@@ -42,49 +44,48 @@ from vonk_agent_protocol.recipe_operations import (
 )
 from vonk_agent_protocol.state_machines import RouteState
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_forge_contracts import RecipeDefinition
-
-from ..distribution_assignment import NodeDistributionAssignment
-from ..fleet_profiles.stop_authority import (
+from vonk_control.distribution_assignment import NodeDistributionAssignment
+from vonk_control.fleet_profiles.stop_contract import (
     JobRunStopScope,
     OfflineStopIntent,
     ProfileStopOwnerBinding,
 )
-from ..lifecycle.evidence import BookkeepingReason
-from ..mapping_parameters import EngineArgumentValue
-from ..operations.blockers import OperationBlocker
-from ..operations.contract import AvailabilityOperationFailure
-from ..recipe_builds.cancellation import RecipeBuildIntent
-from ..recipe_image_availability.availability_contract import (
+from vonk_control.lifecycle.evidence import BookkeepingReason
+from vonk_control.mapping_parameters import EngineArgumentValue
+from vonk_control.operations.blockers import OperationBlocker
+from vonk_control.operations.contract import AvailabilityOperationFailure
+from vonk_control.recipe_image_availability.availability_contract import (
     RecipeImageAvailabilityArtifact,
     RecipeImageAvailabilityState,
 )
-from ..recipe_operations.availability_intent import (
+from vonk_control.recipe_operations.availability_intent import (
     RecipeAvailabilityIntent,
     RecipeBuildDependency,
 )
-from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.progress import RunSwitchMemberReceipt
-from ..run_switch_contract.requests import (
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.progress import RunSwitchMemberReceipt
+from vonk_control.run_switch_contract.requests import (
     RunSwitchApplyRequest,
     RunSwitchCleanupApplyRequest,
     RunSwitchProfileStopScope,
     RunSwitchReconciliationAuthority,
     RunSwitchStopApplyRequest,
 )
-from ..run_switch_contract.vocabulary import (
+from vonk_control.run_switch_contract.vocabulary import (
     RunSwitchAction,
     RunSwitchOperationKind,
     RunSwitchPhaseKind,
 )
-from ..runtime_image_preparation.contracts import (
+from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImageReceipt,
     RuntimeImageReferenceIntent,
 )
-from ..stored.json_values import ExternalPassthrough
-from ..strict_json import StrictJSONModel
+from vonk_control.stored.json_values import ExternalPassthrough
+from vonk_control.strict_json import StrictJSONModel
 
 UuidText = Annotated[
     str,
@@ -498,3 +499,10 @@ class DistributionJobPayload(DistributionJobIdentity):
 
 class EmptyJobResult(_Document):
     """A kind that records its outcome elsewhere stores no result document."""
+
+
+class RecipeBuildIntent(StrictJSONModel):
+    """The accepted producer's intent, independent of its current consumers."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    kind: Literal["independent", "dependency"]

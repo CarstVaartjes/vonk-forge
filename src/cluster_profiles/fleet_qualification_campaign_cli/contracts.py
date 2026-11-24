@@ -13,13 +13,12 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
+from cluster_profiles.cli_states import ENDED_STATES
 from cluster_profiles.cli_states_generated import NEEDS_OPERATOR
 from cluster_profiles.fleet_qualification_observation import (
     QualificationObservationUnknown,
 )
-
-from ..cli_states import ENDED_STATES
-from ..qualification_fixtures.registry import FixtureRegistry
+from cluster_profiles.qualification_fixtures.registry import FixtureRegistry
 
 AUTHORITY_SCHEMA = "qualification-authority-v5.schema.json"
 MANIFEST_SCHEMA = "qualification-campaign-manifest-v2.schema.json"

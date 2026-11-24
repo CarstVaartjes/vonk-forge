@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from sqlalchemy import select
+
 from vonk_control.agent_operation_facts import aware
 from vonk_control.artifact_jobs.lifecycle import dead_removal_identities
 from vonk_control.model_cache import states as model_cache_states

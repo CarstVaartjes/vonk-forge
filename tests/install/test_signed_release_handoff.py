@@ -24,10 +24,10 @@ def _sign(private_key: Path, source: Path, destination: Path) -> None:
 
 @pytest.mark.parametrize(
     ("kind", "arguments"),
-    (
+    [
         ("spark", ("--enroll",)),
         ("nas", ("--answers-file", "answers.txt")),
-    ),
+    ],
 )
 def test_channel_passes_the_verified_immutable_release_to_setup(
     tmp_path: Path, kind: str, arguments: tuple[str, ...]

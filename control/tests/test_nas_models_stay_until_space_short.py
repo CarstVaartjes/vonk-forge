@@ -4,17 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from collections import namedtuple
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 from sqlalchemy import select
+from vonk_forge_contracts import document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import RunState
 from vonk_control.models.execution import RecipeRun
 from vonk_control.storage_demands import StorageDemands
-from vonk_forge_contracts import document_sha256
 
 from .model_cache_support import _artifact, _canonical_model, _download
 from .test_catalog_revision_collection import Catalog
@@ -148,9 +149,14 @@ def test_a_refused_download_is_admitted_after_the_collector_made_room(
     try:
         size = 3  # the canonical model's one file
         free = [size - 2]  # two bytes short; the superseded revision frees three
-        usage = namedtuple("usage", "total used free")
+
+        class DiskUsage(NamedTuple):
+            total: int
+            used: int
+            free: int
+
         monkeypatch.setattr(
-            "shutil.disk_usage", lambda _path: usage(1000, 1000 - free[0], free[0])
+            "shutil.disk_usage", lambda _path: DiskUsage(1000, 1000 - free[0], free[0])
         )
         demands = StorageDemands(lambda: world.now)
         service.bind_storage_demands(demands)

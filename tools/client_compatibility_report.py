@@ -44,6 +44,15 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
+from cluster_profiles.cli_update import (
+    _NOTICE_ORIGIN,
+    INSTALLER_PUBLIC_KEY,
+    CliUpdateIngressError,
+    _download,
+    _signed_release,
+)
+from cluster_profiles.control_client.schema import _open_shown_only_words
+
 _REFERENCE = "#/components/schemas/"
 _OPENAPI_MEMBER = "cluster_profiles/schemas/control-openapi.json"
 
@@ -335,7 +344,6 @@ def breaks(prior: JsonValue, candidate: JsonValue) -> list[str]:
     Only operations the prior contract knows matter: a client never calls a
     route it does not have.
     """
-    from cluster_profiles.control_client.schema import _open_shown_only_words
 
     # The prior client opens the words it only shows when it loads its schema.
     opened = json.loads(json.dumps(prior))
@@ -359,13 +367,6 @@ def breaks(prior: JsonValue, candidate: JsonValue) -> list[str]:
 
 def _published_contract(channel: str) -> tuple[str, JsonValue]:
     """The OpenAPI inside the accepted signed CLI wheel of ``channel``."""
-    from cluster_profiles.cli_update import (
-        _NOTICE_ORIGIN,
-        INSTALLER_PUBLIC_KEY,
-        CliUpdateIngressError,
-        _download,
-        _signed_release,
-    )
 
     release, base = _signed_release(
         channel=channel,

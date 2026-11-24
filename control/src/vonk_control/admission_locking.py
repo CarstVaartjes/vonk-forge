@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Collection, Iterator, Mapping
+from collections.abc import Callable, Collection, Generator, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -14,17 +14,17 @@ from typing import Any
 from sqlalchemy import Index, PrimaryKeyConstraint, Select, UniqueConstraint, text
 from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.admission import AdmissionCode
-
-from . import (
+from vonk_control import (
     models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
 )
-from .bounded_retry import REQUEST_PAUSES, bounded_attempts
-from .model_primitives import Base
-from .settings import DATABASE_WAIT_BUDGETS
+from vonk_control.bounded_retry import REQUEST_PAUSES, bounded_attempts
+from vonk_control.model_primitives import Base
+from vonk_control.settings import DATABASE_WAIT_BUDGETS
 
 _BUSY_SQLSTATES = frozenset({"55P03", "40P01", "40001", "57014"})
 _ROW_LOCK_ORDER = (
@@ -102,7 +102,7 @@ _PATIENCE_MS: ContextVar[int] = ContextVar("vonk_admission_patience_ms", default
 
 
 @contextmanager
-def patient_admission(refused_retries: int) -> Iterator[None]:
+def patient_admission(refused_retries: int) -> Generator[None]:
     """Let admission transactions in this context queue for their locks.
 
     A try-lock never queues, so a background writer that takes and releases a
@@ -324,7 +324,7 @@ def constraint_conflict(error: IntegrityError) -> tuple[Conflict, str]:
 
 
 @contextmanager
-def admitting() -> Iterator[None]:
+def admitting() -> Generator[None]:
     """Turn a constraint violation inside this block into its typed conflict.
 
     Enter it outside the transaction (``with admitting(), sessions.begin()``)
@@ -470,7 +470,7 @@ def acquire_admission_keys(
             with session.begin_nested():
                 acquired = session.scalar(statement, {"key": key.database_key})
         except OperationalError as error:
-            _raise_if_busy(session, error)
+            _raise_if_busy(error)
             raise
         if patient:
             continue  # the blocking form returns only once it holds the key
@@ -524,7 +524,7 @@ def lock_admission_rows(
             with session.begin_nested():
                 locked[request.name] = tuple(session.scalars(statement))
         except OperationalError as error:
-            _raise_if_busy(session, error, table=request.model.__tablename__)
+            _raise_if_busy(error, table=request.model.__tablename__)
             raise
     return locked
 
@@ -594,9 +594,7 @@ def _sqlstate(error: DBAPIError) -> str | None:
     return getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
 
 
-def _raise_if_busy(
-    session: Session, error: OperationalError, *, table: str | None = None
-) -> None:
+def _raise_if_busy(error: OperationalError, *, table: str | None = None) -> None:
     if not is_admission_contention(error):
         return
     sqlstate = _sqlstate(error)

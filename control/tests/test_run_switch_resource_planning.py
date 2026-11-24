@@ -1,7 +1,9 @@
 import hashlib
 from importlib.resources import files
 
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_forge_contracts.model import ModelDefinition
+
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.bounded_json import text
 from vonk_control.resource_planning.demand import (
     _resource_evidence,
@@ -12,7 +14,6 @@ from vonk_control.run_switch_operations.planning_helpers import (
     _resource_evidence_digest,
     _settings_view,
 )
-from vonk_forge_contracts.model import ModelDefinition
 
 
 def _model(publisher: str, slug: str, sizes: dict[str, int]) -> ModelDefinition:
@@ -186,7 +187,8 @@ def test_published_qwen_dspark_corpus_scopes_target_and_drafter_bytes() -> None:
 def test_run_switch_resource_view_binds_canonical_identity_and_evidence() -> None:
     recipe = _recipe()
     resolved = resolve_effective_settings(recipe)
-    assert resolved.allowed and resolved.settings is not None
+    assert resolved.allowed
+    assert resolved.settings is not None
     view = _settings_view(resolved.settings)
     assert view.parallelism.world_size == 1
     assert view.identity_sha256 == resolved.settings.identity_digest

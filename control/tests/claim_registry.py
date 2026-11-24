@@ -26,6 +26,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 from sqlalchemy import MetaData, Table, UniqueConstraint
+
 from vonk_control.owner_liveness import OwnerKind
 
 #: The one module that may read an owner's stored state as liveness.

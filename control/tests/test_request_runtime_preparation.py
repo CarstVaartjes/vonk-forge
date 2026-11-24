@@ -3,20 +3,30 @@
 from __future__ import annotations
 
 import hashlib
+from types import SimpleNamespace
 
 import pytest
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
+)
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
 )
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
+from vonk_agent_protocol.recipe_operations import RecipeStartPayload
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.stored import column_value
+from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.distribution.service import DistributionService
-from vonk_control.distribution.sources import MemoryObjectSource
+from vonk_control.distribution.sources import CompositeObjectSource, MemoryObjectSource
+from vonk_control.distribution.types import DistributionError
 from vonk_control.host_helper_authority import HostHelperAuthorityError
+from vonk_control.model_cache.errors import ModelCacheNotFound
+from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.operations import AgentOperation
 
 from .test_host_helper_authority import NOW, runtime_service
@@ -64,8 +74,6 @@ def test_accepted_execution_can_prepare_its_exact_runtime_image(
 def test_execution_request_creates_delivery_without_an_earlier_distribution(
     operation_kind: str,
 ) -> None:
-    from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
-    from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 
     authority = runtime_service(operation_kind=operation_kind)
     with authority._sessions() as session:
@@ -146,10 +154,6 @@ def test_a_request_delivers_its_image_after_the_nas_evicted_the_model(
     """A Spark that holds the model's files still needs its grant to pull the
     image. The accepted plan names the files, so the grant needs no NAS copy;
     the files themselves stay unreadable while the NAS lacks them."""
-    from vonk_control.distribution.model_cache import ModelCacheObjectSource
-    from vonk_control.distribution.sources import CompositeObjectSource
-    from vonk_control.distribution.types import DistributionError
-    from vonk_control.model_cache.service import ModelCacheService
 
     authority = runtime_service(operation_kind=ProtocolAgentOperation.RECIPE_START)
     with authority._sessions() as session:
@@ -209,11 +213,6 @@ def test_a_request_delivers_its_image_after_the_nas_evicted_the_model(
 def test_a_warm_process_reads_a_deleted_set_as_definite() -> None:
     """The process memo holds the manifest after eviction deleted the set; the
     file read must still say the set is gone, not that it is waiting."""
-    from types import SimpleNamespace
-
-    from vonk_control.distribution.model_cache import ModelCacheObjectSource
-    from vonk_control.distribution.types import DistributionError
-    from vonk_control.model_cache.errors import ModelCacheNotFound
 
     digest, file_sha = "a" * 64, "b" * 64
     held = {"present": True}
@@ -241,9 +240,6 @@ def test_a_warm_process_reads_a_deleted_set_as_definite() -> None:
 def test_the_object_source_memo_forgets_old_sets_and_keeps_recent_ones() -> None:
     """Catches a memo that keeps every set the process ever served: an old set
     is read again from the stored manifest, a recent one is not."""
-    from types import SimpleNamespace
-
-    from vonk_control.distribution.model_cache import ModelCacheObjectSource
 
     reads: list[str] = []
 

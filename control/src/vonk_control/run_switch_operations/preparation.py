@@ -11,13 +11,13 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import STOPPABLE_RUN_STATES, RecipeRun, RunNode
-from ..preparation_contract import (
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import STOPPABLE_RUN_STATES, RecipeRun, RunNode
+from vonk_control.preparation_contract import (
     ControllerAssetState,
     ModelArtifactPreparation,
     PreparationReason,
@@ -26,28 +26,26 @@ from ..preparation_contract import (
     TargetAssetState,
     controller_assets_ready,
 )
-from ..recipe_operations.errors import RecipeOperationConflict
-from ..recipe_operations.runtime_specs import (
-    RUNTIME_INTERFACE,
-)
-from ..run_switch_contract.evidence import (
+from vonk_control.recipe_operations.errors import RecipeOperationConflict
+from vonk_control.recipe_operations.runtime_specs import RUNTIME_INTERFACE
+from vonk_control.run_switch_contract.evidence import (
     RunSwitchReason,
     RuntimeImageStorageImpact,
     SparkFit,
     StopImpact,
 )
-from ..run_switch_contract.requests import SparkGroup
-from .identity_helpers import (
+from vonk_control.run_switch_contract.requests import SparkGroup
+from vonk_control.run_switch_operations.identity_helpers import (
     _is_hex_digest,
     _is_oci_digest,
     _node_missing_bytes,
     _primary_model_digest,
 )
-from .interfaces import ArtifactInspection
-from .planning_helpers import _as_reason
+from vonk_control.run_switch_operations.interfaces import ArtifactInspection
+from vonk_control.run_switch_operations.planning_helpers import _as_reason
 
 if TYPE_CHECKING:
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 class PreparationMixin:
@@ -94,11 +92,11 @@ class PreparationMixin:
         )
         model_controller_missing = (
             None
-            if model_controller_expected is None
+            if model_controller_expected is None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
             else model_controller_expected - model_controller_verified
         )
         model_controller_ready = (
-            model_controller_expected is not None
+            model_controller_expected is not None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
             and model_controller_missing == 0
             and inspection.nas_coverage == "complete"
         )
@@ -124,7 +122,7 @@ class PreparationMixin:
                 inspection.missing_spark_bytes,
                 len(group.nodes),
             )
-            target_ready = model_expected is not None and model_missing == 0
+            target_ready = model_expected is not None and model_missing == 0  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
             model_targets.append(
                 TargetAssetState(
                     node_id=node.node_id,

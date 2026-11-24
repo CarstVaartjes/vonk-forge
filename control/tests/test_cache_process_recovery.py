@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import time
@@ -10,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import sessionmaker
+
 from vonk_control.model_cache.contract import (
     ModelCacheDownloadPayload,
     parse_model_cache_payload,
@@ -65,7 +67,8 @@ with open(sys.argv[1], "a+b") as lock:
         stderr=subprocess.PIPE,
         text=True,
     )
-    assert holder.stdout is not None and holder.stdin is not None
+    assert holder.stdout is not None
+    assert holder.stdin is not None
     try:
         assert holder.stdout.readline().strip() == "locked"
         deadline = time.monotonic() + 30
@@ -83,6 +86,7 @@ with open(sys.argv[1], "a+b") as lock:
         for cycle in range(5):
             before = now[0]
             deadline = time.monotonic() + 30
+            observed = None
             while time.monotonic() < deadline:
                 service.tick()
                 observed = service.get_operation(waiting.id)
@@ -97,16 +101,19 @@ with open(sys.argv[1], "a+b") as lock:
                     break
                 time.sleep(0.01)
             else:
+                assert observed is not None
                 raise AssertionError(
                     f"busy artifact did not release its execution claim: {observed.state}"
                 )
-            assert observed.failure is not None and isinstance(retry_time, str)
+            assert observed.failure is not None
+            assert isinstance(retry_time, str)
             assert observed.attempt == 1, (
                 "waiting for a writer consumed an execution retry"
             )
             with sessions() as session:
                 row = session.get(ModelCacheOperation, waiting.id)
-                assert row is not None and "claim" not in row.payload
+                assert row is not None
+                assert "claim" not in row.payload
             if cycle < 4:
                 now[0] = datetime.fromisoformat(retry_time)
         # Leave the final real busy receipt due in the injected clock's
@@ -114,14 +121,17 @@ with open(sys.argv[1], "a+b") as lock:
         # rather than relying on a CPU-dependent race after the last jump.
         with sessions() as session:
             row = session.get(ModelCacheOperation, waiting.id)
-            assert row is not None and row.state == "queued"
-            assert row.next_action_at is not None and row.next_action_at > now[0]
+            assert row is not None
+            assert row.state == "queued"
+            assert row.next_action_at is not None
+            assert row.next_action_at > now[0]
             assert row.lease_deadline is None
             queued_payload = parse_model_cache_payload(row.kind, row.payload)
             assert isinstance(queued_payload, ModelCacheDownloadPayload)
         holder.stdin.close()
         assert holder.wait(timeout=30) == 0
         deadline = time.monotonic() + 30
+        observed = None
         while time.monotonic() < deadline:
             # Production time advances naturally. The fixture follows only a
             # genuine queued busy receipt's canonical clock, after the actual
@@ -144,12 +154,14 @@ with open(sys.argv[1], "a+b") as lock:
                 break
             time.sleep(0.01)
         else:
+            assert observed is not None
             raise AssertionError(
                 f"busy artifact did not recover after writer exit: {observed.state}"
             )
         recovered = service.get_operation(waiting.id)
         assert recovered.state == "succeeded"
-        assert recovered.id == waiting.id and recovered.attempt == 1
+        assert recovered.id == waiting.id
+        assert recovered.attempt == 1
         assert recovered.request_key == waiting.request_key
         assert (
             service.root / "objects" / str(busy["sha256"])[:2] / str(busy["sha256"])
@@ -164,7 +176,6 @@ with open(sys.argv[1], "a+b") as lock:
 def test_model_worker_death_resumes_real_prefix_and_fresh_cli_reconnects(
     postgres_engine, tmp_path
 ):
-    import json
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine)
@@ -272,7 +283,8 @@ engine.dispose()
             / f"{artifact['sha256']}.part"
         )
         prefix = part.stat().st_size
-        assert 0 < prefix < len(data) and part.read_bytes() == data[:prefix]
+        assert 0 < prefix < len(data)
+        assert part.read_bytes() == data[:prefix]
         with sessions() as session:
             operation = session.get(ModelCacheOperation, accepted.id)
             assert operation is not None
@@ -290,7 +302,8 @@ engine.dispose()
         )
         assert restarted.returncode == 0, restarted.stderr
         receipt = json.loads(restarted.stdout)
-        assert receipt["operation_id"] == accepted.id and receipt["request_key"] == key
+        assert receipt["operation_id"] == accepted.id
+        assert receipt["request_key"] == key
         assert receipt["state"] == "succeeded"
         assert json.loads((root / "observed-offsets.json").read_text()) == [prefix]
         assert (

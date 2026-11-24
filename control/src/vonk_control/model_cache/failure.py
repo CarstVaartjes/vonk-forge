@@ -8,7 +8,6 @@ import shutil
 from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 
-from sqlalchemy.orm import Session
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
@@ -16,45 +15,45 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitReason,
 )
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-
-from ..agent_operation_facts import aware as _aware
-from ..failure_classification import disposition, is_definite
-from ..lifecycle.types import Reported, State
-from ..logging import redact_text
-from ..models.cache import ModelCacheOperation, ModelCacheSet
-from ..operations.blockers import make_blocker
-from ..operations.contract import AvailabilityRecoveryAction
-from ..persisted_waits import schedule_wait, typed_wait_reason
-from .artifacts import ArtifactSetManifest
-from .catalog_helpers import _iso
-from .constants import (
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.failure_classification import disposition, is_definite
+from vonk_control.lifecycle.types import Reported, State
+from vonk_control.logging import redact_text
+from vonk_control.model_cache.artifacts import ArtifactSetManifest
+from vonk_control.model_cache.catalog_helpers import _iso
+from vonk_control.model_cache.constants import (
     _ACCESS_WAIT_CODES,
     _CREDENTIAL_FAILURE_CODES,
     _SOURCE_GONE_ATTEMPTS,
     _SOURCE_GONE_STATUSES,
 )
-from .contract import (
+from vonk_control.model_cache.contract import (
     ModelCacheMissingSourceObservation,
     ModelCacheSetState,
 )
-from .errors import ModelCacheError, _ArtifactWriterBusy
-from .ingress_mismatch import (
+from vonk_control.model_cache.errors import ModelCacheError, _ArtifactWriterBusy
+from vonk_control.model_cache.ingress_mismatch import (
     IngressMismatchStep,
     ingress_mismatch_detail,
     observe_ingress_mismatch,
 )
-from .persistence import (
+from vonk_control.model_cache.persistence import (
     _cache_failure,
     _operation_cancellation,
     _operation_progress,
     _store_operation_payload,
     _updated,
 )
-from .progress import cache_phase, progress_document
-from .provider_waits import hinted_until, provider_kinds
+from vonk_control.model_cache.progress import cache_phase, progress_document
+from vonk_control.model_cache.provider_waits import hinted_until, provider_kinds
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
+from vonk_control.operations.blockers import make_blocker
+from vonk_control.operations.contract import AvailabilityRecoveryAction
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.wait_contract import typed_wait_reason
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class FailureMixin:
@@ -193,7 +192,6 @@ class FailureMixin:
                         failure_code = ModelCacheCode.SOURCE_GONE
                         gone_recovery = AvailabilityRecoveryAction.DOWNLOAD_AGAIN
                         detail = cache._source_gone_detail(
-                            session,
                             manifest,
                             failed_artifact_key or operation.current_artifact_key,
                             int(source_status),
@@ -400,7 +398,6 @@ class FailureMixin:
 
     @staticmethod
     def _source_gone_detail(
-        session: Session,
         manifest: ArtifactSetManifest,
         artifact_key: str | None,
         status: int,

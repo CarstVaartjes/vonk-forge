@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from sqlalchemy import func, select
+
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
 from vonk_control.models.execution import RecipeRun, RunNode
@@ -72,7 +73,8 @@ def test_an_idle_job_member_stays_running_across_complete_empty_reports(
 
         with world.sessions() as session:
             run = session.get(RecipeRun, held)
-            assert run is not None and run.state == "running"
+            assert run is not None
+            assert run.state == "running"
             assert set(
                 session.scalars(select(RunNode.state).where(RunNode.run_id == held))
             ) == {"running"}

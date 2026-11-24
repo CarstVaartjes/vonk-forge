@@ -442,7 +442,8 @@ def test_insufficient_space_skips_the_attempt_and_keeps_the_old_marker(
     finally:
         stderr = _terminate(loop)
 
-    assert "needs" in stderr and "bytes free" in stderr
+    assert "needs" in stderr
+    assert "bytes free" in stderr
     assert (state / "last-successful-backup.epoch").read_text() == "123\n"
     assert not (tmp_path / "listing").exists(), "the dump started without space"
     assert not list((tmp_path / "backups").glob("postgres-*.sql.gz"))

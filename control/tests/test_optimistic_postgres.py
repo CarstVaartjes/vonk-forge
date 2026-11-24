@@ -10,12 +10,22 @@ import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    OperatorActionName,
+    WaitReason,
+)
 from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_control.db.startup import verify_schema_is_current
 from vonk_control.jobs.queue import JobService, StaleAttempt
+from vonk_control.lifecycle.job import JobAdapter
+from vonk_control.lifecycle.types import CancelRequested
 from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import Job, JobAttempt
 from vonk_control.optimistic import Applied, Stale, transition
+
+from .insert_collision_support import Rendezvous
 
 
 def _queue(engine):
@@ -29,14 +39,14 @@ def _queue(engine):
 def test_two_decisions_replan_from_committed_winner(postgres_engine) -> None:
     """Catches lost updates, stale-plan replay, and child effects surviving rollback."""
     sessions, jobs, job = _queue(postgres_engine)
-    read = threading.Barrier(2)
+    read = Rendezvous(2)
     winner_committed = threading.Event()
     seen: list[str] = []
 
     def winner(session: Session) -> None:
         row = session.get(Job, job.id)
         assert row is not None
-        read.wait(timeout=30)
+        read.wait()
         row.state = LifecycleState.CANCELLED
 
     def loser(session: Session) -> bool:
@@ -45,7 +55,7 @@ def test_two_decisions_replan_from_committed_winner(postgres_engine) -> None:
         seen.append(row.state)
         if row.state == LifecycleState.CANCELLED:
             return False
-        read.wait(timeout=30)
+        read.wait()
         assert winner_committed.wait(timeout=30)
         row.state = LifecycleState.SUCCEEDED
         session.add(
@@ -66,7 +76,8 @@ def test_two_decisions_replan_from_committed_winner(postgres_engine) -> None:
         assert isinstance(winning.result(timeout=10), Applied)
         winner_committed.set()
         outcome = losing.result(timeout=10)
-    assert isinstance(outcome, Applied) and outcome.value is False
+    assert isinstance(outcome, Applied)
+    assert outcome.value is False
     assert seen == [LifecycleState.QUEUED, LifecycleState.CANCELLED]
     assert jobs.get(job.id).state == LifecycleState.CANCELLED
     assert jobs.get(job.id).version == job.version + 1
@@ -104,7 +115,6 @@ def test_active_writer_yields_without_waiting_for_its_commit(postgres_engine) ->
 
 def test_startup_adds_version_without_changing_running_job(postgres_engine) -> None:
     """Catches a nullable/no-default addition or destructive schema adoption."""
-    from vonk_control.db.startup import verify_schema_is_current
 
     _sessions, jobs, job = _queue(postgres_engine)
     fence = jobs.claim("worker", 30, kinds=("probe",))
@@ -147,7 +157,8 @@ def test_completion_revalidates_fence_after_conflict(postgres_engine) -> None:
             jobs.succeed(first, {})
     finally:
         event.remove(sessions.class_, "before_flush", reclaim)
-    assert injected and successor is not None
+    assert injected
+    assert successor is not None
     row = jobs.get(job.id)
     assert row.state == LifecycleState.RUNNING
     assert row.current_attempt == successor.attempt
@@ -192,7 +203,8 @@ def test_job_service_contention_is_visible_and_recovers(
         attempt = session.scalar(
             select(JobAttempt).where(JobAttempt.fence == fence.fence)
         )
-        assert attempt is not None and attempt.state == LifecycleState.RUNNING
+        assert attempt is not None
+        assert attempt.state == LifecycleState.RUNNING
     # Recovery needs no reset/revision/new request once the holder commits.
     report()
     if action == "succeed":
@@ -230,7 +242,8 @@ def test_same_clock_heartbeat_revalidates_after_reclaim(postgres_engine) -> None
     assert jobs.get(job.id).current_attempt == successor.attempt
     with sessions() as session:
         old = session.scalar(select(JobAttempt).where(JobAttempt.fence == first.fence))
-        assert old is not None and old.lease_deadline == first.lease_deadline
+        assert old is not None
+        assert old.lease_deadline == first.lease_deadline
 
 
 def test_denied_access_is_not_retried_or_softened(postgres_engine) -> None:
@@ -275,9 +288,6 @@ def test_guarded_lifecycle_write_cannot_bypass_the_version_fence(
     postgres_engine,
 ) -> None:
     """Catches bulk state CAS overwriting a same-state but newer operator decision."""
-    from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName
-    from vonk_control.lifecycle.job import JobAdapter
-    from vonk_control.lifecycle.types import CancelRequested
 
     sessions, jobs, job = _queue(postgres_engine)
     now = datetime.now(UTC)
@@ -300,6 +310,7 @@ def test_guarded_lifecycle_write_cannot_bypass_the_version_fence(
         )
 
     outcome = transition(sessions, decide)
-    assert isinstance(outcome, Applied) and outcome.value is False
+    assert isinstance(outcome, Applied)
+    assert outcome.value is False
     assert seen == [None, OperatorActionName.STOP.value]
     assert jobs.get(job.id).state == LifecycleState.QUEUED

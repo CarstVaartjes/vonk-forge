@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from deploy.compose.tests.test_networking import _rendered
+from deploy.compose.tests.test_runtime_asset_reload import _services
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -70,7 +71,6 @@ def test_no_alert_can_fire_on_the_previous_process_series() -> None:
     # alone; a shorter one must compare the target's own current series, as
     # NasComposeBundleStale does (#1726), or read ``up``, which Prometheus
     # itself writes for every scrape.
-    from deploy.compose.tests.test_runtime_asset_reload import _services
 
     command = _services()["prometheus"]["command"]
     assert not any(flag.startswith("--query.lookback-delta") for flag in command)

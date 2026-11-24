@@ -5,20 +5,23 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
+
+from vonk_agent_protocol.agent_operations import AgentOperation, RecipeStartResult
 from vonk_agent_protocol.compiled_execution_plan import (
     MAX_COMPILED_EXECUTION_PLAN_MOUNTS,
     CompiledExecutionPlan,
     CompiledJobInput,
 )
-from vonk_agent_protocol.contracts import (
-    AgentClaim,
-    AgentOperation,
-    AgentProtocolError,
-    RecipeStartResult,
+from vonk_agent_protocol.contracts import AgentClaim
+from vonk_agent_protocol.recipe_operations import (
+    RecipeInstallPayload,
+    RecipeOperationRequest,
+    RecipeStartPayload,
 )
-from vonk_agent_protocol.recipe_operations import RecipeOperationRequest
+from vonk_agent_protocol.wire_model import AgentProtocolError
 
 PLAN = json.loads(
     (Path(__file__).parent / "fixtures" / "compiled-execution-plan-v2.json").read_text()
@@ -29,7 +32,7 @@ REVISION_ID = "00000000-0000-4000-8000-000000000002"
 MAPPING_ID = "00000000-0000-4000-8000-000000000007"
 
 
-def _install() -> dict[str, object]:
+def _install() -> dict[str, Any]:
     return {
         "installation_id": INSTALLATION_ID,
         "plan_digest": "b" * 64,
@@ -126,6 +129,7 @@ def test_agent_claim_dispatches_the_same_typed_install_and_start_models() -> Non
                 "payload": payload,
             }
         )
+        assert isinstance(claim.payload, RecipeInstallPayload | RecipeStartPayload)
         assert claim.payload.installation_id == INSTALLATION_ID
 
 

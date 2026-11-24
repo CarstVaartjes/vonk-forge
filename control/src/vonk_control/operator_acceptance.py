@@ -6,13 +6,19 @@ read boundary after the mutation returns (and its transaction has committed).
 
 from __future__ import annotations
 
+import functools
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, fields, replace
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.concurrency import run_in_threadpool
+from fastapi.datastructures import DefaultPlaceholder
+from fastapi.routing import APIRoute, iter_route_contexts
 from pydantic import BaseModel
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     OperatorActionName,
@@ -23,28 +29,62 @@ from vonk_agent_protocol.outcome import (
     UnknownOutcomeError,
 )
 from vonk_agent_protocol.state_machines import EnrollmentGrantState
-
-from .api_availability import AVAILABILITY_ERRORS
-from .auth import Actor
-from .operator_receipt_contract import (
+from vonk_control.agent_acceptance import AGENT_POLICIES, resolve_agent_receipt
+from vonk_control.api_availability import AVAILABILITY_ERRORS
+from vonk_control.artifact_jobs.contracts import ArtifactJobResponse
+from vonk_control.auth import Actor
+from vonk_control.enrollment.contract import EnrollmentGrantStatus
+from vonk_control.fleet_profile_contract.definitions import FleetProfileView
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_projection.common import FleetNodeIdentity
+from vonk_control.gateway.keys_contract import GatewayKeyCreated, GatewayKeyRevoked
+from vonk_control.jobs.operator_receipts import read_job_operator_receipt
+from vonk_control.model_cache.contract import ModelCacheOperatorResponse
+from vonk_control.observation.platform_errors import (
+    ObservationCaptureUnavailable,
+    observation_capture_unavailable_response,
+)
+from vonk_control.operation_api.contracts import JobResumeRequest, JobResumeResponse
+from vonk_control.operator_projection_api.contracts import FleetActionResponse
+from vonk_control.operator_receipt_contract import (
     AcceptanceReceipt,
     ReceiptCode,
     ReceiptOwner,
     ReceiptPolicy,
     SecurityEdge,
 )
+from vonk_control.receipt_checks import _available, _identity, _refused, _require
+from vonk_control.recipe_image_availability.removal_contract import (
+    RecipeRemovalUnavailableView,
+)
+from vonk_control.recipe_image_availability.response_contract import (
+    RecipeImageAvailabilityResponse,
+    RecipeOperatorResponse,
+)
+from vonk_control.recipe_image_availability.view_contract import (
+    RecipeCacheRemovalStatus,
+)
+from vonk_control.recipe_update_batches.contract import RecipeUpdateResponse
+from vonk_control.run_switch_contract.operations import RunSwitchOperation
+from vonk_control.strict_json import (
+    _retry_later_response,
+    route_endpoint,
+    serialize_json_value,
+)
 
 if TYPE_CHECKING:
-    from .agent_api.common import AgentApiServices
-    from .api.common import JobQueue
-    from .artifact_jobs.service import ArtifactJobService
-    from .fleet_profiles.service import FleetProfileService
-    from .fleet_projection.service import FleetProjection
-    from .gateway.keys import GatewayKeyService
-    from .model_cache.service import ModelCacheService
-    from .operator_projection_api.services import FleetOperatorServices
-    from .recipe_image_availability.service import RecipeImageAvailabilityService
-    from .run_switch_operations.service import RunSwitchOperationService
+    from vonk_control.agent_api.common import AgentApiServices
+    from vonk_control.api.common import JobQueue
+    from vonk_control.artifact_jobs.service import ArtifactJobService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_projection.service import FleetProjection
+    from vonk_control.gateway.keys import GatewayKeyService
+    from vonk_control.model_cache.service import ModelCacheService
+    from vonk_control.operator_projection_api.services import FleetOperatorServices
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 RECEIPT_HEADER = "X-Vonk-Receipt"
@@ -73,7 +113,6 @@ def security_edge(edge: SecurityEdge):
 
 
 def security_edge_policy(endpoint: Callable[..., Any]) -> SecurityEdge | None:
-    from .strict_json import route_endpoint
 
     endpoint = route_endpoint(endpoint)
     edge = getattr(endpoint, "__vonk_security_edge__", None)
@@ -86,41 +125,9 @@ def security_edge_policy(endpoint: Callable[..., Any]) -> SecurityEdge | None:
 
 
 def receipt_policy(endpoint: Callable[..., Any]) -> ReceiptPolicy | None:
-    from .strict_json import route_endpoint
 
     value = getattr(route_endpoint(endpoint), "__vonk_acceptance__", None)
     return value if isinstance(value, ReceiptPolicy) else None
-
-
-def _refused(detail: str, *, unavailable: bool = False) -> HTTPException:
-    code = ReceiptCode.UNAVAILABLE if unavailable else ReceiptCode.MISMATCH
-    return HTTPException(
-        status_code=503 if unavailable else 409,
-        detail=detail,
-        headers={
-            "x-vonk-error-code": code,
-            **({"retry-after": "5"} if unavailable else {}),
-        },
-    )
-
-
-def _require(condition: bool) -> None:
-    if not condition:
-        raise _refused("The owner has no matching acceptance receipt for this request")
-
-
-def _identity(value: object) -> str:
-    if not isinstance(value, str) or not value:
-        raise _refused("The response has no accepted request identity")
-    return value
-
-
-def _available[T](value: T | None) -> T:
-    if value is None:
-        raise _refused(
-            "The receipt owner is unavailable; retry the same request", unavailable=True
-        )
-    return value
 
 
 @dataclass(frozen=True)
@@ -143,7 +150,6 @@ def acceptance_arguments(
         ReceiptPolicy.SECURITY_EDGE,
     }:
         return None
-    from .operation_api.contracts import JobResumeRequest
 
     actor = next((value for value in values.values() if isinstance(value, Actor)), None)
     request_key = getattr(values.get("body"), "request_key", None)
@@ -191,9 +197,6 @@ class OperatorReceiptResolver:
     installations: RunSwitchOperationService | None = None
 
     def bind(self, app: FastAPI) -> None:
-        from fastapi.routing import iter_route_contexts
-
-        from .strict_json import ControllerAPIRoute
 
         for context in iter_route_contexts(app.routes):
             route = context.original_route
@@ -214,27 +217,6 @@ class OperatorReceiptResolver:
         result: BaseModel | Response,
         arguments: AcceptanceArguments,
     ) -> AcceptanceReceipt:
-        from .agent_acceptance import AGENT_POLICIES, resolve_agent_receipt
-        from .artifact_jobs.contracts import ArtifactJobResponse
-        from .enrollment.contract import EnrollmentGrantStatus
-        from .fleet_profile_contract.definitions import FleetProfileView
-        from .fleet_profile_contract.review import FleetProfileApplicationView
-        from .fleet_projection.common import FleetNodeIdentity
-        from .gateway.keys import GatewayKeyCreated, GatewayKeyRevoked
-        from .jobs.operator_receipts import read_job_operator_receipt
-        from .model_cache.contract import ModelCacheOperatorResponse
-        from .operation_api.contracts import JobResumeResponse
-        from .operator_projection_api.contracts import FleetActionResponse
-        from .recipe_image_availability.api import (
-            RecipeImageAvailabilityResponse,
-            RecipeOperatorResponse,
-        )
-        from .recipe_image_availability.removal_contract import (
-            RecipeRemovalUnavailableView,
-        )
-        from .recipe_image_availability.view_contract import RecipeCacheRemovalStatus
-        from .recipe_update_batches.contract import RecipeUpdateResponse
-        from .run_switch_contract.operations import RunSwitchOperation
 
         if policy in AGENT_POLICIES:
             _require(isinstance(result, Response))
@@ -593,3 +575,124 @@ def apply_receipt(
     )
     response.headers["Link"] = f'<{receipt.href}>; rel="receipt"'
     return response
+
+
+_CONTROLLER_RESPONSE = "_controller_response"
+
+
+def _presence_policy_endpoint(
+    endpoint: Callable[..., Any], route: Callable[[], APIRoute]
+) -> Callable[..., Any]:
+    """Wrap an endpoint so its validated result is encoded with the presence policy.
+
+    The wrapper carries the endpoint's own resolved signature, plus an injected
+    ``Response`` when the endpoint does not declare one, so FastAPI analyses it
+    exactly like the endpoint however the route is later included or mounted.
+    """
+
+    signature = inspect.signature(endpoint, eval_str=True)
+    response_param_name = next(
+        (
+            name
+            for name, parameter in signature.parameters.items()
+            if isinstance(parameter.annotation, type)
+            and issubclass(parameter.annotation, Response)
+        ),
+        None,
+    )
+    parameters = list(signature.parameters.values())
+    if response_param_name is None:
+        injected = inspect.Parameter(
+            _CONTROLLER_RESPONSE, inspect.Parameter.KEYWORD_ONLY, annotation=Response
+        )
+        position = next(
+            (
+                index
+                for index, parameter in enumerate(parameters)
+                if parameter.kind is inspect.Parameter.VAR_KEYWORD
+            ),
+            len(parameters),
+        )
+        parameters.insert(position, injected)
+
+    async def policy_endpoint(**values: Any) -> Any:
+        injected_response = values.get(response_param_name or _CONTROLLER_RESPONSE)
+        if response_param_name is None:
+            values.pop(_CONTROLLER_RESPONSE, None)
+        try:
+            if inspect.iscoroutinefunction(endpoint):
+                result = await endpoint(**values)
+            else:
+                result = await run_in_threadpool(endpoint, **values)
+        except ObservationCaptureUnavailable as error:
+            current = route()
+            return observation_capture_unavailable_response(
+                error,
+                operation=current.operation_id or current.name,
+                endpoint=current.path,
+            )
+        except UnknownOutcomeError as error:
+            # An unknown outcome that no route handled is not a server fault and
+            # not a refusal: the caller is told to ask again.
+            return _retry_later_response(error)
+        current = route()
+        response_field = current.response_field
+        if isinstance(result, Response) or response_field is None:
+            response = result if isinstance(result, Response) else injected_response
+            if not isinstance(response, Response):
+                response = Response(status_code=current.status_code or 200)
+            if response.status_code is None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
+                response.status_code = current.status_code or 200
+            checked = await run_in_threadpool(
+                apply_receipt,
+                receipt_policy(endpoint),
+                getattr(current, "operator_receipts", None),
+                result,
+                response,
+                acceptance_arguments(receipt_policy(endpoint), **values),
+            )
+            return checked if isinstance(result, Response) else result
+        value, errors = response_field.validate(result, {}, loc=("response",))
+        if errors:
+            return result
+        status_code = current.status_code or 200
+        if isinstance(injected_response, Response) and injected_response.status_code:
+            status_code = injected_response.status_code
+        response_class = current.response_class
+        if isinstance(response_class, DefaultPlaceholder):
+            response_class = response_class.value
+        response = response_class(
+            content=serialize_json_value(
+                value, by_alias=current.response_model_by_alias
+            ),
+            status_code=status_code,
+        )
+        if isinstance(injected_response, Response):
+            response.headers.raw.extend(injected_response.headers.raw)
+        return await run_in_threadpool(
+            apply_receipt,
+            receipt_policy(endpoint),
+            getattr(current, "operator_receipts", None),
+            value,
+            response,
+            acceptance_arguments(receipt_policy(endpoint), **values),
+        )
+
+    # Copy the identity FastAPI derives names, operation ids and descriptions
+    # from, but no ``__wrapped__``: FastAPI must see an async endpoint.
+    functools.update_wrapper(policy_endpoint, endpoint, updated=("__dict__",))
+    del policy_endpoint.__wrapped__  # pyright: ignore[reportFunctionMemberAccess]  # update_wrapper set it just above
+    policy_endpoint.__signature__ = signature.replace(parameters=parameters)
+    policy_endpoint.__vonk_endpoint__ = endpoint  # type: ignore[attr-defined]
+    return policy_endpoint
+
+
+class ControllerAPIRoute(APIRoute):
+    """Apply the presence policy after response validation for every JSON route."""
+
+    operator_receipts: OperatorReceiptResolver | None = None
+
+    def __init__(self, path: str, endpoint: Callable[..., Any], **kwargs: Any) -> None:
+        if not hasattr(endpoint, "__vonk_endpoint__"):
+            endpoint = _presence_policy_endpoint(endpoint, lambda: self)
+        super().__init__(path, endpoint, **kwargs)

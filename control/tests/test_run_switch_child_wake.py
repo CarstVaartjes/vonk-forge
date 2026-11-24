@@ -12,9 +12,10 @@ import pytest
 from sqlalchemy import Engine, Table, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import QueuePool
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.jobs.documents import (
     RecipeJobActivateParent,
     RecipeStartParent,
@@ -30,7 +31,7 @@ from vonk_control.run_switch_operations.child_wake import CHILD_ROWS, ChildEndWa
 from vonk_control.run_switch_operations.planning_helpers import _aware
 from vonk_control.run_switch_operations.result_helpers import _read_progress
 from vonk_control.run_switch_operations.results import _persisted_result
-from vonk_control.stored.json_values import read_row_column
+from vonk_control.stored.rows import read_row_column
 
 from .recipe_operations_support import NOW, setup_services
 from .run_switch_operations_support import (
@@ -166,7 +167,8 @@ def test_ending_child_makes_its_run_switch_due_and_one_redrive_consumes_it(
     with sessions() as session:
         wait = read_wait(_get(session, Job, operation_id))
         # The wake names what the parent will read, not a generic fallback.
-        assert wait is not None and wait.reason is WaitReason.RECEIPT_MISSING
+        assert wait is not None
+        assert wait.reason is WaitReason.RECEIPT_MISSING
     # The worker's next look consumes the wake: no due clock is left behind
     # for the due-waits backstop to spin on.
     _replace_child(executor, child_id, state=ended)
@@ -302,10 +304,13 @@ def test_wake_runs_after_the_ending_connection_is_returned(tmp_path) -> None:
         session.add(_job_row(child_id, "running"))
     assert woken == []
 
-    with pytest.raises(RuntimeError), sessions.begin() as session:
+    def expected_failure(session):
         _get(session, Job, child_id).state = "failed"
         session.flush()
         raise RuntimeError("rolled back")
+
+    with pytest.raises(RuntimeError), sessions.begin() as session:
+        expected_failure(session)
     assert woken == []  # a rolled-back end wakes nobody
 
     with sessions.begin() as session:
@@ -351,4 +356,5 @@ def test_a_run_switch_waiting_on_its_transfer_persists_the_dependency_reason(
     assert wait.reason is WaitReason.DEPENDENCY_PENDING
     assert [item.operation.id for item in wait.blockers if item.operation] == [child_id]
     shown = service.activity_provider().get_operation(operation_id)
-    assert shown is not None and shown.wait_reason is WaitReason.DEPENDENCY_PENDING
+    assert shown is not None
+    assert shown.wait_reason is WaitReason.DEPENDENCY_PENDING

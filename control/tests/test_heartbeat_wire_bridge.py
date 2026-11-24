@@ -5,9 +5,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol.contracts import AgentDirective
 
 from tests.wire_probes import prebuilt_probe
+from vonk_agent_protocol.contracts import AgentDirective
 
 from .agent_api_support import NODE_A, STOP_PAYLOAD, agent_headers, parent
 from .agent_api_support import agent_system as _agent_system

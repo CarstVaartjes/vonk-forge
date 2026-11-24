@@ -3,13 +3,22 @@
 import copy
 from typing import Any
 
-from sqlalchemy import text
+from alembic.autogenerate import compare_metadata
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from alembic.operations.ops import AddConstraintOp
+from sqlalchemy import DefaultClause, inspect, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import SQLAlchemyError
 
-from .connections import _reraise_contention
-from .constants import _LOGGER
-from .schema_helpers import (
+from vonk_control import exact_integer_adoption
+from vonk_control import (
+    models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+)
+from vonk_control.db import node_facts
+from vonk_control.db.connections import _reraise_contention
+from vonk_control.db.constants import _LOGGER
+from vonk_control.db.schema_helpers import (
     _FOREIGN_TABLES,
     _REPLACED_CONSTRAINT_NAMES,
     _TOLERATED_SCHEMA_DIFFERENCES,
@@ -29,17 +38,12 @@ from .schema_helpers import (
     _schema_difference_key,
     _unhandled_differences,
 )
+from vonk_control.model_primitives import Base
+from vonk_control.models.evidence import REPEATED_EVIDENCE_SEQUENCE
 
 
 def _schema_differences(connection: Connection) -> list[tuple[Any, ...]]:
     """Differences between the live catalog and the models, minus tolerated ones."""
-    from alembic.autogenerate import compare_metadata
-    from alembic.migration import MigrationContext
-
-    from .. import (
-        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
-    )
-    from ..model_primitives import Base
 
     return [
         difference
@@ -57,18 +61,8 @@ def _schema_differences(connection: Connection) -> list[tuple[Any, ...]]:
 
 def reconcile_schema(connection: Connection) -> None:
     """Apply safe metadata differences inside the caller's startup transaction."""
-    from alembic.migration import MigrationContext
-    from alembic.operations import Operations
-    from sqlalchemy import inspect
 
-    from .. import (
-        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
-    )
-    from ..exact_integer_adoption import adopt_exact_integer_columns
-    from ..model_primitives import Base
-    from ..models.evidence import REPEATED_EVIDENCE_SEQUENCE
-
-    adopt_exact_integer_columns(connection)
+    exact_integer_adoption.adopt_exact_integer_columns(connection)
     ops = Operations(MigrationContext.configure(connection))
     differences = _schema_differences(connection)
     drift: SchemaDrift = {kind: [] for kind in SchemaDriftKind}
@@ -78,10 +72,13 @@ def reconcile_schema(connection: Connection) -> None:
     inspector = inspect(connection)
     tables = set(inspector.get_table_names()) - _FOREIGN_TABLES
     metadata_tables = set(Base.metadata.tables)
-    column_key = lambda difference: (
-        str(difference[2]),
-        str(getattr(difference[3], "name", difference[3])),
-    )
+
+    def column_key(difference):
+        return (
+            str(difference[2]),
+            str(getattr(difference[3], "name", difference[3])),
+        )
+
     reported_type_changes = {
         column_key(difference)
         for difference in differences
@@ -125,8 +122,6 @@ def reconcile_schema(connection: Connection) -> None:
                     column.name,
                 )
             else:
-                from sqlalchemy import DefaultClause
-
                 column.server_default = DefaultClause(text(default_sql))
         # A column that cannot be added is never skipped: the error propagates
         # to startup, which rolls the transaction back and retries (55P03) or
@@ -203,7 +198,7 @@ def reconcile_schema(connection: Connection) -> None:
                     using = f"{quoted}::{target_type}"
                     with connection.begin_nested():
                         lossy_value = connection.exec_driver_sql(
-                            f"SELECT 1 FROM {quoted_table} WHERE {quoted} IS NOT NULL "
+                            f"SELECT 1 FROM {quoted_table} WHERE {quoted} IS NOT NULL "  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
                             f"AND NOT ({quoted}::{target_type} = {quoted}) LIMIT 1"
                         ).first()
                         if lossy_value is not None:
@@ -255,7 +250,7 @@ def reconcile_schema(connection: Connection) -> None:
                                 )
                             )
                             connection.exec_driver_sql(
-                                f"UPDATE {quoted_table} SET {quoted_column}={default_sql} "
+                                f"UPDATE {quoted_table} SET {quoted_column}={default_sql} "  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
                                 f"WHERE {quoted_column} IS NULL"
                             )
                         ops.alter_column(
@@ -381,8 +376,6 @@ def reconcile_schema(connection: Connection) -> None:
             if kind == "check":
                 continue
             try:
-                from alembic.operations.ops import AddConstraintOp
-
                 with connection.begin_nested():
                     ops.invoke(AddConstraintOp.from_constraint(constraint))
                 _LOGGER.info(
@@ -512,16 +505,10 @@ def reconcile_schema(connection: Connection) -> None:
     )
     _drop_undeclared_tables(connection, ops)
 
-    from .node_facts import (
-        move_contact_facts,
-        move_resource_facts,
-        move_runtime_facts,
-    )
-
     # Contact first: the runtime move reads the contact clock from its owner.
-    move_contact_facts(connection)
-    move_runtime_facts(connection)
-    move_resource_facts(connection)
+    node_facts.move_contact_facts(connection)
+    node_facts.move_runtime_facts(connection)
+    node_facts.move_resource_facts(connection)
 
     drift[SchemaDriftKind.DEFERRED_CHECK_CONSTRAINT].extend(
         _check_constraint_differences(connection)

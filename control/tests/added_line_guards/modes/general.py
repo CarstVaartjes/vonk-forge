@@ -17,7 +17,6 @@ from ... import (
     legacy_tolerance,
     lifecycle_sets,
     model_set_first_requester,
-    raw_barriers,
     repeated_parse,
     request_path_scans,
     retention_head_digests,
@@ -787,20 +786,6 @@ def check_set_first_requester(ctx: CheckContext) -> None:
         hits.extend(
             (line, model_set_first_requester.KIND)
             for line in model_set_first_requester.scan_source(source)
-        )
-
-
-def check_barriers(ctx: CheckContext) -> None:
-    path, source, modes, python, hits = (
-        ctx.path,
-        ctx.source,
-        ctx.modes,
-        ctx.python,
-        ctx.hits,
-    )
-    if python and "barriers" in modes and raw_barriers.in_scope(path):
-        hits.extend(
-            (line, raw_barriers.KIND) for line in raw_barriers.scan_source(source)
         )
 
 

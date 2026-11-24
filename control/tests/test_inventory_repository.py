@@ -3,11 +3,14 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.inventory import InstallationBytes
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
+    _validated_inventory,
     newest_snapshot_ids,
 )
 from vonk_control.model_primitives import Base
@@ -90,7 +93,8 @@ def test_new_snapshot_supersedes_old_but_preserves_evidence(tmp_path) -> None:
         )
     )
     latest = repo.latest(node, now=now + timedelta(seconds=6), maximum_age=10)
-    assert latest.id == second.id and latest.id != first.id
+    assert latest.id == second.id
+    assert latest.id != first.id
     assert repo.snapshot_count(node) == 2
 
 
@@ -165,7 +169,8 @@ def test_latest_rejects_malformed_persisted_capabilities(tmp_path) -> None:
         assert snapshot is not None
         snapshot.capabilities = ["runtime.vllm.v1"]
     repaired = repo.latest(node, now=now, maximum_age=60)
-    assert repaired is not None and repaired.id == stored.id
+    assert repaired is not None
+    assert repaired.id == stored.id
     assert repaired.capabilities == ["runtime.vllm.v1"]
     assert repaired.host_memory_free_bytes == 300
 
@@ -177,8 +182,6 @@ def test_original_directory_items_and_sizes_survive_store_load(
     tmp_path, reported
 ) -> None:
     """Catches retaining only reconciliation effects and discarding original facts."""
-    from vonk_agent_protocol.inventory import InstallationBytes
-    from vonk_control.inventory.repository import _validated_inventory
 
     repo, now = repository(tmp_path)
     node_id = "spk_" + "1" * 32

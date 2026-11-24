@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import shutil
 import stat
 import sys
@@ -11,10 +10,9 @@ from pathlib import Path
 
 from vonk_agent_protocol.installer_setup import NasInstallTemplate
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, WaitReason
-
-from . import publication
-from .compose import resolve_compose
-from .environment import (
+from vonk_nas_setup import publication
+from vonk_nas_setup.compose import resolve_compose
+from vonk_nas_setup.environment import (
     SELECTION_ENV,
     profiles,
     recover_environment,
@@ -22,7 +20,7 @@ from .environment import (
     required_default,
     retain_known,
 )
-from .filesystem import (
+from vonk_nas_setup.filesystem import (
     ObservationUnavailable,
     acquire_owner,
     atomic_replace,
@@ -36,8 +34,15 @@ from .filesystem import (
     sync_directory,
     write_member,
 )
-from .prompts import PromptIo
-from .secrets import (
+from vonk_nas_setup.pki import (
+    generate_pki,
+    normalize_controller_key,
+    normalize_intermediate_key,
+    renew_controller_leaf,
+    validate_pki_material,
+)
+from vonk_nas_setup.prompts import PromptIo
+from vonk_nas_setup.secrets import (
     apply_secret_group,
     generate_missing,
     generated,
@@ -102,8 +107,6 @@ def fresh(
         }
         generate_missing(payload, members)
         if payload.step_ca_controller:
-            from .pki import generate_pki, validate_pki_material
-
             request = payload.step_ca_controller
             members.update(retry(lambda: generate_pki(request, environment)))
             validate_pki_material(request, environment, members)
@@ -122,7 +125,7 @@ def fresh(
         permission_note(payload, staging / "secrets", prompt)
         publication.remember_verified(payload, staging)
         publication.sync_tree(staging)
-        os.replace(staging, bundle)
+        staging.replace(bundle)
         sync_directory(bundle.parent)
         return SetupOutcome(bundle)
     except BaseException:
@@ -149,7 +152,7 @@ def upgrade_credentials(
         real_directory(gateway)
     environment = recover_environment(payload, bundle)
     if payload.install_modes and SELECTION_ENV not in environment:
-        raise ObservationUnavailable()
+        raise ObservationUnavailable
     lab = (
         payload.install_modes is not None
         and payload.install_modes.secure_remote_value
@@ -164,7 +167,7 @@ def upgrade_credentials(
         value = required_default(required, environment)
         if value is None:
             if not publication.newly_requested(bundle, required.env, environment=True):
-                raise ObservationUnavailable()
+                raise ObservationUnavailable
             value = prompt.required(required)
         environment[required.env] = value
     dropped = retain_known(payload, environment)
@@ -176,29 +179,22 @@ def upgrade_credentials(
     for item in payload.secrets:
         if item.file in members:
             continue
-        if item.optional or lab and item.secure_remote_only:
+        if item.optional or (lab and item.secure_remote_only):
             members[item.file] = b""
         elif publication.newly_requested(bundle, item.file):
             members[item.file] = secret_content(prompt.secret(item))
         else:
-            raise ObservationUnavailable()
+            raise ObservationUnavailable
     requests = generated(payload)
     for request in (*requests.random_text, *requests.ed25519_pkcs8_pem):
         if request.file not in members and not publication.newly_requested(
             bundle, request.file
         ):
-            raise ObservationUnavailable()
+            raise ObservationUnavailable
     generate_missing(payload, members)
     for request in requests.ed25519_pkcs8_pem:
         validate_ed25519(members[request.file], request.file)
     if payload.step_ca_controller:
-        from .pki import (
-            normalize_controller_key,
-            normalize_intermediate_key,
-            renew_controller_leaf,
-            validate_pki_material,
-        )
-
         request = payload.step_ca_controller
         validated = validate_pki_material(
             request, environment, members, allow_expired_controller=True
@@ -208,7 +204,7 @@ def upgrade_credentials(
         if validated.controller_needs_renewal:
             members.update(renew_controller_leaf(request, environment, members))
     if set(members) != set(secret_paths(payload)):
-        raise ObservationUnavailable()
+        raise ObservationUnavailable
     # The Compose file follows the same selection as .env: no profile flags.
     # It is resolved before the commit point so that a refusal changes nothing.
     compose = resolve_compose(payload.docker_compose_yaml, environment)

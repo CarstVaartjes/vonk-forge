@@ -5,17 +5,17 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol.contracts import (
-    AgentClaim,
-    AgentFailureResult,
-    AgentProtocolError,
-    ArtifactDistributionPayload,
-    canonical_message,
-)
+
+from vonk_agent_protocol.agent_operations import AgentFailureResult
+from vonk_agent_protocol.contracts import AgentClaim, ArtifactDistributionPayload
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, OutcomeKind
 from vonk_agent_protocol.outcome import OutcomeFailed, outcome_body
 from vonk_agent_protocol.recipe_jobs import RecipeJobEvidence
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import (
+    AgentProtocolError,
+    OperationProgress,
+    canonical_message,
+)
 
 
 def _distribution_payload():

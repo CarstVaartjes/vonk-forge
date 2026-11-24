@@ -23,10 +23,10 @@ from vonk_forge_contracts.api import (
 )
 from vonk_forge_contracts.recipe import Scalar
 
-from ..strict_json import StrictModel
+from vonk_control.strict_json import StrictModel
 
 if TYPE_CHECKING:
-    from .route_bundle_contract import RouteAcceptedModelPolicy
+    from vonk_control.gateway.route_bundle_contract import RouteAcceptedModelPolicy
 
 _UPSTREAM_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,119}\Z")
 
@@ -368,7 +368,8 @@ def render_config(routes: RouteState, policy: LiteLlmPolicy) -> bytes:
     if not routes.aliases:
         raise LiteLlmPolicyError("LiteLLM models require a published route snapshot")
     if any(
-        not isinstance(value, str) or not value for value in routes.aliases.values()
+        not isinstance(value, str) or not value  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+        for value in routes.aliases.values()
     ):
         raise LiteLlmPolicyError("LiteLLM routes must be already-rendered strings")
     models = dict(policy.models)

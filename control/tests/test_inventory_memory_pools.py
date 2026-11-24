@@ -1,6 +1,7 @@
 """Physical memory evidence survives the authenticated API and PostgreSQL."""
 
 import pytest
+
 from vonk_control.inventory.repository import InventoryRepository
 
 from .agent_api_support import NODE_A, agent_headers, make_agent_system

@@ -14,34 +14,32 @@ from urllib.parse import urlsplit
 from pydantic import ValidationError
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.state_machines import RouteState as RunRouteState
-from vonk_agent_protocol.state_machines import RunState
 from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN, read_recipe
 
-from ..gateway.litellm import LiteLlmPolicy, RouteState, ServedModelInfo
-from ..gateway.route_bundle_contract import (
+from vonk_agent_protocol.state_machines import RouteState as RunRouteState
+from vonk_agent_protocol.state_machines import RunState
+from vonk_control.gateway.litellm import LiteLlmPolicy, RouteState, ServedModelInfo
+from vonk_control.gateway.route_bundle_contract import (
     RouteAcceptedModelPolicy,
     RouteAcceptedRunIdentity,
     RouteIdentityDocument,
     RouteRankIdentity,
     RouteRunIdentity,
 )
-from ..gateway.route_model_info import RouteModelInfoReader
-from ..interface_adapters import InterfaceAdapterError, interface_adapter
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import RecipeInstallation, RecipeRun, RunNode
-from ..models.fleet import AgentNode
-from ..models.mapping import ClusterMapping
-from ..presence import ManagementAddressPolicy, PresenceError
-from ..recipe_operations.execution_contract import (
+from vonk_control.gateway.route_model_info import RouteModelInfoReader
+from vonk_control.interface_adapters import InterfaceAdapterError, interface_adapter
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.presence import ManagementAddressPolicy, PresenceError
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_endpoint,
     parse_stored_run_plan,
     run_plan_document,
 )
-from ..run_states import ENDED_RUN_STATES
-from ..security.route_authority import require_route_authority
-from .shared import (
+from vonk_control.recipe_routes.shared import (
     _UPSTREAM_MODEL,
     RecipeEndpointAuthorityRefused,
     RecipeRankStopped,
@@ -51,11 +49,13 @@ from .shared import (
     _RecipeCandidate,
     _RecipeEndpoint,
 )
+from vonk_control.run_states import ENDED_RUN_STATES
+from vonk_control.security.route_authority import require_route_authority
 
 _ALIAS = re.compile(ENDPOINT_ALIAS_PATTERN)
 
 if TYPE_CHECKING:
-    from .service import RecipeRouteService
+    from vonk_control.recipe_routes.service import RecipeRouteService
 
 
 def _candidate_once(
@@ -262,16 +262,13 @@ def _candidate_once(
                 # only that route instead of blocking every other one.
                 error.run_id = run.id
                 raise
-            if serving:
-                # A route that already serves keeps the facts it was published
-                # with: new facts would rewrite litellm.json, and the supervisor
-                # restarts LiteLLM on any byte change, cutting every route's
-                # in-flight requests. They apply when the route next changes.
-                # A frozen absence is not frozen: facts that become available
-                # for a route published without any apply once.
-                frozen = served.routes.get(run.alias)
-            else:
-                frozen = None
+            # A route that already serves keeps the facts it was published
+            # with: new facts would rewrite litellm.json, and the supervisor
+            # restarts LiteLLM on any byte change, cutting every route's
+            # in-flight requests. They apply when the route next changes.
+            # A frozen absence is not frozen: facts that become available
+            # for a route published without any apply once.
+            frozen = served.routes.get(run.alias) if serving else None
             model_info = (
                 frozen[1]
                 if frozen is not None and frozen[0] == run.id and frozen[1] is not None

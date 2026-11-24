@@ -75,7 +75,8 @@ def test_model_remove_reconciles_after_lost_acceptance() -> None:
         client,
     )
 
-    assert status == 0 and result == receipt
+    assert status == 0
+    assert result == receipt
     assert [call[:2] for call in client.calls] == [
         ("GET", lookup),
         ("GET", f"/api/model/{selector}/remove-review"),
@@ -121,7 +122,8 @@ def test_model_remove_reconnects_to_existing_key_before_resolving_current_head()
         client,
     )
 
-    assert status == 0 and result == receipt
+    assert status == 0
+    assert result == receipt
     assert [call[:2] for call in client.calls] == [("GET", lookup)]
 
 
@@ -160,7 +162,8 @@ def test_recipe_remove_reconciles_lost_acceptance_with_the_same_request_key() ->
         client,
     )
 
-    assert status == 0 and result == receipt
+    assert status == 0
+    assert result == receipt
     assert [call[:2] for call in client.calls] == [
         ("GET", lookup),
         ("GET", f"/api/recipe/{selector}/remove-review"),
@@ -195,7 +198,8 @@ def test_recipe_remove_reconnects_to_existing_key_without_posting() -> None:
         client,
     )
 
-    assert status == 0 and result == receipt
+    assert status == 0
+    assert result == receipt
     assert [call[:2] for call in client.calls] == [("GET", lookup)]
 
 
@@ -230,7 +234,8 @@ def test_recipe_remove_reconnect_rejects_foreign_selector_or_retention(
         client,
     )
 
-    assert status == 0 and payload == repaired
+    assert status == 0
+    assert payload == repaired
     assert [call[:2] for call in client.calls] == [("GET", lookup), ("GET", lookup)]
 
 
@@ -274,6 +279,7 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
             "transferred_bytes": 0,
         }
     else:
+        model_detail, model_digest = None, None
         receipt = {
             "action": "remove",
             "selector": selector,
@@ -337,7 +343,8 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
 
     assert status == 2
     observation = payload["observation"]
-    assert isinstance(observation, dict) and observation["status"] == "timed_out"
+    assert isinstance(observation, dict)
+    assert observation["status"] == "timed_out"
     assert payload["result"] == {}
     methods = [call[0] for call in client.calls]
     assert methods.count("POST") == 1
@@ -376,7 +383,8 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
     status, result = run(
         (*fresh_args, "--request-key", str(repaired["request_key"])), client
     )
-    assert status == 0 and result["operation_id"] == operation_id
+    assert status == 0
+    assert result["operation_id"] == operation_id
 
 
 def test_fleet_remove_resolves_and_confirms_stable_node_before_post(
@@ -457,7 +465,9 @@ def test_fleet_remove_requires_yes_for_noninteractive_json() -> None:
 
     error = payload.get("error")
     assert status == 2
-    assert isinstance(error, str) and "Pass --yes" in error and node_id in error
+    assert isinstance(error, str)
+    assert "Pass --yes" in error
+    assert node_id in error
     assert [call[:2] for call in client.calls] == [
         ("GET", "/api/fleet"),
         ("GET", f"/api/fleet/{node_id}"),
@@ -488,7 +498,8 @@ def test_fleet_remove_yes_posts_to_the_resolved_stable_identity() -> None:
         client,
     )
 
-    assert status == 0 and payload["node_id"] == node_id
+    assert status == 0
+    assert payload["node_id"] == node_id
     assert [call[:2] for call in client.calls] == [
         ("GET", "/api/fleet"),
         ("GET", f"/api/fleet/{node_id}"),
@@ -532,7 +543,8 @@ def test_model_cancel_requires_consent_and_reuses_its_stable_identity() -> None:
         ),
         client,
     )
-    assert status == 0 and payload["state"] == "observing"
+    assert status == 0
+    assert payload["state"] == "observing"
     assert client.calls == [
         (
             "POST",
@@ -588,7 +600,8 @@ def test_model_cancel_reconciles_a_lost_acceptance_before_replay() -> None:
         ),
         client,
     )
-    assert status == 0 and payload["state"] == "cancelled", payload
+    assert status == 0, payload
+    assert payload["state"] == "cancelled", payload
     assert [call[0] for call in client.calls] == ["POST", "GET"]
     assert client.calls[0][2] == {
         "request_key": cancel_key,

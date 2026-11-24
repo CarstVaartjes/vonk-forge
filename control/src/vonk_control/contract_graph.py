@@ -13,9 +13,14 @@ from fastapi import FastAPI
 from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute, iter_route_contexts
 from pydantic import BaseModel
+from sqlalchemy.orm import sessionmaker
 from starlette.routing import Mount, Route
 
-from .strict_json import route_endpoint
+from vonk_control.api.application import create_app
+from vonk_control.auth import TokenCodec
+from vonk_control.browser_auth import BrowserAuthService
+from vonk_control.jobs.queue import JobService
+from vonk_control.strict_json import route_endpoint
 
 
 class ContractGraphError(ValueError):
@@ -32,23 +37,7 @@ def _declared_parameters(dependant: Dependant, location: str):
         pending.extend(current.dependencies)
 
 
-def raw_json_body(model: type[BaseModel]):
-    """Bind a bounded raw reader to its existing canonical request model."""
-
-    def decorate(endpoint):
-        endpoint.__vonk_raw_json_model__ = model
-        return endpoint
-
-    return decorate
-
-
 def schema_application(*, browser_auth: bool = True) -> FastAPI:
-    from sqlalchemy.orm import sessionmaker
-
-    from .api.application import create_app
-    from .auth import TokenCodec
-    from .browser_auth import BrowserAuthService
-    from .jobs.queue import JobService
 
     key = b"schema-test-signing-key-32-bytes!"
     return create_app(
@@ -70,7 +59,7 @@ def _models(annotation: Any) -> set[type[BaseModel]]:
     return set().union(*(_models(arg) for arg in get_args(annotation)))
 
 
-def _routes(app: FastAPI, prefix: str = "") -> Iterator[tuple[str, Any, dict]]:
+def _routes(app: FastAPI, prefix: str = "") -> Iterator[tuple[str, Any, dict]]:  # pyright: ignore[reportMissingTypeArgument]  # FastAPI.openapi() document: the untyped-mapping guard refuses dict[str, Any]
     schema = app.openapi()
     framework_paths = {
         app.openapi_url,

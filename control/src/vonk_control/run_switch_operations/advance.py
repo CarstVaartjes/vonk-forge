@@ -9,89 +9,92 @@ from typing import (
 from typing import cast as typing_cast
 
 from sqlalchemy.orm import Session
+
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.agent_words import (
     Disposition,
     ProfileChildPhase,
     ProfileEffectState,
 )
-from vonk_agent_protocol.contracts import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
-from vonk_control.run_switch_operations.results import _persisted_result
-
-from ..admission_locking import (
-    admission_attempts,
-)
-from ..bounded_json import require_integer
-from ..content_identity import same_image
-from ..failure_classification import disposition, is_definite
-from ..fleet_profiles.capacity import (
-    accepted_profile_runtime_image,
-)
-from ..jobs import states as job_states
-from ..lifecycle.evidence import BookkeepingReason
-from ..lifecycle.run_switch import (
-    KEEP as _KEEP_REASON,
-)
-from ..lifecycle.run_switch import (
-    LIVE_STATES as _LIVE_STATES,
-)
-from ..lifecycle.types import (
-    Effect as _LifecycleEffect,
-)
-from ..lifecycle.types import (
-    State as _LifecycleState,
-)
-from ..models.jobs import Job
-from ..operations.blockers import BlockingOperation, make_blocker
-from ..persisted_waits import schedule_wait, wait_due
-from ..recipe_builds.cancellation import needs_container_build
-from ..recipe_builds.common import RecipeBuildAdmissionBusy
-from ..recipe_operations.interfaces import RecipeOperationView
-from ..run_switch_contract.operations import (
+from vonk_control.admission_locking import admission_attempts
+from vonk_control.bounded_json import require_integer
+from vonk_control.content_identity import same_image
+from vonk_control.distribution_executor.receipts import _ChildView
+from vonk_control.failure_classification import disposition, is_definite
+from vonk_control.fleet_profiles.capacity import accepted_profile_runtime_image
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.evidence import BookkeepingReason
+from vonk_control.lifecycle.run_switch import KEEP as _KEEP_REASON
+from vonk_control.lifecycle.run_switch import LIVE_STATES as _LIVE_STATES
+from vonk_control.lifecycle.types import Effect as _LifecycleEffect
+from vonk_control.lifecycle.types import State as _LifecycleState
+from vonk_control.models.jobs import Job
+from vonk_control.operations.blockers import BlockingOperation, make_blocker
+from vonk_control.persisted_waits import schedule_wait, wait_due
+from vonk_control.recipe_builds.cancellation import needs_container_build
+from vonk_control.recipe_builds.common import RecipeBuildAdmissionBusy
+from vonk_control.recipe_operations.interfaces import RecipeOperationView
+from vonk_control.run_switch_contract.journal import JournalRepairDisposition
+from vonk_control.run_switch_contract.operations import (
     RunSwitchOperation,
     RunSwitchOperationResult,
 )
-from ..run_switch_contract.phase_results import RunSwitchDistributionChildResult
-from ..run_switch_contract.progress_view import (
+from vonk_control.run_switch_contract.phase_results import (
+    RunSwitchDistributionChildResult,
+)
+from vonk_control.run_switch_contract.progress_view import (
     RECOVERY_STALL_WINDOW,
     _complete_operation_progress,
     _complete_phase_progress,
     _merge_progress_evidence,
 )
-from ..stall_window import stall_deadline
-from ..stored.json_values import read_row_column
-from .artifact_validation import _validate_artifact_execution
-from .constants import (
+from vonk_control.run_switch_journal_repair.observation import (
+    try_repair_zero_transfer_journal,
+)
+from vonk_control.run_switch_operations.artifact_validation import (
+    _validate_artifact_execution,
+)
+from vonk_control.run_switch_operations.constants import (
     _OBSERVING,
     _OPERATION_KINDS,
     _TERMINAL_STATES,
     _is_artifact_phase,
 )
-from .endings_helpers import _reject_invalid_operation
-from .errors import (
+from vonk_control.run_switch_operations.contracts import ScopeIntentStatus
+from vonk_control.run_switch_operations.endings_helpers import _reject_invalid_operation
+from vonk_control.run_switch_operations.errors import (
     RunSwitchOperationConflict,
     RunSwitchRetryLater,
     _RunSwitchBuildParentChanged,
 )
-from .identity_helpers import _string_or_none
-from .image_receipts import _build_receipt_in_session, _plan_target_node_ids
-from .observation_helpers import (
+from vonk_control.run_switch_operations.identity_helpers import _string_or_none
+from vonk_control.run_switch_operations.image_receipts import (
+    _build_receipt_in_session,
+    _plan_target_node_ids,
+)
+from vonk_control.run_switch_operations.observation_helpers import (
+    _established_effect,
     _established_start_effect,
     _established_stop_effect,
-    _EstablishedEffect,
     _start_still_progressing,
 )
-from .observation_window import checkpoint_deadline
-from .ownership import (
+from vonk_control.run_switch_operations.observation_window import checkpoint_deadline
+from vonk_control.run_switch_operations.ownership import (
     _checkpoint_matches,
     _complete_cancellation,
     _lock_current_build_parent,
 )
-from .planning_helpers import _aware, _now, _run_switch_payload, _stored_job_plan
-from .provider import _ADAPTER
-from .result_helpers import (
+from vonk_control.run_switch_operations.planning_helpers import (
+    _aware,
+    _now,
+    _run_switch_payload,
+    _scope_intent_status,
+    _stored_job_plan,
+)
+from vonk_control.run_switch_operations.provider import _ADAPTER
+from vonk_control.run_switch_operations.result_helpers import (
     _bound_workload_intent,
     _child_failure_code,
     _child_failure_kind,
@@ -103,20 +106,18 @@ from .result_helpers import (
     _recover_progress,
     _without_observation_time,
 )
+from vonk_control.run_switch_operations.results import _persisted_result
+from vonk_control.stall_window import stall_deadline
+from vonk_control.stored.rows import read_row_column
 
 if TYPE_CHECKING:
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 class AdvanceMixin:
     def _advance(self, operation_id: str) -> bool:
         service = typing_cast("RunSwitchOperationService", self)
         now = _now(service._clock)
-        from ..distribution_executor.receipts import _ChildView
-        from ..run_switch_contract.journal import JournalRepairDisposition
-        from ..run_switch_journal_repair.observation import (
-            try_repair_zero_transfer_journal,
-        )
 
         repair = try_repair_zero_transfer_journal(service._sessions, operation_id, now)
         if repair != JournalRepairDisposition.NOT_APPLICABLE:
@@ -237,8 +238,8 @@ class AdvanceMixin:
                 )
                 job.result = _persisted_result(progress)
                 session.commit()
-            intent_status = service._scope_intent_status(session, job)
-            if intent_status == "invalid":
+            intent_status = _scope_intent_status(session, job)
+            if intent_status == ScopeIntentStatus.INVALID:
                 service._mark_failed(
                     job,
                     "run-switch workload authority or Spark scope is invalid",
@@ -247,13 +248,13 @@ class AdvanceMixin:
                 )
                 session.commit()
                 return True
-            if intent_status == "missing-target":
+            if intent_status == ScopeIntentStatus.MISSING_TARGET:
                 service._schedule_checkpoint_retry(
                     job, progress, RunSwitchCode.TARGET_NOT_ACTIVE, now
                 )
                 session.commit()
                 return True
-            if intent_status == "waiting":
+            if intent_status == ScopeIntentStatus.WAITING:
                 pending_due = job.next_action_at
                 if (
                     job.state in job_states.words(LifecycleState.OBSERVING)
@@ -280,7 +281,7 @@ class AdvanceMixin:
                 job.updated_at = now
                 session.commit()
                 return True
-            if intent_status == "superseded":
+            if intent_status == ScopeIntentStatus.SUPERSEDED:
                 _ADAPTER.cancelled(
                     job,
                     progress,
@@ -442,7 +443,7 @@ class AdvanceMixin:
             )
 
         if child_id is not None:
-            if not isinstance(child_id, str):
+            if not isinstance(child_id, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                 # Bookkeeping: the child is looked up again by the phase's
                 # deterministic identity, which reconciles what it issued.
                 fail("run-switch child operation identity is invalid", clear_child=True)
@@ -649,7 +650,7 @@ class AdvanceMixin:
                     # ordinary success path records the checkpoint the missing
                     # acknowledgement would have produced.
                     assert isinstance(child, RecipeOperationView)
-                    child = _EstablishedEffect(child, established)
+                    child = _established_effect(child, established)
                 elif _start_still_progressing(
                     service._lifecycle, plan.phases[phase_index], child
                 ):
@@ -705,7 +706,7 @@ class AdvanceMixin:
                     # consumer of its set) can be ended by another consumer's
                     # cancel. This order did not cancel it: it asks again.
                     foreign_cancel = (
-                        child is not None
+                        child is not None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
                         and child.state == LifecycleState.CANCELLED.value
                         and not checkpoint_cancellation
                         and plan.phases[phase_index].kind
@@ -756,7 +757,7 @@ class AdvanceMixin:
                         checkpoint_guard=checkpoint_job,
                         definite=is_definite(kind)
                         or (
-                            child is not None
+                            child is not None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
                             and child.state == LifecycleState.FAILED.value
                             and plan.phases[phase_index].kind
                             in {

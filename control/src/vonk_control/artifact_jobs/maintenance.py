@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import json
 import logging
@@ -14,8 +15,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from ..logging import log_event
-from .contracts import StorageReconciliation
+from vonk_control.artifact_jobs.contracts import StorageReconciliation
+from vonk_control.logging import log_event
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -196,14 +197,12 @@ class ArtifactMaintenanceCadence:
                 stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary, path)
+            temporary.replace(path)
             directory = os.open(self._state_root, os.O_RDONLY)
             try:
                 os.fsync(directory)
             finally:
                 os.close(directory)
         finally:
-            try:
+            with contextlib.suppress(FileNotFoundError):
                 temporary.unlink()
-            except FileNotFoundError:
-                pass

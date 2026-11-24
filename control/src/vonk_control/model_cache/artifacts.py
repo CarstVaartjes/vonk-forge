@@ -9,13 +9,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
 from pydantic import ValidationError
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_forge_contracts.model import ModelReference
 
-from ..bounded_json import require_integer, require_mapping
-from ..strict_json import serialize_json_value
-from .constants import (
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.bounded_json import require_integer, require_mapping
+from vonk_control.model_cache.constants import (
     _DIGEST_LENGTH,
     _EMPTY_SHA256,
     _MAX_MANIFEST_BYTES,
@@ -23,15 +22,20 @@ from .constants import (
     SCHEMA_VERSION,
     SOURCE_POLICY,
 )
-from .contract import (
+from vonk_control.model_cache.contract import (
     CacheIdentity,
     CacheIdentityArtifact,
     CacheManifest,
     CacheManifestArtifact,
     CacheManifestArtifactPart,
 )
-from .errors import ModelCacheResolutionInvalid
-from .source_helpers import _valid_relative_path
+from vonk_control.model_cache.errors import ModelCacheResolutionInvalid
+from vonk_control.model_cache.providers import PROVIDERS
+from vonk_control.model_cache.source_helpers import (
+    _valid_relative_path,
+    _validate_source,
+)
+from vonk_control.strict_json import serialize_json_value
 
 
 @dataclass(frozen=True, slots=True)
@@ -333,8 +337,6 @@ def _optional_digest(value: object) -> str | None:
 
 
 def _validate_artifact(value: ArtifactSpec) -> None:
-    from .catalog_helpers import _validate_source
-    from .providers import PROVIDERS
 
     if (
         not value.key
@@ -357,13 +359,13 @@ def _validate_artifact(value: ArtifactSpec) -> None:
         or len(value.sha256) != _DIGEST_LENGTH
         or value.sha256 != value.sha256.lower()
         or not _is_hex(value.sha256)
-        or not isinstance(value.expected_bytes, int)
+        or not isinstance(value.expected_bytes, int)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         or isinstance(value.expected_bytes, bool)
         or value.expected_bytes < 0
         or (value.expected_bytes == 0 and value.sha256 != _EMPTY_SHA256)
         or not value.roles
         or len(value.roles) > 32
-        or any(not isinstance(role, str) for role in value.roles)
+        or any(not isinstance(role, str) for role in value.roles)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         or len(set(value.roles)) != len(value.roles)
         or any(not role or len(role) > 64 for role in value.roles)
     ):
@@ -389,8 +391,6 @@ def _validate_artifact(value: ArtifactSpec) -> None:
 
 
 def _validate_parts(value: ArtifactSpec) -> None:
-    from .catalog_helpers import _validate_source
-    from .providers import PROVIDERS
 
     parts = value.parts
     assert parts is not None
@@ -412,7 +412,7 @@ def _validate_parts(value: ArtifactSpec) -> None:
             or len(part.sha256) != _DIGEST_LENGTH
             or part.sha256 != part.sha256.lower()
             or not _is_hex(part.sha256)
-            or not isinstance(part.expected_bytes, int)
+            or not isinstance(part.expected_bytes, int)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             or isinstance(part.expected_bytes, bool)
             or part.expected_bytes < 1
         ):
@@ -435,7 +435,7 @@ def _validate_manifest(value: ArtifactSetManifest) -> None:
         )
     _unique_artifacts(value.artifacts)
     if any(
-        not isinstance(item, str) or not _is_hex(item)
+        not isinstance(item, str) or not _is_hex(item)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         for item in value.model_content_digests
     ):
         raise ModelCacheResolutionInvalid(

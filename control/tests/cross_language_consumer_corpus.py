@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, ValidationError
+from vonk_forge_contracts.recipe import RecipeRuntimeEnvironment, RecipeSetting
+
 from vonk_agent_protocol.build_import import RecipeBuildEnvironmentArgument
 from vonk_agent_protocol.contracts import AgentProgress, AgentResult
 from vonk_agent_protocol.error_response import (
@@ -26,7 +29,6 @@ from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileInput,
 )
 from vonk_control.operation_api.contracts import JobDetailResponse
-from vonk_forge_contracts.recipe import RecipeRuntimeEnvironment, RecipeSetting
 
 NODE = "spk_" + "1" * 32
 FENCE = "11111111-1111-4111-8111-111111111111"
@@ -50,7 +52,7 @@ MODELS: dict[str, type[BaseModel]] = {
 }
 
 
-def diagnostic() -> dict:
+def diagnostic() -> dict[str, Any]:
     return {
         "schema_version": 1,
         "collected_at": "2026-10-07T01:00:00+00:00",
@@ -125,7 +127,7 @@ def job_envelope(leaf: str) -> str:
     return json.dumps(document, separators=(",", ":")).replace('"__LEAF__"', leaf)
 
 
-def corpus() -> dict:
+def corpus() -> dict[str, Any]:
     cases = []
 
     def add(

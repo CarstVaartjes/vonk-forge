@@ -8,22 +8,18 @@ from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy import select
+
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
-
-from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.evidence import (
-    BookkeepingReason,
-    retire_as_unknown,
-)
-from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..lifecycle.types import CancelRequested
-from ..models.fleet import AgentNode
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..recovery_policy import FailureKind
-from .errors import RecipeRequestInvalid
-from .intent import (
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.lifecycle.recipe_operation import RecipeOperationAdapter
+from vonk_control.lifecycle.types import CancelRequested
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.recipe_operations.errors import RecipeRequestInvalid
+from vonk_control.recipe_operations.intent import (
     _active_owned_workload_jobs,
     _intent_is_current,
     _job_workload_intent,
@@ -31,15 +27,13 @@ from .intent import (
     _unissued_workload_children,
     _workload_owner_scope,
 )
-from .interfaces import IssuedWorkloadReconciliation
-from .observation_helpers import _aware
-from .progress import (
-    _parent_identity,
-    _parent_intent,
-)
+from vonk_control.recipe_operations.interfaces import IssuedWorkloadReconciliation
+from vonk_control.recipe_operations.observation_helpers import _aware
+from vonk_control.recipe_operations.progress import _parent_identity, _parent_intent
+from vonk_control.recovery_policy import FailureKind
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class SupersessionMixin:

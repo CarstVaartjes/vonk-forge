@@ -7,13 +7,14 @@ from datetime import UTC, datetime
 from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.agent_operations import RecipeStartResult
 from vonk_agent_protocol.build_import import (
     RecipeBuildCleanupRequest,
     RecipeBuildEvidence,
     RecipeBuildRequest,
 )
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import RecipeStartResult, canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import (
@@ -24,14 +25,10 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeUninstallPayload,
 )
 from vonk_agent_protocol.state_machines import InstallationState, RunState
-
-from vonk_control.owner_liveness import run_has_live_operation
-
-from ..fleet_profiles.stop_authority import (
-    ProfileJobRunStopJob,
-)
-from ..jobs import states as job_states
-from ..jobs.documents import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.fleet_profiles.stop_contract import ProfileJobRunStopJob
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import (
     RecipeBuildCleanupParent,
     RecipeBuildParent,
     RecipeInstallParent,
@@ -42,34 +39,36 @@ from ..jobs.documents import (
     RecipeStopParent,
     RecipeUninstallParent,
 )
-from ..lifecycle.evidence import (
+from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
     Residue,
+    read_or_rebuild,
     retire_as_unknown,
 )
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import (
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
     STOPPABLE_NOT_RUNNING_RUN_STATES,
     STOPPABLE_RUN_STATES,
     RecipeInstallation,
     RecipeRun,
     RunNode,
 )
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..owner_liveness import OwnerKind
-from ..stored.json_values import read_row_column
-from ..stored.states import CatalogRevisionState, RecipeBuildState
-from ..strict_json import read_stored_model
-from .errors import RecipeRetryLater
-from .execution_contract import (
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.owner_liveness import OwnerKind, run_has_live_operation
+from vonk_control.recipe_operations.errors import RecipeRetryLater
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_plan,
     parse_stored_build_policy,
+    parse_stored_run_plan,
 )
-from .lifecycle_contract import JOB_ACTIVATION
-from .results import _RANK_FAILED
+from vonk_control.recipe_operations.lifecycle_contract import JOB_ACTIVATION
+from vonk_control.recipe_operations.results import _RANK_FAILED
+from vonk_control.stored.rows import read_row_column
+from vonk_control.stored.states import CatalogRevisionState, RecipeBuildState
+from vonk_control.strict_json import read_stored_model
 
 
 def wait_for_installation_upkeep(session: Session, installation_id: str) -> None:
@@ -328,9 +327,6 @@ def prepare_exact_recipe_run_observation_nodes(
     loss; each in-flight job is judged by its own order.
     """
 
-    # Imported here: rank authority reads this module's revision helper.
-    from .rank_authority import _run_is_one_shot
-
     assigned = tuple(
         session.execute(
             select(RunNode, RecipeRun)
@@ -371,3 +367,36 @@ def prepare_exact_recipe_run_observation_nodes(
                 node.observation_process_running = False
                 node.observation_observed_at = observed_at
     return tuple(node for node, _ in assigned)
+
+
+def _run_is_one_shot(session: Session, run: RecipeRun) -> bool:
+    """Whether the run only hosts one-shot jobs (no service container).
+
+    The stored plan says so; when it does not parse, the evidence is the
+    activation operation that created the run, which nothing else produces.
+    """
+
+    def read() -> bool:
+        return (
+            parse_stored_run_plan(read_row_column(run, "plan")).execution_mode
+            == "one-shot-jobs"
+        )
+
+    def rebuild() -> bool:
+        return (
+            session.scalar(
+                select(Job.id)
+                .where(
+                    Job.kind == JOB_ACTIVATION,
+                    Job.owner_kind == "run",
+                    Job.owner_id == run.id,
+                )
+                .limit(1)
+            )
+            is not None
+        )
+
+    loaded = read_or_rebuild(
+        kind="recipe.run-plan", subject=run.id, read=read, rebuild=rebuild
+    )
+    return loaded is True

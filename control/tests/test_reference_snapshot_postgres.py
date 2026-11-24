@@ -9,6 +9,7 @@ from threading import Event, current_thread
 from uuid import uuid4
 
 from sqlalchemy import Engine, event, select
+
 from vonk_agent_protocol.gpu_clock import GpuClockRange
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.admission_locking import report_admission_locks
@@ -17,6 +18,7 @@ from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import CompositeObjectSource, MemoryObjectSource
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.saved_profiles import _definition
 from vonk_control.models.cache import ModelCacheSet
 from vonk_control.models.fleet import FleetProfile
 
@@ -121,7 +123,8 @@ def test_profile_saves_share_references_with_distribution_and_downloads(
                     assert not release.is_set()
                     with world.sessions() as session:
                         holders = report_admission_locks(session).held
-                    assert holders and all(
+                    assert holders
+                    assert all(
                         holder.holder.startswith("profile-save:") for holder in holders
                     )
                 finally:
@@ -132,7 +135,7 @@ def test_profile_saves_share_references_with_distribution_and_downloads(
                 with world.sessions() as session:
                     row = session.get(FleetProfile, profile.id)
                     assert row is not None
-                    stored = world.controller.profiles._definition(row)
+                    stored = _definition(row)
                 assert stored is not None
                 assert stored.assignments[0].gpu_clock == desired_clock
     finally:
@@ -170,7 +173,7 @@ def test_unchanged_profile_pins_never_reacquire_reference_gates(
             with world.sessions() as session:
                 row = session.get(FleetProfile, profile.id)
                 assert row is not None
-                definition = profiles._definition(row)
+                definition = _definition(row)
             saved = FleetProfileInput.model_validate(
                 {
                     **definition.model_dump(mode="json"),
@@ -197,7 +200,7 @@ def test_unchanged_profile_pins_never_reacquire_reference_gates(
             with world.sessions() as session:
                 row = session.get(FleetProfile, profile.id)
                 assert row is not None
-                stored = profiles._definition(row)
+                stored = _definition(row)
             assert stored is not None
             assert stored.assignments[0].gpu_clock == desired_clock
         finally:

@@ -11,14 +11,16 @@ from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from fastapi import HTTPException
 from hypothesis import example, given
 from hypothesis import strategies as st
 from sqlalchemy import event, select
+
+from cluster_profiles.cli_render.dispatch import render_payload
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.agent_words import (
     AgentClientDecision,
 )
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.error_response import BoundedErrorResponse
 from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
 from vonk_agent_protocol.inventory import (
@@ -28,12 +30,18 @@ from vonk_agent_protocol.inventory import (
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 from vonk_agent_protocol.state_machines import RouteState
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.agent_api import common
 from vonk_control.agent_api.common import (
     _ENROLLMENT_TOKEN,
+    _prepare_recipe_image_upload,
 )
 from vonk_control.enrollment.body import _scan_enrollment_grants
+from vonk_control.enrollment.types import EnrollmentDenied
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.models.execution import RecipeRun, RunNode
 from vonk_control.models.fleet import AgentCertificate
 from vonk_control.models.operations import AgentOperation
@@ -50,6 +58,8 @@ from .agent_api_support import (
     upgrade_payload,
 )
 from .agent_jobs_support import canonical_start_payload
+from .recipe_routes_support import setup
+from .test_enrollment import RecoveryAuthority, csr, enroll, expired_proof
 
 
 @pytest.mark.parametrize(
@@ -59,8 +69,6 @@ def test_upload_storage_failure_preserves_agent_authority(
     tmp_path, monkeypatch, caplog, failure
 ):
     # Catches NAS storage faults incorrectly sending an agent to re-enrollment.
-    from fastapi import HTTPException
-    from vonk_control.agent_api.common import _prepare_recipe_image_upload
 
     root = tmp_path / "managed"
     outside = tmp_path / "outside"
@@ -100,7 +108,8 @@ def test_upload_storage_failure_preserves_agent_authority(
     monkeypatch.undo()
     descriptor, temporary = _prepare_recipe_image_upload(root, "identity")
     os.close(descriptor)
-    assert temporary.is_file() and not temporary.is_symlink()
+    assert temporary.is_file()
+    assert not temporary.is_symlink()
 
 
 @pytest.mark.parametrize("damage", ["symlink", "fifo"])
@@ -108,8 +117,6 @@ def test_upload_storage_changed_entry_retries_then_repairs(
     tmp_path, monkeypatch, damage
 ):
     # Catches a swap after cleanup producing a terminal 409 or blocking on a FIFO.
-    from fastapi import HTTPException
-    from vonk_control.agent_api import common
 
     outside = tmp_path / "outside"
     outside.write_bytes(b"untouched")
@@ -142,8 +149,6 @@ def test_publication_permission_failure_retries_then_succeeds(
     tmp_path, monkeypatch, caplog
 ):
     # Catches publication permission failures incorrectly revoking agent authority.
-    from fastapi import HTTPException
-    from vonk_control.agent_api import common
 
     temporary = tmp_path / ".identity.upload"
     temporary.write_bytes(b"verified archive")
@@ -175,7 +180,6 @@ def test_artifact_permission_failure_retries_after_storage_recovers(
     agent_system, monkeypatch, caplog, failure
 ):
     # Catches storage stat/repair failures triggering re-enrollment instead of recovery.
-    from vonk_control.agent_api import common
 
     client, services, _, clock = agent_system
     digest = "a" * 64
@@ -230,10 +234,6 @@ def test_display_memory_agent_vectors_reobserve_through_http_store_and_cli(
     agent_system, capsys
 ):
     """Catches lost JSON enum evidence, sticky advice, or inventing unknown bytes."""
-    from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
-    from vonk_control.fleet_projection.service import FleetProjection
-
-    from cluster_profiles.cli_render.dispatch import render_payload
 
     client, services, _, clock = agent_system
     vectors = json.loads(
@@ -291,7 +291,6 @@ def test_claim_stale_recipe_run_consumer_waits_then_admits(
     postgres_engine,
 ) -> None:
     """A lost run fence in the plain claim transaction must not become HTTP 500."""
-    from .recipe_routes_support import setup
 
     client, services, _, clock = make_agent_system(tmp_path, engine=postgres_engine)
     routes, _, _, run_id = setup(tmp_path / "routes", engine=postgres_engine)
@@ -342,7 +341,8 @@ def test_claim_stale_recipe_run_consumer_waits_then_admits(
     assert problem.context.retryable is True
     with services.sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state == LifecycleState.RUNNING
+        assert stored is not None
+        assert stored.state == LifecycleState.RUNNING
     services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,
@@ -358,7 +358,6 @@ def test_recipe_observation_contention_waits_then_redelivery_commits(
     postgres_engine,
 ) -> None:
     """Continued contention must roll back observations and acknowledge redelivery."""
-    from .recipe_routes_support import setup
 
     client, services, _, clock = make_agent_system(tmp_path, engine=postgres_engine)
     routes, _, _, run_id = setup(tmp_path / "routes", engine=postgres_engine)
@@ -414,7 +413,8 @@ def test_recipe_observation_contention_waits_then_redelivery_commits(
     assert int(response.headers["retry-after"]) > 0
     with services.sessions() as session:
         rank = session.scalar(select(RunNode).where(RunNode.node_id == NODE_A))
-        assert rank is not None and rank.observation_observed_at is None
+        assert rank is not None
+        assert rank.observation_observed_at is None
     delivered = client.post(
         "/agent/recipe-runs/observations",
         headers=agent_headers(NODE_A, "serial-a"),
@@ -423,7 +423,8 @@ def test_recipe_observation_contention_waits_then_redelivery_commits(
     assert delivered.status_code == 204
     with services.sessions() as session:
         rank = session.scalar(select(RunNode).where(RunNode.node_id == NODE_A))
-        assert rank is not None and rank.observation_process_running is True
+        assert rank is not None
+        assert rank.observation_process_running is True
         assert rank.observed_run_generation == generation
 
 
@@ -441,11 +442,15 @@ def test_result_scope_changed_yields_without_outer_replay(
         raise refused
 
     monkeypatch.setattr(services.operations, "_finish", finish)
-    with pytest.raises(UnknownOutcomeError) as caught:
+
+    def expected_failure():
         if action == "succeed":
             services.operations.succeed("unused-fence", {})
         else:
             services.operations.fail("unused-fence", "invalid result")
+
+    with pytest.raises(UnknownOutcomeError) as caught:
+        expected_failure()
     assert caught.value is refused
     assert len(calls) == 1
 
@@ -484,7 +489,6 @@ def test_internal_error_during_renewal_is_a_wait_not_a_fatal_refusal(
 
 
 def test_real_denial_during_renewal_stays_a_403(agent_system, monkeypatch) -> None:
-    from vonk_control.enrollment.types import EnrollmentDenied
 
     client, services, _, _ = agent_system
     _renewable_source(services)
@@ -524,7 +528,6 @@ def test_renewal_heals_after_one_internal_error(agent_system, monkeypatch) -> No
 
 
 def test_expired_renewal_internal_error_waits_and_heals(tmp_path, monkeypatch) -> None:
-    from .test_enrollment import RecoveryAuthority, csr, enroll, expired_proof
 
     client, services, _codec, clock = make_agent_system(
         tmp_path, authority=RecoveryAuthority()

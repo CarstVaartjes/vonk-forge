@@ -7,6 +7,7 @@ its save condition explicitly (the main ref, or "false").
 """
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -15,7 +16,7 @@ MAIN_ONLY = "${{ github.ref == 'refs/heads/main' }}"
 SAVE_OPTION = {"astral-sh/setup-uv": "save-cache", "Swatinem/rust-cache": "save-if"}
 
 
-def _steps(document: dict) -> list[dict]:
+def _steps(document: dict[str, Any]) -> list[dict[str, Any]]:
     if "runs" in document:
         return document["runs"].get("steps", [])
     return [

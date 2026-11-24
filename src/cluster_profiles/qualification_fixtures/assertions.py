@@ -7,8 +7,18 @@ import re
 from collections.abc import Mapping
 from pathlib import PurePosixPath
 
-from .contracts import _FORMATS, _MEDIA_TYPE, _NAME, FixtureError
-from .values import _integer, _number_range, _object, _positive_number
+from cluster_profiles.qualification_fixtures.contracts import (
+    _FORMATS,
+    _MEDIA_TYPE,
+    _NAME,
+    FixtureError,
+)
+from cluster_profiles.qualification_fixtures.values import (
+    _integer,
+    _number_range,
+    _object,
+    _positive_number,
+)
 
 
 def _parse_assertion(key: str, raw: object) -> dict[str, object]:
@@ -165,7 +175,7 @@ def _parse_assertion(key: str, raw: object) -> dict[str, object]:
     elif kind == "media-type-counts":
         counts = _object(assertion.get("counts"), "media type counts")
         if not counts or any(
-            not isinstance(name, str)
+            not isinstance(name, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             or not _MEDIA_TYPE.fullmatch(name)
             or not isinstance(count, int)
             or isinstance(count, bool)
@@ -365,15 +375,17 @@ def _parse_assertion(key: str, raw: object) -> dict[str, object]:
             or any(
                 not isinstance(name, str)
                 or not name
-                or shape is not None
-                and (
-                    not isinstance(shape, list)
-                    or not shape
-                    or any(
-                        not isinstance(value, int)
-                        or isinstance(value, bool)
-                        or value < 0
-                        for value in shape
+                or (
+                    shape is not None
+                    and (
+                        not isinstance(shape, list)
+                        or not shape
+                        or any(
+                            not isinstance(value, int)
+                            or isinstance(value, bool)
+                            or value < 0
+                            for value in shape
+                        )
                     )
                 )
                 for name, shape in tensor_shapes.items()

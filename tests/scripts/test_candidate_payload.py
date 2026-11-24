@@ -204,7 +204,8 @@ def _accept(tmp_path: Path, main: Path, reused: Path, spark_report: Path):
     output.mkdir()
     plan = json.loads((reused / "publication-plan.json").read_text())
     release = _release(reused)
-    command = publication._accept_command(main, output, [nas]) + [
+    command = [
+        *publication._accept_command(main, output, [nas]),
         "--reuse-candidate-release",
         str(release),
         "--reuse-baseline-release",

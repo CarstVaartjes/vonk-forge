@@ -24,14 +24,16 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.orm import Session, load_only
-from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import ModelDefinition
 from vonk_forge_contracts.model import ModelReference
 
-from ..models.cache import ModelCacheSet, ModelCacheSetArtifact
-from ..models.catalog import CatalogDocumentRevision
-from ..stored.json_values import read_row_column
-from .contract import CacheManifest
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+from vonk_control.catalog.revision_contract import read_catalog_document
+from vonk_control.lifecycle.evidence import Residue, read_or_rebuild
+from vonk_control.model_cache.contract import CacheManifest
+from vonk_control.models.cache import ModelCacheSet, ModelCacheSetArtifact
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.stored.rows import read_row_column
 
 
 def set_bindings(
@@ -210,9 +212,6 @@ def catalog_model_files(
 ) -> frozenset[str] | None:
     """The files the catalog documents of ``contents`` list; ``None`` when one
     cannot be read (nothing may then be ruled out by files)."""
-
-    from ..catalog.revision_contract import read_catalog_document
-    from ..lifecycle.evidence import Residue, read_or_rebuild
 
     files: set[str] = set()
     for revision in session.scalars(

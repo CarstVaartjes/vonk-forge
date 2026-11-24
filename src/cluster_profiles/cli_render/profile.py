@@ -7,21 +7,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from ..cli_states_generated import (
-    ENDPOINT_EXPIRED,
-    ENDPOINT_INSTALLED_ONLY,
-    ENDPOINT_NOT_PUBLISHED_YET,
-    ENDPOINT_UNAVAILABLE,
-    ENDPOINT_WITHDRAWN,
-    PUBLISHED,
-)
-from ..control_client.errors import ControlMalformedResponse
-from ..generated_control.models.endpoint_response import EndpointResponse
-from ..generated_control.models.fleet_profile_endpoints_view import (
-    FleetProfileEndpointsView,
-)
-from ..generated_control.types import Unset
-from .common import (
+from cluster_profiles.cli_render.common import (
     _actions,
     _field,
     _freshness,
@@ -36,7 +22,21 @@ from .common import (
     _words,
     terminal_text,
 )
-from .library import _option_choices
+from cluster_profiles.cli_render.library import _option_choices
+from cluster_profiles.cli_states_generated import (
+    ENDPOINT_EXPIRED,
+    ENDPOINT_INSTALLED_ONLY,
+    ENDPOINT_NOT_PUBLISHED_YET,
+    ENDPOINT_UNAVAILABLE,
+    ENDPOINT_WITHDRAWN,
+    PUBLISHED,
+)
+from cluster_profiles.control_client.errors import ControlMalformedResponse
+from cluster_profiles.generated_control.models.endpoint_response import EndpointResponse
+from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
+    FleetProfileEndpointsView,
+)
+from cluster_profiles.generated_control.types import Unset
 
 
 def _profile(payload: Mapping[str, object]) -> None:
@@ -148,7 +148,7 @@ CONNECTION_NOTE = (
 )
 
 
-def _connection_examples(api_base: str, alias: str, wide: bool = False) -> None:
+def _connection_examples(api_base: str, alias: str, *, wide: bool = False) -> None:
     """Print the examples; the key is only ever read from the key file."""
     snippets = connection_snippets(terminal_text(api_base), terminal_text(alias))
     shown = [("Client setup", "setup"), ("curl example", "curl")]
@@ -190,7 +190,7 @@ def _set(value: object) -> object:
     return None if isinstance(value, Unset) else value
 
 
-def _profile_endpoints(view: FleetProfileEndpointsView, wide: bool = False) -> None:
+def _profile_endpoints(view: FleetProfileEndpointsView, *, wide: bool = False) -> None:
     assignments = view.assignments or []
     listing = endpoint_listing(
         _set(view.application_id), _set(view.projection_issue), view.assignments

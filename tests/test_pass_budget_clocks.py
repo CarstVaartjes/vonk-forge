@@ -26,7 +26,7 @@ WAIT_DEADLINE_MODULES = {
     "vonk_control.model_cache.download_admission",
     "vonk_control.model_cache.split_transfer",
     "vonk_control.agent_jobs.claim_notes",
-    "vonk_control.fleet_profiles.selection",
+    "vonk_control.fleet_profiles.continuing_effects",
     "vonk_control.db.connections",
 }
 
@@ -73,7 +73,8 @@ def budget_modules(tree: ast.Module) -> tuple[str, ...]:
             for target in node.targets
         ):
             value = ast.literal_eval(node.value)
-            assert isinstance(value, tuple) and all(isinstance(s, str) for s in value)
+            assert isinstance(value, tuple)
+            assert all(isinstance(s, str) for s in value)
             return value
     raise AssertionError("Pass-budget clock registry is missing")
 
@@ -158,11 +159,12 @@ def test_budgeted_callers_inherit_the_autouse_clock_fixture() -> None:
     )
     failures = []
     for directory in (ROOT / "control/tests", ROOT / "tests"):
-        for path in sorted(directory.rglob("*.py")):
-            if budget_imports(parse_file(path).tree, modules) and (
-                not active or not path.is_relative_to(ROOT / "control/tests")
-            ):
-                failures.append(str(path.relative_to(ROOT)))
+        failures.extend(
+            str(path.relative_to(ROOT))
+            for path in sorted(directory.rglob("*.py"))
+            if budget_imports(parse_file(path).tree, modules)
+            and (not active or not path.is_relative_to(ROOT / "control/tests"))
+        )
     assert not failures, f"Budgeted callers need the autouse pass clock: {failures}"
     assert active, "The shared pass clock must freeze every registered lookup owner"
 
@@ -213,8 +215,7 @@ def uninjected_stall_calls(tree: ast.Module) -> list[int]:
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and (
-            isinstance(node.func, ast.Name)
-            and node.func.id in names
+            (isinstance(node.func, ast.Name) and node.func.id in names)
             or ast.unparse(node.func).endswith(".run_until_stalled")
         )
         and not any(keyword.arg == "clock" for keyword in node.keywords)

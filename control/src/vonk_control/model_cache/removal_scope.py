@@ -6,21 +6,20 @@ import stat
 from typing import TYPE_CHECKING, cast
 
 from vonk_agent_protocol.state_machines import AssetAvailability
-
-from ..cache_removal_review import (
+from vonk_control.cache_removal_review import (
     AssetDisposition,
     CacheAssetDisposition,
     CacheRemovalAsset,
 )
-from ..models.cache import ModelCacheSet
-from . import constants
-from .artifacts import _unique_artifacts
-from .constants import _PARALLEL_RANGE_WORKERS
-from .ranges import range_partial_bytes
-from .views import ModelCacheRemovalScope
+from vonk_control.model_cache import constants
+from vonk_control.model_cache.artifacts import _unique_artifacts
+from vonk_control.model_cache.constants import _PARALLEL_RANGE_WORKERS
+from vonk_control.model_cache.ranges import range_partial_bytes
+from vonk_control.model_cache.views import ModelCacheRemovalScope
+from vonk_control.models.cache import ModelCacheSet
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class RemovalScopeMixin:

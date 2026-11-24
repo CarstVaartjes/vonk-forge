@@ -10,6 +10,7 @@ from threading import Event
 from uuid import uuid4
 
 from sqlalchemy import select
+
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.models.execution import ResourceReservation
@@ -159,7 +160,8 @@ def test_installed_cancel_reports_issued_child_until_late_receipt_is_reconciled(
             try:
                 assert started.wait(timeout=10)
                 progress = service.application(application.id).progress.switch_adapter
-                assert progress is not None and progress.pending_children
+                assert progress is not None
+                assert progress.pending_children
                 child_id = progress.pending_children[0].operation_id
                 result = run(
                     "--profile",
@@ -228,5 +230,6 @@ def test_installed_cancel_reports_issued_child_until_late_receipt_is_reconciled(
             children = tuple(
                 session.scalars(select(Job).where(Job.kind == "recipe.run-switch.v2"))
             )
-            assert len(children) == 1 and children[0].id == child_id
+            assert len(children) == 1
+            assert children[0].id == child_id
             assert children[0].state == "cancelled"

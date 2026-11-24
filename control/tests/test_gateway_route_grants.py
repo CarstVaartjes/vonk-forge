@@ -1,9 +1,27 @@
 """Published contract route grants, exercised against the real database."""
 
-from vonk_agent_protocol.state_machines import RouteState
-from vonk_control.gateway.route_grants import GatewayInferenceRoute, recipe_key_routes
+import asyncio
 
-from .recipe_routes_support import _recipe_run, setup
+import httpx2
+import pytest
+from sqlalchemy import event
+from sqlalchemy.exc import SQLAlchemyError
+
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.state_machines import RouteState
+from vonk_control.api.production import _keep_recipe_routes
+from vonk_control.gateway.keys import GatewayKeyService
+from vonk_control.gateway.keys_contract import GatewayKeyCreated
+from vonk_control.gateway.route_grants import (
+    GatewayInferenceRoute,
+    recipe_key_routes,
+    require_existing_recipe_routes,
+)
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
+from vonk_control.recipe_routes.shared import RecipeRouteNotReady
+
+from .recipe_routes_support import NOW, _recipe_run, setup
+from .test_gateway_keys import MASTER, FakeLiteLlm
 
 
 def test_native_grants_follow_published_accepted_recipe_and_public_alias(
@@ -58,14 +76,6 @@ def test_native_grants_follow_published_accepted_recipe_and_public_alias(
 def test_route_publication_waits_for_key_grants_then_heals(
     tmp_path, postgres_engine, monkeypatch
 ):
-    import httpx2
-    import pytest
-    from sqlalchemy import event
-    from sqlalchemy.exc import SQLAlchemyError
-    from vonk_agent_protocol.outcome import UnknownOutcomeError
-    from vonk_control.gateway.keys import GatewayKeyCreated, GatewayKeyService
-
-    from .test_gateway_keys import MASTER, FakeLiteLlm
 
     upstream = FakeLiteLlm()
     unavailable = True
@@ -121,13 +131,6 @@ def test_route_publication_waits_for_key_grants_then_heals(
     with service.sessions.begin() as session:
         _recipe_run(session, run_id).route_state = RouteState.PENDING
 
-    import asyncio
-
-    from vonk_control.api.production import _keep_recipe_routes
-    from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
-
-    from .recipe_routes_support import NOW
-
     reconcile = gateway.reconcile_route_grants
 
     async def api_restart():
@@ -176,17 +179,14 @@ def test_route_publication_waits_for_key_grants_then_heals(
 
 
 def test_worker_waits_for_api_publication_without_gateway_authority(tmp_path):
-    import pytest
-    from vonk_control.gateway.route_grants import require_existing_recipe_routes
-    from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
-    from vonk_control.recipe_routes.shared import RecipeRouteNotReady
-
-    from .recipe_routes_support import NOW
 
     service, _, applied, run_id = setup(tmp_path)
     with service.sessions.begin() as session:
         _recipe_run(session, run_id).route_state = RouteState.PENDING
-    prepare = lambda runs: require_existing_recipe_routes(service.sessions, runs)
+
+    def prepare(runs):
+        return require_existing_recipe_routes(service.sessions, runs)
+
     with pytest.raises(RecipeRouteNotReady):
         prepare(frozenset({run_id}))
     worker = RecipeOperationWorker(

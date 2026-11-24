@@ -7,47 +7,55 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import func, select
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import input_state
 from vonk_agent_protocol.reason_codes.model_cache import (
     ModelCacheBlockerCode,
     ModelCacheCode,
 )
-
-from ..admission_locking import admitting
-from ..agent_operation_facts import aware as _aware
-from ..bounded_json import require_integer, require_mapping, require_sequence
-from ..categorized_errors import InvalidValue
-from ..lifecycle.types import Reported
-from ..models.cache import ModelCacheOperation, ModelCacheSet
-from ..operations.contract import AvailabilityOperationFailure
-from ..strict_json import serialize_json_value
-from . import states as model_cache_states
-from .artifacts import (
+from vonk_control.admission_locking import admitting
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.bounded_json import require_integer, require_mapping, require_sequence
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.lifecycle.types import Reported
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.artifacts import (
     ArtifactSetManifest,
     _optional_digest,
     _sha256_json,
 )
-from .catalog_helpers import _datetime, _iso
-from .constants import _RETRY_BASE_SECONDS, SCHEMA_VERSION, SOURCE_POLICY
-from .contract import (
+from vonk_control.model_cache.catalog_helpers import _datetime, _iso
+from vonk_control.model_cache.constants import (
+    _RETRY_BASE_SECONDS,
+    SCHEMA_VERSION,
+    SOURCE_POLICY,
+)
+from vonk_control.model_cache.contract import (
     ModelCacheRepairCheckpoint,
     ModelCacheRepairPayload,
     ModelCacheRetry,
 )
-from .errors import (
+from vonk_control.model_cache.errors import (
     ModelCacheConflictInvalid,
     ModelCacheNotFoundInvalid,
 )
-from .persistence import _cache_failure, _write_operation_payload
-from .progress import progress_document
-from .source_helpers import _request_key
-from .storage import RunningTransfers, TransferNeed
-from .transfer_admission import admit_transfer
-from .views import CacheOperationView
+from vonk_control.model_cache.persistence import (
+    _cache_failure,
+    _write_operation_payload,
+)
+from vonk_control.model_cache.progress import progress_document
+from vonk_control.model_cache.source_helpers import _request_key
+from vonk_control.model_cache.storage import RunningTransfers, TransferNeed
+from vonk_control.model_cache.transfer_admission import admit_transfer
+from vonk_control.model_cache.views import CacheOperationView
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
+from vonk_control.operation_api.providers import _activity_keyset_filter
+from vonk_control.operations.contract import AvailabilityOperationFailure
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class RepairMixin:
@@ -354,7 +362,7 @@ class RepairMixin:
         *,
         after: tuple[datetime, str] | None = None,
         limit: int = 101,
-        state: str | None = None,
+        state: object = None,
         node_id: str | None = None,
         request_id: str | None = None,
     ) -> dict[str, object]:
@@ -366,7 +374,6 @@ class RepairMixin:
         ``after`` is the already authenticated global activity boundary.
         """
         cache = cast("ModelCacheService", self)
-        from ..operation_api.providers import _activity_keyset_filter
 
         if not 1 <= limit <= 101:
             raise InvalidValue("operation provider page limit is invalid")

@@ -5,11 +5,12 @@ import json
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.source_bundles import (
     SourceBundleDigestManifest,
     SourceBundleManifest,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 
 
 def manifest_document():

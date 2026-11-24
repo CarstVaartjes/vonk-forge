@@ -12,18 +12,22 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
-from vonk_agent_protocol.wire_model import OperationProgress
 
-from ..lifecycle_preflight import LifecyclePreflightCheckpoint
-from ..operations.blockers import OperationBlocker
-from ..strict_json import StrictModel
-from ..wait_contract import QueueWait
-from .identity import NodeId, RunSwitchCancellation, UuidId
-from .phase_results import RunSwitchPhaseResult
-from .progress import RunSwitchMemberReceipt, RunSwitchProgress
-from .vocabulary import (
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
+from vonk_control.lifecycle_preflight_contract import LifecyclePreflightCheckpoint
+from vonk_control.operations.blockers import OperationBlocker
+from vonk_control.run_switch_contract.identity import (
+    NodeId,
+    RunSwitchCancellation,
+    UuidId,
+)
+from vonk_control.run_switch_contract.phase_results import RunSwitchPhaseResult
+from vonk_control.run_switch_contract.progress import (
+    RunSwitchMemberReceipt,
+    RunSwitchProgress,
+)
+from vonk_control.run_switch_contract.vocabulary import (
     Digest,
     RunSwitchAction,
     RunSwitchOperationKind,
@@ -31,6 +35,8 @@ from .vocabulary import (
     RunSwitchProgressState,
     RunSwitchSubphase,
 )
+from vonk_control.strict_json import StrictModel
+from vonk_control.wait_contract import QueueWait
 
 
 class RunSwitchRuntimeImageReferenceIntent(StrictModel):

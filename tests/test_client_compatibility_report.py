@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from typing import Any
 
 from tools.client_compatibility_report import breaks
 
@@ -17,7 +18,9 @@ _LEVELS = {
 }
 
 
-def _contract(effort: dict[str, object], *, extra_route: bool = False) -> dict:
+def _contract(
+    effort: dict[str, object], *, extra_route: bool = False
+) -> dict[str, Any]:
     paths: dict[str, object] = {
         "/api/recipe/library": {
             "get": {

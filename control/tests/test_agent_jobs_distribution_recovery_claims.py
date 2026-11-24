@@ -13,14 +13,14 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
-from vonk_agent_protocol.contracts import (
-    AgentProgress,
-    AgentResult,
-    ArtifactDistributionResult,
-    canonical_message,
+
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
 )
+from vonk_agent_protocol.agent_operations import ArtifactDistributionResult
+from vonk_agent_protocol.contracts import AgentProgress, AgentResult, canonical_payload
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.predicates import _claim_predicate
 from vonk_control.agent_jobs.service import AgentJobService
@@ -65,10 +65,8 @@ def test_transient_distribution_failure_recovers_after_repeated_faults_and_resta
             NODE_A,
             "serial-a",
         )
-        assert (
-            claim is not None
-            and fenced_attempt(sessions, claim).attempt == attempt_number
-        ), attempt_number
+        assert claim is not None, attempt_number
+        assert fenced_attempt(sessions, claim).attempt == attempt_number, attempt_number
         body = {key: claim.model_dump(mode="json")[key] for key in ("fence",)}
         jobs.record_result(
             AgentResult.model_validate_json(
@@ -119,10 +117,8 @@ def test_transient_distribution_failure_recovers_after_repeated_faults_and_resta
         NODE_A,
         "serial-a",
     )
-    assert (
-        recovered is not None
-        and fenced_operation(sessions, recovered).id == operation.id
-    )
+    assert recovered is not None
+    assert fenced_operation(sessions, recovered).id == operation.id
     jobs.succeed(recovered, ArtifactDistributionResult(downloaded_bytes=0))
     with sessions() as session:
         assert session.get(AgentOperation, operation.id).state == "succeeded"
@@ -170,7 +166,8 @@ def test_a_refused_distribution_stores_the_agents_denial_evidence(service) -> No
                 AgentOperationAttempt.operation_id == operation.id
             )
         )
-        assert attempt is not None and attempt.result is not None
+        assert attempt is not None
+        assert attempt.result is not None
         evidence = case["result"]["evidence"]
         assert attempt.result["diagnostic"] == evidence["diagnostic"]
         assert attempt.result["stage"] == evidence["stage"]
@@ -256,7 +253,6 @@ def test_the_nas_rate_survives_the_distribution_receipt(service) -> None:
 def test_queue_stores_and_claims_the_canonical_payload_hash(
     service, explicit_null: bool
 ) -> None:
-    from vonk_agent_protocol.contracts import canonical_payload
 
     jobs, sessions, clock = service
     vector = json.loads(
@@ -383,7 +379,8 @@ def _supersede_waiting_mutation(
     with sessions.begin() as session:
         stored = session.get(AgentOperation, operation.id)
         old_parent = session.get(Job, parent_job.id)
-        assert stored is not None and old_parent is not None
+        assert stored is not None
+        assert old_parent is not None
         stored.state = "needs-operator"
         stored.current_attempt = 1
         stored.status_reason = "operation outcome uncertain"
@@ -494,8 +491,10 @@ def test_live_cancellation_still_blocks_later_work(service) -> None:
     with sessions() as session:
         blocked = session.get(AgentOperation, new.id)
         waiting = session.get(AgentOperation, old.id)
-        assert blocked is not None and blocked.state == "queued"
-        assert waiting is not None and waiting.state in aos.PARKED
+        assert blocked is not None
+        assert blocked.state == "queued"
+        assert waiting is not None
+        assert waiting.state in aos.PARKED
 
 
 def test_live_prior_mutation_still_blocks_later_work(service) -> None:
@@ -503,7 +502,8 @@ def test_live_prior_mutation_still_blocks_later_work(service) -> None:
     old_parent = parent(sessions, clock)
     old = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
     first = claim_agent(jobs, NODE_A, "serial-a")
-    assert first is not None and fenced_operation(sessions, first).id == old.id
+    assert first is not None
+    assert fenced_operation(sessions, first).id == old.id
     clock.advance(seconds=1)
     new_parent = parent(sessions, clock)
     new = jobs.enqueue(new_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
@@ -513,11 +513,13 @@ def test_live_prior_mutation_still_blocks_later_work(service) -> None:
     with sessions() as session:
         blocked = session.get(AgentOperation, new.id)
         running = session.get(AgentOperation, old.id)
-        assert blocked is not None and blocked.state == "queued"
-        assert running is not None and running.state == "running"
+        assert blocked is not None
+        assert blocked.state == "queued"
+        assert running is not None
+        assert running.state == "running"
 
 
-@pytest.mark.parametrize("dead_attempt", ("missing", "stopped"))
+@pytest.mark.parametrize("dead_attempt", ["missing", "stopped"])
 def test_dead_running_mutation_is_reconciled_and_stops_blocking(
     service, dead_attempt
 ) -> None:
@@ -536,7 +538,8 @@ def test_dead_running_mutation_is_reconciled_and_stops_blocking(
     old_parent = parent(sessions, clock)
     old = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
     first = claim_agent(jobs, NODE_A, "serial-a")
-    assert first is not None and fenced_operation(sessions, first).id == old.id
+    assert first is not None
+    assert fenced_operation(sessions, first).id == old.id
 
     with sessions.begin() as session:
         attempt = session.scalar(
@@ -558,13 +561,16 @@ def test_dead_running_mutation_is_reconciled_and_stops_blocking(
     assert claim_agent(jobs, NODE_A, "serial-a") is None
     claimed = claim_agent(jobs, NODE_A, "serial-a")
 
-    assert claimed is not None and fenced_operation(sessions, claimed).id == new.id
+    assert claimed is not None
+    assert fenced_operation(sessions, claimed).id == new.id
     with sessions() as session:
         parked = session.get(AgentOperation, old.id)
         successor = session.get(AgentOperation, new.id)
-        assert parked is not None and parked.state in aos.PARKED
+        assert parked is not None
+        assert parked.state in aos.PARKED
         assert parked.status_reason is not None
-        assert successor is not None and successor.state == "running"
+        assert successor is not None
+        assert successor.state == "running"
 
 
 def test_reconciled_dead_running_mutation_retains_its_pending_result(service) -> None:
@@ -612,7 +618,8 @@ def test_claim_refusal_records_parent_state_reason(service) -> None:
 
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.status_reason is not None
+        assert stored is not None
+        assert stored.status_reason is not None
 
 
 def test_excluded_work_refusal_names_both_ordinals(service) -> None:
@@ -628,7 +635,8 @@ def test_excluded_work_refusal_names_both_ordinals(service) -> None:
 
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.status_reason is not None
+        assert stored is not None
+        assert stored.status_reason is not None
 
 
 def test_excluded_work_refusal_records_a_cancelled_parent(service) -> None:
@@ -642,7 +650,8 @@ def test_excluded_work_refusal_records_a_cancelled_parent(service) -> None:
 
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.status_reason is not None
+        assert stored is not None
+        assert stored.status_reason is not None
 
 
 def test_excluded_work_refusal_records_an_unready_retry_attempt(service) -> None:
@@ -662,7 +671,8 @@ def test_excluded_work_refusal_records_an_unready_retry_attempt(service) -> None
 
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.status_reason is not None
+        assert stored is not None
+        assert stored.status_reason is not None
 
 
 def test_work_enqueued_after_the_claim_query_is_not_reported_as_refused(
@@ -692,7 +702,7 @@ def test_work_enqueued_after_the_claim_query_is_not_reported_as_refused(
     assert claim_agent(jobs, NODE_A, "serial-a") is not None
 
 
-@pytest.mark.parametrize("malformed", (1, "true"))
+@pytest.mark.parametrize("malformed", [1, "true"])
 def test_claim_admits_and_names_a_malformed_cancel_flag(service, malformed) -> None:
     """A non-boolean cancel flag does not cancel, and is not silent either.
 
@@ -713,11 +723,13 @@ def test_claim_admits_and_names_a_malformed_cancel_flag(service, malformed) -> N
         job.result = {"cancel_requested": malformed}
 
     claim = claim_agent(jobs, NODE_A, "serial-a")
-    assert claim is not None and fenced_operation(sessions, claim).id == operation.id
+    assert claim is not None
+    assert fenced_operation(sessions, claim).id == operation.id
 
     with sessions() as session:
         job = session.get(Job, parent_job.id)
-        assert job is not None and job.status_reason is not None
+        assert job is not None
+        assert job.status_reason is not None
 
 
 def test_no_work_claim_records_no_refusal(service) -> None:
@@ -737,7 +749,8 @@ def test_no_work_claim_records_no_refusal(service) -> None:
     with sessions() as session:
         assert session.scalars(select(AgentOperation)).all() != []
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.status_reason is None
+        assert stored is not None
+        assert stored.status_reason is None
 
 
 def _claim_refusal_check_names() -> tuple[str, ...]:

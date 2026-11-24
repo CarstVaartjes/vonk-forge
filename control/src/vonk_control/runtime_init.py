@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import array
+import contextlib
 import errno
+import fcntl
 import logging
 import os
 import secrets
@@ -14,9 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-
-from .categorized_errors import UnsettledOutcome
-from .runtime.asset_contract import RuntimeAssetInventory
+from vonk_control.categorized_errors import UnsettledOutcome
+from vonk_control.runtime.asset_contract import RuntimeAssetInventory
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_PRIVATE_KEY_BYTES = 16 * 1024
@@ -104,10 +105,8 @@ def _read_runtime_file(source: Path, *, maximum_bytes: int) -> bytes:
             "runtime source is unreadable", reason=WaitReason.OBSERVATION_UNAVAILABLE
         ) from error
     finally:
-        try:
+        with contextlib.suppress(OSError):
             os.close(descriptor)
-        except OSError:
-            pass
     return bytes(content)
 
 
@@ -135,7 +134,7 @@ def _stage_runtime_file_once(
             parent.mkdir(mode=0o750, parents=True, exist_ok=True)
             if os.geteuid() == 0:
                 os.chown(parent, 0, 10001)
-            os.chmod(parent, 0o755)
+            parent.chmod(0o755)
         descriptor = os.open(
             temporary,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
@@ -157,13 +156,11 @@ def _stage_runtime_file_once(
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
-        os.replace(temporary, destination)
+        temporary.replace(destination)
         return destination
     except OSError as error:
-        try:
+        with contextlib.suppress(OSError):
             temporary.unlink()
-        except OSError:
-            pass
         raise UnsettledOutcome(
             "runtime file staging is unavailable",
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
@@ -237,12 +234,10 @@ def _write_runtime_asset_inventory_once(source_root: Path) -> None:
     temporary = source_root / ".inventory.json.new"
     try:
         temporary.write_text(inventory.model_dump_json())
-        os.replace(temporary, source_root / ".inventory.json")
+        temporary.replace(source_root / ".inventory.json")
     finally:
-        try:
+        with contextlib.suppress(OSError):
             temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
 
 
 def stage_private_key(
@@ -537,10 +532,8 @@ def _directory(path: Path, uid: int, gid: int, mode: int) -> Path:
         for component in target.parts[1:]:
             if component in {"", ".", ".."}:
                 raise RuntimeSecretError("shared runtime directory is unsafe")
-            try:
+            with contextlib.suppress(FileExistsError):
                 os.mkdir(component, mode=mode, dir_fd=descriptor)
-            except FileExistsError:
-                pass
             child = os.open(component, flags, dir_fd=descriptor)
             os.close(descriptor)
             descriptor = child
@@ -575,8 +568,6 @@ def _disable_copy_on_write(directory: Path) -> None:
     except OSError:
         return
     try:
-        import fcntl
-
         flags = array.array("L", [0])
         fcntl.ioctl(descriptor, _FS_IOC_GETFLAGS, flags, True)
         if not flags[0] & _FS_NOCOW_FL:
@@ -607,7 +598,7 @@ def _disable_copy_on_write_below(root: Path) -> None:
         return
     for child in children:
         _disable_copy_on_write(Path(child))
-        if os.path.basename(child) == "partials":
+        if Path(child).name == "partials":
             try:
                 downloads = [
                     entry.path

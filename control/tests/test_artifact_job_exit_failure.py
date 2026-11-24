@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
@@ -204,7 +205,8 @@ def test_a_late_exit_receipt_ends_a_lost_job_without_rerunning_it(
     agent_jobs.reconcile_orders()
 
     ended = service.get(submitted.id)
-    assert ended.state in ajs.ENDED and ended.state != ajs.CANCELLED
+    assert ended.state in ajs.ENDED
+    assert ended.state != ajs.CANCELLED
     # The agent's own exit reason, else why its result was not accepted.
     assert ended.status_reason not in {None, WaitReason.RECEIPT_MISSING.value}
     if exit_code:

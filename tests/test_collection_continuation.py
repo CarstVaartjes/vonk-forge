@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize(
-    "path,source",
+    ("path", "source"),
     [
         ("control/src/profiles.py", "def profiles():\n    return query.limit(128)\n"),
         (
@@ -44,7 +44,7 @@ def test_new_core_prefix_without_continuation_fails(path, source):
 
 
 @pytest.mark.parametrize(
-    "path,source",
+    ("path", "source"),
     [
         (
             "control/src/profiles.py",

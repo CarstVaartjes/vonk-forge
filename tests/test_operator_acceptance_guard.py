@@ -3,14 +3,15 @@
 import pytest
 from fastapi import APIRouter, Response
 from fastapi.testclient import TestClient
+
 from vonk_control.contract_graph import ContractGraphError, _routes, schema_application
 from vonk_control.operator_acceptance import (
+    ControllerAPIRoute,
     operator_acceptance,
     receipt_policy,
     security_edge_policy,
 )
 from vonk_control.operator_receipt_contract import ReceiptPolicy, SecurityEdge
-from vonk_control.strict_json import ControllerAPIRoute
 
 
 def require_operator_policies(app):

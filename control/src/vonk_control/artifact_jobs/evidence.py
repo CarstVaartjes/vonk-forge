@@ -12,10 +12,14 @@ from __future__ import annotations
 from typing import Literal, get_args
 
 from pydantic import ConfigDict, Field
-from vonk_agent_protocol.contracts import canonical_message
 
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..strict_json import StrictJSONModel, read_stored_model, serialize_json_value
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.strict_json import (
+    StrictJSONModel,
+    read_stored_model,
+    serialize_json_value,
+)
 
 #: Every rule of a job's output contract that a manifest can break: the
 #: limits the job was submitted with, then the recipe's output slots.

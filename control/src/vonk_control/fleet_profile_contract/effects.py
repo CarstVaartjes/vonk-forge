@@ -9,15 +9,15 @@ from pydantic import (
     Field,
     model_validator,
 )
+from vonk_forge_contracts import EndpointAlias
+
 from vonk_agent_protocol.gpu_clock import GpuClockRange
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_forge_contracts import EndpointAlias
-
-from ..child_phases import FleetProfileChildPhase
-from ..run_switch_contract.requests import RunSwitchProfileStopScope
-from ..strict_json import StrictModel
-from .vocabulary import Digest, NodeId, UuidId
+from vonk_control.child_phases import FleetProfileChildPhase
+from vonk_control.fleet_profile_contract.vocabulary import Digest, NodeId, UuidId
+from vonk_control.run_switch_contract.requests import RunSwitchProfileStopScope
+from vonk_control.strict_json import StrictModel
 
 
 class FleetProfileRunEffect(StrictModel):

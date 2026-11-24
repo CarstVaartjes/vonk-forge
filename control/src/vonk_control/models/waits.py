@@ -8,9 +8,9 @@ from typing import Protocol
 from sqlalchemy import DateTime
 from sqlalchemy.orm import Mapped, MappedColumn, mapped_column
 
-from ..lifecycle.evidence import Residue
-from ..stored.json_values import ContractJSON
-from ..wait_contract import WaitEvidence
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.stored.json_values import ContractJSON
+from vonk_control.wait_contract import WaitEvidence
 
 
 class ScheduledWaitOwner(Protocol):

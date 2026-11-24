@@ -19,15 +19,25 @@ import os
 import threading
 import time
 import uuid
+from concurrent.futures import wait
+from datetime import timedelta
+from importlib import resources
+from types import SimpleNamespace
 
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import event, select, update
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
+from cluster_profiles.cli_render.dispatch import render_payload
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_control.api.production import LibraryObservations
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.library.api import install_library_routes
 from vonk_control.library.assessment import LibraryAssessment, unavailable
 from vonk_control.library.contract import (
+    LibraryCacheState,
     ModelDetailResponse,
     ModelLibraryResponse,
     RecipeReadiness,
@@ -40,20 +50,24 @@ from vonk_control.library.storage_observation import (
 )
 from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.model_cache.contract import (
+    CacheManifest,
     CacheOperationKind,
     ModelCacheUsage,
     ModelStorageObservationReason,
 )
 from vonk_control.model_cache.resolution import resolve_recipe_set
+from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.cache import ModelCacheSet, RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
 from vonk_control.settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
-from vonk_forge_contracts import RecipeDefinition, document_sha256
+from vonk_control.stored.json_values import write_guard_mode
 
 from .display_fixtures import reword
+from .model_cache_support import _artifact, _download
 from .pass_budget_clocks import PassClock
 from .recipe_image_availability_support import _recipe_projection
-from .recipe_operations_support import NOW
+from .recipe_operations_support import NOW, setup_services
+from .removal_settle import advance_until_ended, release_ended_gates
 from .runtime_image_fixtures import place_test_image, remove_test_image
 from .test_library_assessment import (  # noqa: F401 - the shared fixture
     assessed_library,
@@ -67,7 +81,6 @@ _BLOCKED_SECONDS = 30.0
 
 def _expire_image_wait(monkeypatch, clock: PassClock, entered: threading.Event):
     """Expire only once a real probe has reached the injected fault."""
-    from concurrent.futures import wait
 
     def expired(futures, *, timeout, return_when):
         assert entered.wait(timeout=30)
@@ -283,8 +296,6 @@ def test_a_blocked_placement_read_degrades_the_recipe_not_the_listing(
         answered.set()
         return inspect(*args, **kwargs)
 
-    from types import SimpleNamespace
-
     monkeypatch.setattr(
         "vonk_control.library.assessment.threading",
         SimpleNamespace(
@@ -293,7 +304,7 @@ def test_a_blocked_placement_read_degrades_the_recipe_not_the_listing(
             Event=threading.Event,
         ),
     )
-    service.inspect_candidate = blocked_inspect  # type: ignore[method-assign]
+    service.inspect_candidate = blocked_inspect
     projection = LibraryProjection(
         sessions,
         cursors=TokenCodec(b"b" * 32).cursor_codec(),
@@ -363,15 +374,13 @@ def test_the_next_assessment_waits_out_an_overrun_worker_and_is_assessed(
         def release(self):
             self._lock.release()
 
-    from types import SimpleNamespace
-
     monkeypatch.setattr(
         "vonk_control.library.assessment.threading",
         SimpleNamespace(
             Thread=FirstJoinExpires, Lock=OverrunEndsWhileWaited, Event=threading.Event
         ),
     )
-    service.inspect_candidate = first_inspection_blocks  # type: ignore[method-assign]
+    service.inspect_candidate = first_inspection_blocks
     assess = LibraryAssessment(
         sessions,
         run_switch=service,
@@ -385,7 +394,8 @@ def test_the_next_assessment_waits_out_an_overrun_worker_and_is_assessed(
         following = assess(recipes)[0].assessment
     finally:
         release.set()
-    assert overrun is not None and overrun.fleet_fit.state == "unavailable"
+    assert overrun is not None
+    assert overrun.fleet_fit.state == "unavailable"
     assert following is not None
     assert following.fleet_fit.state == "ready", following.model_dump(mode="json")
 
@@ -408,7 +418,8 @@ def test_an_assessment_resolves_each_exact_artifact_set_once(
     assessment = LibraryAssessment(
         sessions, run_switch=service, model_cache=cache, clock=lambda: NOW
     )(recipes)[0].assessment
-    assert assessment is not None and assessment.fleet_fit.state == "ready"
+    assert assessment is not None
+    assert assessment.fleet_fit.state == "ready"
     # Cache, ordering and placement reads ask for the same exact sets more
     # than once; each is resolved once and shared, not re-read per placement.
     assert any(len(manifests) > 1 for manifests in resolved.values()), resolved
@@ -539,14 +550,6 @@ def test_queued_download_progress_is_projected_from_the_persisted_row(
 
 def test_queued_download_progress_is_projected_on_postgres(tmp_path, postgres_engine):
     """The production database reads the same progress through its JSON operators."""
-
-    from importlib import resources
-
-    from vonk_control.model_cache.service import ModelCacheService
-    from vonk_control.models.catalog import CatalogDocumentHead
-    from vonk_forge_contracts import document_sha256
-
-    from .recipe_operations_support import setup_services
 
     model = json.loads(
         resources.files("vonk_forge_contracts")
@@ -732,8 +735,6 @@ def test_blocked_assessment_reuses_one_executor_then_fresh_read_is_assessed(
         workers.append(thread)
         return thread
 
-    from types import SimpleNamespace
-
     monkeypatch.setattr(
         "vonk_control.library.assessment.threading",
         SimpleNamespace(Thread=worker, Lock=threading.Lock, Event=threading.Event),
@@ -826,7 +827,6 @@ def test_model_reads_never_invoke_storage_provider(assessed_library):  # noqa: F
     model = original.models().models[0]
     calls = []
     usage = ModelCacheUsage(disk_bytes=7, unique_bytes=7, shared_bytes=0)
-    from datetime import timedelta
 
     clock = [NOW]
 
@@ -880,11 +880,6 @@ def test_production_owner_survives_storage_hang_failure_and_recovers(
     capsys,
 ):
     """A stuck/raising walk never stops the library owner; the same owner heals it."""
-    from datetime import timedelta
-
-    from vonk_control.api.production import LibraryObservations
-
-    from cluster_profiles.cli_render.dispatch import render_payload
 
     original, sessions, *_ = assessed_library
     model = original.models().models[0]
@@ -995,12 +990,6 @@ def test_completed_cache_change_is_visible_without_storage_refresh(
     change,
 ):
     """The DB batch owns list/filter/detail state even when byte observations disagree."""
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_control.library.contract import LibraryCacheState
-    from vonk_control.model_cache.service import ModelCacheService
-
-    from .model_cache_support import _artifact, _download
-    from .removal_settle import advance_until_ended, release_ended_gates
 
     original, sessions, existing_cache, *_ = assessed_library
     cache = ModelCacheService(
@@ -1072,9 +1061,6 @@ def test_damaged_verified_references_do_not_hide_healthy_cached_model(
     references,
 ):
     """One bad manifest must not turn unrelated cached rows into unknown state."""
-    from vonk_control.library.contract import LibraryCacheState
-    from vonk_control.model_cache.contract import CacheManifest
-    from vonk_control.stored.json_values import write_guard_mode
 
     projection, sessions, *_ = assessed_library
     healthy = projection.models().models[0]
@@ -1129,7 +1115,6 @@ def test_damaged_verified_references_do_not_hide_healthy_cached_model(
 )
 def test_storage_age_reason_does_not_claim_endpoint_unavailable(reason, capsys):
     """A reason without an exception class must not acquire an unavailable suffix."""
-    from cluster_profiles.cli_render.dispatch import render_payload
 
     render_payload(
         {
@@ -1149,7 +1134,6 @@ def test_storage_age_reason_does_not_claim_endpoint_unavailable(reason, capsys):
 
 
 def test_deadline_after_a_failed_walk_names_no_earlier_error():
-    from datetime import timedelta
 
     # Break caught: a hang past its deadline kept the previous walk's error
     # class, so clients blamed the hang on an unrelated earlier failure.

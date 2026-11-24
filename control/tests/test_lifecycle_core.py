@@ -16,6 +16,8 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
+
+from vonk_agent_protocol.agent_operations import AgentFailureKind
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_control.lifecycle.adapter import Dispatch
 from vonk_control.lifecycle.core import (
@@ -48,6 +50,7 @@ from vonk_control.lifecycle.types import (
     Submitted,
     Tick,
 )
+from vonk_control.recovery_policy import RECOVERY, WAIT_STEP
 
 NOW = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
 LATER = NOW + timedelta(hours=1)
@@ -97,7 +100,7 @@ def _row(**fields: object) -> Lifecycle:
     base = Lifecycle(
         id="op-1", kind="fake", fence="f1", attempt=1, effect=Effect.ISSUED
     )
-    return replace(base, **fields)  # type: ignore[arg-type]
+    return replace(base, **fields)
 
 
 EVENTS: tuple[Event, ...] = (
@@ -172,7 +175,8 @@ def test_transition_is_total_and_keeps_identity() -> None:
     for row, event, adapter, decision in _table():
         cases += 1
         assert isinstance(decision, Decision), _describe(row, event, adapter)
-        assert decision.row.id == row.id and decision.row.kind == row.kind
+        assert decision.row.id == row.id
+        assert decision.row.kind == row.kind
         assert isinstance(decision.row.state, State)
     assert cases > 50_000
 
@@ -222,7 +226,7 @@ def test_never_executed_or_idempotent_work_is_always_retried() -> None:
         for attempt, effect, irreversible in itertools.product(
             (0, 1, 3), Effect, (False, True)
         ):
-            adapter = replace(adapter, is_irreversible=irreversible)
+            variant = replace(adapter, is_irreversible=irreversible)
             row = _row(
                 state=State.RUNNING,
                 attempt=attempt,
@@ -233,8 +237,8 @@ def test_never_executed_or_idempotent_work_is_always_retried() -> None:
             if not (attempt == 0 or effect is Effect.NONE or not irreversible):
                 continue
             for event in uncertain:
-                decision = transition(row, event, adapter, NOW)
-                where = _describe(row, event, adapter)
+                decision = transition(row, event, variant, NOW)
+                where = _describe(row, event, variant)
                 assert decision.row.state is State.BACKOFF, where
                 assert decision.row.next_action_at is not None, where
                 assert decision.row.next_action_at > NOW, where
@@ -251,7 +255,8 @@ def test_parked_legacy_rows_are_reevaluated_on_their_first_tick() -> None:
     parked = _row(state=State.NEEDS_OPERATOR, next_action_at=NOW, effect=Effect.UNKNOWN)
     healed = transition(parked, Tick(), idempotent, NOW)
     assert healed.row.state is State.BACKOFF
-    assert healed.row.next_action_at is not None and healed.row.next_action_at > NOW
+    assert healed.row.next_action_at is not None
+    assert healed.row.next_action_at > NOW
 
     never = transition(
         replace(parked, attempt=0), Tick(), FakeAdapter(is_irreversible=True), NOW
@@ -276,7 +281,8 @@ def test_an_established_effect_ends_every_wait_word() -> None:
     adapter = FakeAdapter()
     waiting = _row(state=State.OBSERVING, reason=WaitReason.SPARK_BUSY)
     done = transition(waiting, Observed(Effect.ESTABLISHED), adapter, NOW).row
-    assert done.state is State.SUCCEEDED and done.reason is None
+    assert done.state is State.SUCCEEDED
+    assert done.reason is None
     own = transition(
         waiting, Observed(Effect.ESTABLISHED, WaitReason.SET_INCOMPLETE), adapter, NOW
     ).row
@@ -287,7 +293,8 @@ def test_an_established_effect_ends_every_wait_word() -> None:
         adapter,
         NOW,
     ).row
-    assert reported.state is State.SUCCEEDED and reported.reason is None
+    assert reported.state is State.SUCCEEDED
+    assert reported.reason is None
 
 
 def test_an_irreversible_uncertain_effect_is_observed_first() -> None:
@@ -303,10 +310,12 @@ def test_an_irreversible_uncertain_effect_is_observed_first() -> None:
     done = transition(observing, Observed(Effect.ESTABLISHED), adapter, NOW)
     assert done.row.state is State.SUCCEEDED
     retried = transition(observing, Observed(Effect.NONE), adapter, NOW)
-    assert retried.row.state is State.BACKOFF and retried.row.effect is Effect.NONE
+    assert retried.row.state is State.BACKOFF
+    assert retried.row.effect is Effect.NONE
     # It ran and ceased (a receipted exit): over, and never run again.
     stopped = transition(observing, Observed(Effect.STOPPED), adapter, NOW)
-    assert stopped.row.state is State.FAILED and stopped.row.effect is Effect.STOPPED
+    assert stopped.row.state is State.FAILED
+    assert stopped.row.effect is Effect.STOPPED
     assert stopped.commands == ()
     unknown = transition(observing, Observed(Effect.UNKNOWN), adapter, NOW)
     assert unknown.row.state is State.OBSERVING
@@ -337,8 +346,6 @@ def test_safe_current_intent_recovers_after_repeated_faults(
 ) -> None:
     # Wrong implementation: a repetition count ends still-authorized intent,
     # so clearing the fault cannot recover the same operation.
-    from vonk_agent_protocol.contracts import AgentFailureKind
-    from vonk_control.recovery_policy import RECOVERY
 
     adapter = FakeAdapter(is_irreversible=irreversible)
     row = _row(state=State.OBSERVING, effect=effect)
@@ -401,10 +408,10 @@ def test_an_exhausted_unknown_irreversible_effect_is_lost_not_failed(
     # Observed again at the bounded backoff's ceiling: never at once, even past
     # the deadline, and less often than a short wait re-check (a lost row may
     # last for hours and each look rewrites it).
-    from vonk_control.recovery_policy import RECOVERY, WAIT_STEP
 
     wait = RECOVERY.next_attempt(row.id, WAIT_STEP, NOW, ongoing_intent=True)
-    assert wait is not None and decision.row.next_action_at is not None
+    assert wait is not None
+    assert decision.row.next_action_at is not None
     assert wait < decision.row.next_action_at
     assert decision.row.next_action_at <= NOW + 2 * timedelta(
         seconds=RECOVERY.max_delay_seconds
@@ -480,7 +487,8 @@ def test_an_unknown_effect_is_observed_until_it_is_proven_and_a_cancel_ends_it()
         assert due is not None
         looked = transition(lost, Tick(), adapter, due)
         ended = transition(looked.row, Observed(Effect.STOPPED), adapter, due)
-        assert ended.row.terminal and ended.row.effect is Effect.STOPPED
+        assert ended.row.terminal
+        assert ended.row.effect is Effect.STOPPED
         assert ended.commands == ()  # never executed again
         # A cancel (or newer intent) still completes within the stop budget.
         cancelled = transition(lost, CancelRequested("k"), adapter, due)
@@ -501,11 +509,14 @@ def test_an_operator_chooses_among_the_advertised_actions() -> None:
     adapter = FakeAdapter(is_irreversible=True, advertised=("resume", "retire", "stop"))
     waiting = _row(state=State.NEEDS_OPERATOR, effect=Effect.UNKNOWN, retry_count=4)
     resumed = transition(waiting, OperatorAction("resume"), adapter, NOW).row
-    assert resumed.state is State.QUEUED and resumed.retry_count == 0
+    assert resumed.state is State.QUEUED
+    assert resumed.retry_count == 0
     retired = transition(waiting, OperatorAction("retire"), adapter, NOW).row
-    assert retired.state is State.FAILED and retired.effect is Effect.UNKNOWN
+    assert retired.state is State.FAILED
+    assert retired.effect is Effect.UNKNOWN
     stopped = transition(waiting, OperatorAction("stop"), adapter, NOW)
-    assert stopped.row.cancel_requested and stopped.commands == (Stop(),)
+    assert stopped.row.cancel_requested
+    assert stopped.commands == (Stop(),)
 
 
 def test_a_stale_fence_is_dropped_and_the_current_one_is_accepted() -> None:
@@ -517,9 +528,11 @@ def test_a_stale_fence_is_dropped_and_the_current_one_is_accepted() -> None:
         running
     )
     fresh = transition(running, Reported(Outcome.DONE, fence="f1"), adapter, NOW)
-    assert fresh.row.state is State.SUCCEEDED and fresh.row.effect is Effect.ESTABLISHED
+    assert fresh.row.state is State.SUCCEEDED
+    assert fresh.row.effect is Effect.ESTABLISHED
     renewed = transition(running, Heartbeat("f1", LATER), adapter, NOW).row
-    assert renewed.lease_deadline == LATER and renewed.next_action_at == LATER
+    assert renewed.lease_deadline == LATER
+    assert renewed.next_action_at == LATER
 
 
 def test_a_claim_starts_an_attempt_only_for_claimable_work() -> None:
@@ -638,7 +651,8 @@ def test_a_cancel_reaches_a_terminal_state_within_the_stop_budget(
     final = store.rows[row.id]
     assert final.state is State.CANCELLED
     assert State.NEEDS_OPERATOR not in seen
-    assert State.QUEUED not in seen[1:] and State.BACKOFF not in seen[1:]
+    assert State.QUEUED not in seen[1:]
+    assert State.BACKOFF not in seen[1:]
     if final.effect is Effect.UNKNOWN and attempt > 0 and effect is not Effect.NONE:
         confirmed_stop = stop_result is StopResult.CONFIRMED
         assert confirmed_stop or store.residues  # the residue is recorded
@@ -650,13 +664,15 @@ def test_a_cancel_of_never_executed_work_is_immediate_and_repeats_are_harmless()
     adapter = FakeAdapter(is_irreversible=True)
     queued = _row(state=State.QUEUED, attempt=0, effect=Effect.NONE)
     decision = transition(queued, CancelRequested("k"), adapter, NOW)
-    assert decision.row.state is State.CANCELLED and decision.commands == ()
+    assert decision.row.state is State.CANCELLED
+    assert decision.commands == ()
     again = transition(decision.row, CancelRequested("k2"), adapter, NOW)
     assert again == Decision(decision.row)
 
     running = _row(state=State.RUNNING)
     first = transition(running, CancelRequested("k"), adapter, NOW)
-    assert first.row.state is State.OBSERVING and first.commands == (Stop(),)
+    assert first.row.state is State.OBSERVING
+    assert first.commands == (Stop(),)
     second = transition(first.row, CancelRequested("k2"), adapter, NOW)
     assert second == Decision(first.row)  # the first request key is kept
     assert second.row.cancel_request_key == "k"
@@ -688,7 +704,8 @@ def test_the_reconciler_is_disabled_by_default() -> None:
     assert reconciler.enabled is False
     report = reconciler.reconcile()
     assert (report.examined, report.changed) == (0, 0)
-    assert store.rows[row.id] == row and adapter.calls == []
+    assert store.rows[row.id] == row
+    assert adapter.calls == []
 
 
 def test_the_reconciler_heals_a_parked_row_and_ignores_unknown_kinds() -> None:
@@ -741,7 +758,8 @@ def test_a_definite_report_ends_the_row_even_when_a_cancel_is_pending() -> None:
         (Outcome.FAILED, State.FAILED),
     ):
         decision = transition(running, Reported(outcome, fence="f1"), adapter, NOW)
-        assert decision.row.state is expected and decision.commands == ()
+        assert decision.row.state is expected
+        assert decision.commands == ()
         assert decision.row.cancel_requested_at == NOW
     uncertain = transition(running, Reported(Outcome.UNKNOWN, fence="f1"), adapter, NOW)
     assert uncertain.row.state is State.OBSERVING  # the cancel path, not a retry
@@ -760,7 +778,6 @@ def test_a_retry_never_starts_before_the_kinds_safety_fence() -> None:
 def test_persistent_unknown_keeps_its_durable_count_until_the_fault_clears() -> None:
     # Wrong implementation: repeated unknowns end the same current intent, or
     # a reload forgets its evidence and starts a fresh backoff window.
-    from vonk_control.recovery_policy import RECOVERY
 
     adapter = FakeAdapter()
     row = _row(state=State.RUNNING)
@@ -787,13 +804,13 @@ def test_persistent_unknown_keeps_its_durable_count_until_the_fault_clears() -> 
         ).row
     assert row.retry_count == RECOVERY.max_failures * 2
     done = transition(row, Reported(Outcome.DONE, fence=row.fence), adapter, now).row
-    assert done.id == row.id and done.state is State.SUCCEEDED
+    assert done.id == row.id
+    assert done.state is State.SUCCEEDED
 
 
 def test_persisted_deadline_bounds_retries_and_releases_fresh_work() -> None:
     # Wrong merge: the fallback failure count ends a deadline-owned request
     # early, or adapter-only scheduling lets it retry beyond its stored deadline.
-    from vonk_control.recovery_policy import RECOVERY
 
     adapter = FakeAdapter(fence_until=LATER)
     deadline = NOW + timedelta(seconds=1)

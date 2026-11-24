@@ -79,7 +79,7 @@ class CliErrorType(StrEnum):
     ENROLLMENT_DELIVERY = "enrollment_delivery"
 
 
-def failure_document(message: str, error_type: CliErrorType, **fields) -> dict:
+def failure_document(message: str, error_type: CliErrorType, **fields) -> dict:  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
     """The one constructor of a failure document: ``error``, ``error_type``, extras."""
 
     return dict(error=message, error_type=error_type, **fields)
@@ -112,7 +112,10 @@ _ARTIFACT_JOB_ACTIONS = frozenset(
 
 
 def document_kind(
-    args: argparse.Namespace, document: Mapping, *, error: bool
+    args: argparse.Namespace,
+    document: Mapping,  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
+    *,
+    error: bool,
 ) -> DocumentKind | None:
     """The published kind of the document this invocation prints, if any."""
 
@@ -165,7 +168,7 @@ def document_kind(
     return None
 
 
-def stamp(document: Mapping, kind: DocumentKind | None) -> Mapping:
+def stamp(document: Mapping, kind: DocumentKind | None) -> Mapping:  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
     """The document with its ``schema_version`` (unchanged when it has no kind)."""
 
     if kind is None or kind in SELF_VERSIONED:
@@ -179,8 +182,11 @@ _NO_RESULT_KINDS = frozenset(
 
 
 def stamp_document(
-    args: argparse.Namespace, document: Mapping, *, error: bool
-) -> Mapping:
+    args: argparse.Namespace,
+    document: Mapping,  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
+    *,
+    error: bool,
+) -> Mapping:  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
     """The document as printed: stamped, with a followed result stamped inside it.
 
     A followed command that stops early prints the last confirmed document of

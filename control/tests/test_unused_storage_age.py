@@ -5,16 +5,28 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from sqlalchemy import select
+
+from vonk_agent_protocol.agent_operations import AgentOperation as Operation
 from vonk_agent_protocol.state_machines import InstallationState, RunState
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.models.operations import AgentOperation
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
 from .test_catalog_revision_collection import NOW, Catalog
 from .unused_storage_collection_support import (
+    _REAL_CLOCK,
     A_MODEL,
     AN_IMAGE,
     TOTAL,
     FakeLifecycle,
+    _agents_succeed,
     _collector,
+    _models,
+    _real_lifecycle,
     _receipt,
+    _set_exists,
     _size,
 )
 
@@ -41,7 +53,8 @@ def test_non_model_expiry_survives_restart_and_retries_failed_unlink(
 
     result = restarted(timedelta(hours=23, minutes=59)).collect()
     assert result.installations == result.images == 0
-    assert receipt.exists() and model.exists()
+    assert receipt.exists()
+    assert model.exists()
 
     collector = restarted(timedelta(hours=24, seconds=1))
     assert collector._images is not None
@@ -52,55 +65,47 @@ def test_non_model_expiry_survives_restart_and_retries_failed_unlink(
 
     monkeypatch.setattr(collector._images, "remove_published", fail_unlink)
     result = collector.collect()
-    assert result.installations == 1 and result.images == 0
+    assert result.installations == 1
+    assert result.images == 0
     assert lifecycle.removed == [idle]
-    assert receipt.exists() and model.exists()
+    assert receipt.exists()
+    assert model.exists()
     with world.sessions() as session:
-        from vonk_control.models.execution import RecipeInstallation
-
         row = session.get(RecipeInstallation, live)
-        assert row is not None and row.state == InstallationState.INSTALLED
+        assert row is not None
+        assert row.state == InstallationState.INSTALLED
 
     # A fresh collector has no retry memory; disk and SQL remain the authority.
     monkeypatch.setattr(collector._images, "remove_published", remove)
     result = restarted(timedelta(hours=24, minutes=1)).collect()
-    assert result.images == 1 and result.models == 0
-    assert not receipt.exists() and model.exists()
+    assert result.images == 1
+    assert result.models == 0
+    assert not receipt.exists()
+    assert model.exists()
     assert lifecycle.removed == [idle]
 
 
 def test_age_collection_keeps_the_real_nas_model_cache(world: Catalog, cached) -> None:
     """Catches accidentally applying runtime expiry to model cache objects."""
-    from .unused_storage_collection_support import _models, _set_exists
 
     service, digest = cached
     result = _models(world, service, free=TOTAL // 2).collect()
-    assert result.models == 0 and _set_exists(world, digest)
+    assert result.models == 0
+    assert _set_exists(world, digest)
 
 
 def test_age_uninstall_binds_model_retention_in_real_queue(
     tmp_path: Path, postgres_engine
 ) -> None:
     """Catches preview retaining models while acceptance still asks the agent to erase them."""
-    from sqlalchemy import select
-    from vonk_agent_protocol.contracts import AgentOperation as Operation
-    from vonk_control.models.execution import RecipeInstallation
-    from vonk_control.models.operations import AgentOperation
-    from vonk_control.models.telemetry import NodeInventorySnapshot
-    from vonk_control.unused_storage_collection.service import UnusedStorageCollector
-
-    from .unused_storage_collection_support import (
-        _REAL_CLOCK,
-        _agents_succeed,
-        _real_lifecycle,
-    )
 
     sessions, service, installation_id, _nodes = _real_lifecycle(
         tmp_path, engine=postgres_engine
     )
     with sessions() as session:
         stored = session.get(RecipeInstallation, installation_id)
-        assert stored is not None and stored.recipe_build_id is not None
+        assert stored is not None
+        assert stored.recipe_build_id is not None
         mapping_id, build_id = stored.mapping_id, stored.recipe_build_id
 
     # Keep the real admission fixture's memory/capability observations when

@@ -58,8 +58,9 @@ from typing import Any, Literal
 from sqlalchemy import Select, or_, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+
+from vonk_agent_protocol.agent_operations import AgentFailureResult
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     FailureCode,
     InvalidRequestReason,
@@ -69,36 +70,28 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.evidence import RunDegradedReason
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
-
-from .. import agent_operation_states as aos
-from ..agent_operation_facts import aware
-from ..artifact_jobs import states as ajs
-from ..artifact_jobs.evidence import (
+from vonk_control import agent_operation_states as aos
+from vonk_control.agent_jobs.supersession import _cancel_order
+from vonk_control.agent_operation_facts import aware, job_attempt_did_not_launch
+from vonk_control.artifact_jobs import states as ajs
+from vonk_control.artifact_jobs.evidence import (
     ArtifactJobResultEvidence,
     dump_result_evidence,
     read_result_evidence,
 )
-from ..categorized_errors import InvalidValue
-from ..models.execution import STOPPABLE_RUN_STATES, ArtifactJob, RecipeRun
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..persisted_waits import lifecycle_wait
-from ..settings import DATABASE_WAIT_BUDGETS
-from ..stall_window import stall_deadline
-from ..stored.json_values import read_row_column
-from .adapter import Dispatch
-from .agent_operation import (
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.lifecycle.adapter import Dispatch
+from vonk_control.lifecycle.agent_operation import (
     JOB_RUN_OPERATION,
     STOP_ACTION,
     AgentOperationAdapter,
     receipt_effect,
     set_parent_state,
 )
-from .core import transition
-from .job_ranks import fan_in_cancellation_key, resolve_owner
-from .reconciler import settle
-from .types import (
+from vonk_control.lifecycle.core import transition
+from vonk_control.lifecycle.job_ranks import fan_in_cancellation_key, resolve_owner
+from vonk_control.lifecycle.reconciler import settle
+from vonk_control.lifecycle.types import (
     Effect,
     Event,
     Lifecycle,
@@ -108,6 +101,14 @@ from .types import (
     State,
     StopResult,
 )
+from vonk_control.models.execution import STOPPABLE_RUN_STATES, ArtifactJob, RecipeRun
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.persisted_waits import lifecycle_wait
+from vonk_control.settings import DATABASE_WAIT_BUDGETS
+from vonk_control.stall_window import stall_deadline
+from vonk_control.stored.rows import read_row_column
 
 KIND = "artifact-job"
 WAITING = ajs.NEEDS_OPERATOR
@@ -353,16 +354,13 @@ class ArtifactJobAdapter:
             reason=job.status_reason,
             owner_id=job.run_id,
         )
-        return _with_effect(
-            row, self._effect(job, state, attempts, attempt, row, operation)
-        )
+        return _with_effect(row, self._effect(job, state, attempts, row, operation))
 
     @staticmethod
     def _effect(
         job: ArtifactJob,
         state: State,
         attempts: int,
-        attempt: AgentOperationAttempt | None,
         row: Lifecycle,
         operation: StoredOperation | None,
     ) -> Effect:
@@ -389,15 +387,15 @@ class ArtifactJobAdapter:
 
     # ----------------------------------------------------- the kind's facts
 
-    def irreversible(self, row: Lifecycle) -> bool:
+    def irreversible(self, _row: Lifecycle) -> bool:
         """A user's job may have run: repeating it could repeat a visible effect."""
 
         return True
 
-    def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
+    def retry_not_before(self, _row: Lifecycle, _now: datetime) -> datetime | None:
         return None
 
-    def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
+    def execute(self, _row: Lifecycle, _attempt: int) -> Dispatch:
         """The Spark claims its own order; the job issues nothing itself."""
 
         return Dispatch(issued=False)
@@ -456,7 +454,7 @@ class ArtifactJobAdapter:
             return ()
         return (STOP_ACTION,)
 
-    def children(self, row: Lifecycle) -> tuple[Lifecycle, ...]:
+    def children(self, _row: Lifecycle) -> tuple[Lifecycle, ...]:
         return ()
 
     def view(
@@ -492,7 +490,6 @@ class ArtifactJobAdapter:
     def apply(
         self,
         job: ArtifactJob,
-        before: Lifecycle,
         after: Lifecycle,
         now: datetime,
         *,
@@ -585,7 +582,8 @@ class ArtifactJobAdapter:
                 return ajs.OBSERVING
             case State.BACKOFF:
                 return ajs.BACKOFF
-        return ajs.RUNNING
+            case _:
+                return ajs.RUNNING
 
     @staticmethod
     def _default_reason(after: Lifecycle, target: str | None) -> str | None:
@@ -703,10 +701,9 @@ class ArtifactJobAdapter:
         parent, operation, attempt = self.order_of(session, job)
         row = self.lifecycle(job, parent, operation, attempt, now)
 
-        def save(before: Lifecycle, after: Lifecycle) -> bool:
+        def save(_before: Lifecycle, after: Lifecycle) -> bool:
             self.apply(
                 job,
-                before,
                 after,
                 now,
                 reason=reason,
@@ -810,7 +807,6 @@ class ArtifactJobAdapter:
             )
             changed = self.apply(
                 job,
-                before,
                 after,
                 now,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
@@ -878,7 +874,6 @@ class ArtifactJobAdapter:
             evidence = measured if evidence is None else measured.merged(evidence)
         return self.apply(
             job,
-            before,
             after,
             now,
             reason=reason or report,
@@ -948,9 +943,6 @@ class ArtifactJobAdapter:
         if (owner_ended or settled) and any(
             order.state in aos.LIVE for order in orders
         ):
-            # imported here: agent_jobs reads this package's lifecycle.
-            from ..agent_jobs.supersession import _cancel_order
-
             _cancel_order(
                 AgentOperationAdapter(session),
                 parent,
@@ -990,9 +982,6 @@ class ArtifactJobAdapter:
             receipt = None if attempt is None else _RECEIPT_STATES.get(attempt.state)
             if receipt is Effect.STOPPED:
                 return Effect.STOPPED
-            # imported here: agent_jobs reads this package's lifecycle.
-            from ..agent_jobs.retry import job_attempt_did_not_launch
-
             # An attempt that reported it stopped before launch left nothing
             # for the cancel to stop (a damaged report proves nothing).
             report = None if attempt is None else read_row_column(attempt, "result")

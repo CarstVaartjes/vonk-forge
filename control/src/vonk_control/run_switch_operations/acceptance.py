@@ -9,32 +9,32 @@ from typing import (
 from typing import cast as typing_cast
 
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
-from ..categorized_errors import (
-    MissingRecord,
-)
-from ..jobs.documents import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.jobs.documents import (
     RunSwitchCleanupIntent,
     RunSwitchProfileStopIntent,
     RunSwitchRunIntent,
     RunSwitchStopIntent,
 )
-from ..models.jobs import Job
-from ..run_switch_contract.operations import RunSwitchOperation
-from ..run_switch_contract.requests import (
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_contract.operations import RunSwitchOperation
+from vonk_control.run_switch_contract.requests import (
     RunSwitchApplyRequest,
     RunSwitchCleanupApplyRequest,
     RunSwitchProfileStopScope,
     RunSwitchStopApplyRequest,
 )
-from .constants import _OPERATION_KINDS
-from .errors import RunSwitchRequestInvalid
-from .observation_helpers import _plan_blockers_are_waitable, _require_reviewed_plan
+from vonk_control.run_switch_operations.constants import _OPERATION_KINDS
+from vonk_control.run_switch_operations.errors import RunSwitchRequestInvalid
+from vonk_control.run_switch_operations.observation_helpers import (
+    _plan_blockers_are_waitable,
+    _require_reviewed_plan,
+)
 
 if TYPE_CHECKING:
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 class AcceptanceMixin:
@@ -65,7 +65,7 @@ class AcceptanceMixin:
             )
             if existing is not None:
                 return existing
-        preview = service.preview_cleanup(request, actor=actor)
+        preview = service.preview_cleanup(request)
         _require_reviewed_plan(request.plan_digest, preview)
         if not preview.allowed and not _plan_blockers_are_waitable(preview):
             raise RunSwitchRequestInvalid(
@@ -160,7 +160,7 @@ class AcceptanceMixin:
                 return existing
         # Stop is declarative: a preview that moved on is re-planned, never
         # refused as stale.
-        preview = service.preview_stop(request, actor=actor)
+        preview = service.preview_stop(request)
         if not preview.allowed and not _plan_blockers_are_waitable(preview):
             raise RunSwitchRequestInvalid(
                 f"{RunSwitchCode.PLAN_BLOCKED}: "
@@ -181,7 +181,6 @@ class AcceptanceMixin:
         run_id: str,
         profile_stop_scope: RunSwitchProfileStopScope,
         *,
-        plan_digest: str,
         request_key: str,
         actor: str,
         workload_intent_ordinal: int,
@@ -202,7 +201,6 @@ class AcceptanceMixin:
             return existing
         plan = service.preview_stop(
             run_id,
-            actor=actor,
             profile_stop_scope=profile_stop_scope,
         )
         if not plan.allowed and not _plan_blockers_are_waitable(plan):

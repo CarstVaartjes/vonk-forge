@@ -445,7 +445,7 @@ def test_installed_cli_process_exposes_the_complete_artifact_job_surface() -> No
 
 
 @pytest.mark.parametrize(
-    "status,body",
+    ("status", "body"),
     [
         (409, b'{"unexpected":true}'),
         (409, b"x" * (MAX_CONTROL_DOCUMENT_BYTES + 1)),
@@ -521,7 +521,7 @@ def test_unreadable_submit_reply_reconciles_exact_acceptance_and_fresh_request(
 
 
 @pytest.mark.parametrize(
-    "status,body",
+    ("status", "body"),
     [
         (409, b'{"unexpected":true}'),
         (409, b"x" * (MAX_CONTROL_DOCUMENT_BYTES + 1)),
@@ -601,7 +601,8 @@ def test_cli_create_reconciles_lost_receipt_and_never_submits(
     )
 
     assert result == 0
-    assert client.job is not None and client.job["preparation"] == "ready"
+    assert client.job is not None
+    assert client.job["preparation"] == "ready"
     assert (
         len(
             [
@@ -647,7 +648,8 @@ def test_cli_retains_create_key_when_lookup_is_unavailable_for_a_retry(
 
     assert uncertain == 0
     assert uncertain_document["id"] == JOB_ID
-    assert client.job is not None and client.job["preparation"] == "ready"
+    assert client.job is not None
+    assert client.job["preparation"] == "ready"
 
     retried = cli.main(
         (
@@ -754,7 +756,8 @@ def test_cli_capability_limit_and_changed_local_input_refuse_before_byte_transfe
     )
 
     assert status == 2
-    assert client.job is not None and client.job["input_files"] == []
+    assert client.job is not None
+    assert client.job["input_files"] == []
     (tmp_path / "input.png").write_bytes(b"a")
     assert (
         cli.main(
@@ -1223,9 +1226,8 @@ def test_create_ignores_stale_capacity_and_authority_admits_fresh_draft(tmp_path
         == 0
     )
     assert client.upload_calls == ["input.png"]
-    assert client.job is not None and client.job["input_files"] == _declarations(
-        {"input.png": b"x"}
-    )
+    assert client.job is not None
+    assert client.job["input_files"] == _declarations({"input.png": b"x"})
     client.job = None
     assert (
         cli.main(
@@ -1398,7 +1400,7 @@ def test_ingress_digest_mismatch_never_publishes_and_fresh_download_recovers(
 RECIPE_ID = "00000000-0000-4000-8000-000000000008"
 
 
-def _loaded(alias: str, run_id: str) -> dict:
+def _loaded(alias: str, run_id: str) -> dict[str, Any]:
     return {
         "alias": alias,
         "recipe_id": RECIPE_ID,
@@ -1417,7 +1419,7 @@ class RunClient(ArtifactJobClient):
 
     def __init__(
         self,
-        *loaded: dict,
+        *loaded: dict[str, Any],
         succeed: bool = False,
         ended: int = 0,
         ended_state: str = "failed",
@@ -1434,7 +1436,7 @@ class RunClient(ArtifactJobClient):
         self.ended_keys: list[str] = []
         self.contract: dict[str, object] | None = None
 
-    def request(self, method, path, payload=None, **kwargs):
+    def request(self, method, path, payload=None, **kwargs) -> dict[str, object]:
         kwargs.pop("retry", None)
         if path.startswith("/api/artifact-jobs/requests/") and self.ended:
             key = path.rsplit("/", 1)[1]
@@ -1456,6 +1458,7 @@ class RunClient(ArtifactJobClient):
                 ]
             }
         if path.startswith("/api/artifact-jobs/contract/run/"):
+            assert self.contract is not None
             return copy.deepcopy(self.contract)
         if (
             self.finish_state
@@ -1777,7 +1780,8 @@ def test_download_creates_the_directory_and_local_errors_are_not_api_errors(
     status, _ = vonkctl_json(
         "job", "download", JOB_ID, "--output", str(made), control_client=client
     )
-    assert status == 0 and made.is_dir()
+    assert status == 0
+    assert made.is_dir()
     blocker = tmp_path / "file"
     blocker.write_text("x")
     status, error = vonkctl_json(

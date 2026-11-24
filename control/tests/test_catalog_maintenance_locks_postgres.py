@@ -9,12 +9,14 @@ session locks the row it is about to write with ``NOWAIT``.
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 
 import pytest
 from sqlalchemy import Engine, select, update
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import PrebuiltImage, RecipeDefinition
+
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog import entities
 from vonk_control.catalog.revision_contract import (
@@ -24,7 +26,6 @@ from vonk_control.catalog.revision_contract import (
 from vonk_control.catalog.service import CatalogService
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentRevision
-from vonk_forge_contracts import PrebuiltImage, RecipeDefinition
 
 from .test_catalog_entities import _model, _recipe
 from .test_catalog_import_recovery import NOW, _cores, _projection, _request_import
@@ -45,7 +46,7 @@ def catalog(postgres_engine: Engine) -> CatalogService:
 @contextmanager
 def _paused_check(
     monkeypatch: pytest.MonkeyPatch, name: str, run: Callable[[], object]
-) -> Iterator[None]:
+) -> Generator[None]:
     """Run ``run`` in a thread, paused inside its first call of ``name``."""
 
     check = getattr(entities, name)

@@ -9,32 +9,35 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
-
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import AvailabilityJobPayload
+from vonk_control.lifecycle.core import STOP_BUDGET
 from vonk_control.lifecycle.evidence import Residue
-
-from ..jobs import states as job_states
-from ..jobs.documents import AvailabilityJobPayload
-from ..lifecycle.core import STOP_BUDGET
-from ..model_cache.errors import ModelCacheError
-from ..models.jobs import Job
-from ..operations.contract import AvailabilityOperationFailure
-from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
-from ..strict_json import serialize_json_value
-from .contracts import (
+from vonk_control.model_cache.errors import ModelCacheError
+from vonk_control.models.jobs import Job
+from vonk_control.operations.contract import AvailabilityOperationFailure
+from vonk_control.recipe_image_availability.contracts import (
     OPERATION_KIND,
     RecipeImageAvailabilityClaim,
     _AvailabilityClaimLost,
     _failure_code,
     _failure_detail,
 )
+from vonk_control.runtime_image_preparation.contracts import (
+    RuntimeImagePreparationError,
+)
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from ..recipe_update_batches.helpers import RecipeUpdateClaim
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
+    from vonk_control.recipe_update_batches.helpers import RecipeUpdateClaim
 
 
 def _release_cancelled_claim(
@@ -49,7 +52,7 @@ def _release_cancelled_claim(
             or operation.kind != OPERATION_KIND
             or operation.state not in job_states.words(LifecycleState.OBSERVING)
             or operation.current_attempt != claim.execution_attempt
-            or not isinstance(operation.payload, Mapping)
+            or not isinstance(operation.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             or payload.claim_owner != claim.claim_owner
             or self._stored_cancellation(operation) is None
             or payload.removal_fence is not None
@@ -81,7 +84,7 @@ def _release_cancelled_claim(
                 or not isinstance(payload, AvailabilityJobPayload)
                 or operation.state not in job_states.words(LifecycleState.OBSERVING)
                 or operation.current_attempt != claim.execution_attempt
-                or not isinstance(operation.payload, Mapping)
+                or not isinstance(operation.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
                 or payload.claim_owner != claim.claim_owner
                 or payload.removal_fence is not None
                 or self._stored_cancellation(operation) is None
@@ -241,7 +244,7 @@ def _reconcile_cancellation_pass(
     now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
     owner = payload.claim_owner
     if owner is not None:
-        if not isinstance(owner, str):
+        if not isinstance(owner, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             return child_changed
         if payload.image_reference_intent is None:
             until = payload.claim_until
@@ -253,7 +256,7 @@ def _reconcile_cancellation_pass(
                 # the archive lock; expiry later fences callbacks in SQL.
                 return child_changed
         recipe_revision_id = operation.authority_revision
-        if not isinstance(recipe_revision_id, str):
+        if not isinstance(recipe_revision_id, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             return child_changed
         build_input_sha256 = payload.build_input_sha256
         claim = RecipeImageAvailabilityClaim(

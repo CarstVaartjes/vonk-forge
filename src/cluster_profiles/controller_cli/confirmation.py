@@ -6,7 +6,7 @@ import argparse
 import sys
 from collections.abc import Sequence
 
-from ..cli_render.common import terminal_text
+from cluster_profiles.cli_render.common import terminal_text
 
 
 class ActionDeclined(ValueError):

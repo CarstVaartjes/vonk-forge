@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime
@@ -12,36 +12,41 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, object_session
-from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 
-from ..lifecycle.evidence import BookkeepingReason, Damaged, Residue, read_or_rebuild
-from ..lifecycle.types import Lifecycle, State
-from ..logging import log_event
-from ..models.cache import ModelCacheOperation, ModelCacheSet
-from ..operations.contract import AvailabilityOperationFailure
-from ..stored.json_values import read_row_column
-from . import states as model_cache_states
-from .artifacts import ArtifactSetManifest, _unique_artifacts
-from .constants import _LOGGER
-from .contract import (
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Damaged,
+    Residue,
+    read_or_rebuild,
+)
+from vonk_control.lifecycle.types import Lifecycle, State
+from vonk_control.logging import log_event
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, _unique_artifacts
+from vonk_control.model_cache.constants import _LOGGER
+from vonk_control.model_cache.contract import (
     CacheManifest,
     ModelCacheDownloadPayload,
     ModelCacheOperationPayload,
     ModelCacheRemovalPayload,
     ModelCacheSetState,
 )
-from .errors import ModelCacheError
-from .persistence import (
+from vonk_control.model_cache.errors import ModelCacheError
+from vonk_control.model_cache.persistence import (
     _manifest_of,
     _operation_payload,
     _operation_progress,
     _store_operation_payload,
 )
-from .progress import cache_phase, progress_document
-from .provider_waits import payload_kinds, provider_wait_end
+from vonk_control.model_cache.progress import cache_phase, progress_document
+from vonk_control.model_cache.provider_waits import payload_kinds, provider_wait_end
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
+from vonk_control.operations.contract import AvailabilityOperationFailure
+from vonk_control.stored.rows import read_row_column
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 _CACHE_SESSION: ContextVar[tuple[ModelCacheService, Session, bool] | None] = ContextVar(
@@ -77,7 +82,7 @@ class CoreMixin:
         return math.ceil(total_bytes * cache._free_fraction)
 
     @contextmanager
-    def _session(self, *, write: bool = False) -> Iterator[Session]:
+    def _session(self, *, write: bool = False) -> Generator[Session]:
         cache = cast("ModelCacheService", self)
         active = _CACHE_SESSION.get()
         if active is not None and active[0] is cache and (active[2] or not write):
@@ -292,7 +297,7 @@ class CoreMixin:
         return None if isinstance(value, Residue) else value
 
     def _project_end(
-        self, operation: ModelCacheOperation, before: Lifecycle, after: Lifecycle
+        self, operation: ModelCacheOperation, _before: Lifecycle, after: Lifecycle
     ) -> None:
         """What a cancelled download leaves behind, in the transaction that ends it.
 

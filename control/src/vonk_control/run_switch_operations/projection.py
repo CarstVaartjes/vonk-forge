@@ -5,25 +5,32 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy.orm import object_session
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OutcomeKind
 
-from ..jobs import states as job_states
-from ..models.jobs import Job
-from ..operations.blockers import make_blocker
-from ..persisted_waits import read_wait, wait_due
-from ..run_switch_contract.operations import RunSwitchOperation
-from ..run_switch_contract.progress_view import (
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OutcomeKind
+from vonk_agent_protocol.reason_codes.runs import JournalRepairCode
+from vonk_control.jobs import states as job_states
+from vonk_control.journal_models import RunSwitchJournalRepairPending
+from vonk_control.models.jobs import Job
+from vonk_control.operations.blockers import make_blocker
+from vonk_control.persisted_waits import read_wait, wait_due
+from vonk_control.run_switch_contract.journal import RunSwitchJournalRepairPendingState
+from vonk_control.run_switch_contract.operations import RunSwitchOperation
+from vonk_control.run_switch_contract.progress_view import (
+    _progress_operation_state,
     _progress_view,
 )
-from ..stored.json_values import read_row_column
-from .constants import _OPERATION_KIND_ADAPTER
-from .plan_persistence import _view_identity
-from .planning_helpers import _stored_job_plan
-from .result_helpers import (
+from vonk_control.run_switch_journal_repair.discovery import (
+    REPAIR_WAIT,
+    is_zero_transfer_journal_fault,
+)
+from vonk_control.run_switch_operations.constants import _OPERATION_KIND_ADAPTER
+from vonk_control.run_switch_operations.plan_persistence import _view_identity
+from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
+from vonk_control.run_switch_operations.result_helpers import (
     _parse_persisted_result,
-    _progress_operation_state,
     _read_progress,
 )
+from vonk_control.stored.rows import read_row_column
 
 
 class ProjectionMixin:
@@ -64,10 +71,6 @@ class ProjectionMixin:
         if (wait := read_wait(job)) is not None:
             blockers = list(wait.blockers)
         repair_due: datetime | None = None
-        from ..run_switch_journal_repair.discovery import (
-            REPAIR_WAIT,
-            is_zero_transfer_journal_fault,
-        )
 
         if (
             persisted_result is None
@@ -79,9 +82,6 @@ class ProjectionMixin:
             }
             and is_zero_transfer_journal_fault(job)
         ):
-            from ..journal_models import RunSwitchJournalRepairPending
-            from ..run_switch_contract.journal import RunSwitchJournalRepairPendingState
-
             view_session = object_session(job)
             pending = (
                 view_session.get(RunSwitchJournalRepairPending, job.id)
@@ -102,7 +102,6 @@ class ProjectionMixin:
                     node_ids=list(job.targets),
                 )
             ]
-        from vonk_agent_protocol.reason_codes.runs import JournalRepairCode
 
         if (job.status_reason or "").startswith(JournalRepairCode.EXHAUSTED):
             blockers = [

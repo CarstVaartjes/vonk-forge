@@ -6,19 +6,22 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.state_machines import InstallationState, ReservationState
 
-from .inventory.repository import MAX_INVENTORY_FUTURE_SKEW, newest_snapshot_ids
-from .machine_states import rank_installed
-from .models.execution import (
+from vonk_agent_protocol.state_machines import InstallationState, ReservationState
+from vonk_control.inventory.repository import (
+    MAX_INVENTORY_FUTURE_SKEW,
+    newest_snapshot_ids,
+)
+from vonk_control.machine_states import rank_installed
+from vonk_control.models.execution import (
     STOPPABLE_RUN_STATES,
     InstallationNode,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
 )
-from .models.telemetry import NodeInventorySnapshot
-from .reservation_owners import ReservationOwner
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.reservation_owners import ReservationOwner
 
 
 def release_covered_installation_claims(
@@ -59,9 +62,8 @@ def release_covered_installation_claims(
     ).all()
     if not rows:
         return ()
-    newest = {
-        node_id: observed_at
-        for node_id, observed_at in session.execute(
+    newest = dict(
+        session.execute(
             select(
                 NodeInventorySnapshot.node_id, NodeInventorySnapshot.observed_at
             ).where(
@@ -69,8 +71,8 @@ def release_covered_installation_claims(
                     newest_snapshot_ids(sorted({r.node_id for r, _, _ in rows}))
                 )
             )
-        )
-    }
+        ).all()
+    )
     for reservation, installation, node in rows:
         observed = newest.get(reservation.node_id)
         if observed is None or _aware(observed) <= (

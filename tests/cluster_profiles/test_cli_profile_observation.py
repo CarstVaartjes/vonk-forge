@@ -8,15 +8,26 @@ from typing import cast
 import pytest
 
 from cluster_profiles import cli
+from cluster_profiles.cli_states_generated import RUNNING, SUCCEEDED
 from cluster_profiles.control_client.errors import (
     ControlConflict,
+    ControlForbidden,
     ControlHTTPError,
     ControlNotFound,
+    ControlObservationUnavailable,
     ControlUnavailable,
 )
 from cluster_profiles.controller_cli import observation as observation_module
 from cluster_profiles.controller_cli.common import ControllerClient
+from cluster_profiles.controller_cli.observation import _poll_path
 from cluster_profiles.controller_cli.profile import _profile
+from tests.cluster_profiles.controller_cli_support import (
+    FakeClient,
+    _recipe_removal_receipt,
+    _removal_review,
+    run,
+)
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 
 # Observation retries end at this time budget, not after a number of reads.
 BUDGET = observation_module._bounded_timeout(argparse.Namespace())
@@ -69,7 +80,6 @@ class _Successors:
             identity = path.rsplit("/", 1)[-1]
         if self.finish and identity != "0":
             self.successor_reads += 1
-            from cluster_profiles.cli_states_generated import RUNNING, SUCCEEDED
 
             return {
                 "id": identity,
@@ -187,12 +197,6 @@ def test_wrong_successor_is_discarded_and_original_continuation_recovers(
 
 @pytest.mark.parametrize("code", ["cache.identity_mismatch", "cache.revoked_record"])
 def test_bookkeeping_blockers_do_not_veto_new_removal(code):
-    from tests.cluster_profiles.controller_cli_support import (
-        FakeClient,
-        _recipe_removal_receipt,
-        _removal_review,
-        run,
-    )
 
     selector = "vision"
     key = "11111111-1111-4111-8111-111111111111"
@@ -217,13 +221,6 @@ def test_bookkeeping_blockers_do_not_veto_new_removal(code):
 
 
 def test_owner_authorization_denial_does_not_replay_and_a_new_request_is_admitted():
-    from cluster_profiles.control_client.errors import ControlForbidden
-    from tests.cluster_profiles.controller_cli_support import (
-        FakeClient,
-        _recipe_removal_receipt,
-        _removal_review,
-        run,
-    )
 
     selector = "vision"
     key = "11111111-1111-4111-8111-111111111111"
@@ -247,7 +244,6 @@ def test_owner_authorization_denial_does_not_replay_and_a_new_request_is_admitte
 
 
 def test_closed_output_ends_only_observation_and_fresh_observer_reconnects(monkeypatch):
-    from cluster_profiles.controller_cli.observation import _poll_path
 
     controller = _Successors(_Clock())
     monkeypatch.setattr("time.monotonic", controller.clock.monotonic)
@@ -257,7 +253,7 @@ def test_closed_output_ends_only_observation_and_fresh_observer_reconnects(monke
     )
 
     def closed(_snapshot):
-        raise BrokenPipeError()
+        raise BrokenPipeError
 
     args._watch_callback = closed
     initial = {"id": "0", "request_key": "original-request", "state": "running"}
@@ -280,14 +276,13 @@ def test_closed_output_ends_only_observation_and_fresh_observer_reconnects(monke
         terminal=lambda _: True,
         fetch_initial=True,
     )
-    assert result["id"] == "0" and result["request_key"] == "original-request"
+    assert result["id"] == "0"
+    assert result["request_key"] == "original-request"
     assert args.observation.status == "complete"
     assert controller.calls == ["/api/profile/applications/0"]
 
 
 def test_peer_broken_submission_response_reconciles_the_original_without_replay():
-    from cluster_profiles.cli_states_generated import SUCCEEDED
-    from tests.cluster_profiles.controller_cli_support import FakeClient, run
 
     key = "11111111-1111-4111-8111-111111111111"
     application = "22222222-2222-4222-8222-222222222222"
@@ -313,13 +308,15 @@ def test_peer_broken_submission_response_reconciles_the_original_without_replay(
         ),
         client,
     )
-    assert status == 0 and ended["id"] == application
+    assert status == 0
+    assert ended["id"] == application
     assert [call[0] for call in client.calls] == ["POST", "GET"]
     status, fresh = run(
         ("--profile", "1", "profile", "progress", "--request-key", key, "--json"),
         client,
     )
-    assert status == 0 and fresh["id"] == application
+    assert status == 0
+    assert fresh["id"] == application
     assert [call[:2] for call in client.calls] == [
         ("POST", "/api/profile/1/load"),
         ("GET", lookup),
@@ -332,11 +329,6 @@ def test_peer_broken_submission_response_reconciles_the_original_without_replay(
 def test_initial_request_lookup_recovers_or_ends_then_fresh_observer_is_admitted(
     monkeypatch, repair, fault
 ):
-    from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
-
-    from cluster_profiles.cli_states_generated import SUCCEEDED
-    from cluster_profiles.control_client.errors import ControlObservationUnavailable
-    from tests.cluster_profiles.controller_cli_support import FakeClient, run
 
     key = "11111111-1111-4111-8111-111111111111"
     application = "33333333-3333-4333-8333-333333333333"
@@ -371,9 +363,11 @@ def test_initial_request_lookup_recovers_or_ends_then_fresh_observer_is_admitted
     )
     status, result = run(argv, controller)
     if repair and fault != "missing":
-        assert status == 0 and result == ready
+        assert status == 0
+        assert result == ready
     else:
-        assert status == 2 and result["result"] == {}
+        assert status == 2
+        assert result["result"] == {}
         observation = result["observation"]
         assert isinstance(observation, dict)
         assert observation["status"] == ("ended" if fault == "missing" else "timed_out")
@@ -382,7 +376,8 @@ def test_initial_request_lookup_recovers_or_ends_then_fresh_observer_is_admitted
     assert clock.now <= 0.1
     controller.responses[("GET", path)] = ready
     status, result = run(argv, controller)
-    assert status == 0 and result == ready
+    assert status == 0
+    assert result == ready
     assert all(call[0] == "GET" for call in controller.calls)
 
 
@@ -398,8 +393,6 @@ def test_initial_request_lookup_recovers_or_ends_then_fresh_observer_is_admitted
 def test_peer_loss_retries_without_publishing_a_candidate_and_fresh_observer_works(
     monkeypatch, fault
 ):
-    from cluster_profiles.cli_states_generated import SUCCEEDED
-    from tests.cluster_profiles.controller_cli_support import FakeClient, run
 
     clock = _Clock()
     monkeypatch.setattr("time.monotonic", clock.monotonic)
@@ -425,9 +418,11 @@ def test_peer_loss_retries_without_publishing_a_candidate_and_fresh_observer_wor
         assert status == 2
         assert result["http_status"] == 409
     else:
-        assert status == 0 and result == ready
+        assert status == 0
+        assert result == ready
     status, result = run(argv, client)
-    assert status == 0 and result == ready
+    assert status == 0
+    assert result == ready
     assert all(call[0] == "GET" for call in client.calls)
 
 
@@ -450,7 +445,8 @@ def test_successor_relationship_is_decided_before_any_watcher_publication(monkey
     args._watch_callback = lambda snapshot: snapshots.append(dict(snapshot))
     result = _profile(args, cast(ControllerClient, controller), lambda: "fresh")
     assert result["id"] == "0"
-    assert snapshots and all(snapshot.get("id", "0") == "0" for snapshot in snapshots)
+    assert snapshots
+    assert all(snapshot.get("id", "0") == "0" for snapshot in snapshots)
     assert all(
         snapshot.get("request_key", "original-request") == "original-request"
         for snapshot in snapshots
@@ -459,7 +455,8 @@ def test_successor_relationship_is_decided_before_any_watcher_publication(monkey
     controller.finish = True
     controller.different_request = False
     result, observation = _observe(monkeypatch, controller)
-    assert result["id"] == "1" and observation.status == "complete"
+    assert result["id"] == "1"
+    assert observation.status == "complete"
 
 
 def test_profile_list_publishes_no_progress_snapshot():
@@ -478,7 +475,6 @@ def test_profile_list_publishes_no_progress_snapshot():
 def test_a_followed_read_still_publishes_every_snapshot_to_the_final_one(
     monkeypatch,
 ):
-    from cluster_profiles.controller_cli.observation import _poll_path
 
     clock = _Clock()
     monkeypatch.setattr("time.monotonic", clock.monotonic)
@@ -521,8 +517,6 @@ def test_a_one_shot_profile_read_publishes_no_progress_snapshot():
 def test_zero_budget_has_reconnect_receipt_and_a_fresh_observer_is_admitted(
     monkeypatch,
 ):
-    from cluster_profiles.cli_states_generated import SUCCEEDED
-    from tests.cluster_profiles.controller_cli_support import FakeClient, run
 
     identity = "33333333-3333-4333-8333-333333333333"
     path = f"/api/profile/applications/{identity}"
@@ -538,19 +532,21 @@ def test_zero_budget_has_reconnect_receipt_and_a_fresh_observer_is_admitted(
         "--timeout-seconds",
     )
     status, result = run((*argv, "0"), controller)
-    assert status == 2 and result["result"] == {}
+    assert status == 2
+    assert result["result"] == {}
     observation = result["observation"]
     assert isinstance(observation, dict)
     assert observation["path"] == path
     assert identity in str(observation["reconnect_command"])
     assert controller.calls == []
     status, result = run((*argv, "1"), controller)
-    assert status == 0 and result == ready
+    assert status == 0
+    assert result == ready
     assert len(controller.calls) == 1
 
 
 @pytest.mark.parametrize(
-    "argv,method,path,ready,attempts",
+    ("argv", "method", "path", "ready", "attempts"),
     [
         (("profile", "--json"), "GET", "/api/profile/1", {"id": "profile-1"}, None),
         (("profile", "list", "--json"), "GET", "/api/profile", {"profiles": []}, None),
@@ -567,7 +563,6 @@ def test_zero_budget_has_reconnect_receipt_and_a_fresh_observer_is_admitted(
 def test_profile_read_paths_reobserve_and_a_fresh_read_is_admitted(
     monkeypatch, argv, method, path, ready, attempts, persistent
 ):
-    from tests.cluster_profiles.controller_cli_support import FakeClient, run
 
     clock = _Clock()
     monkeypatch.setattr("time.monotonic", clock.monotonic)
@@ -585,8 +580,10 @@ def test_profile_read_paths_reobserve_and_a_fresh_read_is_admitted(
         assert status == 2
         assert result["result"] == {}
     else:
-        assert status == 0 and result == ready
+        assert status == 0
+        assert result == ready
     client.responses[(method, path)] = ready
     status, result = run(argv, client)
-    assert status == 0 and result == ready
+    assert status == 0
+    assert result == ready
     assert all(call[:2] == (method, path) for call in client.calls)

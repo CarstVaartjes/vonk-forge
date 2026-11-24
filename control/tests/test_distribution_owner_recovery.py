@@ -7,6 +7,7 @@ from uuid import uuid4
 import httpx2
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.models.jobs import Job
@@ -18,9 +19,9 @@ from .non_blocking import NON_BLOCKING_ENDS
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
     _cold_compile_switch,
+    _finish,
     _request,
 )
-from .test_lifecycle_preflight import _finish
 
 
 @pytest.mark.parametrize(

@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.package_source import AgentPackageSource
 from vonk_control import agent_operation_states as aos
@@ -48,7 +49,10 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
     monkeypatch,
 ) -> None:
     clock_value = [datetime(2026, 9, 24, tzinfo=UTC)]
-    clock = lambda: clock_value[0]
+
+    def clock():
+        return clock_value[0]
+
     now = clock()
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -179,7 +183,8 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
         with sessions.begin() as session:
             job = session.get(Job, job_id)
             child = session.get(AgentOperation, child_operation_id)
-            assert job is not None and child is not None
+            assert job is not None
+            assert child is not None
             assert job.state == "queued"
             job.state = PARKED
             child.next_action_at = None
@@ -189,7 +194,8 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
             child = session.scalar(
                 select(AgentOperation).where(AgentOperation.parent_job_id == job_id)
             )
-            assert job is not None and child is not None
+            assert job is not None
+            assert child is not None
             assert job.state == PARKED
             assert child.state in aos.PARKED
             assert child.id == child_operation_id
@@ -283,7 +289,8 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
         with sessions() as session:
             job = session.get(Job, job_id)
             child = session.get(AgentOperation, child_operation_id)
-            assert job is not None and child is not None
+            assert job is not None
+            assert child is not None
             after_denial = (
                 job.id,
                 job.request_id,
@@ -357,12 +364,15 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
                     select(AgentOperation).where(AgentOperation.parent_job_id == job_id)
                 )
             )
-            assert job is not None and child is not None and attempt is not None
+            assert job is not None
+            assert child is not None
+            assert attempt is not None
             assert job.state == "queued"
             assert child.state in aos.PARKED
             assert child.next_action_at is not None
             assert job.request_id == request_key
-            assert len(children) == 1 and children[0].id == child_operation_id
+            assert len(children) == 1
+            assert children[0].id == child_operation_id
             assert (
                 job.id,
                 job.request_id,

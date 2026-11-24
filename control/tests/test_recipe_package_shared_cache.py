@@ -13,6 +13,7 @@ from pathlib import Path
 
 import httpx2
 import pytest
+
 from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
 from vonk_control.recipe_packages import client as recipe_packages
 from vonk_control.recipe_packages.client import RecipePackageClient
@@ -129,7 +130,7 @@ def test_a_killed_writers_old_private_files_are_removed_at_start(
     two_days_ago = time.time() - 2 * 24 * 60 * 60
     for path in old + live:
         path.write_bytes(b"x")
-    for path in old + [live[1]]:
+    for path in [*old, live[1]]:
         os.utime(path, (two_days_ago, two_days_ago))
 
     RecipePackageClient(api_url="http://127.0.0.1", cache_root=cache).close()

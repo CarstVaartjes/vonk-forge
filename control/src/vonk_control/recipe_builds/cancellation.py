@@ -4,50 +4,46 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Literal
 
-from pydantic import ConfigDict
 from sqlalchemy import String, and_, cast, or_, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import read_recipe
+
 from vonk_agent_protocol.agent_words import Disposition, ProfileChildJobKind
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
 )
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
-from vonk_forge_contracts import read_recipe
-
-from ..admission_locking import is_admission_contention
-from ..agent_jobs.predicates import _JsonFlagIsTrue
-from ..categorized_errors import InvalidValue
-from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
-from ..fleet_profile_contract.definitions import FleetProfileAssignment
-from ..fleet_profile_contract.review import FleetProfilePreview
-from ..fleet_profile_contract.vocabulary import profile_switch_child_request_key
-from ..fleet_profiles import states as fleet_profile_states
-from ..jobs import states as job_states
-from ..models.cache import RecipeBuild
-from ..models.fleet import AgentNode, FleetProfileApplication
-from ..models.jobs import Job
-from ..recipe_operations.availability_intent import read_availability_intent
-from ..recipe_operations.lifecycle_contract import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.admission_locking import is_admission_contention
+from vonk_control.agent_jobs.predicates import _JsonFlagIsTrue
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profile_contract.vocabulary import (
+    profile_switch_child_request_key,
+)
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import RecipeBuildIntent
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.fleet import AgentNode, FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_operations.availability_intent import read_availability_intent
+from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationCancellationResult,
     parse_recipe_lifecycle_result,
 )
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..runtime_image_preparation.contracts import RuntimeImageReceipt
-from ..strict_json import StrictJSONModel, read_stored_model
-
-
-class RecipeBuildIntent(StrictJSONModel):
-    """The accepted producer's intent, independent of its current consumers."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-    kind: Literal["independent", "dependency"]
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
+from vonk_control.strict_json import read_stored_model
 
 
 def read_build_intent(job: Job) -> RecipeBuildIntent:

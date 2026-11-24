@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator, Mapping
 from copy import deepcopy
+from dataclasses import fields, is_dataclass
 from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal, cast
@@ -14,6 +15,7 @@ from pydantic import (
     ConfigDict,
     Field,
     GetCoreSchemaHandler,
+    RootModel,
     field_validator,
     model_validator,
 )
@@ -38,7 +40,7 @@ def _check_literal_type(value: object, expected: tuple[Any, ...]) -> object:
 
 
 def _wrap_numeric_literals(schema: CoreSchema) -> CoreSchema:
-    if not isinstance(schema, dict):
+    if not isinstance(schema, dict):  # pyright: ignore[reportUnnecessaryIsInstance]  # the walk recurses into every nested dict, not only core schemas
         return schema
     if schema.get("type") == "literal":
         expected = tuple(schema.get("expected", ()))
@@ -77,11 +79,11 @@ def _bind_string_enum_values(schema: CoreSchema) -> CoreSchema:
     difference without weakening the contract.
     """
 
-    if not isinstance(schema, dict):
+    if not isinstance(schema, dict):  # pyright: ignore[reportUnnecessaryIsInstance]  # the walk recurses into every nested dict, not only core schemas
         return schema
     if schema.get("type") == "enum" and schema.get("sub_type") == "str":
         enum_type = cast(type[StrEnum], schema.get("cls"))
-        members = frozenset(schema.get("members", ()))
+        members: frozenset[object] = frozenset(schema.get("members", ()))
 
         def bind_member(value: object) -> object:
             if type(value) is str and value in members:
@@ -121,14 +123,14 @@ def _bind_json_string_scalars(schema: CoreSchema) -> CoreSchema:
     does; any other value reaches Pydantic's own error unchanged.
     """
 
-    if not isinstance(schema, dict):
+    if not isinstance(schema, dict):  # pyright: ignore[reportUnnecessaryIsInstance]  # the walk recurses into every nested dict, not only core schemas
         return schema
     metadata = schema.get("metadata")
     if isinstance(metadata, dict) and metadata.get(JSON_STRING_BOUND):
         return schema
     scalar = schema.get("type")
-    if isinstance(scalar, str) and scalar in JSON_STRING_SCALARS:
-        json_mode = SchemaValidator(cast(CoreSchema, deepcopy(schema)))
+    if isinstance(scalar, str) and scalar in JSON_STRING_SCALARS:  # pyright: ignore[reportUnnecessaryIsInstance]  # the walk recurses into every nested dict, not only core schemas
+        json_mode = SchemaValidator(deepcopy(schema))
 
         def bind_string(value: object) -> object:
             if type(value) is not str:
@@ -230,7 +232,7 @@ class WireModel(StrictJSONModel, Mapping[str, Any]):
         except (KeyError, TypeError):
             raise KeyError(key) from None
 
-    def __iter__(self) -> Iterator[str]:
+    def __iter__(self) -> Iterator[str]:  # pyright: ignore[reportIncompatibleMethodOverride]  # Mapping[str, Any] iterates keys, not BaseModel's (name, value) pairs
         # Mapping iteration exposes explicitly supplied fields. Canonical wire
         # serialization separately applies the model-aware default/null policy.
         declared = (
@@ -246,6 +248,103 @@ class WireModel(StrictJSONModel, Mapping[str, Any]):
 
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+UUID4_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+Uuid4Text = Annotated[str, Field(pattern=UUID4_PATTERN)]
+
+
+class AgentProtocolError(ValueError):
+    """A protocol message is invalid or outside the agent trust boundary."""
+
+
+_UUID_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+CanonicalUUID = Annotated[
+    str,
+    Field(
+        strict=True,
+        min_length=36,
+        max_length=36,
+        pattern=_UUID_PATTERN,
+        json_schema_extra={"format": "uuid"},
+    ),
+]
+DigestText = Annotated[
+    str,
+    Field(strict=True, pattern=r"^[0-9a-f]{64}$"),
+]
+
+
+def canonical_message(value: Any) -> bytes:
+    """Encode a protocol value with deterministic UTF-8 JSON."""
+    try:
+        return json.dumps(
+            _to_wire(value),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as error:
+        raise AgentProtocolError("message must contain JSON values") from error
+
+
+def _model_field_to_wire(original: Any, serialized: Any) -> Any:
+    """Retain nested model metadata after Pydantic applies field serializers."""
+    if isinstance(original, RootModel):
+        return _model_field_to_wire(original.root, serialized)
+    if isinstance(original, BaseModel) and isinstance(serialized, Mapping):
+        return _model_to_wire(original, serialized)
+    if isinstance(original, Mapping) and isinstance(serialized, Mapping):
+        return {
+            str(key): _model_field_to_wire(original[key], item)
+            for key, item in serialized.items()
+        }
+    if isinstance(original, (tuple, list)) and isinstance(serialized, (tuple, list)):
+        return [
+            _model_field_to_wire(source, item)
+            for source, item in zip(original, serialized, strict=True)
+        ]
+    return _to_wire(serialized)
+
+
+def _model_to_wire(value: BaseModel, document: Mapping[str, Any]) -> dict[str, Any]:
+    fields = {
+        (field.serialization_alias or name)
+        if value.model_config.get("serialize_by_alias", False)
+        else name: (name, field)
+        for name, field in type(value).model_fields.items()
+    }
+    result = {}
+    for name, item in document.items():
+        declared = fields.get(name)
+        if declared is not None:
+            attribute, field = declared
+            if not field.is_required() and field.default is None and item is None:
+                continue
+            result[name] = _model_field_to_wire(getattr(value, attribute), item)
+        else:
+            # Declared extension data has its own meaning; null is not absence.
+            result[name] = _to_wire(item)
+    return result
+
+
+def _to_wire(value: Any) -> Any:
+    if isinstance(value, RootModel):
+        return _model_field_to_wire(value.root, value.model_dump(mode="json"))
+    if isinstance(value, BaseModel):
+        return _model_to_wire(value, value.model_dump(mode="json"))
+    if isinstance(value, StrEnum):
+        return value.value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if is_dataclass(value) and not isinstance(value, type):
+        return {
+            field.name: _to_wire(getattr(value, field.name)) for field in fields(value)
+        }
+    if isinstance(value, Mapping):
+        return {str(key): _to_wire(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_to_wire(item) for item in value]
+    return value
 
 
 def strict_json_datetime(value: object) -> object:
@@ -398,21 +497,24 @@ class OperationProgress(WireModel):
 def normalize_operation_progress(value: Mapping[str, object]) -> dict[str, object]:
     """Validate progress and retain every meaningful declared default."""
 
-    from .contracts import canonical_message
-
     return json.loads(canonical_message(OperationProgress.model_validate(value)))
 
 
 __all__ = [
     "ERROR_CODE_PATTERN",
+    "AgentProtocolError",
+    "CanonicalUUID",
+    "DigestText",
     "ErrorCode",
     "NetworkFetch",
     "OperationCheckpoint",
     "OperationMemberProgress",
     "OperationProgress",
     "StrictJSONModel",
+    "Uuid4Text",
     "WireEnum",
     "WireModel",
+    "canonical_message",
     "normalize_operation_progress",
     "typed_tag",
 ]

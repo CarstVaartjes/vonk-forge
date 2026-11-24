@@ -9,8 +9,9 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.state_machines import (
@@ -18,36 +19,34 @@ from vonk_agent_protocol.state_machines import (
     InstallationState,
     ReservationState,
 )
-
-from ..admission_locking import admission_attempts
-from ..jobs import states as job_states
-from ..lifecycle.evidence import (
-    Damaged,
-    Residue,
-    read_or_rebuild,
+from vonk_control.admission_locking import admission_attempts
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import RecipeBuildIntent
+from vonk_control.lifecycle.evidence import Damaged, Residue, read_or_rebuild
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    ResourceReservation,
 )
-from ..models.cache import RecipeBuild
-from ..models.execution import InstallationNode, RecipeInstallation, ResourceReservation
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..recipe_builds.cancellation import RecipeBuildIntent, build_cancellation
-from ..recipe_builds.common import RecipeBuildPlan
-from ..stored.json_values import read_row_column
-from ..strict_json import serialize_json_value
-from .errors import RecipeRequestInvalid, RecipeRetryLater
-from .execution_contract import (
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_builds.cancellation import build_cancellation
+from vonk_control.recipe_builds.common import RecipeBuildPlan
+from vonk_control.recipe_operations.errors import RecipeRequestInvalid, RecipeRetryLater
+from vonk_control.recipe_operations.execution_contract import (
     build_plan_document,
     parse_stored_build_plan,
 )
-from .intent import _bound_workload_intent
-from .interfaces import RecipeOperationView
-from .observation_helpers import _active_recipe_revision
-from .progress import (
-    _parent_identity,
-)
+from vonk_control.recipe_operations.intent import _bound_workload_intent
+from vonk_control.recipe_operations.interfaces import RecipeOperationView
+from vonk_control.recipe_operations.observation_helpers import _active_recipe_revision
+from vonk_control.recipe_operations.progress import _parent_identity
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class RetryMixin:
@@ -137,7 +136,8 @@ class RetryMixin:
             )
         )
         revision = _active_recipe_revision(session, installation.recipe_revision_id)
-        assert revision is not None and revision.content_digest is not None
+        assert revision is not None
+        assert revision.content_digest is not None
         recipe_digest = revision.content_digest
         compiled_plans = service._stored_compiled_plans(
             session, installation, [node.node_id for node in nodes], now=now

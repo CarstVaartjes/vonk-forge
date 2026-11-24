@@ -108,13 +108,17 @@ def documentation_reads(source: str) -> list[int]:
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and (
-            isinstance(node.func, ast.Attribute)
-            and node.func.attr in {"read_text", "read_bytes", "open"}
-            and is_documentation(node.func.value)
-            or isinstance(node.func, ast.Name)
-            and node.func.id == "open"
-            and node.args
-            and is_documentation(node.args[0])
+            (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr in {"read_text", "read_bytes", "open"}
+                and is_documentation(node.func.value)
+            )
+            or (
+                isinstance(node.func, ast.Name)
+                and node.func.id == "open"
+                and node.args
+                and is_documentation(node.args[0])
+            )
         )
     ]
 
@@ -207,10 +211,8 @@ def _structural_counter_tree(tree: ast.AST) -> list[int]:
         and any(
             isinstance(child, ast.Call)
             and (
-                isinstance(child.func, ast.Attribute)
-                and child.func.attr == "count"
-                or isinstance(child.func, ast.Name)
-                and child.func.id == "len"
+                (isinstance(child.func, ast.Attribute) and child.func.attr == "count")
+                or (isinstance(child.func, ast.Name) and child.func.id == "len")
             )
             for child in ast.walk(value)
         )
@@ -228,13 +230,17 @@ def _structural_counter_tree(tree: ast.AST) -> list[int]:
             for call in ast.walk(assertion.test)
             if isinstance(call, ast.Call)
             and (
-                isinstance(call.func, ast.Attribute)
-                and call.func.attr == "count"
-                and reads_source(call.func.value)
-                or isinstance(call.func, ast.Name)
-                and call.func.id in {"len", "max", "min", "sum"}
-                and call.args
-                and reads_source(call.args[0])
+                (
+                    isinstance(call.func, ast.Attribute)
+                    and call.func.attr == "count"
+                    and reads_source(call.func.value)
+                )
+                or (
+                    isinstance(call.func, ast.Name)
+                    and call.func.id in {"len", "max", "min", "sum"}
+                    and call.args
+                    and reads_source(call.args[0])
+                )
             )
         }
     )

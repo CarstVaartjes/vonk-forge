@@ -6,27 +6,27 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.inventory import MemoryPool
 from vonk_agent_protocol.state_machines import ReservationState, RunState
-
-from .fleet_profiles.capacity import (
+from vonk_control.fleet_profiles.capacity import (
     profile_build_memory_claims,
     profile_memory_floor,
     profile_memory_replacements,
     reservation_visible,
 )
-from .models.cache import RecipeBuild
-from .models.execution import RecipeRun, ResourceReservation, RunNode
-from .owner_liveness import OwnerKind, OwnerRef, build_may_run
-from .recipe_operations.execution_contract import parse_stored_run_plan
-from .resource_planning.memory_kinds import memory_reservation_kinds
-from .resource_planning.types import (
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
+from vonk_control.owner_liveness import OwnerKind, OwnerRef, build_may_run
+from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
+from vonk_control.resource_planning.memory_kinds import memory_reservation_kinds
+from vonk_control.resource_planning.types import (
     MemoryClaimHolder,
     MemoryReservationTotals,
     UnknownRunMemoryResidual,
 )
-from .run_switch_contract.evidence import StopImpact
-from .stored.states import RecipeBuildState
+from vonk_control.run_switch_contract.evidence import StopImpact
+from vonk_control.stored.states import RecipeBuildState
 
 MEMORY_RESERVATION_KINDS = ("host-memory", "gpu-memory", "unified-memory")
 

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,13 +17,13 @@ def direct_apt_calls(root: Path) -> list[str]:
     # Include shell entry points invoked by workflows/actions, and their callees.
     # Scanning all shell scripts prevents a new indirection from evading the guard.
     for directory in ("scripts", "tests", "tools", "install", "packaging", "deploy"):
-        for path in (root / directory).rglob("*"):
-            if (
-                path.is_file()
-                and (path.suffix == ".sh" or not path.suffix)
-                and path.read_bytes().startswith(b"#!/")
-            ):
-                paths.append(path)
+        paths.extend(
+            path
+            for path in (root / directory).rglob("*")
+            if path.is_file()
+            and (path.suffix == ".sh" or not path.suffix)
+            and path.read_bytes().startswith(b"#!/")
+        )
     for path in paths:
         if path == root / "scripts/ci-apt-install":
             continue
@@ -56,8 +58,6 @@ def test_guard_catches_composite_and_indirect_bypasses(tmp_path: Path) -> None:
 def test_mirror_recovery_is_bounded_and_a_fresh_request_can_succeed(
     tmp_path: Path,
 ) -> None:
-    import os
-    import subprocess
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()

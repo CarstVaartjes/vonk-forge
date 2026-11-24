@@ -1,18 +1,29 @@
 from __future__ import annotations
 
+import errno
 import gzip
 import io
 import tarfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import source_bundles
+from vonk_control.auth import TokenCodec
+from vonk_control.catalog.service import CatalogService
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import RecipeSourceBundle
 from vonk_control.source_bundles import (
     BundleLimits,
+    DatabaseSourceBundleStore,
     SourceBundleError,
     SourceBundleStore,
     generate_source_bundle,
@@ -183,15 +194,6 @@ def test_store_rejects_expected_digest_mismatch(tmp_path) -> None:
 def test_postgres_source_bundle_metadata_roundtrip_and_archive_owned_reads(
     postgres_engine,
 ):
-    from sqlalchemy.orm import sessionmaker
-    from vonk_agent_protocol.contracts import canonical_message
-    from vonk_agent_protocol.source_bundles import SourceBundleManifest
-    from vonk_control.model_primitives import Base
-    from vonk_control.models.catalog import RecipeSourceBundle
-    from vonk_control.source_bundles import (
-        DatabaseSourceBundleStore,
-        generate_source_bundle,
-    )
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -227,7 +229,6 @@ def test_postgres_source_bundle_metadata_roundtrip_and_archive_owned_reads(
 def test_existing_verified_bundle_is_not_replaced_when_read_is_unknown(
     tmp_path, monkeypatch, fault
 ):
-    import errno
 
     bundle = generate_source_bundle({"Dockerfile": b"FROM scratch\n"})
     store = SourceBundleStore(tmp_path)
@@ -255,15 +256,6 @@ def test_existing_verified_bundle_is_not_replaced_when_read_is_unknown(
 
 
 def test_catalog_source_upload_unknown_recovers_exact_digest(tmp_path, monkeypatch):
-    import errno
-    from datetime import UTC, datetime
-
-    from sqlalchemy import create_engine, select
-    from sqlalchemy.orm import sessionmaker
-    from vonk_control.auth import TokenCodec
-    from vonk_control.catalog.service import CatalogService
-    from vonk_control.model_primitives import Base
-    from vonk_control.models.catalog import RecipeSourceBundle
 
     bundle = generate_source_bundle({"Dockerfile": b"FROM scratch\n"})
     store = SourceBundleStore(tmp_path / "bundles")
@@ -397,9 +389,11 @@ def test_normalised_source_bundle_path_never_leaves_the_root(raw: str) -> None:
     try:
         normalised = source_bundles._safe_path(raw)
     except SourceBundleError as error:
-        assert error.code in {
-            SourceBundleCode.PATH_FORBIDDEN,
-            SourceBundleCode.PATH_TOO_LONG,
-        }
+        code = error.code
+    else:
+        assert _stays_inside_root(normalised)
         return
-    assert _stays_inside_root(normalised)
+    assert code in {
+        SourceBundleCode.PATH_FORBIDDEN,
+        SourceBundleCode.PATH_TOO_LONG,
+    }

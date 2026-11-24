@@ -11,13 +11,12 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-from vonk_agent_protocol.contracts import (
-    AgentFailureResult,
-    AgentResult,
-    canonical_message,
-)
-from vonk_agent_protocol.contracts import AgentOperation as WireOperation
+
+from vonk_agent_protocol.agent_operations import AgentFailureResult
+from vonk_agent_protocol.agent_operations import AgentOperation as WireOperation
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.contracts import _REFUSAL_PREFIXES
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.models.jobs import Job
@@ -65,10 +64,12 @@ def _running_start(tmp_path):
     )
     # Rank 1 has already reported; rank 0 is the order whose result is pending.
     sibling = claim_agent(jobs, nodes[1], "serial-1")
-    assert sibling is not None and sibling.operation == WireOperation.RECIPE_START
+    assert sibling is not None
+    assert sibling.operation == WireOperation.RECIPE_START
     jobs.record_result(_result(sibling, succeeded=True))
     claim = claim_agent(jobs, nodes[0], "serial-0")
-    assert claim is not None and claim.operation == WireOperation.RECIPE_START
+    assert claim is not None
+    assert claim.operation == WireOperation.RECIPE_START
     return sessions, service, jobs, clock, started, nodes, claim
 
 

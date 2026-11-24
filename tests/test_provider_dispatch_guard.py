@@ -121,12 +121,14 @@ def test_artifact_kinds_are_dispatched_through_the_provider_table():
     violations = []
     for path in (ROOT / "control/src").rglob("*.py"):
         relative = str(path.relative_to(ROOT))
-        for line in scan_source(
-            path.read_text(),
-            dispatcher=relative == DISPATCH_OWNER,
-            owner=relative in {LITERAL_OWNER, DISPATCH_OWNER},
-        ):
-            violations.append(f"{relative}:{line}")
+        violations.extend(
+            f"{relative}:{line}"
+            for line in scan_source(
+                path.read_text(),
+                dispatcher=relative == DISPATCH_OWNER,
+                owner=relative in {LITERAL_OWNER, DISPATCH_OWNER},
+            )
+        )
     assert not violations, (
         "artifact kind spelled or compared outside providers.py; add a Provider "
         "field instead: " + ", ".join(violations)

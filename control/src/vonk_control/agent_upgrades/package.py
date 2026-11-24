@@ -7,19 +7,21 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
 import httpx2
-from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 
-from ..bounded_retry import bounded_attempts
-from ..categorized_errors import (
-    InvalidType,
-)
-from .contract import AgentUpgradePackage
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
+from vonk_control.agent_upgrades.contract import AgentUpgradePackage
+from vonk_control.bounded_retry import bounded_attempts
+from vonk_control.categorized_errors import InvalidType
 
 if TYPE_CHECKING:
-    from .service import AgentUpgradeService
+    from vonk_control.agent_upgrades.service import AgentUpgradeService
 
-from .constants import _SHA256
-from .errors import _RELEASE_PAUSES, AgentUpgradeRetryLater, AgentUpgradeUnavailable
+from vonk_control.agent_upgrades.constants import _SHA256
+from vonk_control.agent_upgrades.errors import (
+    _RELEASE_PAUSES,
+    AgentUpgradeRetryLater,
+    AgentUpgradeUnavailable,
+)
 
 
 class PackageMixin:

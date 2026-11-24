@@ -8,11 +8,11 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy import select, true
+
 from vonk_agent_protocol.agent_words import (
     ProfileCancellationCause,
     ProfileOperationKind,
 )
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -23,58 +23,66 @@ from vonk_agent_protocol.state_machines import (
     DesiredAssignmentState,
     ObservedAssignmentState,
 )
-
-from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract.applications import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationCancellationIntent,
     FleetProfileApplicationProgress,
     FleetProfileIntendedConfiguration,
 )
-from ..fleet_profile_contract.review import FleetProfileApplicationView
-from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..lifecycle.fleet_profile import FleetProfileAdapter
-from ..lifecycle.types import Effect as _LifecycleEffect
-from ..models.fleet import (
-    AgentNode,
-    FleetProfile,
-    FleetProfileApplication,
-    FleetProfileSelection,
-)
-from ..operations.blockers import make_blocker
-from ..persisted_waits import read_wait, schedule_wait, typed_wait_reason
-from ..settings import PROFILE_STALL_WINDOW_SECONDS
-from ..stall_window import stall_deadline
-from ..strict_json import read_stored_model
-from ..workload_intent import take_workload_intent
-from . import states as fleet_profile_states
-from .assessment_support import (
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.fleet_profiles.assessment_support import (
     _deferral_code,
     _preview_blockers,
     _profile_preview_is_waitable,
     _storage_wait_of,
 )
-from .contracts import (
+from vonk_control.fleet_profiles.assignment_assessment import _assignment_state
+from vonk_control.fleet_profiles.continuing_effects import _adopted_application_scope
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileAdmissionBusy,
     FleetProfileAdmissionEffectBusy,
     FleetProfileConflict,
     FleetProfileInvalid,
     _FleetProfileSupersededIntentConflict,
 )
-from .persistence import (
+from vonk_control.fleet_profiles.persistence import (
     _application_effect_scope,
+    _intended_profile,
     _newer_pending_profile_load,
     _owns_pending_admission,
     _persisted_profile_plan,
     _persisted_profile_progress,
     _stored_progress,
 )
-from .projection_support import (
-    _aware,
+from vonk_control.fleet_profiles.projection_support import _aware
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
 )
+from vonk_control.lifecycle.fleet_profile import FleetProfileAdapter
+from vonk_control.lifecycle.types import Effect as _LifecycleEffect
+from vonk_control.models.fleet import (
+    AgentNode,
+    FleetProfile,
+    FleetProfileApplication,
+    FleetProfileSelection,
+)
+from vonk_control.operations.blockers import make_blocker
+from vonk_control.persisted_waits import read_wait, schedule_wait
+from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
+from vonk_control.stall_window import stall_deadline
+from vonk_control.strict_json import read_stored_model
+from vonk_control.wait_contract import typed_wait_reason
+from vonk_control.workload_intent import take_workload_intent
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 class FleetProfileService:
@@ -169,7 +177,7 @@ class FleetProfileService:
                 # accepting a second request identity for the same stop.
                 cancellation = previous
             else:
-                if self._adopted_application_scope(session, row) is not None:
+                if _adopted_application_scope(session, row) is not None:
                     # Continuing effects belong to the newer selected request.
                     # An older cancellation cannot mutate that newer authority.
                     raise FleetProfileInvalid(
@@ -287,7 +295,7 @@ class FleetProfileService:
                 self._cancel_owned_preparations(application_id, plan, actor=actor)
             return self.application(application_id)
         adapter = self._switch_adapter
-        if adapter is not None and cancellation is not None:
+        if adapter is not None and cancellation is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
             request_cancellation = getattr(adapter, "request_cancellation", None)
             if callable(request_cancellation):
                 request_cancellation(
@@ -350,7 +358,7 @@ class FleetProfileService:
                 select(FleetProfileApplication)
                 .where(
                     FleetProfileApplication.id == application_id
-                    if application_id is not None
+                    if application_id is not None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
                     else true()
                 )
                 .where(eligible, FleetProfileApplication.id == application_id)
@@ -431,7 +439,7 @@ class FleetProfileService:
                         (assignment.id, state.current_state)
                         for assignment in selected.intended.assignments
                         if assignment.desired_state == DesiredAssignmentState.RUNNING
-                        for state in (self._assignment_state(session, assignment),)
+                        for state in (_assignment_state(session, assignment),)
                         if state.current_state != ObservedAssignmentState.RUNNING
                     )
                 )
@@ -473,7 +481,7 @@ class FleetProfileService:
                         # must neither conflict with it nor reset its backoff.
                         return False
                     previous_request_id = previous.id
-                    intended = self._intended_profile(previous, session=session)
+                    intended = _intended_profile(previous, session=session)
                     if not isinstance(intended, Residue):
                         previous_reviewed_digest = intended.reviewed_plan_digest
 

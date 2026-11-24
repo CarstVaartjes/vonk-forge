@@ -7,15 +7,23 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
+from types import MethodType
 
 import pytest
 from sqlalchemy import event, select
-from vonk_agent_protocol.contracts import AgentInstallResult, canonical_message
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_forge_contracts import (
+    read_recipe,
+)
+
+from vonk_agent_protocol.agent_operations import AgentInstallResult
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.admission import InstallAdmissionCode
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
+from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.install_admission.contracts import (
     AdmissionReason,
     InstallAdmissionBusy,
@@ -26,6 +34,7 @@ from vonk_control.install_admission.validation import (
     require_admissible as require_install_admissible,
 )
 from vonk_control.jobs.documents import RecipeStopParent
+from vonk_control.lifecycle.image_availability import CANCEL_BUDGET
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import (
@@ -39,14 +48,25 @@ from vonk_control.models.execution import (
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_image_availability.availability_contract import (
+    AvailabilityBuildReceipt,
+)
+from vonk_control.recipe_image_availability.contracts import (
+    OPERATION_KIND,
+    BuildUnsettled,
+)
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
+)
+from vonk_control.recipe_operations import persistence
 from vonk_control.recipe_operations.errors import (
     RecipeOperationConflict,
 )
 from vonk_control.run_admission import RunAdmissionBusy
-from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import (
-    read_recipe,
+from vonk_control.runtime_image_preparation.preparation import (
+    stored_runtime_image_resolver,
 )
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .recipe_operations_support import (
     NOW,
@@ -148,7 +168,6 @@ def test_postgres_duplicate_stop_waiting_on_dispatch_replays(
     # creation key here makes its own duplicate spend every try-lock attempt
     # before it can read that receipt. Hold dispatch until the duplicate waits
     # on its run, then let the committed receipt answer both callers.
-    from vonk_control.recipe_operations import persistence
 
     Base.metadata.drop_all(postgres_engine)
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
@@ -425,7 +444,8 @@ def test_postgres_pending_stop_reconciler_waits_for_dispatch_of_accepted_stop(
         review = RecipeStopParent.model_validate_json(
             canonical_message(job.payload)
         ).service_stop_review
-        assert review is not None and review.stage == "dispatched"
+        assert review is not None
+        assert review.stage == "dispatched"
         assert session.scalar(
             select(AgentOperation.id).where(AgentOperation.parent_job_id == stop_id)
         )
@@ -995,22 +1015,14 @@ def test_installation_requests_exact_receipt_repair_before_any_agent_effect(
     tmp_path: Path,
     fault: str,
 ) -> None:
-    from vonk_control.recipe_image_availability.availability_contract import (
-        AvailabilityBuildReceipt,
-    )
-    from vonk_control.recipe_image_availability.service import (
-        RecipeImageAvailabilityService,
-    )
-    from vonk_control.runtime_image_preparation.preparation import (
-        stored_runtime_image_resolver,
-    )
 
     sessions, service, _queue, mapping_id, build_id, _nodes = setup_services(tmp_path)
     reviewed = service.preview_install(mapping_id, build_id)
     assert reviewed.allowed, reviewed.nodes
     provider = service._install_admission._compiled_plan_provider
-    assert provider is not None
+    assert isinstance(provider, MethodType)
     compiler = provider.__self__
+    assert isinstance(compiler, ControllerExecutionPlanService)
     storage = FilesystemRuntimeImageStorage(tmp_path / "runtime-images")
     resolver = stored_runtime_image_resolver(storage)
     reply_damaged = [fault == "malformed-reply"]
@@ -1047,12 +1059,6 @@ def test_installation_requests_exact_receipt_repair_before_any_agent_effect(
         path.write_text("{")
     with sessions() as session:
         previous_jobs = set(session.scalars(select(Job.id)))
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-    from vonk_control.recipe_image_availability.contracts import (
-        OPERATION_KIND,
-        BuildUnsettled,
-    )
 
     blocked = [fault == "persistent"]
     now = [NOW]
@@ -1126,7 +1132,6 @@ def test_installation_requests_exact_receipt_repair_before_any_agent_effect(
                 )
                 is None
             )
-        from vonk_control.lifecycle.image_availability import CANCEL_BUDGET
 
         now[0] += timedelta(minutes=16)
         preparation.run_pending()

@@ -10,6 +10,7 @@ from unittest.mock import Mock
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
+
 from vonk_control.admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
@@ -127,9 +128,12 @@ def test_contended_row_lock_ends_and_next_transaction_acquires(sessions) -> None
 
 
 def test_admission_rollback_releases_keys_for_the_next_request(sessions) -> None:
-    with pytest.raises(RuntimeError), sessions.begin() as failed:
+    def expected_failure(failed):
         acquire_admission_keys(failed, (node_admission_key(NODE),))
         raise RuntimeError("injected failure after admission")
+
+    with pytest.raises(RuntimeError), sessions.begin() as failed:
+        expected_failure(failed)
     with sessions.begin() as fresh:
         acquire_admission_keys(fresh, (node_admission_key(NODE),))
 
@@ -189,18 +193,17 @@ def test_changed_contact_skips_busy_admission_then_recovers(sessions) -> None:
             assert done.wait(10), "contact reply queued behind capacity admission"
     finally:
         traffic.join(10)
-    assert not traffic.is_alive() and not errors
+    assert not traffic.is_alive()
+    assert not errors
     delivery._record(NODE, 422, NOW + timedelta(seconds=1))
     # A delayed older success must not clear the newer rejection.
     delivery._record(NODE, 204, NOW)
     with sessions() as session:
         node = session.get(AgentNode, NODE)
-        assert (
-            node is not None and contact_row(node).recipe_observation_http_status == 422
-        )
+        assert node is not None
+        assert contact_row(node).recipe_observation_http_status == 422
     delivery._record(NODE, 204, NOW + timedelta(seconds=2))
     with sessions() as session:
         node = session.get(AgentNode, NODE)
-        assert (
-            node is not None and contact_row(node).recipe_observation_http_status == 204
-        )
+        assert node is not None
+        assert contact_row(node).recipe_observation_http_status == 204

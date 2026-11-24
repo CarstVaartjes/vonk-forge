@@ -6,22 +6,26 @@ import shlex
 from collections.abc import Container, Mapping, Sequence
 from enum import StrEnum
 
-from ..cli_json_contract import Word
-from ..cli_states import ARTIFACT_JOB_IN_FLIGHT, lifecycle_state
-from ..cli_states_generated import ENDPOINT_UNAVAILABLE, SUCCEEDED
-from ..control_client.errors import ControlMalformedResponse
-from ..generated_control.models.artifact_job_contract_response import (
+from cluster_profiles.cli_json_contract import Word
+from cluster_profiles.cli_render.common import _bytes, _field, _records, _text, _time
+from cluster_profiles.cli_states import ARTIFACT_JOB_IN_FLIGHT, lifecycle_state
+from cluster_profiles.cli_states_generated import ENDPOINT_UNAVAILABLE, SUCCEEDED
+from cluster_profiles.control_client.errors import ControlMalformedResponse
+from cluster_profiles.generated_control.models.artifact_job_contract_response import (
     ArtifactJobContractResponse,
 )
-from ..generated_control.models.artifact_job_response import ArtifactJobResponse
-from ..generated_control.models.artifact_slot_contract import ArtifactSlotContract
-from ..generated_control.models.boolean_parameter import BooleanParameter
-from ..generated_control.models.enum_parameter import EnumParameter
-from ..generated_control.models.float_parameter import FloatParameter
-from ..generated_control.models.integer_parameter import IntegerParameter
-from ..generated_control.models.string_parameter import StringParameter
-from ..generated_control.types import Unset
-from .common import _bytes, _field, _records, _text, _time
+from cluster_profiles.generated_control.models.artifact_job_response import (
+    ArtifactJobResponse,
+)
+from cluster_profiles.generated_control.models.artifact_slot_contract import (
+    ArtifactSlotContract,
+)
+from cluster_profiles.generated_control.models.boolean_parameter import BooleanParameter
+from cluster_profiles.generated_control.models.enum_parameter import EnumParameter
+from cluster_profiles.generated_control.models.float_parameter import FloatParameter
+from cluster_profiles.generated_control.models.integer_parameter import IntegerParameter
+from cluster_profiles.generated_control.models.string_parameter import StringParameter
+from cluster_profiles.generated_control.types import Unset
 
 type Knob = (
     StringParameter

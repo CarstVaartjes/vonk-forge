@@ -13,7 +13,7 @@ from fastapi import Request
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import FileResponse, StreamingResponse
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.error_response import (
     BoundedErrorResponse,
     ErrorContextResponse,
@@ -24,8 +24,11 @@ from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
 from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 from vonk_agent_protocol.reason_codes.catalog import CatalogCode
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
-
-from ..catalog.api import CatalogProblem
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.auth import agent_identity_from_scope
+from vonk_control.auth_api import LoginRequestInvalid
+from vonk_control.catalog.api import CatalogProblem
+from vonk_control.logging import log_event, redact_text
 
 """Versioned authenticated control API."""
 
@@ -84,8 +87,6 @@ def _bounded_error_content(
     submitted input alongside the type error.
     """
 
-    from ..logging import redact_text
-
     if not isinstance(detail, str):
         detail = "request failed"
     detail = redact_text(detail)[:256]
@@ -125,7 +126,6 @@ def _validation_detail(issues: list[RequestValidationIssue]) -> str:
 
 
 def _invalid_login_content() -> bytes:
-    from ..auth_api import LoginRequestInvalid
 
     return canonical_message(
         LoginRequestInvalid(detail="login request is invalid").model_dump(mode="json")
@@ -135,7 +135,7 @@ def _invalid_login_content() -> bytes:
 def _catalog_error_content(request: Request, error: StarletteHTTPException) -> bytes:
     """Serialize catalog HTTP errors through the route's public model."""
 
-    detail = error.detail if isinstance(error.detail, str) else "catalog request failed"
+    detail = error.detail if isinstance(error.detail, str) else "catalog request failed"  # pyright: ignore[reportUnnecessaryIsInstance]  # an HTTPException detail can carry a document
     response = CatalogProblem(
         code=_CATALOG_HTTP_ERROR_CODES.get(
             error.status_code, CatalogCode.REQUEST_FAILED
@@ -195,7 +195,6 @@ def _log_request_failure(
     request: Request, status: int, cause: BaseException | None
 ) -> None:
     """Log a 5xx with the request id the caller sees and a redacted traceback."""
-    from ..logging import log_event
 
     log_event(
         _LOGGER,
@@ -212,8 +211,6 @@ def _log_request_failure(
 
 def _log_agent_rejection(request: Request, status: int, reason: str) -> None:
     """One line for a 4xx on an agent endpoint: request id and reason, no body."""
-    from ..auth import agent_identity_from_scope
-    from ..logging import log_event
 
     identity = agent_identity_from_scope(dict(request.scope))
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
@@ -15,6 +16,7 @@ from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileInput,
 )
 from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_profiles.continuing_effects import _adopted_application_scope
 from vonk_control.models.fleet import FleetProfileApplication, FleetProfileSelection
 from vonk_control.models.jobs import Job
 
@@ -61,7 +63,8 @@ def test_superseded_replay_ends_and_selected_load_replans(
         assert profiles.tick()
         assert profiles.tick()
         document = profiles.application(older.id).progress.switch_adapter
-        assert document is not None and document.pending_children
+        assert document is not None
+        assert document.pending_children
         child_id = document.pending_children[0].operation_id
         world.advance(1)
         replacement = FleetProfileAssignmentInput(
@@ -71,7 +74,7 @@ def test_superseded_replay_ends_and_selected_load_replans(
         )
         newer = load("C+B", [replacement, choices[1]])
         with world.sessions() as session:
-            assert profiles._adopted_application_scope(
+            assert _adopted_application_scope(
                 session, session.get_one(FleetProfileApplication, older.id)
             )
         # Inject a recoverable executor fault after the newer load adopted B.
@@ -109,6 +112,7 @@ def test_superseded_replay_ends_and_selected_load_replans(
             ]
         assert all(count <= 1 for count in repeats)
 
+        selected = None
         for _ in range(60):
             world.advance(ROUND_SECONDS)
             world.tick()
@@ -119,6 +123,7 @@ def test_superseded_replay_ends_and_selected_load_replans(
                 selected = profiles.application(selection.application_id)
             if selected.state == LifecycleState.SUCCEEDED:
                 break
+        assert selected is not None
         assert selected.state == LifecycleState.SUCCEEDED, selected.blockers
         assert selected.profile_id == newer.profile_id
         assert selected.progress.intended_profile is not None

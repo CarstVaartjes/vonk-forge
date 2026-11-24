@@ -87,6 +87,7 @@ from tests.acceptance.test_spark_lifecycle import (
     _sibling_recipes,
     _validate_canary_cleanup_preview,
 )
+from vonk_agent_protocol.installer_release import InstallerReleaseObject
 
 PROBE_INTERVAL_SECONDS = 3.0
 # Each settle phase waits for its observed condition, not a fixed time: the
@@ -226,7 +227,6 @@ def _retired_installer_responses(
     """Answers for the prompts this release's own NAS installer asks and the
     lane no longer knows: a release from before Hermes was removed still asks
     whether to enable it, and the lane declines it."""
-    from vonk_agent_protocol.installer_release import InstallerReleaseObject
 
     record = InstallerReleaseObject.model_validate_json(
         json.dumps(
@@ -427,7 +427,6 @@ def resolve_release(
             caddy,
         )
     openapi = directory / "openapi.json"
-    from vonk_agent_protocol.installer_release import InstallerReleaseObject
 
     wheel_record = InstallerReleaseObject.model_validate_json(
         json.dumps(
@@ -819,9 +818,10 @@ class UpgradeCarryLifecycle(SparkLifecycle):
     def _controller_request_guard(self):
         # The harness is newer than both Controllers it drives: every request
         # must be one the Controller in front of it accepts (#1086).
-        return lambda method, path, body: self._current_release().contract.check(
-            method, path, body
-        )
+        def guard(method: str, path: str, body: bytes | None) -> None:
+            self._current_release().contract.check(method, path, body)
+
+        return guard
 
     def _release_environment(self, release: ReleaseInput) -> dict[str, str]:
         assert self.temporary_root is not None
@@ -1020,7 +1020,8 @@ class UpgradeCarryLifecycle(SparkLifecycle):
     def _redeploy_controller(self) -> None:
         """Upgrade the Controller the way an operator reruns the installer."""
 
-        assert self.temporary_root is not None and self.bundle is not None
+        assert self.temporary_root is not None
+        assert self.bundle is not None
         self._refusal_window_start = int(time.time())
         os.environ[OVERLAY_VARIABLE] = os.fspath(self.candidate.overlay)
         self.controller_generation = self.candidate.generation
@@ -1131,7 +1132,8 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         install and start, and must serve inference as the new revision.
         """
 
-        assert self.control is not None and self.browser is not None
+        assert self.control is not None
+        assert self.browser is not None
         fixture = self.synthetic_canary_fixture
         successor = _editorial_successor(fixture)
         nodes = self._fleet_snapshot().get("nodes")
@@ -1169,7 +1171,8 @@ class UpgradeCarryLifecycle(SparkLifecycle):
     ) -> tuple[str, str]:
         """Download, load and serve the editorial successor as the newest revision."""
 
-        assert self.control is not None and self.browser is not None
+        assert self.control is not None
+        assert self.browser is not None
         selector = f"{successor.publisher}/{successor.slug}"
         _, detail_payload = self.control.request("GET", f"/api/recipe/{selector}")
         identity = require_object(
@@ -1278,7 +1281,8 @@ class UpgradeCarryLifecycle(SparkLifecycle):
     ) -> dict[str, object]:
         """Download, install and start one Recipe, then route and infer."""
 
-        assert self.control is not None and self.browser is not None
+        assert self.control is not None
+        assert self.browser is not None
         selector = f"{fixture.publisher}/{fixture.slug}"
         _, detail_payload = self.control.request("GET", f"/api/recipe/{selector}")
         identity = require_object(
@@ -1494,7 +1498,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         outside = [
             probe
             for probe in self.evidence.probes
-            if probe.phase not in {"controller-redeploy"}
+            if probe.phase != "controller-redeploy"
         ]
         failures = [probe for probe in outside if not probe.ok]
         consecutive = any(

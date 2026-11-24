@@ -10,11 +10,11 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from vonk_forge_contracts import ModelDefinition
 
-from ..catalog.revision_contract import read_catalog_document
-from ..model_cache.contract import CacheManifest
-from ..models.cache import ModelCacheSet
-from ..models.catalog import CatalogDocumentRevision
-from ..strict_json import read_stored_model
+from vonk_control.catalog.revision_contract import read_catalog_document
+from vonk_control.model_cache.contract import CacheManifest
+from vonk_control.models.cache import ModelCacheSet
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.strict_json import read_stored_model
 
 
 def protected_model_objects(session: Session, references: AbstractSet[str]) -> set[str]:
@@ -54,7 +54,7 @@ def protected_model_objects(session: Session, references: AbstractSet[str]) -> s
             .execution_options(yield_per=1)
         ):
             digest = revision.content_digest
-            if digest is None:
+            if digest is None:  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
                 raise ValueError("model reference has no content identity")
             unresolved.discard(digest)
             visited.add(digest)

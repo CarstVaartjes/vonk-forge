@@ -32,7 +32,8 @@ import pytest
 _spec = importlib.util.spec_from_file_location(
     "vonk_cli_dependencies", Path(__file__).with_name("cli_dependencies.py")
 )
-assert _spec is not None and _spec.loader is not None
+assert _spec is not None
+assert _spec.loader is not None
 cli_dependencies = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cli_dependencies)
 

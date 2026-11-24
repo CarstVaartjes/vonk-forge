@@ -10,9 +10,8 @@ from dataclasses import dataclass
 from typing import Literal, cast
 from urllib.parse import urlsplit
 
+from fastapi import HTTPException
 from pydantic import BaseModel
-from vonk_agent_protocol.outcome import UnknownOutcomeError
-from vonk_agent_protocol.state_machines import AssetAvailability, RunState
 from vonk_forge_contracts import (
     ModelDefinition,
     ModelDisplay,
@@ -25,14 +24,16 @@ from vonk_forge_contracts.api_checks import (
     accepted_modalities,
 )
 
-from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-
-from ..catalog.revision_contract import (
+from vonk_agent_protocol.error_response import RequestValidationProblem
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.state_machines import AssetAvailability, RunState
+from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
     read_catalog_document,
 )
-from ..library.contract import (
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from vonk_control.library.contract import (
     LibraryCacheState,
     LibraryLocalState,
     LibraryModelIdentity,
@@ -40,12 +41,12 @@ from ..library.contract import (
     ModelLibraryResponse,
     RecipeLibraryResponse,
 )
-from ..machine_states import RUN_LIVE
-from ..models.catalog import CatalogDocument, CatalogDocumentRevision
-from ..operator_receipt_contract import ReceiptOwner
-from ..request_fault import RequestFault
-from ..strict_json import serialize_json_value
-from ..unreadable_rows import LOGGED_UNREADABLE, note_unreadable
+from vonk_control.machine_states import RUN_LIVE
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.request_fault import RequestFault
+from vonk_control.strict_json import serialize_json_value
+from vonk_control.unreadable_rows import LOGGED_UNREADABLE, note_unreadable
 
 """Bounded canonical Model to Recipe Library projection."""
 
@@ -283,7 +284,7 @@ def _observed_library_page[T: BaseModel](
 
 
 def _controller_state(
-    states: Mapping[str, LibraryControllerState], value: str, detail: str
+    states: Mapping[str, LibraryControllerState], value: str
 ) -> LibraryControllerState:
     """Map a persisted state onto the projected controller vocabulary."""
 
@@ -469,3 +470,25 @@ def _canonical_recipe_summary(
         runs_truncated=False,
         reasons=[],
     )
+
+
+class SelectorAmbiguityHTTPError(HTTPException):
+    """Carry canonical choices separately from bounded, redacted error copy."""
+
+    def __init__(
+        self,
+        error: LibrarySelectorAmbiguous,
+        *,
+        status_code: int = 422,
+        code: str | None = None,
+    ) -> None:
+        self.problem = RequestValidationProblem(
+            detail="selector is ambiguous; choose an exact canonical candidate",
+            issues=[],
+            candidates=list(error.candidates),
+        )
+        super().__init__(
+            status_code=status_code,
+            detail=self.problem.detail,
+            headers={"x-vonk-error-code": code} if code is not None else None,
+        )

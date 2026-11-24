@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import random
 
-from ..cli_states_generated import (
+from cluster_profiles.cli_states_generated import (
     DISPOSITION_FAIL,
     DISPOSITION_OBSERVE,
     DISPOSITION_SECURITY,
     DISPOSITION_WAIT,
     HTTP_STATUS_DISPOSITIONS,
 )
-from .errors import (
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlContractMismatch,
     ControlHTTPError,

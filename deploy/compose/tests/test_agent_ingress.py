@@ -1,14 +1,23 @@
+import gzip
+import hashlib
+import http.client
+import io
 import json
 import os
 import re
 import subprocess
 import sys
+import tarfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from fnmatch import fnmatchcase
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from vonk_forge_contracts.api import MAX_AUDIO_FILE_BYTES
+
+from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
 from vonk_control.agent_api.common import MAX_RECIPE_IMAGE_BYTES
 from vonk_control.api.common import (
@@ -22,7 +31,6 @@ from vonk_control.artifact_jobs.api import (
 )
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.gateway.route_grants import GatewayInferenceRoute
-from vonk_forge_contracts.api import MAX_AUDIO_FILE_BYTES
 
 ROOT = Path(__file__).resolve().parents[3]
 DEV_CADDYFILE = ROOT / "deploy/compose/Caddyfile"
@@ -148,17 +156,15 @@ def _request_body_routes(value: object) -> list[dict]:
         if isinstance(item, dict):
             handlers = item.get("handle")
             if isinstance(handlers, list):
-                for handler in handlers:
-                    if (
-                        isinstance(handler, dict)
-                        and handler.get("handler") == "request_body"
-                    ):
-                        routes.append(
-                            {
-                                "match": item.get("match"),
-                                "max_size": handler.get("max_size"),
-                            }
-                        )
+                routes.extend(
+                    {
+                        "match": item.get("match"),
+                        "max_size": handler.get("max_size"),
+                    }
+                    for handler in handlers
+                    if isinstance(handler, dict)
+                    and handler.get("handler") == "request_body"
+                )
             for child in item.values():
                 visit(child)
         elif isinstance(item, list):
@@ -766,7 +772,8 @@ def test_every_edge_admits_each_body_the_controller_accepts_and_no_more() -> Non
             browser = sites["browser"]
             two_mib = 2 * 1024 * 1024
             chat_bound = _edge_body_bound(browser, "POST", "/v1/chat/completions")
-            assert chat_bound is not None and chat_bound >= two_mib
+            assert chat_bound is not None
+            assert chat_bound >= two_mib
             # The transcription bound is exactly the contract's largest upload:
             # that many bytes pass and one more is refused at the edge.
             assert (
@@ -1181,7 +1188,8 @@ def test_caddy_entrypoint_reads_owner_protected_secrets_with_deployed_capabiliti
             entrypoint_arguments=("/bin/true",),
             runtime_options=tuple(without_read_authority),
         )
-        assert refused.returncode != 0 and "Permission denied" in refused.stderr
+        assert refused.returncode != 0
+        assert "Permission denied" in refused.stderr
     finally:
         subprocess.run(
             ["docker", "volume", "rm", volume], check=True, capture_output=True
@@ -1218,8 +1226,6 @@ def test_caddy_serves_the_file_the_controller_names_and_nothing_else(
     Controller's, a path outside the two content-addressed layouts, and ranges
     that are not honoured.
     """
-    import http.client
-    import time
 
     _require_docker_runtime()
     digest = "ab" + "0" * 62
@@ -1325,10 +1331,6 @@ def _runtime_image_store_snippet() -> str:
 
 def _oci_layout(store: Path) -> tuple[str, str]:
     """A one-layer arm64 runtime image, written as the Controller stores it."""
-    import gzip
-    import hashlib
-    import io
-    import tarfile
 
     def blob(payload: bytes) -> str:
         digest = hashlib.sha256(payload).hexdigest()
@@ -1390,8 +1392,6 @@ def test_docker_pulls_a_pinned_runtime_image_from_the_digest_only_store(
     Docker-Content-Digest, a route that exposes anything but digest reads,
     and a request without an agent identity reaching the store.
     """
-    import http.client
-    import time
 
     _require_docker_runtime()
     state = tmp_path / "state"
@@ -1516,10 +1516,6 @@ def test_docker_pulls_a_pinned_runtime_image_from_the_digest_only_store(
 @pytest.mark.slow(30)
 def test_edge_body_limit_errors_are_distinct_from_proxied_controller_limits(tmp_path):
     """Inject Caddy's handler error; never relabel an upstream 413 as edge."""
-    import http.client
-    import time
-
-    from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 
     text = DEV_CADDYFILE.read_text()
     snippets = []

@@ -1,6 +1,6 @@
 """Run the production Controller API."""
 
-from .production import production_app
+from vonk_control.api.production import production_app
 
 if __name__ == "__main__":
     import uvicorn

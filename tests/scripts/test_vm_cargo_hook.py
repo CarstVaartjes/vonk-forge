@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import fcntl
 import importlib.machinery
 import importlib.util
+import json
+import os
 import shlex
+import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from types import ModuleType
@@ -31,10 +36,6 @@ def test_vm_shell_bounds_contention_and_preserves_caller_arguments(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import fcntl
-    import os
-    import shutil
-    import sys
 
     module = hook()
     root = tmp_path / "worktree with spaces"
@@ -75,7 +76,6 @@ def test_vm_shell_bounds_contention_and_preserves_caller_arguments(
         check=False,
     )
     assert fresh.returncode == 0
-    import json
 
     assert json.loads(output.read_text()) == [hostile, "", "multiline\nargument"]
     assert not (root / "injected").exists()

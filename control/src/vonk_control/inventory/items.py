@@ -6,14 +6,16 @@ from collections.abc import Callable
 from datetime import datetime
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
-
-from ..models.fleet import AgentNode
-from ..models.telemetry import NodeInventoryItemsSnapshot
-from .items_contract import AgentInventoryItems, PreflightInventoryItem
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.inventory.items_contract import (
+    AgentInventoryItems,
+    PreflightInventoryItem,
+)
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.telemetry import NodeInventoryItemsSnapshot
 
 
 def inventory_items(node: AgentNode | None) -> AgentInventoryItems:

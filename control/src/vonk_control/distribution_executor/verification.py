@@ -5,17 +5,16 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from vonk_agent_protocol.agent_words import ProfileChildPhase
-
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.phase_results import (
+from vonk_control.distribution_executor.identity import DistributionIdentity
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import (
     RunSwitchCachedTransferResult,
     RunSwitchTargetTransferEvidenceResult,
     RunSwitchTargetTransferResult,
     RunSwitchVerifyResult,
 )
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.progress import ArtifactVerificationEvidence
-from .identity import DistributionIdentity
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.progress import ArtifactVerificationEvidence
 
 
 class DistributionVerification(DistributionIdentity):
@@ -36,7 +35,7 @@ class DistributionVerification(DistributionIdentity):
         resolved_image_digest, resolved_layout_digest, _image_bytes, build_id = (
             DistributionIdentity._runtime_identity(plan, progress)
         )
-        result = RunSwitchVerifyResult(
+        return RunSwitchVerifyResult(
             phase=ProfileChildPhase.VERIFY.value,
             subphase=ProfileChildPhase.TARGET_COPY.value,
             skipped=skipped,
@@ -56,7 +55,6 @@ class DistributionVerification(DistributionIdentity):
             cached_target_totals=dict(cached_target_totals or {}),
             evidence=list(evidence),
         )
-        return result
 
     def _verify_evidence(
         self,

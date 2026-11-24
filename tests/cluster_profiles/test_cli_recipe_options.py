@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+from typing import Any
 
 from library_route_fixtures import _recipe_projection
 
@@ -69,7 +70,7 @@ class Fake:
         raise AssertionError((method, path))
 
 
-def _saved(client: Fake) -> dict:
+def _saved(client: Fake) -> dict[str, Any]:
     assert client.saved is not None
     return client.saved
 

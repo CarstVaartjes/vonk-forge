@@ -169,8 +169,8 @@ def test_every_staged_runtime_asset_a_service_reads_ships_in_the_controller_imag
     }
     assert {"caddy/Caddyfile", "postgres/entrypoint.sh"} <= shipped
     assert referenced
-    for path in referenced:
-        path = path.rstrip("/")
+    for reference in referenced:
+        path = reference.rstrip("/")
         assert path in shipped or any(
             item.startswith(path + "/") for item in shipped
         ), path

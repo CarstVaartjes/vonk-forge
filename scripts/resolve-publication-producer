@@ -20,7 +20,7 @@ import re
 import subprocess
 import sys
 from enum import StrEnum
-from typing import NamedTuple
+from typing import NamedTuple, Required, TypedDict, cast
 
 RELEASE_WORKFLOW = ".github/workflows/installer-publication.yml"
 RELEASE_EVENTS = {"push", "workflow_dispatch"}
@@ -249,11 +249,42 @@ def run(*args: str) -> str:
     return subprocess.check_output(args, text=True, timeout=60).strip()
 
 
-def api(endpoint: str) -> dict:
+class GitHubRunRef(TypedDict, total=False):
+    """The run an artifact came from: the fields this script reads."""
+
+    id: int
+    head_sha: str
+    head_branch: str
+
+
+class GitHubArtifact(TypedDict, total=False):
+    """A listed Actions artifact: the fields this script reads."""
+
+    name: Required[str]
+    expired: bool
+    workflow_run: GitHubRunRef
+
+
+class GitHubDocument(TypedDict, total=False):
+    """An artifact listing or a run record: the fields this script reads.
+
+    Only the listing endpoints carry ``artifacts``; the run record carries the rest.
+    """
+
+    artifacts: Required[list[GitHubArtifact]]
+    path: str
+    head_branch: str
+    event: str
+    head_sha: str
+    run_number: int
+
+
+def api(endpoint: str) -> GitHubDocument:
     document = json.loads(run("gh", "api", endpoint))
     if not isinstance(document, dict):
         raise TypeError("unexpected API response")
-    return document
+    # Each field is re-checked where it is read.
+    return cast(GitHubDocument, document)
 
 
 def changed_matches(base: str, source: str, patterns: tuple[str, ...]) -> bool:
@@ -298,14 +329,15 @@ def available_artifacts(repo: str, run_id: int) -> set[str]:
 
 def release_run_number(repo: str, run_id: int, base: str) -> int | None:
     record = api(f"repos/{repo}/actions/runs/{run_id}")
+    run_number = record.get("run_number")
     if (
         record.get("path") == RELEASE_WORKFLOW
         and record.get("head_branch") == "main"
         and record.get("event") in RELEASE_EVENTS
         and record.get("head_sha") == base
-        and isinstance(record.get("run_number"), int)
+        and isinstance(run_number, int)
     ):
-        return record["run_number"]
+        return run_number
     return None
 
 

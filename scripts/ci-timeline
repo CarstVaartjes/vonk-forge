@@ -10,20 +10,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TypedDict
+from typing import Required, TypedDict
 
 
 class JobRecord(TypedDict, total=False):
     """The fields of a GitHub Actions job record the timeline reads."""
 
-    name: str
+    name: Required[str]
     conclusion: str | None
-    created_at: str
+    created_at: Required[str]
     started_at: str | None
     completed_at: str | None
     labels: list[str]
@@ -110,24 +111,24 @@ def render(summary: Summary, *, markdown: bool) -> str:
         lines.append("")
         lines.append("| End | Start | Queue | Duration | Result | Job |")
         lines.append("| --- | --- | --- | --- | --- | --- |")
-        for row in summary.jobs:
-            lines.append(
-                f"| +{row.end_offset:.1f} | +{row.start_offset:.1f} | "
-                f"{row.queue_minutes:.1f} | {row.minutes:.1f} | "
-                f"{row.conclusion} | {row.name} |"
-            )
+        lines.extend(
+            f"| +{row.end_offset:.1f} | +{row.start_offset:.1f} | "
+            f"{row.queue_minutes:.1f} | {row.minutes:.1f} | "
+            f"{row.conclusion} | {row.name} |"
+            for row in summary.jobs
+        )
     else:
         lines.append(
             f"wall={summary.wall_minutes:.1f}min runner-min={summary.runner_minutes:.0f} "
             f"arm-min={summary.arm_minutes:.0f} queue-min={summary.queue_minutes:.0f} "
             f"jobs={len(summary.jobs)}"
         )
-        for row in summary.jobs:
-            lines.append(
-                f"end+{row.end_offset:5.1f} start+{row.start_offset:5.1f} "
-                f"queue {row.queue_minutes:4.1f} dur {row.minutes:5.1f} "
-                f"{row.conclusion!s:9s} {row.name}"
-            )
+        lines.extend(
+            f"end+{row.end_offset:5.1f} start+{row.start_offset:5.1f} "
+            f"queue {row.queue_minutes:4.1f} dur {row.minutes:5.1f} "
+            f"{row.conclusion!s:9s} {row.name}"
+            for row in summary.jobs
+        )
     waits = sorted(summary.jobs, key=lambda row: -row.queue_minutes)[:5]
     if waits and waits[0].queue_minutes >= 2:
         lines.append("")
@@ -175,8 +176,6 @@ def main() -> int:
         document = json.loads(arguments.jobs_file.read_text(encoding="utf-8"))
         jobs = document["jobs"] if isinstance(document, dict) else document
     elif arguments.run_id:
-        import os
-
         repository = arguments.repo or os.environ.get("GITHUB_REPOSITORY")
         if not repository:
             parser.error("--repo or GITHUB_REPOSITORY is required with a run id")

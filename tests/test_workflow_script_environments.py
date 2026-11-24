@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import os
 import re
@@ -18,9 +19,19 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
+
+import tests.acceptance.test_spark_lifecycle as canary
+from tests.acceptance import test_spark_lifecycle as lifecycle
+from tests.acceptance.test_spark_lifecycle import LifecycleError, SparkLifecycle
+from vonk_agent_protocol.agent_state import (
+    NativeRenewalClock,
+    NativeRenewalEvidence,
+    RenewalHelperManifest,
+)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.installer_release import (
     InstallerCandidateArtifacts,
@@ -48,6 +59,10 @@ def _python_script_needing_project(path: Path) -> str | None:
     shebang = text.splitlines()[0] if text.startswith("#!") else ""
     if "python" not in shebang or "uv run" in shebang:
         return None  # not Python, or it brings its own project environment
+    if "run_in_control(ROOT)" in text or "run_in_protocol(ROOT)" in text:
+        # It re-executes in the project environment before its imports
+        # (test_contract_generators_prepare_before_project_imports).
+        return None
     found = _NEEDS_PROJECT.search(text)
     return found.group(1) if found else None
 
@@ -137,7 +152,6 @@ runpy.run_path(script, run_name="__main__")
 
 def test_spark_acceptance_prepares_its_observation_contract(tmp_path, monkeypatch):
     """Catches a fresh Spark lane relying on a removed checkout OpenAPI file."""
-    from tests.acceptance import test_spark_lifecycle as lifecycle
 
     workflow = yaml.safe_load(
         (ROOT / ".github/workflows/release-acceptance-core.yml").read_text()
@@ -185,7 +199,6 @@ def test_native_renewal_helper_uses_candidate_content_identity(
     Execute the workflow's identity exports and manifest producer, then exercise
     the real canary gate up to its first effect. No git, compiler or host services.
     """
-    from tests.acceptance.test_spark_lifecycle import LifecycleError, SparkLifecycle
 
     package = InstallerPackageArtifact(
         path="agent.deb",
@@ -326,8 +339,6 @@ def test_native_renewal_helper_uses_candidate_content_identity(
         elif defect == "binary":
             helper.write_bytes(b"substituted helper")
         elif defect == "input":
-            import json
-
             manifest = json.loads(verified_manifest)
             name = next(iter(manifest["source_inputs"]))
             manifest["source_inputs"][name] = "0" * 64
@@ -367,18 +378,6 @@ def test_renewal_observation_exhaustion_allows_a_fresh_invocation(
 
 
 def _exercise_renewal_observation(tmp_path, monkeypatch, fault, *, exhaust):
-    import argparse
-    import hashlib
-    import json
-    from types import SimpleNamespace
-
-    from vonk_agent_protocol.agent_state import (
-        NativeRenewalClock,
-        NativeRenewalEvidence,
-        RenewalHelperManifest,
-    )
-
-    import tests.acceptance.test_spark_lifecycle as canary
 
     helper = tmp_path / "helper"
     helper.write_bytes(b"verified native helper")
@@ -490,14 +489,16 @@ def _exercise_renewal_observation(tmp_path, monkeypatch, fault, *, exhaust):
 
     monkeypatch.setattr(run, "_run_command", command)
     observed = run._exercise_native_renewal(deadline=elapsed[0] + 10)
-    assert len(rotations) == 1 and len(starts) == 1
+    assert len(rotations) == 1
+    assert len(starts) == 1
     if exhaust:
         assert observed is None
         assert elapsed[0] <= 10
         failing[0] = False
         fresh = run._exercise_native_renewal(deadline=elapsed[0] + 10)
         assert fresh is not None
-        assert len(rotations) == 2 and len(starts) == 2
+        assert len(rotations) == 2
+        assert len(starts) == 2
     else:
         assert observed is not None
         assert (tmp_path / "renewal-scheduling-clock.json").exists()

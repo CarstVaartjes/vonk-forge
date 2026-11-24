@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from threading import Event
 from typing import Any
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
@@ -48,7 +50,7 @@ from vonk_control.models.fleet import (
     User,
 )
 from vonk_control.models.jobs import Job
-from vonk_control.models.operations import AgentOperation
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.operation_api.durable import durable_operation_services
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations.service import RecipeOperationService
@@ -106,14 +108,16 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
     artifact = submitted_artifact_job(artifact_jobs, run_id, request_suffix=115)
     with sessions.begin() as session:
         artifact_row = session.get(ArtifactJob, artifact.id)
-        assert artifact_row is not None and artifact_row.operation_id is not None
+        assert artifact_row is not None
+        assert artifact_row.operation_id is not None
         source_job = session.get(Job, artifact_row.operation_id)
         source_operation = session.scalar(
             select(AgentOperation).where(
                 AgentOperation.parent_job_id == artifact_row.operation_id
             )
         )
-        assert source_job is not None and source_operation is not None
+        assert source_job is not None
+        assert source_operation is not None
         if profile_run_generation > 1:
             current_run = session.get(RecipeRun, run_id)
             assert current_run is not None
@@ -163,6 +167,7 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
         request_key=_uuid(116),
     )
 
+    stop = None
     for _ in range(8):
         profiles.tick()
         run_switch.tick()
@@ -183,7 +188,8 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
     stop_payload = stop.payload
     assert isinstance(stop_payload, dict)
     phases = stop_payload.get("phases")
-    assert isinstance(phases, list) and phases
+    assert isinstance(phases, list)
+    assert phases
     payloads: list[dict[str, Any]] = []
     for phase in phases:
         if not isinstance(phase, list):
@@ -208,7 +214,8 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
     assert stop.targets == [node_id]
     with sessions() as session:
         current_run = session.get(RecipeRun, run_id)
-        assert current_run is not None and current_run.state != "stopped"
+        assert current_run is not None
+        assert current_run.state != "stopped"
         claims = tuple(
             session.scalars(
                 select(ResourceReservation).where(
@@ -236,10 +243,12 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
                 select(AgentOperation).where(AgentOperation.parent_job_id == stop.id)
             )
         )
-    assert (
-        stop_claim is not None
-        and fenced_operation(sessions, stop_claim).parent_job_id == stop.id
-    ), f"profile Stop child is not claimable: {stop_children!r}"
+    assert stop_claim is not None, (
+        f"profile Stop child is not claimable: {stop_children!r}"
+    )
+    assert fenced_operation(sessions, stop_claim).parent_job_id == stop.id, (
+        f"profile Stop child is not claimable: {stop_children!r}"
+    )
     if stop_receipt_state == "succeeded":
         # A duplicate of the profile Stop reads it as pending; the exact receipt
         # then finishes it before the duplicate takes its lock. The duplicate
@@ -257,7 +266,8 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
 
         plan_digest = stop_payload["plan_digest"]
         ordinal = stop_payload["workload_intent_ordinal"]
-        assert isinstance(plan_digest, str) and isinstance(ordinal, int)
+        assert isinstance(plan_digest, str)
+        assert isinstance(ordinal, int)
         monkeypatch.setattr(
             lifecycle, "_profile_jobrun_stop_is_pending", probe_then_stop_finishes
         )
@@ -305,15 +315,13 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
             unresolved_source_job = session.get(Job, source_job.id)
         assert profiles.application(application.id).state != "succeeded"
         assert lifecycle.get(stop.id).state != "succeeded"
-        assert unresolved_run is not None and unresolved_run.state != "stopped"
+        assert unresolved_run is not None
+        assert unresolved_run.state != "stopped"
         assert retained_claims, "an uncertain Stop cannot release run claims"
-        assert (
-            unresolved_artifact is not None and unresolved_artifact.state != "cancelled"
-        )
-        assert (
-            unresolved_source_job is not None
-            and unresolved_source_job.state != "cancelled"
-        )
+        assert unresolved_artifact is not None
+        assert unresolved_artifact.state != "cancelled"
+        assert unresolved_source_job is not None
+        assert unresolved_source_job.state != "cancelled"
         return
 
     for _ in range(12):
@@ -342,9 +350,11 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
                 )
             )
         )
-    assert current_run is not None and current_run.state == "stopped"
+    assert current_run is not None
+    assert current_run.state == "stopped"
     # The ended job keeps its recorded outcome; the receipt resolves its residue.
-    assert stopped_artifact is not None and stopped_artifact.state == "failed"
+    assert stopped_artifact is not None
+    assert stopped_artifact.state == "failed"
     reason_code = WaitReason(stopped_artifact.status_reason)
     assert reason_code is WaitReason.JOB_STOP_UNCONFIRMED
     stopped_evidence = read_result_evidence(stopped_artifact.result_evidence)
@@ -353,11 +363,10 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
     assert stopped_evidence.residue_resolved_by == "exact-stop"
     assert stopped_evidence.active_scope_may_remain is False
     # Its order was still live: the exact Stop really cancelled it.
-    assert stopped_source_job is not None and stopped_source_job.state == "cancelled"
-    assert (
-        stopped_source_operation is not None
-        and stopped_source_operation.state == "cancelled"
-    )
+    assert stopped_source_job is not None
+    assert stopped_source_job.state == "cancelled"
+    assert stopped_source_operation is not None
+    assert stopped_source_operation.state == "cancelled"
     assert not remaining_claims, "run claims release only after exact Stop success"
 
 
@@ -365,14 +374,16 @@ def _profile_worker_process_dies_with_pending_cancel(
     database_url: str, now_text: str
 ) -> None:
     """Rebuild the production owners, observe once, then die like a worker."""
-    from sqlalchemy import create_engine
 
     engine = create_engine(
         database_url, connect_args={"options": "-c lock_timeout=3000"}
     )
     sessions = sessionmaker(engine, expire_on_commit=False)
     now = datetime.fromisoformat(now_text)
-    clock = lambda: now
+
+    def clock():
+        return now
+
     agent_jobs = AgentJobService(sessions, clock=clock)
     lifecycle = RecipeOperationService(
         sessions,
@@ -408,14 +419,16 @@ def _resume_profile_cancel_process(
     database_url: str, now_text: str, application_id: str
 ) -> None:
     """A fresh real worker settles the exact child after its receipt arrives."""
-    from sqlalchemy import create_engine
 
     engine = create_engine(
         database_url, connect_args={"options": "-c lock_timeout=3000"}
     )
     sessions = sessionmaker(engine, expire_on_commit=False)
     now = datetime.fromisoformat(now_text)
-    clock = lambda: now
+
+    def clock():
+        return now
+
     agent_jobs = AgentJobService(sessions, clock=clock)
     lifecycle = RecipeOperationService(
         sessions,
@@ -462,7 +475,10 @@ def _agent_result(claim, *, state: str, result: dict[str, object]) -> AgentResul
 
 def _two_target_stop_case(tmp_path, *, engine):
     now = [NOW]
-    clock = lambda: now[0]
+
+    def clock():
+        return now[0]
+
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2, engine=engine
     )
@@ -580,10 +596,8 @@ def test_profile_cancel_after_one_of_two_stop_targets_preserves_exact_partial_ef
     agent_jobs, first_claim = _agent_service_and_target_claim(
         sessions, lifecycle, nodes[0], nodes, clock=lambda: now[0]
     )
-    assert (
-        first_claim is not None
-        and fenced_operation(sessions, first_claim).parent_job_id == stop_job_id
-    )
+    assert first_claim is not None
+    assert fenced_operation(sessions, first_claim).parent_job_id == stop_job_id
     agent_jobs.record_result(_agent_result(first_claim, state="succeeded", result={}))
     _, second_claim = _agent_service_and_target_claim(
         sessions,
@@ -593,10 +607,8 @@ def test_profile_cancel_after_one_of_two_stop_targets_preserves_exact_partial_ef
         clock=lambda: now[0],
         jobs=agent_jobs,
     )
-    assert (
-        second_claim is not None
-        and fenced_operation(sessions, second_claim).parent_job_id == stop_job_id
-    )
+    assert second_claim is not None
+    assert fenced_operation(sessions, second_claim).parent_job_id == stop_job_id
 
     with sessions() as session:
         first_node = session.scalar(
@@ -609,8 +621,10 @@ def test_profile_cancel_after_one_of_two_stop_targets_preserves_exact_partial_ef
                 RunNode.run_id == run.owner_id, RunNode.node_id == nodes[1]
             )
         )
-        assert first_node is not None and first_node.state == "stopped"
-        assert second_node is not None and second_node.state != "stopped"
+        assert first_node is not None
+        assert first_node.state == "stopped"
+        assert second_node is not None
+        assert second_node.state != "stopped"
         claims = tuple(
             session.scalars(
                 select(ResourceReservation).where(
@@ -619,7 +633,8 @@ def test_profile_cancel_after_one_of_two_stop_targets_preserves_exact_partial_ef
                 )
             )
         )
-        assert claims and all(claim.state == "active" for claim in claims)
+        assert claims
+        assert all(claim.state == "active" for claim in claims)
 
     cancel_key = _uuid(989)
     pending = service.cancel(
@@ -639,7 +654,8 @@ def test_profile_cancel_after_one_of_two_stop_targets_preserves_exact_partial_ef
         second_operation = session.get(
             AgentOperation, fenced_operation(sessions, second_claim).id
         )
-        assert second_operation is not None and second_operation.state == "running"
+        assert second_operation is not None
+        assert second_operation.state == "running"
         assert second_operation.parent_job_id == stop_job_id
     # The Stop is cleanup: the profile's cancellation never cancels it, and
     # the cancellation waits for its exact receipt.
@@ -678,10 +694,14 @@ def test_profile_cancel_after_one_of_two_stop_targets_preserves_exact_partial_ef
             )
         )
     assert [item.id for item in stop_jobs] == [stop_job_id]
-    assert first_operation is not None and first_operation.state == "succeeded"
-    assert second_operation is not None and second_operation.state == "succeeded"
-    assert first_node is not None and first_node.state == "stopped"
-    assert second_node is not None and second_node.state == "stopped"
+    assert first_operation is not None
+    assert first_operation.state == "succeeded"
+    assert second_operation is not None
+    assert second_operation.state == "succeeded"
+    assert first_node is not None
+    assert first_node.state == "stopped"
+    assert second_node is not None
+    assert second_node.state == "stopped"
 
 
 # Slow by design: a spawned worker process is killed and a fresh one restarts
@@ -707,10 +727,8 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
     agent_jobs, claim = _agent_service_and_target_claim(
         sessions, lifecycle, nodes[0], nodes, clock=lambda: now[0]
     )
-    assert (
-        claim is not None
-        and fenced_operation(sessions, claim).parent_job_id == stop_job_id
-    )
+    assert claim is not None
+    assert fenced_operation(sessions, claim).parent_job_id == stop_job_id
     # Stop roles dispatch sequentially. The first exact receipt makes the
     # second rank claimable before cancellation and worker death.
     agent_jobs.record_result(
@@ -723,10 +741,8 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
     _, second_claim = _agent_service_and_target_claim(
         sessions, lifecycle, nodes[1], nodes, clock=lambda: now[0], jobs=agent_jobs
     )
-    assert (
-        second_claim is not None
-        and fenced_operation(sessions, second_claim).parent_job_id == stop_job_id
-    )
+    assert second_claim is not None
+    assert fenced_operation(sessions, second_claim).parent_job_id == stop_job_id
     pending = service.cancel(
         application.id,
         profile_number=profile.number,
@@ -766,8 +782,10 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
         cancellation_result = parent_job.result.get("cancellation")
         assert isinstance(cancellation_result, dict)
         assert cancellation_result.get("request_key") == _uuid(990)
-        assert stop_job is not None and stop_job.state == "running"
-        assert operation is not None and operation.state == "running"
+        assert stop_job is not None
+        assert stop_job.state == "running"
+        assert operation is not None
+        assert operation.state == "running"
         retained = tuple(
             session.scalars(
                 select(ResourceReservation).where(
@@ -776,7 +794,8 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
                 )
             )
         )
-        assert retained and all(item.state == "active" for item in retained)
+        assert retained
+        assert all(item.state == "active" for item in retained)
 
     # Worker death alone releases no claims. Each rank needs its own
     # authenticated exact Stop receipt before cancellation can free capacity.
@@ -815,7 +834,8 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
         run_row = session.get(RecipeRun, run.owner_id)
     assert [item.id for item in stop_jobs] == [stop_job_id]
     # Both ranks' Stops completed (the cancellation never cancelled them).
-    assert run_row is not None and run_row.state == RunState.STOPPED
+    assert run_row is not None
+    assert run_row.state == RunState.STOPPED
     with sessions() as session:
         assert (
             session.scalar(
@@ -896,18 +916,23 @@ def test_newer_profile_load_replaces_pending_cancellation_without_losing_child_o
         issued = session.get(
             AgentOperation, fenced_operation(sessions, second_claim).id
         )
-    assert old is not None and old.state == "superseded"
-    assert new is not None and new.state == "queued"
-    assert old_child is not None and old_child.id == child_id
-    assert stop_job is not None and stop_job.state == "running"
-    assert issued is not None and issued.state == "running"
+    assert old is not None
+    assert old.state == "superseded"
+    assert new is not None
+    assert new.state == "queued"
+    assert old_child is not None
+    assert old_child.id == child_id
+    assert stop_job is not None
+    assert stop_job.state == "running"
+    assert issued is not None
+    assert issued.state == "running"
     assert issued.parent_job_id == stop_job_id
     new_ordinal = new.progress.get("workload_intent_ordinal")
     old_ordinal = old.progress.get("workload_intent_ordinal")
-    assert isinstance(new_ordinal, int) and isinstance(old_ordinal, int)
-    assert node_rows and {node.workload_intent_ordinal for node in node_rows} == {
-        new_ordinal
-    }
+    assert isinstance(new_ordinal, int)
+    assert isinstance(old_ordinal, int)
+    assert node_rows
+    assert {node.workload_intent_ordinal for node in node_rows} == {new_ordinal}
     assert new_ordinal > old_ordinal
     assert run_switch.tick()
     assert run_switch.get(child_id).state == "cancelled"
@@ -928,9 +953,12 @@ def test_newer_profile_load_replaces_pending_cancellation_without_losing_child_o
         nodes_after_receipt = tuple(
             session.scalars(select(AgentNode).where(AgentNode.node_id.in_(nodes)))
         )
-    assert settled is not None and settled.state == "succeeded"
-    assert old_after_receipt is not None and old_after_receipt.state == "superseded"
-    assert new_after_receipt is not None and new_after_receipt.state == "queued"
+    assert settled is not None
+    assert settled.state == "succeeded"
+    assert old_after_receipt is not None
+    assert old_after_receipt.state == "superseded"
+    assert new_after_receipt is not None
+    assert new_after_receipt.state == "queued"
     assert {node.workload_intent_ordinal for node in nodes_after_receipt} == {
         new_ordinal
     }
@@ -1266,9 +1294,10 @@ def test_activity_preserves_issued_effect_while_profile_cancellation_waits(
     )
     assert service.tick() is True
     active = service.application(application.id).progress.switch_adapter
-    assert active is not None and active.pending_children
+    assert active is not None
+    assert active.pending_children
     child_id = active.pending_children[0].operation_id
-    adapter.request_cancellation = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+    adapter.request_cancellation = lambda *_args, **_kwargs: None
     adapter.advance = lambda _application_id, **_kwargs: FleetProfileChildOperation(
         id=child_id, state=LifecycleState.RUNNING
     )  # type: ignore[method-assign]
@@ -1324,14 +1353,15 @@ def test_cancel_during_child_start_keeps_late_start_receipt_from_resuming_profil
             raise TimeoutError("test did not release the delayed child response")
         return child
 
-    adapter.start = delayed_start  # type: ignore[method-assign]
+    adapter.start = delayed_start
 
     with ThreadPoolExecutor(max_workers=1) as pool:
         worker = pool.submit(service.tick)
         try:
             assert started.wait(timeout=10), "profile worker did not start its child"
             active = service.application(application.id).progress.switch_adapter
-            assert active is not None and active.pending_children
+            assert active is not None
+            assert active.pending_children
             active_operation_id = active.pending_children[0].operation_id
 
             requested = service.cancel(
@@ -1395,12 +1425,13 @@ def test_pending_cancellation_observation_does_not_suppress_recovery(tmp_path) -
     )
     assert service.tick() is True
     active = service.application(application.id).progress.switch_adapter
-    assert active is not None and active.pending_children
+    assert active is not None
+    assert active.pending_children
     child_id = active.pending_children[0].operation_id
 
     # Keep the issued child unresolved so the cancellation remains pending;
     # the separate real-boundary test covers Run/Switch's cancellation owner.
-    run_switch.cancel = lambda *_args, **_kwargs: run_switch.get(child_id)  # type: ignore[method-assign]
+    run_switch.cancel = lambda *_args, **_kwargs: run_switch.get(child_id)
     service.cancel(
         application.id,
         profile_number=profile.number,
@@ -1434,7 +1465,8 @@ def test_pending_cancellation_observation_does_not_suppress_recovery(tmp_path) -
     progress_cancellation = service.application(application.id).progress.cancellation
     assert progress_cancellation is not None
     wait = service.application(application.id).wait
-    assert wait is not None and wait.next_check is not None
+    assert wait is not None
+    assert wait.next_check is not None
 
     # The next worker pass can service other work instead of polling this
     # unresolved owner again before its next bounded observation time.
@@ -1559,10 +1591,11 @@ def test_latest_selected_profile_supersedes_parked_apps_before_cancellation(
     assert [row.current_operation_id for row in rows] == [None, None, latest_id]
 
     latest_child = service.application(latest_id).progress.switch_adapter
-    assert latest_child is not None and latest_child.pending_children
+    assert latest_child is not None
+    assert latest_child.pending_children
     active_child_id = latest_child.pending_children[0].operation_id
     observations: list[str] = []
-    adapter.request_cancellation = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+    adapter.request_cancellation = lambda *_args, **_kwargs: None
     original_advance = adapter.advance
 
     def observe_pending(
@@ -1605,10 +1638,6 @@ def test_profile_cancel_settles_when_a_distribution_sibling_is_parked_for_retry(
     cancel never completed. Parked idempotent transfers are closed instead.
     """
 
-    import uuid
-
-    from vonk_control.models.operations import AgentOperationAttempt
-
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path, nodes=2
     )
@@ -1621,7 +1650,10 @@ def test_profile_cancel_settles_when_a_distribution_sibling_is_parked_for_retry(
         )
     assert revision is not None
     now = [lifecycle._clock()]
-    clock = lambda: now[0]
+
+    def clock():
+        return now[0]
+
     lifecycle._clock = clock
     executor = RecordingArtifactExecutor(child_transfer=True)
     run_switch = RunSwitchOperationService(

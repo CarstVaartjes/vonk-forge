@@ -10,9 +10,14 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    WaitReason,
+)
 from vonk_agent_protocol.state_machines import ReservationState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.inventory.repository import (
     InventoryRepository,
@@ -30,6 +35,7 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.recipe_builds.common import RecipeBuildPlan
+from vonk_control.recipe_operations.errors import RecipeRequestInvalid
 from vonk_control.recipe_operations.interfaces import RecipeOperationView
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_switch_contract.phase_results import (
@@ -42,6 +48,7 @@ from vonk_control.run_switch_contract.requests import (
     SparkGroup,
     SparkGroupNode,
 )
+from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
 from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
 from vonk_control.run_switch_operations.result_helpers import _phase_result
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
@@ -293,12 +300,6 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
     assert _phase_result(execution.result, phase=phase) == execution.result
 
     # A build preview superseded in place re-plans; it does not end the load.
-    from vonk_agent_protocol.lifecycle_vocabulary import (
-        InvalidRequestReason,
-        WaitReason,
-    )
-    from vonk_control.recipe_operations.errors import RecipeRequestInvalid
-    from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
 
     def superseded_build(*_args, **_kwargs) -> RecipeOperationView:
         raise RecipeRequestInvalid(
@@ -374,7 +375,8 @@ def test_a_refusal_that_survives_a_replan_retries_in_place_and_keeps_counting(
         )
         with sessions() as session:
             job = session.get(Job, parent.operation_id)
-            assert job is not None and isinstance(job.result, dict)
+            assert job is not None
+            assert isinstance(job.result, dict)
             return dict(job.result)
 
     first = refuse()
@@ -420,7 +422,8 @@ def test_exact_stop_reservation_budget_needs_a_fresh_post_stop_check(
     with sessions.begin() as session:
         installation = session.get(RecipeInstallation, installation_id)
         run = session.get(RecipeRun, run_id)
-        assert installation is not None and run is not None
+        assert installation is not None
+        assert run is not None
         installation.state = "partial"
         run.state = "running"
         run.route_state = "published"
@@ -448,7 +451,8 @@ def test_exact_stop_reservation_budget_needs_a_fresh_post_stop_check(
     baseline = service.preview(request, actor="admin")
     required = baseline.fit_current.nodes[0].memory_required_bytes
     floor = baseline.fit_current.nodes[0].memory_floor_bytes
-    assert required is not None and floor is not None
+    assert required is not None
+    assert floor is not None
     # Aggregate free already accounts for the running owner. The declared
     # peak still owns the hard budget until this exact run stops.
     total = 7_800 + required + floor - 1
@@ -504,7 +508,8 @@ def test_exact_stop_reservation_budget_needs_a_fresh_post_stop_check(
     ]
     required = plan.fit_current.nodes[0].memory_required_bytes
     floor = plan.fit_current.nodes[0].memory_floor_bytes
-    assert required is not None and floor is not None
+    assert required is not None
+    assert floor is not None
     impossible_total = required + floor - 1
     with sessions.begin() as session:
         snapshot = session.scalar(select(NodeInventorySnapshot))
@@ -583,7 +588,8 @@ def _single_run_replaced_by_a_dual(
     with sessions.begin() as session:
         installation = session.get(RecipeInstallation, installation_id)
         run = session.get(RecipeRun, run_id)
-        assert installation is not None and run is not None
+        assert installation is not None
+        assert run is not None
         installation.state = "partial"
         run.state = "running"
         run.route_state = "published"
@@ -634,7 +640,8 @@ def _single_run_replaced_by_a_dual(
     baseline = service.preview(request, actor="admin")
     required = baseline.fit_current.nodes[0].memory_required_bytes
     floor = baseline.fit_current.nodes[0].memory_floor_bytes
-    assert required is not None and floor is not None
+    assert required is not None
+    assert floor is not None
     with sessions.begin() as session:
         for snapshot in session.scalars(select(NodeInventorySnapshot)):
             snapshot.host_memory_total_bytes = 7_800 + required + floor - 1
@@ -753,7 +760,8 @@ def test_recheck_binds_the_inventory_sample_it_reads_not_the_reviewed_one(
     with sessions.begin() as session:
         installation = session.get(RecipeInstallation, installation_id)
         run = session.get(RecipeRun, run_id)
-        assert installation is not None and run is not None
+        assert installation is not None
+        assert run is not None
         installation.state = "partial"
         run.state = "running"
         run.route_state = "published"
@@ -780,7 +788,8 @@ def test_recheck_binds_the_inventory_sample_it_reads_not_the_reviewed_one(
     baseline = service.preview(request, actor="admin")
     required = baseline.fit_current.nodes[0].memory_required_bytes
     floor = baseline.fit_current.nodes[0].memory_floor_bytes
-    assert required is not None and floor is not None
+    assert required is not None
+    assert floor is not None
     # Aggregate free already accounts for the running owner. The declared
     # peak still owns the hard budget until this exact run stops.
     total = 7_800 + required + floor - 1
@@ -842,7 +851,8 @@ def test_switch_preserves_the_memory_floor_on_an_idle_spark(
     baseline = service.preview(request, actor="admin")
     required = baseline.fit_current.nodes[0].memory_required_bytes
     floor = baseline.fit_current.nodes[0].memory_floor_bytes
-    assert required is not None and floor is not None
+    assert required is not None
+    assert floor is not None
     for headroom in (-1, 0):
         total = required + floor + headroom
         with sessions.begin() as session:
@@ -884,7 +894,8 @@ def test_switch_tries_an_estimate_above_an_idle_spark_as_its_only_claim(
     baseline = service.preview(request, actor="admin")
     required = baseline.fit_current.nodes[0].memory_required_bytes
     floor = baseline.fit_current.nodes[0].memory_floor_bytes
-    assert required is not None and floor is not None
+    assert required is not None
+    assert floor is not None
     total = required + floor - 1
     with sessions.begin() as session:
         snapshot = session.scalar(select(NodeInventorySnapshot))

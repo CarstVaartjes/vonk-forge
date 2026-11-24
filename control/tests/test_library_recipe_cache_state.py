@@ -21,6 +21,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import event, update
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog.revision_contract import (
@@ -28,10 +30,15 @@ from vonk_control.catalog.revision_contract import (
     write_catalog_projection,
 )
 from vonk_control.library.contract import LibraryLocalState, LibraryRecipeProjection
+from vonk_control.library_projection import local_state
 from vonk_control.library_projection.common import compose_recipe_state
 from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.model_cache import model_artifact_cache
 from vonk_control.model_cache.contract import CacheOperationKind
+from vonk_control.model_cache.errors import (
+    ModelCacheResolutionInvalid,
+    ModelCacheResolutionRefused,
+)
 from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet, RecipeBuild
 from vonk_control.models.catalog import (
     CatalogDocument,
@@ -45,7 +52,6 @@ from vonk_control.run_switch_operations.artifact_inspection import (
     DatabaseRunSwitchArtifactInspector,
 )
 from vonk_control.stored.json_values import write_guard_mode
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .model_cache_support import _canonical_model, _canonical_recipe
 from .test_library_local_state_history import _cache_set, _operation
@@ -487,7 +493,8 @@ def test_a_recipes_facts_reach_the_result_only_through_the_fold():
     body = source[source.index("def _database_local_state") :]
     body = body[: body.index("\ndef ")]
     targets = re.findall(r"_merge_local\(\s*(\w+)", body)
-    assert targets and set(targets) <= {"cache_facts", "asset_facts"}
+    assert targets
+    assert set(targets) <= {"cache_facts", "asset_facts"}
     assert "_fold_local_facts(" in body
 
 
@@ -683,7 +690,6 @@ def test_each_recipe_set_is_resolved_once_across_library_reads(
     cache,
     monkeypatch,
 ):
-    from vonk_control.library_projection import local_state
 
     _, sessions = cache
     world = _World(sessions, count=1)
@@ -712,11 +718,6 @@ def test_an_unresolvable_set_reads_unknown_not_cached_from_its_build(
     monkeypatch,
     refused: bool,
 ):
-    from vonk_control.library_projection import local_state
-    from vonk_control.model_cache.errors import (
-        ModelCacheResolutionInvalid,
-        ModelCacheResolutionRefused,
-    )
 
     service, sessions = cache
     world = _World(sessions, count=1)
@@ -766,7 +767,8 @@ def test_cache_resolution_loads_documents_only_where_it_reads_them(
     finally:
         event.remove(engine, "before_cursor_execute", record)
 
-    assert resolution.recipe.cached and resolution.model.cached
+    assert resolution.recipe.cached
+    assert resolution.model.cached
     document_reads = [
         item
         for item in statements

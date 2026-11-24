@@ -13,19 +13,20 @@ from typing import Any, ClassVar
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 from pydantic_core import ValidationError
 
-from .contracts import (
-    AgentProtocolError,
-    CanonicalUUID,
-    canonical_message,
-)
-from .gpu_clock import GpuClockObservation
-from .optional_evidence import (
+from vonk_agent_protocol.gpu_clock import GpuClockObservation
+from vonk_agent_protocol.optional_evidence import (
     EvidenceGroup,
     OptionalEvidenceModel,
     fail_open_on_optional_evidence,
 )
-from .reason_codes.evidence import AgentEvidenceCode
-from .wire_model import MAX_TELEMETRY_CAPACITY_BYTES, WireModel
+from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
+from vonk_agent_protocol.wire_model import (
+    MAX_TELEMETRY_CAPACITY_BYTES,
+    AgentProtocolError,
+    CanonicalUUID,
+    WireModel,
+    canonical_message,
+)
 
 # Authenticated transport memory safeguard.
 MAX_TELEMETRY_REPORT_BYTES = 1024 * 1024
@@ -442,8 +443,8 @@ class _EngineEntries(TelemetryWireModel):
         if isinstance(entries, list):
             kept: list[EngineReading] = []
             for entry in entries:
-                reading, refusal = _engine_reading(entry)
-                if refusal is not None:
+                reading, _refusal = _engine_reading(entry)
+                if reading is None:
                     dropped += 1
                     continue
                 if any(reading.run_id == earlier.run_id for earlier in kept):

@@ -26,21 +26,25 @@ from datetime import datetime
 
 from sqlalchemy import event, inspect, select
 from sqlalchemy.orm import Session, SessionTransaction, load_only, sessionmaker
-from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 
-from ..jobs import states as job_states
-from ..lifecycle.evidence import Residue
-from ..model_cache import states as model_cache_states
-from ..models.cache import ModelCacheOperation
-from ..models.jobs import Job
-from ..persisted_waits import read_wait, schedule_wait
-from ..recipe_operations.lifecycle_contract import START_CHILD_KINDS
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..stored.json_values import read_row_column
-from .awaited_children import awaited_jobs, child_job_ids, start_request_key
-from .constants import _OPERATION_KINDS
-from .planning_helpers import _aware, _stored_job_plan
-from .result_helpers import _read_progress
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.models.jobs import Job
+from vonk_control.persisted_waits import read_wait, schedule_wait
+from vonk_control.recipe_operations.lifecycle_contract import START_CHILD_KINDS
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_operations.awaited_children import (
+    awaited_jobs,
+    child_job_ids,
+    start_request_key,
+)
+from vonk_control.run_switch_operations.constants import _OPERATION_KINDS
+from vonk_control.run_switch_operations.planning_helpers import _aware, _stored_job_plan
+from vonk_control.run_switch_operations.result_helpers import _read_progress
+from vonk_control.stored.rows import read_row_column
 
 _LOGGER = logging.getLogger(__name__)
 #: Every row a run-switch child is stored in, with its live words (any other
@@ -86,12 +90,12 @@ class ChildEndWake:
         # new/dirty sets and attribute history still describe this flush.
         for row in (*session.new, *session.dirty):
             live = CHILD_ROWS.get(type(row))
-            if live is None or row.state in live:  # type: ignore[attr-defined]
+            if live is None or row.state in live:
                 continue
-            if row.id is None:  # type: ignore[attr-defined]
+            if row.id is None:
                 continue
             if row in session.new or inspect(row).attrs.state.history.added:
-                session.info.setdefault(_STAGED, set()).add(row.id)  # type: ignore[attr-defined]
+                session.info.setdefault(_STAGED, set()).add(row.id)
 
     @staticmethod
     def _committed(session: Session) -> None:

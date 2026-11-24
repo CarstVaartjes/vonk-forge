@@ -31,14 +31,23 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from jsonschema import Draft202012Validator, ValidationError
 
-from .build_identity import current_build
-from .control_transport import open_https
-from .runtime_identity import (
+from cluster_profiles.build_identity import current_build
+from cluster_profiles.control_client.errors import (
+    ControlClientError,
+    ControlForbidden,
+    ControlUnauthorized,
+)
+from cluster_profiles.control_client.transfers import ControlClient
+from cluster_profiles.control_transport import open_https
+from cluster_profiles.generated_control.models.cli_update_contract import (
+    CliUpdateContract,
+)
+from cluster_profiles.runtime_identity import (
     installed_content_identity,
     verified_wheel_identity,
     wheel_content_identity,
 )
-from .stall_window import stall_deadline
+from cluster_profiles.stall_window import stall_deadline
 
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _SOURCE = re.compile(r"[0-9a-f]{40}\Z")
@@ -247,11 +256,9 @@ def _signed_release(
         raise
     except (ValueError, TypeError) as error:
         raise CliUpdateError("immutable release is not yet observable") from error
-    if (
-        not isinstance(release, dict)
-        or any(release.get(name) != fields[name] for name in ("channel", "generation"))
-        or release.get("schema_version") != int(fields["schema_version"])
-    ):
+    if any(
+        release.get(name) != fields[name] for name in ("channel", "generation")
+    ) or release.get("schema_version") != int(fields["schema_version"]):
         raise CliUpdateError("immutable release identity is inconsistent")
     artifacts = release.get("artifacts")
     if not isinstance(artifacts, dict):
@@ -312,6 +319,9 @@ def run_update(
             if attempt == 2:
                 raise
             sleeper(0.25 * 2**attempt)
+    else:
+        # The last attempt re-raises, so only a break leaves the loop.
+        raise AssertionError
     current = current_build()
     target_source = release["source_sha"]
     result: dict[str, object] = {
@@ -348,7 +358,12 @@ def run_update(
             sleeper(0.25 * 2**attempt)
             wheel = download(f"{base}/{path}", size)
             if len(wheel) != size or hashlib.sha256(wheel).hexdigest() != digest:
-                raise CliUpdateIngressError("CLI wheel digest or size is invalid")
+                raise CliUpdateIngressError(
+                    "CLI wheel digest or size is invalid"
+                ) from None
+    else:
+        # The last attempt raises, so only a break leaves the loop.
+        raise AssertionError
     installed_content = installed_content_identity()
     equal_content = (
         target_content is not None
@@ -362,12 +377,6 @@ def run_update(
     )
     if not apply or equal_content:
         return result
-    from .control_client.errors import (
-        ControlClientError,
-        ControlForbidden,
-        ControlUnauthorized,
-    )
-    from .control_client.transfers import ControlClient
 
     # This is an authority observation, not a second compatibility planner.
     # Signed wheel ingress already verified the exact installed bytes. Source
@@ -391,7 +400,6 @@ def run_update(
                 .read_text()
             )
             Draft202012Validator(installed_schema).validate(deployed)
-            from .generated_control.models.cli_update_contract import CliUpdateContract
 
             if not isinstance(deployed, dict):
                 raise TypeError("controller compatibility document is not an object")
@@ -606,7 +614,7 @@ def _write_notice(cache: Path, record: dict[str, object]) -> None:
         ) as handle:
             json.dump(record, handle)
             temporary = Path(handle.name)
-        os.chmod(temporary, 0o600)
+        temporary.chmod(0o600)
         temporary.replace(cache)
     except OSError:
         pass

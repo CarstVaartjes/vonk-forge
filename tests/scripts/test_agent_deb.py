@@ -167,7 +167,7 @@ VONK_RENDEZVOUS_PORT=29500"""
     return path
 
 
-@pytest.mark.parametrize("action", ("remove", "purge"))
+@pytest.mark.parametrize("action", ["remove", "purge"])
 def test_postrm_forgets_unit_enablement_on_purge_only(
     tmp_path: Path, action: str
 ) -> None:
@@ -700,9 +700,8 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "Type=simple" not in helper_unit.splitlines()
     assert "ExecStart=/usr/lib/vonk-forge/vonk-agent-helper" in helper_unit.splitlines()
     assert "Requires=vonk-forge-docker-firewall.service" in helper_unit
-    assert (
-        "After=" in helper_unit and "vonk-forge-docker-firewall.service" in helper_unit
-    )
+    assert "After=" in helper_unit
+    assert "vonk-forge-docker-firewall.service" in helper_unit
     assert "PrivateNetwork=yes" not in helper_unit
     assert "IPAddressDeny=any" in helper_unit
     assert "RestrictAddressFamilies=AF_UNIX AF_NETLINK" in helper_unit
@@ -770,7 +769,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
 
 @pytest.mark.parametrize(
     ("architecture", "debian_architecture", "machine"),
-    (("linux-arm64", "arm64", 183), ("linux-amd64", "amd64", 62)),
+    [("linux-arm64", "arm64", 183), ("linux-amd64", "amd64", 62)],
 )
 def test_builder_and_verifier_make_each_architecture_a_real_package_output(
     tmp_path: Path,
@@ -992,7 +991,7 @@ def test_docker_firewall_requires_explicit_host_endpoint_authority(
 
 @pytest.mark.parametrize(
     ("old", "new", "message"),
-    (
+    [
         ("192.168.1.211", "192.168.001.211", "invalid IPv4"),
         ("8000,8101", "8000,8000", "must be unique"),
         ("VONK_RENDEZVOUS_PORT=29500", "VONK_RENDEZVOUS_PORT=8000", "must differ"),
@@ -1001,7 +1000,7 @@ def test_docker_firewall_requires_explicit_host_endpoint_authority(
             "VONK_UNKNOWN=1",
             "unknown or malformed",
         ),
-    ),
+    ],
 )
 def test_docker_firewall_rejects_noncanonical_site_policy(
     tmp_path: Path, old: str, new: str, message: str
@@ -1129,14 +1128,14 @@ def test_builder_accepts_exact_derived_development_version(tmp_path: Path) -> No
 
 @pytest.mark.parametrize(
     "version",
-    (
+    [
         "0.1.0-rc.1",
         "0.1.0+build.1",
         "0.1.0~devX1786300000+g0123456789ab",
         "0.1.0~dev.1786300000+g0123456789abc",
         "0.1.0~dev.1786300000+g0123456789AB",
         "0.1.0~dev.4102444801+g0123456789ab",
-    ),
+    ],
 )
 def test_builder_rejects_noncanonical_package_versions(
     tmp_path: Path, version: str

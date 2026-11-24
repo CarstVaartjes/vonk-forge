@@ -18,7 +18,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from control.tests.added_line_guards.patch import added_lines
+from control.tests.added_line_guards.patch import (  # noqa: E402 -- the repository imports follow the repository root's sys.path entry
+    added_lines,
+)
 
 TEST_ROOTS = ("tests/", "control/tests/", "deploy/compose/tests/")
 

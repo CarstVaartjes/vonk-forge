@@ -15,11 +15,14 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
 from sqlalchemy import select
+
 from vonk_agent_protocol.agent_words import (
     RecipeRunDispositionValue,
 )
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.enrollment import IssuedCertificateResponse
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.state_machines import RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment.contract import EnrollmentGrant
@@ -29,6 +32,7 @@ from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperationAttempt
 from vonk_control.pki import IssuedCertificate
+from vonk_control.step_ca import StepCAIssuancePending
 
 from .agent_api_support import (
     NODE_A,
@@ -42,10 +46,11 @@ from .agent_api_support import (
     parent,
     valid_enrollment_body,
 )
+from .host_memory_guard_support import guard_diagnostics
 from .node_contacts import contact_row
 
 
-@pytest.mark.parametrize("architecture", ("linux-riscv64", True, 7))
+@pytest.mark.parametrize("architecture", ["linux-riscv64", True, 7])
 def test_claim_api_rejects_noncanonical_runtime_architecture(
     agent_system, architecture: object
 ) -> None:
@@ -95,7 +100,7 @@ def test_unauthenticated_claim_cannot_change_runtime_architecture(agent_system) 
 
 @pytest.mark.parametrize(
     ("field", "nested"),
-    (("future_claim_field", False), ("future_attestation", True)),
+    [("future_claim_field", False), ("future_attestation", True)],
 )
 def test_claim_rejects_unknown_structural_fields(
     agent_system,
@@ -124,7 +129,7 @@ def test_claim_rejects_unknown_structural_fields(
     assert response.status_code == 422
 
 
-@pytest.mark.parametrize("field", ("protocol_version", "wait_seconds"))
+@pytest.mark.parametrize("field", ["protocol_version", "wait_seconds"])
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_claim_rejects_string_encoded_numeric_fields(
     agent_system,
@@ -183,13 +188,15 @@ def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact
         node = session.get(AgentNode, NODE_A)
         assert node is not None
         seen = contact_row(node).last_seen_at
-        assert seen is not None and seen.replace(tzinfo=UTC) == clock.now
+        assert seen is not None
+        assert seen.replace(tzinfo=UTC) == clock.now
         assert contact_row(node).protocol_version == 4
         presence = session.get(AgentNode, NODE_A)
         assert presence is not None
         assert contact_row(presence).management_address == "10.0.0.43"
         observed = contact_row(presence).management_observed_at
-        assert observed is not None and observed.replace(tzinfo=UTC) == clock.now
+        assert observed is not None
+        assert observed.replace(tzinfo=UTC) == clock.now
 
 
 def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fence_validation(
@@ -232,13 +239,15 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
         node = session.get(AgentNode, NODE_A)
         assert node is not None
         seen = contact_row(node).last_seen_at
-        assert seen is not None and seen.replace(tzinfo=UTC) == clock.now
+        assert seen is not None
+        assert seen.replace(tzinfo=UTC) == clock.now
         assert contact_row(node).protocol_version == 4
         presence = session.get(AgentNode, NODE_A)
         assert presence is not None
         assert contact_row(presence).management_address == "10.0.0.44"
         observed = contact_row(presence).management_observed_at
-        assert observed is not None and observed.replace(tzinfo=UTC) == clock.now
+        assert observed is not None
+        assert observed.replace(tzinfo=UTC) == clock.now
 
 
 def test_failed_stop_result_never_writes_health_observation(agent_system) -> None:
@@ -328,10 +337,11 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
         assert presence is not None
         assert contact_row(presence).management_address == "10.0.0.42"
         observed = contact_row(presence).management_observed_at
-        assert observed is not None and observed.replace(tzinfo=UTC) == observed_at
+        assert observed is not None
+        assert observed.replace(tzinfo=UTC) == observed_at
 
 
-@pytest.mark.parametrize("version", (True, 3, 5))
+@pytest.mark.parametrize("version", [True, 3, 5])
 def test_unsupported_protocol_version_is_rejected_without_recording_contact(
     agent_system, version: object
 ) -> None:
@@ -354,7 +364,7 @@ def test_unsupported_protocol_version_is_rejected_without_recording_contact(
         assert contact_row(node).protocol_version is None
 
 
-@pytest.mark.parametrize("mutation", ("revoked", "retired", "expired", "fingerprint"))
+@pytest.mark.parametrize("mutation", ["revoked", "retired", "expired", "fingerprint"])
 def test_persisted_certificate_state_is_checked_on_every_agent_request(
     agent_system, mutation: str
 ) -> None:
@@ -362,7 +372,8 @@ def test_persisted_certificate_state_is_checked_on_every_agent_request(
     with services.sessions.begin() as session:
         certificate = session.get(AgentCertificate, "serial-a")
         node = session.get(AgentNode, NODE_A)
-        assert certificate is not None and node is not None
+        assert certificate is not None
+        assert node is not None
         if mutation == "revoked":
             certificate.revoked_at = clock.now
         elif mutation == "retired":
@@ -648,10 +659,6 @@ def test_recipe_run_observation_report_applies_process_state_per_run(
             json={"observed_at": observed_at.isoformat(), "runs": list(runs)},
         )
 
-    from vonk_agent_protocol.failure_evidence import FailureDiagnostics
-
-    from .host_memory_guard_support import guard_diagnostics
-
     diagnostics = guard_diagnostics(clock.now.isoformat())
     run: dict[str, object] = {
         "run_id": run_id,
@@ -671,7 +678,8 @@ def test_recipe_run_observation_report_applies_process_state_per_run(
     assert report(run, observed_at=clock.now - timedelta(seconds=2)).status_code == 204
     with services.sessions() as session:
         node = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
-        assert node is not None and node.observation_observed_at is None
+        assert node is not None
+        assert node.observation_observed_at is None
 
     assert report(run | {"run_id": str(uuid.uuid4())}, run).status_code == 204
     with services.sessions() as session:
@@ -737,7 +745,6 @@ def test_a_guard_stop_of_a_serving_co_tenant_is_not_the_runs_failure(
     recovery relaunches it as it would any lost rank. The run never seen alive
     keeps the guard stop as its failure. Catches settling the co-tenant for good.
     """
-    from .host_memory_guard_support import guard_diagnostics
 
     client, services, _, clock = agent_system
     serving, tried = (
@@ -809,7 +816,8 @@ def test_a_guard_stop_of_a_serving_co_tenant_is_not_the_runs_failure(
         node is not None and node.state != RunState.RUNNING for node in kept.values()
     )
     co_tenant, own = kept[serving], kept[tried]
-    assert co_tenant is not None and own is not None
+    assert co_tenant is not None
+    assert own is not None
     assert co_tenant.observation_failure_diagnostics is None
     assert co_tenant.last_exit_diagnostics is not None
     assert own.observation_failure_diagnostics is not None
@@ -961,8 +969,6 @@ def test_rotation_follower_heals_a_begun_journal_row_after_a_busy_reply(
     agent_system,
     monkeypatch,
 ) -> None:
-    from vonk_agent_protocol.enrollment import IssuedCertificateResponse
-    from vonk_control.step_ca import StepCAIssuancePending
 
     client, services, _, clock = agent_system
     with services.sessions.begin() as session:

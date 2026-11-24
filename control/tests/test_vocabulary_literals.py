@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import ast
+import re
 from collections import Counter
 from pathlib import Path
 
 import pytest
+
+from cluster_profiles import cli, cli_render, controller_cli
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, WaitReason
+from vonk_agent_protocol.reason_codes.vocabulary import REASON_CODE_ENUMS
 
 from . import vocabulary_literals as scan
 
@@ -351,12 +356,6 @@ def use():
 
 
 def test_the_cli_spells_only_contract_codes() -> None:
-    import ast
-    import re
-
-    from vonk_agent_protocol.reason_codes.vocabulary import REASON_CODE_ENUMS
-
-    from cluster_profiles import cli, cli_render, controller_cli
 
     members = {
         member.value

@@ -8,6 +8,7 @@ sub-packages; the gitignored ``generated_control`` is generated code) and the
 agent protocol."""
 
 import ast
+import importlib.util
 import re
 from pathlib import Path
 
@@ -20,11 +21,25 @@ PACKAGES = (
 GENERATED = ROOT / "src/cluster_profiles/generated_control"
 
 
+def _imports_only_submodules(node: ast.ImportFrom) -> bool:
+    """``from vonk_control.models import cache, fleet``: modules, not names."""
+    if node.level or node.module is None:
+        return False
+    try:
+        return all(
+            importlib.util.find_spec(f"{node.module}.{alias.name}") is not None
+            for alias in node.names
+        )
+    except ModuleNotFoundError:
+        return False
+
+
 def reexports(source: str) -> list[int]:
     """Lines of an ``__init__`` body beyond the allowed few.
 
-    Allowed: a docstring, ``from __future__``, module-only ``from . import x`` /
-    ``from .. import x`` (``models/`` registers every mapped table this way) and
+    Allowed: a docstring, ``from __future__``, module-only ``from . import x`` or
+    ``from pkg import x`` where every ``x`` is a submodule (``models/`` registers
+    every mapped table this way) and
     ``__version__``. Anything else, such as a name import, ``__all__``, a lazy
     ``__getattr__`` or ``Name = x.Name``, re-exports. ``if TYPE_CHECKING:`` blocks
     are ignored."""
@@ -33,7 +48,9 @@ def reexports(source: str) -> list[int]:
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
             continue
         if isinstance(node, ast.ImportFrom) and (
-            node.module == "__future__" or (node.module is None and node.level >= 1)
+            node.module == "__future__"
+            or (node.module is None and node.level >= 1)
+            or _imports_only_submodules(node)
         ):
             continue
         if isinstance(node, ast.If) and ast.unparse(node.test) in {

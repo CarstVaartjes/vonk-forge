@@ -21,9 +21,9 @@ from importlib.resources import files
 from sigstore.errors import Error as SigstoreError
 from sigstore.models import Bundle, TrustedRoot
 from sigstore.verify import Verifier, policy
-from vonk_agent_protocol.reason_codes.catalog import CatalogCode
 
-from .recipe_library_types import RecipeLibraryError
+from vonk_agent_protocol.reason_codes.catalog import CatalogCode
+from vonk_control.recipe_library_types import RecipeLibraryError
 
 RELEASE_CHECKSUMS = "SHA256SUMS"
 RELEASE_BUNDLE = "SHA256SUMS.sigstore.json"

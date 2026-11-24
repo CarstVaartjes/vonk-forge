@@ -4,9 +4,14 @@ from datetime import timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, insert, select, update
 from sqlalchemy import inspect as sa_inspect
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_forge_contracts.qualification_status import (
+    PublishedMeasuredMemory,
+    PublishedRoleMemory,
+)
+
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics, FailureLogTail
 from vonk_agent_protocol.lifecycle_vocabulary import (
     ResourceBlockerCode,
     RunAdmissionCode,
@@ -14,6 +19,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.state_machines import RunState
 from vonk_agent_protocol.swap import GIB
 from vonk_agent_protocol.telemetry import TelemetrySample
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import (
     InstallationNode,
@@ -22,6 +29,12 @@ from vonk_control.models.execution import (
     RecipeRun,
     ResourceReservation,
     RunNode,
+)
+from vonk_control.models.jobs import Job
+from vonk_control.models.telemetry import (
+    FleetEventCursor,
+    FleetStreamEvent,
+    NodeTelemetrySample,
 )
 from vonk_control.observed_run_memory import observed_role_peaks
 from vonk_control.run_admission import RunAdmissionService
@@ -165,7 +178,8 @@ def test_real_use_below_the_declaration_never_loosens_admission(tmp_path) -> Non
     assert observed == 100
 
     plan = service.plan_run(installation, alias="qwen", now=now)
-    assert plan.allowed and plan.nodes[0].required_memory_bytes == 225
+    assert plan.allowed
+    assert plan.nodes[0].required_memory_bytes == 225
 
 
 @pytest.mark.parametrize("freed", [0, 64])
@@ -294,7 +308,6 @@ def test_a_running_run_without_a_row_gets_it_from_its_next_sample(tmp_path) -> N
 
 
 def _run_node_events(sessions) -> list[int]:
-    from vonk_control.models.telemetry import FleetStreamEvent
 
     with sessions() as session:
         return [
@@ -334,17 +347,10 @@ def test_an_unrenderable_run_node_event_is_a_cursor_hole_not_a_refusal(
     tmp_path,
 ) -> None:
     """Catches a rank whose stored diagnostics break the payload refusing telemetry."""
-    from vonk_agent_protocol.failure_evidence import FailureLogTail
-    from vonk_control.models.telemetry import (
-        FleetEventCursor,
-        FleetStreamEvent,
-        NodeTelemetrySample,
-    )
 
     sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
     run_id = _admit_run(sessions, now, node, installation)
     empty = FailureLogTail(text="", truncated=False, dropped_bytes=0, dropped_lines=0)
-    from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 
     diagnostics = FailureDiagnostics(
         collected_at=now.isoformat(),
@@ -368,11 +374,13 @@ def test_an_unrenderable_run_node_event_is_a_cursor_hole_not_a_refusal(
     with sessions() as session:
         assert session.scalar(select(NodeTelemetrySample.id)) is not None
         rank = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
-        assert rank is not None and rank.observed_memory_bytes == 100
+        assert rank is not None
+        assert rank.observed_memory_bytes == 100
         events = list(session.scalars(select(FleetStreamEvent.id)))
         last_id = session.scalar(select(FleetEventCursor.last_id))
     assert _run_node_events(sessions) == []
-    assert last_id is not None and last_id > max(events)  # the hole
+    assert last_id is not None
+    assert last_id > max(events)
 
 
 def _batch(sessions, node, start, availables):
@@ -402,7 +410,6 @@ def _batch(sessions, node, start, availables):
 
 
 def _stored_samples(sessions) -> int:
-    from vonk_control.models.telemetry import NodeTelemetrySample
 
     with sessions() as session:
         return len(session.scalars(select(NodeTelemetrySample)).all())
@@ -432,7 +439,6 @@ def test_a_failing_attribution_never_refuses_the_samples(
     HTTP 500 until the Spark dropped the batch. Whatever the attribution
     raises, the samples commit and only the attribution is lost.
     """
-    from sqlalchemy import insert
 
     def violating_peak(session, _run, role, _peak):
         # The real write order: the rank's peak was raised (and its event
@@ -453,7 +459,8 @@ def test_a_failing_attribution_never_refuses_the_samples(
     assert _stored_samples(sessions) == 2
     with sessions() as session:
         rank = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
-        assert rank is not None and rank.observed_memory_bytes is None
+        assert rank is not None
+        assert rank.observed_memory_bytes is None
         assert session.scalars(select(MeasuredRolePeak)).all() == []
     assert _run_node_events(sessions) == []
     assert (
@@ -473,7 +480,8 @@ def test_a_fresh_sample_after_a_non_positive_one_is_still_attributed(
     _report(sessions, node, now + timedelta(seconds=2), _FREE - 120)
     with sessions() as session:
         rank = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
-        assert rank is not None and rank.observed_memory_bytes == 120
+        assert rank is not None
+        assert rank.observed_memory_bytes == 120
         assert [
             row.peak_bytes for row in session.scalars(select(MeasuredRolePeak))
         ] == [120]
@@ -483,12 +491,6 @@ def _publish_measured(
     sessions, installation, now, peak, *, exceeds=False, declared=225
 ):
     """The signed catalog's measured steady peak for the installation's one role."""
-    from vonk_control.catalog.entities import CatalogEntityService
-    from vonk_control.models.catalog import CatalogDocumentRevision
-    from vonk_forge_contracts.qualification_status import (
-        PublishedMeasuredMemory,
-        PublishedRoleMemory,
-    )
 
     with sessions() as session:
         revision = session.scalars(
@@ -563,7 +565,8 @@ def test_a_measurement_over_the_admission_maximum_keeps_the_declared_peak(
     sessions, now, _, installation = setup(tmp_path, free_memory=_FREE)
     service = _publish_measured(sessions, installation, now, 900, exceeds=True)
     plan = service.plan_run(installation, alias="qwen", now=now)
-    assert plan.allowed and plan.nodes[0].required_memory_bytes == 225
+    assert plan.allowed
+    assert plan.nodes[0].required_memory_bytes == 225
     warning = next(
         item
         for item in plan.nodes[0].warnings
@@ -579,7 +582,6 @@ def test_a_delivered_measurement_leaves_a_running_run_untouched(tmp_path) -> Non
     (the path that reads it); the running run's rows, reservations and Jobs are
     exactly as admitted.
     """
-    from vonk_control.models.jobs import Job
 
     sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
     _admit_run(sessions, now, node, installation)
@@ -600,7 +602,8 @@ def test_a_delivered_measurement_leaves_a_running_run_untouched(tmp_path) -> Non
         return [rows(model) for model in (RecipeRun, RunNode, ResourceReservation, Job)]
 
     before = state()
-    assert before[0] and before[2]
+    assert before[0]
+    assert before[2]
     service = _publish_measured(sessions, installation, now, 280)
     review = service.plan_run(installation, alias="another", now=now)
     assert review.nodes[0].required_memory_bytes == 280

@@ -4,6 +4,7 @@ import copy
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -11,15 +12,25 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
+)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.failure_evidence import LOG_TAIL_BYTES, FailureDiagnostics
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    FailureCode,
+    LifecycleState,
+    OutcomeKind,
+)
 from vonk_agent_protocol.optional_evidence import EvidenceDrop
+from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeFailed, outcome_body
 from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.api.application import create_app
+from vonk_control.auth import Actor, TokenCodec
 from vonk_control.failure_evidence import (
     _OMISSION_MARKER,
     FailedAttempt,
@@ -37,7 +48,14 @@ from vonk_control.models.execution import ArtifactJob
 from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operation_api.contracts import (
+    OperationApiServices,
+    OperationListPage,
+    OperationPage,
+)
+from vonk_control.operations.contract import sanitize_failure_evidence
 from vonk_control.operations.item_contract import OperationResultFacts, operation_item
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 
 from .agent_fences import fenced_attempt
 from .agent_jobs_support import NODE_A, NODE_B, Clock, distribution_payload, parent
@@ -46,6 +64,7 @@ from .runtime_identity_support import (
     claim_agent,
     inventory_items_fixture,
 )
+from .test_api import Jobs
 
 NOW = datetime(2026, 9, 8, 12, tzinfo=UTC)
 COMMIT = "a" * 64
@@ -223,7 +242,7 @@ def test_redaction_keeps_a_constraint_violation_that_names_an_authorization_tabl
     )
     assert safe_text(violation) == violation
     header = safe_text("Authorization: Bearer super-sensitive")
-    assert "[redacted diagnostic line]" == header
+    assert header == "[redacted diagnostic line]"
     assert "super-sensitive" not in header
 
 
@@ -413,7 +432,9 @@ def test_the_omission_marker_is_read_as_the_agent_writes_it(
 
 
 @pytest.mark.parametrize("case", _OMISSION_VECTOR["clamps"])
-def test_a_retained_tail_is_bounded_as_the_agent_bounds_it(case: dict) -> None:
+def test_a_retained_tail_is_bounded_as_the_agent_bounds_it(
+    case: dict[str, Any],
+) -> None:
     """Catches the Controller's bound drifting from the agent's clamp_retained."""
     assert _keep_retained(case["text"], case["limit"]) == (
         case["kept"],
@@ -426,8 +447,11 @@ def test_ring_buffer_preserves_last_lines_and_reports_loss():
     assert tail.text.endswith("last useful error")
     dropped_bytes = tail.dropped_bytes
     dropped_lines = tail.dropped_lines
-    assert isinstance(dropped_bytes, int) and isinstance(dropped_lines, int)
-    assert tail.truncated and dropped_bytes > 0 and dropped_lines > 0
+    assert isinstance(dropped_bytes, int)
+    assert isinstance(dropped_lines, int)
+    assert tail.truncated
+    assert dropped_bytes > 0
+    assert dropped_lines > 0
     assert len(tail.text.encode()) <= LOG_TAIL_BYTES
     assert len(tail.text.splitlines()) <= 32
 
@@ -520,15 +544,6 @@ def test_evidence_download_is_authenticated_exact_attempt_and_stable(service):
 
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_composed_controller_exposes_exact_download_on_operation_projection(service):
-    from vonk_control.api.application import create_app
-    from vonk_control.auth import Actor, TokenCodec
-    from vonk_control.operation_api.contracts import (
-        OperationApiServices,
-        OperationListPage,
-        OperationPage,
-    )
-
-    from .test_api import Jobs
 
     value: dict[str, object] = {
         **item(),
@@ -678,7 +693,8 @@ def test_lease_expired_attempt_keeps_its_receipt_after_a_later_attempt(
         NODE_A,
         "serial-a",
     )
-    assert first is not None and fenced_attempt(sessions, first).attempt == 1
+    assert first is not None
+    assert fenced_attempt(sessions, first).attempt == 1
     # The agent's own failure arrives after the lease lapsed.  The Controller
     # keeps it on the expired attempt rather than discarding it.
     clock.advance(seconds=31)
@@ -709,7 +725,8 @@ def test_lease_expired_attempt_keeps_its_receipt_after_a_later_attempt(
         NODE_A,
         "serial-a",
     )
-    assert second is not None and fenced_attempt(sessions, second).attempt == 2
+    assert second is not None
+    assert fenced_attempt(sessions, second).attempt == 2
     jobs.succeed(second, DISTRIBUTION_SUCCESS)
 
     bundle = evidence.read(operation.id, 1)
@@ -830,7 +847,8 @@ def test_a_failure_whose_diagnostics_were_dropped_says_what_was_lost(
                 AgentOperationAttempt.operation_id == operation.id
             )
         )
-        assert stored is not None and stored.result is not None
+        assert stored is not None
+        assert stored.result is not None
         assert stored.result["dropped_evidence"] == [drop.model_dump(mode="json")]
     bundle = evidence.read(operation.id, 1)
     assert (
@@ -885,7 +903,8 @@ def test_a_long_traceback_tail_is_kept_and_still_redacted(durable_evidence):
                 AgentOperationAttempt.operation_id == operation.id
             )
         )
-        assert stored is not None and stored.result is not None
+        assert stored is not None
+        assert stored.result is not None
         assert "dropped_evidence" not in stored.result
     bundle = evidence.read(operation.id, 1)
     assert not any(
@@ -1272,7 +1291,6 @@ def test_a_failed_run_switch_carries_the_stderr_of_its_phase_childs_spark_work(
     searched, so the download of a run-switch whose llama-server could not load
     its shared library showed empty stderr and ``agent-observations-unavailable``.
     """
-    from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 
     loader = (
         "/app/llama-server: error while loading shared libraries: "
@@ -1366,7 +1384,6 @@ def test_a_failed_run_switch_carries_the_stderr_of_its_phase_childs_spark_work(
 
 
 def test_oversized_failure_evidence_keeps_the_container_diagnostics():
-    from vonk_control.operations.contract import sanitize_failure_evidence
 
     document = _child_diagnostics_document("segfault\n")
     document["versions"] = [{"name": f"v{i}", "value": "x" * 256} for i in range(8)]
@@ -1386,8 +1403,6 @@ def test_oversized_failure_evidence_keeps_the_container_diagnostics():
 
 def test_subprocess_exit_and_final_stderr_survive_store_and_evidence_download(tmp_path):
     # A classifier label cannot replace the opaque command's own explanation.
-    from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, OutcomeKind
-    from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeFailed, outcome_body
 
     value = item(ProtocolAgentOperation.RECIPE_BUILD.value)
     diagnostics = collect_failure(

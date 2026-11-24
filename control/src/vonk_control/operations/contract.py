@@ -9,12 +9,12 @@ from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from vonk_agent_protocol.contracts import AgentFailureResult
+
+from vonk_agent_protocol.agent_operations import AgentFailureResult
 from vonk_agent_protocol.failure_evidence import add_known_dropped_bytes
 from vonk_agent_protocol.wire_model import ERROR_CODE_PATTERN, OperationProgress
-
-from .. import agent_operation_states
-from ..logging import redact_text
+from vonk_control import agent_operation_states
+from vonk_control.logging import redact_text
 
 _SENSITIVE = re.compile(
     r"(?i)(password|secret|token|private.?key|authorization|cookie)"
@@ -327,7 +327,7 @@ def sanitize_failure_evidence(value: Mapping[str, object]) -> dict[str, object]:
         # The container's own exit facts and log tails are the evidence that
         # explains the failure; the size guard may shed the surrounding
         # properties but never them.
-        diagnostics = full.get("diagnostics") if isinstance(full, dict) else None
+        diagnostics = full.get("diagnostics") if isinstance(full, dict) else None  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         if isinstance(diagnostics, dict):
             kept = dict(diagnostics)
             result["diagnostics"] = kept

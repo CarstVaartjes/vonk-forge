@@ -9,21 +9,22 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
+
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.contracts import (
-    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
-    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
-    MAX_DOCUMENT_BYTES,
     RESULT_MODELS,
     AgentClaim,
-    AgentOperation,
     AgentProgress,
-    AgentProtocolError,
     AgentResult,
     _validate_safe_keys,
-    canonical_message,
     schema_validator,
     validate_result_for_operation,
     validate_schema_message,
+)
+from vonk_agent_protocol.document_limits import (
+    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
+    MAX_DOCUMENT_BYTES,
 )
 from vonk_agent_protocol.package_upgrade import PackageActivationOutcome
 from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
@@ -31,6 +32,7 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeStopPayload,
     RecipeUninstallPayload,
 )
+from vonk_agent_protocol.wire_model import AgentProtocolError, canonical_message
 
 
 def valid_claim() -> dict[str, object]:
@@ -97,17 +99,18 @@ def apply_vector_changes(
     payload = deepcopy(base)
     for change in changes:
         path = change["path"]
-        assert isinstance(path, list) and path
+        assert isinstance(path, list)
+        assert path
         target: object = payload
         for component in path[:-1]:
             assert isinstance(target, (dict, list))
-            target = target[component]  # type: ignore[index]
+            target = target[component]
         assert isinstance(target, (dict, list))
         if change["op"] == "set":
-            target[path[-1]] = deepcopy(change["value"])  # type: ignore[index]
+            target[path[-1]] = deepcopy(change["value"])
         else:
             assert change["op"] == "remove"
-            del target[path[-1]]  # type: ignore[index]
+            del target[path[-1]]
     return payload
 
 
@@ -184,12 +187,12 @@ def test_protocol_allows_only_exact_versioned_platform_target_identifier() -> No
 
 @pytest.mark.parametrize(
     "target",
-    (
+    [
         "platform-release.json",
         "platform/releases/latest/" + "a" * 64 + ".json",
         "platform/releases/1.2.3/../../escape.json",
         "platform/releases/1.2.3/" + "A" * 64 + ".json",
-    ),
+    ],
 )
 def test_protocol_rejects_client_selected_parameter_path(
     target: str,
@@ -221,7 +224,7 @@ def test_claim_copies_canonical_payload_before_becoming_frozen() -> None:
         == "00000000-0000-4000-8000-000000000005"
     )
     with pytest.raises(ValidationError):
-        claim.fence = "00000000-0000-4000-8000-000000000009"  # type: ignore[misc]
+        claim.fence = "00000000-0000-4000-8000-000000000009"
 
 
 def test_direct_construction_cannot_bypass_claim_validation_or_serialization() -> None:

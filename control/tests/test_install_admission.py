@@ -2,20 +2,35 @@ import json
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
+from typing import Any
 
 import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+    read_recipe,
+)
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.execution_plan_service import ExecutionPlanCompilationError
+from vonk_control.install_admission.contracts import (
+    InstallAdmissionBusy,
+    InstallPlanStale,
+    InstallPreflightExpired,
+)
 from vonk_control.install_admission.identity import (
     _primary_model_sha256,
     installation_plan_digest_from_stored_document,
 )
 from vonk_control.install_admission.service import InstallAdmissionService
+from vonk_control.install_admission.validation import require_admissible
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
@@ -40,11 +55,8 @@ from vonk_control.recipe_operations.execution_contract import (
     parse_stored_installation_plan,
 )
 from vonk_control.recipe_operations.runtime_specs import ResolvedRecipe
-from vonk_forge_contracts import (
-    ModelDefinition,
-    RecipeDefinition,
-    document_sha256,
-    read_recipe,
+from vonk_control.runtime_image_preparation.contracts import (
+    RuntimeImagePreparationUnknown,
 )
 
 from .display_fixtures import legacy_model_display, model_display_denying
@@ -67,7 +79,7 @@ def _canonical_catalog_documents(
     *,
     denied_jurisdictions: tuple[str, ...] = (),
     disk_estimates: tuple[int, int] = (30, 70),
-) -> tuple[ModelDefinition, RecipeDefinition, dict, dict]:
+) -> tuple[ModelDefinition, RecipeDefinition, dict[str, Any], dict[str, Any]]:
     raw_model = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", "model-definition.json")
@@ -98,7 +110,7 @@ def _canonical_catalog_documents(
 
 
 def _seed_canonical_catalog(
-    sessions: sessionmaker,
+    sessions: sessionmaker[Session],
     now: datetime,
     *,
     denied_jurisdictions: tuple[str, ...] = (),
@@ -555,12 +567,6 @@ def test_install_admission_blocks_malformed_mapping_parameters(tmp_path) -> None
 def test_unconfirmed_plan_evidence_is_a_wait_not_a_blocked_plan(tmp_path) -> None:
     """A receipt that cannot be read now is observed again, never a verdict."""
 
-    from vonk_control.install_admission.contracts import InstallAdmissionBusy
-    from vonk_control.install_admission.validation import require_admissible
-    from vonk_control.runtime_image_preparation.contracts import (
-        RuntimeImagePreparationUnknown,
-    )
-
     sessions, now, _node, mapping_id, build = setup(tmp_path)
 
     def unreadable(**_unused: object) -> dict[str, dict[str, object]]:
@@ -578,12 +584,8 @@ def test_unconfirmed_plan_evidence_is_a_wait_not_a_blocked_plan(tmp_path) -> Non
 
 
 def test_deterministic_compile_error_is_a_verdict_with_its_text(tmp_path) -> None:
-    from vonk_control.install_admission.contracts import InstallPlanStale
-    from vonk_control.install_admission.validation import require_admissible
 
     sessions, now, _node, mapping_id, build = setup(tmp_path)
-
-    from vonk_control.execution_plan_service import ExecutionPlanCompilationError
 
     def invalid(**_unused: object) -> dict[str, dict[str, object]]:
         raise ExecutionPlanCompilationError("compiled launch payload is invalid")
@@ -603,8 +605,6 @@ def test_deterministic_compile_error_is_a_verdict_with_its_text(tmp_path) -> Non
 
 
 def test_an_unexpected_provider_error_waits(tmp_path) -> None:
-    from vonk_control.install_admission.contracts import InstallAdmissionBusy
-    from vonk_control.install_admission.validation import require_admissible
 
     sessions, now, _node, mapping_id, build = setup(tmp_path)
 
@@ -656,7 +656,8 @@ def test_a_3x_model_display_row_does_not_break_install_planning(tmp_path) -> Non
     with sessions.begin() as session:
         root = session.get(CatalogDocument, MODEL_DOCUMENT_ID)
         revision = session.get(CatalogDocumentRevision, MODEL_REVISION_ID)
-        assert root is not None and revision is not None
+        assert root is not None
+        assert revision is not None
         session.execute(
             update(CatalogDocument)
             .where(CatalogDocument.id == root.id)
@@ -817,7 +818,8 @@ def test_install_adopts_a_fresh_plan_after_nonblocking_reservation_change(
     assert current.allowed
     current_free = current.nodes[0].free_after_bytes
     preview_free = preview.nodes[0].free_after_bytes
-    assert current_free is not None and preview_free is not None
+    assert current_free is not None
+    assert preview_free is not None
     assert current_free < preview_free
 
     installation_id = service.accept_install(preview, actor="admin", now=refreshed_at)
@@ -970,10 +972,14 @@ def test_install_topology_capability_loss_is_a_plan_blocker(tmp_path) -> None:
 
 def test_database_rejects_mutable_built_image_identity(tmp_path) -> None:
     sessions, _now, _node, _mapping, build = setup(tmp_path, free=200)
-    with pytest.raises(IntegrityError), sessions.begin() as session:
+
+    def expected_failure(session):
         row = session.get(RecipeBuild, build)
         assert row is not None
         row.image_digest = "latest"
+
+    with pytest.raises(IntegrityError), sessions.begin() as session:
+        expected_failure(session)
 
 
 def test_an_agent_that_cannot_pull_images_asks_for_an_upgrade(tmp_path) -> None:
@@ -1011,15 +1017,19 @@ def test_an_agent_that_cannot_pull_images_asks_for_an_upgrade(tmp_path) -> None:
 
 def test_install_rejects_mapping_with_wrong_endpoint_owner(tmp_path) -> None:
     sessions, _now, _node, mapping, _build = setup(tmp_path, free=200)
-    with (
-        pytest.raises(Exception) as _ending,
-        sessions.begin() as session,
-    ):
+
+    def expected_failure(session):
         node = session.scalar(
             select(ClusterMappingNode).where(ClusterMappingNode.mapping_id == mapping)
         )
         assert node is not None
         node.endpoint_owner = False
+
+    with (
+        pytest.raises(Exception) as _ending,
+        sessions.begin() as session,
+    ):
+        expected_failure(session)
 
 
 def _record_inventory(sessions, node_id, at, *, free=200) -> None:
@@ -1062,7 +1072,6 @@ def test_a_host_change_waits_then_accepts_the_same_request(tmp_path) -> None:
     re-present the same plan.  Catches both an age window (716 s alone must
     not refuse) and a host change that admits on the old receipt.
     """
-    from vonk_control.install_admission.contracts import InstallPreflightExpired
 
     sessions, now, node, mapping, build = setup(tmp_path, free=200)
     service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)

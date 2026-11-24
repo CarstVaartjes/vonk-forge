@@ -7,19 +7,19 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal, get_args
 
-from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_forge_contracts.recipe import (
     RecipeDiskResources,
     Scalar,
 )
 
-from ..operations.blockers import SwapShortfallEvidence
-from ..run_switch_contract.vocabulary import RunSwitchChangeEffect
-from .identity import _canonical
-from .memory_kinds import memory_reservation_kind
+from vonk_agent_protocol.compiled_execution_plan import MemoryKind
+from vonk_control.operations.blockers import SwapShortfallEvidence
+from vonk_control.resource_planning.identity import _canonical
+from vonk_control.resource_planning.memory_kinds import memory_reservation_kind
+from vonk_control.run_switch_contract.vocabulary import RunSwitchChangeEffect
 
 if TYPE_CHECKING:
-    from ..owner_liveness import OwnerRef
+    from vonk_control.owner_liveness import OwnerRef
 
 EvidenceState = Literal["declared", "measured", "fresh", "stale", "unknown"]
 

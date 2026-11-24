@@ -8,6 +8,7 @@ import re
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
+
 from vonk_agent_protocol.enrollment import (
     EnrollmentBootstrapResponse,
     EnrollmentObservationReply,
@@ -15,27 +16,31 @@ from vonk_agent_protocol.enrollment import (
     IssuedCertificateResponse,
 )
 from vonk_agent_protocol.outcome import UnknownError
-
-from vonk_control.enrollment.responses import _issued_response, _json_response
-from vonk_control.operator_receipt_contract import ReceiptPolicy
-
-from ..contract_graph import raw_json_body
-from ..enrollment.body import _bounded_enrollment_body, _scan_enrollment_grants
-from ..enrollment.responses import unknown_response
-from ..enrollment.types import (
-    EnrollmentDenied,
-    EnrollmentIssuanceUncertain,
-    RenewalIssuanceUncertain,
-)
-from ..operation_api.contracts import bounded_error_responses
-from ..operator_acceptance import operator_acceptance
-from .common import (
+from vonk_control.agent_api.common import (
     AgentApiServices,
     EnrollmentRateLimiter,
     _require_enrollment,
     _require_services,
     contract_verdict_or_wait,
 )
+from vonk_control.enrollment.body import (
+    _bounded_enrollment_body,
+    _scan_enrollment_grants,
+)
+from vonk_control.enrollment.responses import (
+    _issued_response,
+    _json_response,
+    unknown_response,
+)
+from vonk_control.enrollment.types import (
+    EnrollmentDenied,
+    EnrollmentIssuanceUncertain,
+    RenewalIssuanceUncertain,
+)
+from vonk_control.operation_api.contracts import bounded_error_responses
+from vonk_control.operator_acceptance import operator_acceptance
+from vonk_control.operator_receipt_contract import ReceiptPolicy
+from vonk_control.route_declarations import raw_json_body
 
 
 def install_enrollment_routes(
@@ -96,7 +101,7 @@ def install_enrollment_routes(
                 detail="enrollment rate limit exceeded",
                 headers={"retry-after": str(limiter.retry_after_seconds())},
             )
-        raw = await _bounded_enrollment_body(request, required)
+        raw = await _bounded_enrollment_body(request)
         scan = _scan_enrollment_grants(raw)
         content_type = request.headers.get("content-type", "")
         if (

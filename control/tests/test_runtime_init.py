@@ -6,7 +6,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
+
 from vonk_control import runtime_init
+from vonk_control.gateway.keys import MASTER_KEY_FILE
 from vonk_control.runtime_init import (
     SharedRuntimePaths,
     prepare_shared_volumes,
@@ -14,6 +16,7 @@ from vonk_control.runtime_init import (
     stage_private_key,
     stage_runtime_assets,
     stage_runtime_file,
+    write_runtime_asset_inventory,
 )
 
 
@@ -272,7 +275,8 @@ def test_shared_volume_preparation_rejects_symlinked_component(
     assert list(outside.iterdir()) == []
     routes.unlink()
     prepare_shared_volumes(paths)
-    assert routes.is_dir() and not routes.is_symlink()
+    assert routes.is_dir()
+    assert not routes.is_symlink()
     assert list(outside.iterdir()) == []
 
 
@@ -351,8 +355,6 @@ def test_gateway_master_key_is_staged_only_outside_worker_volume(
     assert api_key.read_bytes() == master.read_bytes()
     stage_compose_secrets(source, shared, gateway_master_key=api_key)
     assert not stale.exists()
-
-    from vonk_control.gateway.keys import MASTER_KEY_FILE
 
     assert MASTER_KEY_FILE == runtime_init.GATEWAY_MASTER_KEY_PATH
 
@@ -548,7 +550,6 @@ def test_direct_private_staging_ends_preserves_and_fresh_request_recovers(
 def test_kit_inventory_assembly_ends_preserves_and_fresh_assembly_stages(
     tmp_path, monkeypatch
 ):
-    from vonk_control.runtime_init import write_runtime_asset_inventory
 
     monkeypatch.setattr(os, "fchown", lambda *_args: None)
     kit = tmp_path / "kit"

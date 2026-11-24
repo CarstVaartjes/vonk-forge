@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import Any
 
 import pytest
+
+from cluster_profiles import cli
+from cluster_profiles.cli_render.dispatch import render_payload
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
@@ -18,9 +22,11 @@ from vonk_control.cache_removal_review import (
     CacheRemovalReviewContent,
     seal_cache_removal_review,
 )
-
-from cluster_profiles import cli
-from cluster_profiles.cli_render.dispatch import render_payload
+from vonk_control.fleet_model_removal_contract import (
+    FleetModelRemovalCheckpoint,
+    FleetModelRemovalEffects,
+    FleetRemovalReason,
+)
 
 from .test_cli_cache_removal_review import (
     _accept_response_contracts,  # noqa: F401
@@ -132,7 +138,7 @@ def _review(*, blocked: bool = False) -> dict[str, object]:
     return seal_cache_removal_review(content).model_dump(mode="json")
 
 
-def _human(capsys: pytest.CaptureFixture[str], review: dict, **kwargs) -> str:
+def _human(capsys: pytest.CaptureFixture[str], review: dict[str, Any], **kwargs) -> str:
     render_payload(review, "model", action="preview", **kwargs)
     return capsys.readouterr().out
 
@@ -149,7 +155,8 @@ def test_default_review_is_a_summary(capsys: pytest.CaptureFixture[str]) -> None
     assert f"Confirm: vonkctl model remove {_SELECTOR} --yes --detach" in text
     assert "Review digest: " + str(review["review_digest"]) in text
     # Short by content: no per-asset or per-pair blocks, whatever the model size.
-    assert "Asset:" not in text and "Saved references:\n" not in text
+    assert "Asset:" not in text
+    assert "Saved references:\n" not in text
     assert "Saved references: none" in text
     assert text.count("another cached model set") == 0
     for asset in review["assets"]:  # type: ignore[attr-defined]
@@ -265,10 +272,6 @@ def test_json_review_is_unchanged_by_verbose(
 def test_fleet_review_confirm_command_keeps_the_fleet_scope(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from vonk_control.fleet_model_removal_contract import (
-        FleetModelRemovalEffects,
-        FleetRemovalReason,
-    )
 
     review = _review()
     review["fleet"] = FleetModelRemovalEffects(
@@ -286,7 +289,6 @@ def test_fleet_review_confirm_command_keeps_the_fleet_scope(
 def _fleet_review(
     assets: list[CacheRemovalAsset], *, nas_remove: bool, reason: object
 ) -> dict[str, object]:
-    from vonk_control.fleet_model_removal_contract import FleetModelRemovalEffects
 
     return seal_cache_removal_review(
         CacheRemovalReviewContent(
@@ -312,7 +314,6 @@ def _fleet_review(
 def test_protected_nas_copy_keeps_every_asset_without_inventing_a_reason(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from vonk_control.fleet_model_removal_contract import FleetRemovalReason
 
     kept = CacheAssetDisposition.RETAIN_REFERENCED
     review = _fleet_review(
@@ -339,7 +340,6 @@ def test_protected_nas_copy_keeps_every_asset_without_inventing_a_reason(
 def test_shared_fleet_object_without_membership_finding_names_no_sets(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from vonk_control.fleet_model_removal_contract import FleetRemovalReason
 
     review = _fleet_review(
         [
@@ -351,7 +351,8 @@ def test_shared_fleet_object_without_membership_finding_names_no_sets(
     )
     text = _human(capsys, review)
 
-    assert "Removes" in text and "in 1 files" in text
+    assert "Removes" in text
+    assert "in 1 files" in text
     assert "Keeps (retain-shared): 1 files" in text
     assert "other" not in text.lower().replace("another", "")
     assert " 0 " not in text.replace("0 model sets", "")
@@ -362,11 +363,6 @@ def test_fleet_receipt_that_kept_the_nas_copy_says_so_and_why(
 ) -> None:
     """Catches a fleet removal receipt that read as removed (#2354): it said
     ``succeeded`` with nothing about the NAS copy the Controller kept."""
-    from vonk_control.fleet_model_removal_contract import (
-        FleetModelRemovalCheckpoint,
-        FleetModelRemovalEffects,
-        FleetRemovalReason,
-    )
 
     fleet = FleetModelRemovalCheckpoint(
         deadline_at="2026-11-16T21:55:35Z",  # type: ignore[arg-type]
@@ -398,4 +394,5 @@ def test_fleet_receipt_that_kept_the_nas_copy_says_so_and_why(
         receipt | {"fleet": fleet | {"effects": removed}}, "model", action="remove"
     )
     text = capsys.readouterr().out
-    assert "State: succeeded" in text and "Controller copy" not in text
+    assert "State: succeeded" in text
+    assert "Controller copy" not in text

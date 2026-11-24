@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import stat
@@ -141,10 +142,8 @@ def test_private_reservation_failure_closes_descriptor_before_issuance(
             os.fstat(descriptors[0])
     finally:
         for descriptor in descriptors:
-            try:
+            with contextlib.suppress(OSError):
                 os.close(descriptor)
-            except OSError:
-                pass
 
     monkeypatch.undo()
     assert run(client, destination, "--json") == 0
@@ -191,7 +190,7 @@ def test_failed_private_delivery_reconciles_and_revokes_only_the_issued_grant(
 
     def fail_secret_write(self, document):
         if "token" in document and failure_point == "interrupt":
-            raise KeyboardInterrupt()
+            raise KeyboardInterrupt
         return original(self, document)
 
     monkeypatch.setattr(PrivateOutput, "write", fail_secret_write)
@@ -246,7 +245,7 @@ def test_output_path_replacement_never_receives_secret_bytes(tmp_path):
     victim = tmp_path / "victim.json"
     victim.write_text("keep")
     with not_adopted(), PrivateOutput(destination) as output:
-        os.rename(destination, original)
+        destination.rename(original)
         destination.symlink_to(victim)
         output.write(GRANT)
     assert victim.read_text() == "keep"

@@ -2,34 +2,51 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
 import httpx
+import httpx2
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import event, func, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.fleet_projection.service import FleetProjection
+from vonk_control.gateway.keys import GatewayKeyService
 from vonk_control.jobs.queue import JobService
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
-from vonk_control.models.fleet import FleetProfile, FleetProfileApplication, User
+from vonk_control.models.catalog import CatalogDocument
+from vonk_control.models.fleet import (
+    AgentNode,
+    AgentNodeProfile,
+    FleetProfile,
+    FleetProfileApplication,
+    User,
+)
 from vonk_control.models.jobs import Job
 from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
+from .agent_fences import park_for_operator
+from .artifact_jobs_support import artifact_create_request, running_artifact_service
 from .recipe_image_availability_support import _add_revision, _recipe, _runtime
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profile_api import _client, _headers
+from .test_gateway_keys import MASTER, FakeLiteLlm
 from .test_model_cache_cancel_recovery import _artifact
+from .test_operation_api import MutableClock, _claim_parked, _parked_stop_services
 from .test_profile_cancel_receipt_postgres import _application
 
 
@@ -89,7 +106,8 @@ def test_profile_save_lost_response_replays_committed_revision(postgres_engine):
         transport.put("/api/profile/1", json=body, headers=headers)
     with sessions() as session:
         saved = session.scalar(select(FleetProfile))
-        assert saved is not None and saved.revision == 1
+        assert saved is not None
+        assert saved.revision == 1
         identity = saved.id
     restarted, _ = _client(sessions)
     replay = restarted.put("/api/profile/1", json=body, headers=headers)
@@ -127,7 +145,8 @@ def test_profile_load_lost_response_reconnects_after_restart(postgres_engine):
             == 1
         )
         accepted = session.scalar(select(FleetProfileApplication))
-        assert accepted is not None and accepted.request_key == key
+        assert accepted is not None
+        assert accepted.request_key == key
         identity = accepted.id
     restarted, _ = _client(sessions)
     response = restarted.post(path, json={"request_key": key}, headers=headers)
@@ -257,7 +276,6 @@ def test_model_cancel_dropped_response_and_schema_valid_unchanged_success(
 
 def test_recipe_cancellation_receipt_survives_restart(tmp_path, postgres_engine):
     """Catches cancellation lookup depending on process memory or original request id."""
-    from vonk_control.models.catalog import CatalogDocument
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -314,10 +332,6 @@ def test_key_receipts_replay_without_repeating_external_effects(
     tmp_path, postgres_engine
 ):
     """Catches losing key acceptance or treating transport uncertainty as success."""
-    import httpx2
-    from vonk_control.gateway.keys import GatewayKeyService
-
-    from .test_gateway_keys import MASTER, FakeLiteLlm
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -417,9 +431,6 @@ def test_artifact_create_upload_and_cancel_resolve_existing_job(
     tmp_path, postgres_engine
 ):
     """Catches accepting a terminal no-op cancel or losing an upload's publication."""
-    import hashlib
-
-    from .artifact_jobs_support import artifact_create_request, running_artifact_service
 
     sessions, _operations, _queue, owner, run_id, _node = running_artifact_service(
         tmp_path, engine=postgres_engine
@@ -480,8 +491,6 @@ def test_artifact_create_upload_and_cancel_resolve_existing_job(
 
 def test_fleet_rename_is_a_committed_resource_receipt(tmp_path, postgres_engine):
     """Catches returning a renamed projection before the node profile committed."""
-    from vonk_control.fleet_projection.service import FleetProjection
-    from vonk_control.models.fleet import AgentNode, AgentNodeProfile
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -526,8 +535,6 @@ def test_job_resume_replays_committed_owner_after_response_loss(
     tmp_path, postgres_engine
 ):
     """Catches a second resume refusing the retry authorization already committed."""
-    from .agent_fences import park_for_operator
-    from .test_operation_api import MutableClock, _claim_parked, _parked_stop_services
 
     clock = MutableClock(datetime.now(UTC))
     sessions, queue, operations, _order, job_id = _parked_stop_services(
@@ -575,8 +582,6 @@ def test_job_commit_failure_rolls_back_acceptance_and_authorization(
     tmp_path, postgres_engine
 ):
     """Catches a receipt committed separately from the retry authorization it proves."""
-    from .agent_fences import park_for_operator
-    from .test_operation_api import MutableClock, _claim_parked, _parked_stop_services
 
     clock = MutableClock(datetime.now(UTC))
     sessions, queue, operations, _order, job_id = _parked_stop_services(
@@ -656,7 +661,6 @@ def test_save_receipt_cannot_adopt_an_intervening_revision(
     postgres_engine, monkeypatch
 ):
     """Catches accepting the same content after its reviewed revision was replaced."""
-    from vonk_control.fleet_profiles.service import FleetProfileService
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)

@@ -21,7 +21,7 @@ def test_postgres_runtime_is_the_deployed_pin() -> None:
             Path(__file__).resolve().parents[2] / "deploy/compose/images.lock.json"
         ).read_text(encoding="utf-8")
     )
-    assert POSTGRES_IMAGE == lock["images"]["postgres"]
+    assert lock["images"]["postgres"] == POSTGRES_IMAGE
     assert re.fullmatch(r"postgres:\d+\.\d+@sha256:[0-9a-f]{64}", POSTGRES_IMAGE)
 
 

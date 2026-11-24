@@ -5,13 +5,13 @@ from datetime import UTC, timedelta
 from pathlib import Path
 
 from sqlalchemy import Engine
-from vonk_agent_protocol.contracts import (
+
+from vonk_agent_protocol.agent_operations import (
     AgentFailureKind,
     AgentFailureResult,
     AgentInstallResult,
-    AgentResult,
-    canonical_message,
 )
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.failure_evidence import (
     FailureDiagnostics,
     ModelStoreLayoutFault,
@@ -22,6 +22,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
 )
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.fleet_projection.service import FleetProjection
 
@@ -89,12 +90,15 @@ def _assert_layout_recovery(
         notice.model_store_layout.path == "installations/id/models/weights.safetensors"
     )
     assert nodes[0] in notice.detail
-    assert "errno=18" in notice.detail and "weights.safetensors" in notice.detail
-    assert notice.recommendation is not None and "filesystem" in notice.recommendation
+    assert "errno=18" in notice.detail
+    assert "weights.safetensors" in notice.detail
+    assert notice.recommendation is not None
+    assert "filesystem" in notice.recommendation
     assert service.get(installation.id).state != LifecycleState.FAILED
 
     parked = fenced_operation(sessions, claim)
-    assert parked.next_action_at is not None and parked.recovery_deadline is not None
+    assert parked.next_action_at is not None
+    assert parked.recovery_deadline is not None
     deadline = parked.recovery_deadline
     now[0] = parked.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
     # Recreate the queue owner and resume the original persisted operation.

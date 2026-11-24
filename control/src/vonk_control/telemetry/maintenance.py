@@ -20,20 +20,20 @@ from sqlalchemy.engine import Row
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..admission_locking import is_admission_contention, label_transaction
-from ..catalog.revision_collection import GRACE
-from ..fleet_event_contract import NodeTelemetryPayload
-from ..fleet_events import FleetEventDraft, FleetEventRepository
-from ..inventory.items_contract import InventorySnapshotKind
-from ..inventory.repository import newest_snapshot_ids
-from ..models.fleet import (
+from vonk_control.admission_locking import is_admission_contention, label_transaction
+from vonk_control.catalog.revision_collection import GRACE
+from vonk_control.fleet_event_contract import NodeTelemetryPayload
+from vonk_control.fleet_events import FleetEventDraft, FleetEventRepository
+from vonk_control.inventory.items_contract import InventorySnapshotKind
+from vonk_control.inventory.repository import newest_snapshot_ids
+from vonk_control.models.fleet import (
     AgentCertificate,
     AgentIssuedCertificateRevocation,
     AgentNode,
     LocalCertificateIssuance,
     LocalCertificateRevocation,
 )
-from ..models.telemetry import (
+from vonk_control.models.telemetry import (
     FleetStreamEvent,
     NodeInventoryResourceSnapshot,
     NodeInventorySnapshot,
@@ -41,7 +41,7 @@ from ..models.telemetry import (
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
-from ..step_ca import CERTIFICATE_LIFETIME
+from vonk_control.step_ca import CERTIFICATE_LIFETIME
 
 _MAX_MAINTENANCE_LIMIT = 25_000
 #: One pass deletes at most this many rows per table.  Maintenance holds rows
@@ -424,7 +424,7 @@ class TelemetryMaintenance:
                 return
 
     @staticmethod
-    def _chunks(values: list, size: int = _SQL_KEY_CHUNK):
+    def _chunks[T](values: list[T], size: int = _SQL_KEY_CHUNK):
         for offset in range(0, len(values), size):
             yield values[offset : offset + size]
 

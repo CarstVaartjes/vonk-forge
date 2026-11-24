@@ -8,10 +8,12 @@ import unicodedata
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
-from ..cli_states_generated import ENDPOINT_UNAVAILABLE
-from ..cli_telemetry_render import size as _size
-from ..control_client.errors import ControlMalformedResponse
-from ..generated_control.models.swap_shortfall_evidence import SwapShortfallEvidence
+from cluster_profiles.cli_states_generated import ENDPOINT_UNAVAILABLE
+from cluster_profiles.cli_telemetry_render import size as _size
+from cluster_profiles.control_client.errors import ControlMalformedResponse
+from cluster_profiles.generated_control.models.swap_shortfall_evidence import (
+    SwapShortfallEvidence,
+)
 
 
 def terminal_text(value: str) -> str:

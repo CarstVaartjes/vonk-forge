@@ -2,13 +2,25 @@
 
 from __future__ import annotations
 
+import hashlib
 from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import delete, select
+
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState
+from vonk_agent_protocol.recipe_jobs import (
+    RecipeJobEvidence,
+    RecipeJobFile,
+    RecipeJobOutputManifest,
+    RecipeJobRunResult,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_sha256 as recipe_job_manifest_sha256,
+)
 from vonk_control.artifact_jobs import states as artifact_job_states
 from vonk_control.models.execution import ArtifactJob, ArtifactJobFile, RecipeRun
+from vonk_control.models.operations import AgentOperation
 
 from .artifact_jobs_support import (
     artifact_create_request,
@@ -94,23 +106,11 @@ def test_a_damaged_run_plan_still_finds_the_endpoint_owner_from_the_mapping(
 
 @pytest.mark.usefixtures("damaged_json_rows")
 @pytest.mark.parametrize(
-    "rebuildable,lost_output", [(True, False), (False, False), (True, True)]
+    ("rebuildable", "lost_output"), [(True, False), (False, False), (True, True)]
 )
 def test_damaged_contract_rebuilds_or_ends_without_holding_fresh_request(
     tmp_path, rebuildable, lost_output
 ):
-    import hashlib
-
-    from vonk_agent_protocol.recipe_jobs import (
-        RecipeJobEvidence,
-        RecipeJobFile,
-        RecipeJobOutputManifest,
-        RecipeJobRunResult,
-    )
-    from vonk_agent_protocol.recipe_jobs import (
-        manifest_sha256 as recipe_job_manifest_sha256,
-    )
-    from vonk_control.models.operations import AgentOperation
 
     sessions, _operations, _queue, service, run_id, node_id = running_artifact_service(
         tmp_path

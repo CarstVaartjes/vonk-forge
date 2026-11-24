@@ -16,15 +16,7 @@ from pathlib import Path
 
 import httpx2
 
-from ..error_reporting import (
-    local_io_context,
-    protocol_context,
-    safe_endpoint,
-    safe_request_id,
-    transport_context,
-)
-from ..generated_control.limits import MAX_CONTROL_DOCUMENT_BYTES
-from .errors import (
+from cluster_profiles.control_client.errors import (
     _MAX_TOKEN,
     _STATUS_ERRORS,
     ControlClientError,
@@ -37,12 +29,20 @@ from .errors import (
     _OpenedResponse,
     _retry_after_seconds,
 )
-from .schema import (
+from cluster_profiles.control_client.schema import (
     _operation,
     _schema_unavailable,
     _validate_generated_request,
     _validate_generated_response,
 )
+from cluster_profiles.error_reporting import (
+    local_io_context,
+    protocol_context,
+    safe_endpoint,
+    safe_request_id,
+    transport_context,
+)
+from cluster_profiles.generated_control.limits import MAX_CONTROL_DOCUMENT_BYTES
 
 
 def _read_token_file(token_file: Path) -> str:

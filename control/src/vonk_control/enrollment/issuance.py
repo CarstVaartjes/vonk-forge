@@ -9,7 +9,7 @@ import secrets
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.enrollment import MAX_CSR_BYTES
 from vonk_agent_protocol.lifecycle_vocabulary import (
     ErrorCategory,
@@ -33,34 +34,30 @@ from vonk_agent_protocol.state_machines import (
     EnrollmentRecordState,
     NodeIdentityState,
 )
-
-from ..categorized_errors import InvalidValue
-from ..models.fleet import (
-    AgentCertificate,
-    AgentCertificateRotation,
-    AgentEnrollment,
-    AgentEnrollmentGrant,
-    AgentIssuedCertificateRevocation,
-    AgentNode,
-)
-from ..persisted_waits import schedule_wait
-from ..pki import CertificateAuthority, IssuedCertificate
-from ..security.enrollment import (
-    require_admitted_request,
-    require_fresh_enrollment,
-    require_grant,
-    require_optional_node,
-    require_provider_verification,
-    validate_issued_binding,
-)
-from ..settings import DATABASE_WAIT_BUDGETS
-from ..step_ca import StepCAIssuancePending
-from .contract import (
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.enrollment.contract import (
     ENROLLMENT_ID_PATTERN,
+    EnrollmentGrant,
     EnrollmentGrantStatus,
+    EnrollmentIssuanceClaim,
     EnrollmentObservationOutcome,
 )
-from .validation import (
+from vonk_control.enrollment.ending import retain_ended_effect
+from vonk_control.enrollment.persistence import (
+    _issuance_binding,
+    _issued,
+    _lock_node_issuance,
+    _locked_enrollment,
+    _persist_issued_enrollment,
+    _replay_matches,
+    _require_issuance_binding,
+)
+from vonk_control.enrollment.types import (
+    MAX_ENROLLMENT_GRANT_TTL_SECONDS,
+    EnrollmentDenied,
+    EnrollmentIssuanceUncertain,
+)
+from vonk_control.enrollment.validation import (
     EVIDENCE_REFUSAL_REASONS,
     _decode_token,
     _digest,
@@ -71,29 +68,31 @@ from .validation import (
     _validate_evidence,
     _validate_node_id,
 )
+from vonk_control.models.fleet import (
+    AgentCertificate,
+    AgentCertificateRotation,
+    AgentEnrollment,
+    AgentEnrollmentGrant,
+    AgentIssuedCertificateRevocation,
+    AgentNode,
+)
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.pki import CertificateAuthority, IssuedCertificate
+from vonk_control.security.enrollment import (
+    require_admitted_request,
+    require_fresh_enrollment,
+    require_grant,
+    require_optional_node,
+    require_provider_verification,
+    validate_issued_binding,
+)
+from vonk_control.settings import DATABASE_WAIT_BUDGETS
+from vonk_control.step_ca import StepCAIssuancePending
 
 _LOGGER = logging.getLogger("vonk_control.enrollment")
 
-from vonk_control.enrollment.contract import EnrollmentGrant, EnrollmentIssuanceClaim
 
-from .ending import retain_ended_effect
-from .persistence import (
-    _issuance_binding,
-    _issued,
-    _lock_node_issuance,
-    _locked_enrollment,
-    _persist_issued_enrollment,
-    _replay_matches,
-    _require_issuance_binding,
-)
-from .types import (
-    MAX_ENROLLMENT_GRANT_TTL_SECONDS,
-    EnrollmentDenied,
-    EnrollmentIssuanceUncertain,
-)
-
-
-def _submission_input(csr: bytes, evidence_error: str | None = None) -> None:
+def _submission_input(csr: object, evidence_error: str | None = None) -> None:
     """Malformed caller input cannot mutate a bearer grant or an older intent."""
     if evidence_error is not None:
         raise InvalidValue(
@@ -157,7 +156,7 @@ class EnrollmentCore:
         self._sqlite_transaction_lock = threading.RLock()
 
     @contextmanager
-    def _transaction(self) -> Iterator[Session]:
+    def _transaction(self) -> Generator[Session]:
         with self._sessions() as session:
             local = session.get_bind().dialect.name == "sqlite"
             if local and not self._sqlite_transaction_lock.acquire(timeout=1):
@@ -404,9 +403,9 @@ class EnrollmentCore:
                     raise EnrollmentIssuanceUncertain(
                         "enrollment attempt ended without a receipt"
                     )
-                elif enrollment.state == EnrollmentRecordState.ENDED:
+                if enrollment.state == EnrollmentRecordState.ENDED:
                     raise EnrollmentIssuanceUncertain("enrollment observation ended")
-                elif not _replay_matches(enrollment, csr, evidence):
+                if not _replay_matches(enrollment, csr, evidence):
                     failure = "enrollment replay does not match original request"
                 else:
                     # Refresh observations independently of credential content.
@@ -440,7 +439,6 @@ class EnrollmentCore:
                         public_key_fingerprint,
                     )
                     _submission_input(csr, evidence_error)
-                if failure is None:
                     node_id = values["node_id"]
                     enrollment = AgentEnrollment(
                         id=str(uuid.uuid4()),
@@ -754,7 +752,11 @@ class EnrollmentCore:
                 session.delete(intent)
 
     def _reconcile_competing_enrollment(
-        self, token_bytes: bytes, csr: bytes, evidence: Mapping[str, str], now: datetime
+        self,
+        token_bytes: bytes,
+        csr: object,
+        evidence: Mapping[str, str],
+        now: datetime,
     ) -> None:
         """A valid fresh grant drives exact observation of an older issuance gate."""
         with self._sessions() as session:

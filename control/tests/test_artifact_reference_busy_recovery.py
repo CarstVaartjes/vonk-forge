@@ -12,6 +12,7 @@ from typing import cast
 import pytest
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
@@ -100,13 +101,17 @@ def test_every_reference_busy_or_ownership_conflict_stays_transient(
         raise ArtifactReferenceUnsettled(code, "concurrent reference owner")
 
     monkeypatch.setattr(image_preparation, "require_reference_open", busy)
-    with pytest.raises(Exception) as raised:
+
+    def expected_failure():
         if provisional:
             service._persist_provisional_image_reference(
                 claim, receipt=_reference_receipt()
             )
         else:
             service._persist_receipt(claim, _reference_receipt())
+
+    with pytest.raises(Exception) as raised:
+        expected_failure()
     assert disposition(raised.value) is Disposition.WAIT
     assert availability_disposition(raised.value) is Disposition.WAIT
     assert isinstance(raised.value, ArtifactReferenceUnsettled)
@@ -216,7 +221,8 @@ def test_collection_racing_download_converges_after_restart(
                 payload = AvailabilityJobPayload.model_validate_json(
                     json.dumps(row.payload)
                 )
-                assert payload.claim_owner is None and payload.claim_until is None
+                assert payload.claim_owner is None
+                assert payload.claim_until is None
                 assert payload.retry.automatic_attempts == 0
                 assert deadline == preparation_deadline(
                     row.created_at, payload.progress_advanced_at
@@ -235,7 +241,8 @@ def test_collection_racing_download_converges_after_restart(
     finished = restarted.get(queued.id)
     assert finished.state == LifecycleState.SUCCEEDED, finished.failure_evidence
     assert finished.request_id == queued.request_id
-    assert finished.failure_evidence is None and finished.wait is None
+    assert finished.failure_evidence is None
+    assert finished.wait is None
     assert finished.artifact is not None
     assert finished.artifact.oci_archive_sha256 == ARCHIVE_SHA
 
@@ -255,7 +262,8 @@ def test_busy_wait_deadline_survives_restart_and_expires(
     monkeypatch.setattr(image_preparation, "require_reference_open", busy)
     assert service.run_pending() == 1
     waiting = service.get(queued.id)
-    assert waiting.wait is not None and waiting.wait.dependency_deadline is not None
+    assert waiting.wait is not None
+    assert waiting.wait.dependency_deadline is not None
     deadline = waiting.wait.dependency_deadline
     assert waiting.next_attempt_at is not None
     now[0] = datetime.fromisoformat(waiting.next_attempt_at)

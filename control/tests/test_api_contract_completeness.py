@@ -5,15 +5,17 @@ from pathlib import Path
 
 import pytest
 from fastapi import FastAPI, Request, Response
+from fastapi.testclient import TestClient
 from pydantic import BaseModel
+
 from vonk_control.contract_graph import (
     ContractGraphError,
     discover_contracts,
-    raw_json_body,
     require_wire_exports,
     schema_application,
 )
 from vonk_control.operation_api.openapi import admin_openapi_schema
+from vonk_control.route_declarations import raw_json_body
 
 
 class AddedRequest(BaseModel):
@@ -59,7 +61,6 @@ def test_hidden_new_route_fails_even_when_absent_from_openapi():
     repaired.add_api_route("/new", added, methods=["POST"])
     operations, _ = discover_contracts(repaired)
     assert operations
-    from fastapi.testclient import TestClient
 
     with TestClient(repaired) as client:
         response = client.post(

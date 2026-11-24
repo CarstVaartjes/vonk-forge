@@ -7,6 +7,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
@@ -40,7 +41,8 @@ def test_fleet_review_and_receipt_are_owned_by_the_same_durable_removal(
             )
             assert review.status_code == 200
             effects = review.json()["fleet"]
-            assert effects is not None and effects["nas_remove"] is True
+            assert effects is not None
+            assert effects["nas_remove"] is True
             assert path.read_bytes() == b"finished"
             key = str(uuid4())
             body = {

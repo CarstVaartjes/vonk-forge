@@ -12,6 +12,7 @@ import threading
 from uuid import uuid4
 
 from sqlalchemy import select
+
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_control.admission_locking import PATIENT_AFTER_RETRIES, label_transaction
 from vonk_control.fleet_profile_contract.applications import (
@@ -20,6 +21,7 @@ from vonk_control.fleet_profile_contract.applications import (
 from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
 from vonk_control.fleet_profiles.persistence import _persisted_profile_progress
 from vonk_control.models.fleet import AgentNode, FleetProfileApplication
+from vonk_control.persisted_waits import wait_due
 
 from .test_profile_capacity_admission import _capacity_profile
 
@@ -46,7 +48,6 @@ def _pending(sessions, request_key: str) -> FleetProfileApplicationProgress:
 
 
 def _pending_due(sessions, request_key: str):
-    from vonk_control.persisted_waits import wait_due
 
     with sessions() as session:
         row = session.scalar(

@@ -8,24 +8,25 @@ import time
 from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
-from ..cli_select import SelectorError
-from ..control_client.errors import (
+from cluster_profiles.cli_select import SelectorError
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlForbidden,
     ControlMalformedResponse,
     ControlUnauthorized,
 )
-from ..control_client.schema import validate_control_document
-
-if TYPE_CHECKING:
-    from ..generated_control.models.library_recipe_projection import (
-        LibraryRecipeProjection,
-    )
-
-from .common import MAX_PAGE_LIMIT, ControllerClient
-from .submission import _known_http_refusal_status
+from cluster_profiles.control_client.schema import validate_control_document
+from cluster_profiles.controller_cli.common import (
+    MAX_PAGE_LIMIT,
+    ControllerClient,
+    _known_http_refusal_status,
+    _quoted,
+)
+from cluster_profiles.generated_control.models.library_recipe_projection import (
+    LibraryRecipeProjection,
+)
 
 
 def _selection_remaining(deadline: float) -> float:
@@ -144,9 +145,6 @@ def _scan_recipe_rows(
     client: ControllerClient, *, deadline: float
 ) -> Iterator[LibraryRecipeProjection]:
     """Decode a complete catalogue read before using any partial matches."""
-    from ..generated_control.models.library_recipe_projection import (
-        LibraryRecipeProjection,
-    )
 
     seen_selectors: set[str] = set()
     for raw_recipes in _library_pages(
@@ -182,7 +180,7 @@ def _library_pages(
     client: ControllerClient,
     path: str,
     key: str,
-    query: Mapping,
+    query: Mapping,  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
     *,
     deadline: float,
 ) -> Iterator[list[object]]:
@@ -259,7 +257,6 @@ def _resolve_recipe_selector(
     if not matches:
 
         def owner_detail():
-            from .common import _quoted
 
             detail = client.request(
                 "GET",

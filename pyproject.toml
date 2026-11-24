@@ -51,33 +51,171 @@ path = "tools/hatch_build.py"
 "src/cluster_profiles/schemas/cli-release-projection.schema.json" = "cluster_profiles/schemas/cli-release-projection.schema.json"
 
 [tool.ruff]
-required-version = "==0.16.9"
-target-version = "py312"
+# One owner for the Ruff version: uv.lock (control dev group). No required-version pin.
+# py313, not py314: at py314 the formatter rewrites every `except (A, B):` to
+# PEP 758's `except A, B:`, and the added-line guards re-flag those handlers.
+target-version = "py313"
+# agent_protocol runs on the Sparks, which have Python 3.12.
+per-file-target-version = { "agent_protocol/**" = "py312" }
+# Every extensionless executable in scripts/ and bin/ is Python unless excluded
+# here by name: a new shell script that is not listed fails Ruff loudly (a parse
+# error) instead of a new Python script being skipped silently.
+extend-include = ["scripts/*", "bin/*", "rust/fuzz/seed-corpus"]
 extend-exclude = [
     "src/cluster_profiles/generated_control",
+    "scripts/*.Dockerfile",
+    "scripts/*.toml",
+    "scripts/**/*.sh",
+    # Shell scripts.
+    "scripts/accept-development-image-archive",
+    "scripts/build-control-wheel",
+    "scripts/build-recipe-library",
+    "scripts/check-added-lines",
+    "scripts/check-fresh-contract-build",
+    "scripts/ci-apt-install",
+    "scripts/dev-agent-wire-linux",
+    "scripts/dev-publication-sequence",
+    "scripts/ensure-project-venv",
+    "scripts/install-git-hooks",
+    "scripts/measure-nas-serving",
+    "scripts/measure-transfer",
+    "scripts/promote-accepted-channel",
+    "scripts/promote-image-aliases",
+    "scripts/publish-immutable-image",
+    "scripts/pull-test-images",
+    "scripts/reconcile-github-release",
+    "scripts/reuse-pr-candidate-images",
+    "scripts/reuse-pr-image-security",
+    "scripts/run-with-nas-secret-group",
+    "scripts/sync-cli-dependencies",
+    "scripts/test",
+    "scripts/test-agent-package-native-lifecycle",
+    "scripts/test-changed",
+    "scripts/test-local",
+    "scripts/test-vm-lane",
+    "scripts/validate-fabric",
+    "scripts/verify-controller-skopeo",
+    "scripts/verify-litellm-base-signature",
+    "scripts/verify-multiarch-image-manifest",
+    "scripts/verify-production-alias-postconditions",
+    "scripts/verify-published-image",
+    "scripts/verify-release-tag-authority",
 ]
-# Python scripts without a .py suffix.
-extend-include = ["rust/fuzz/seed-corpus"]
+
+[tool.ruff.lint]
+extend-select = [
+    "E4", "E7", "E9",  # E402 is the companion of PLC0415; E731 lambda assignment
+    "PLC", "PLE", "PLR", "PLW",  # incl. PLC0415 import-outside-top-level
+    "TID252",  # with ban-relative-imports = "all": one import spelling
+    "TID251",  # banned-api (below)
+    "B", "C4", "RET", "SIM", "PERF", "PT", "PTH", "FURB", "PYI", "RSE", "RUF",
+    "N", "A", "ERA", "FAST", "ASYNC", "LOG", "PGH", "S", "ARG", "FBT001", "FBT002",
+]
+ignore = [
+    # Size/complexity ceilings: numeric thresholds are count ceilings.
+    "PLR0904", "PLR0911", "PLR0912", "PLR0913", "PLR0914", "PLR0915", "PLR0916", "PLR0917", "PLR1702",
+    "PLR2004",  # magic-value comparison: tests assert literal expected values
+    "PLR6301",  # no-self-use: protocol and fake classes keep self for the interface
+    "PLC2701",  # private import: package-private _modules are the layering convention
+    "PLW1514",  # unspecified encoding: UTF-8 mode
+    "PT011",  # pytest.raises too broad: the fix is match= on message text, a wording test
+    "RUF043",  # ambiguous match= pattern: polishes wording asserts
+    "RUF001", "RUF002", "RUF003",  # ambiguous unicode: × … – are intentional in user-facing text
+    "N818",  # exception names without Error suffix: wire-visible names
+    "A002",  # argument shadows builtin: FastAPI parameter names (id, type) are wire names
+    "S101",  # assert: pytest's assertion style
+    "S104", "S105", "S106", "S108", "S311",  # bind-all/hardcoded secret/tmp/random: fixture noise
+    "S603", "S607",  # subprocess audit flags every call; the git-in-tests guards are the rule
+    "S310",  # urlopen scheme audit
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Unused fixture/monkeypatch parameters and boolean test parameters are pytest idiom.
+"**/tests/**" = ["ARG", "FBT001", "FBT002"]
+# Absolute imports only inside the installable packages, where the absolute name
+# is unambiguous (control/tests is `tests.*` under pytest but `control.tests.*`
+# as a module).
+"!{src,control/src,agent_protocol/src,nas_setup/src}/**" = ["TID252"]
+# The one place that may hold threads on a raw barrier.
+"control/tests/insert_collision_support.py" = ["TID251"]
+# Guard-blocked grandfathered sites; fixed by the class follow-up. A fix or a
+# per-site noqa re-adds a line an added-line principle guard flags: an untyped
+# mapping (catalog/service, lifecycle/job, campaign profiles), an item-count cap
+# (model_cache/http), and for PT018 a transient fault ending "failed", an
+# operator wait or an observation withdrawal.
+"control/src/vonk_control/catalog/service.py" = ["ARG002"]
+"control/src/vonk_control/lifecycle/job.py" = ["RUF036"]
+"control/src/vonk_control/model_cache/http.py" = ["B007"]
+"src/cluster_profiles/fleet_qualification_campaign_cli/profiles.py" = ["ARG001"]
+"control/tests/{test_agent_jobs_claim_intent,test_agent_jobs_postgres,test_build_cancellation_process_recovery,test_profile_removed_spark_postgres,test_recipe_builds_plan_admission,test_recipe_observation_wire_bridge,test_recipe_retry_installed_cli,test_recipe_update_batches,test_agent_operation_lifecycle,test_operation_api,test_distributed_recovery_budget,test_service_stop_review_postgres}.py" = ["PT018"]
+
+[tool.ruff.lint.isort]
+# Classification must not depend on the generated client being present.
+known-first-party = ["cluster_profiles", "vonk_control", "vonk_agent_protocol", "vonk_nas_setup"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"threading.Barrier".msg = "use control/tests/insert_collision_support.py barriers"
+
+[tool.ruff.format]
+# Never formatter-clean; a reflow re-adds lines the added-line principle guards
+# flag (contract literals, document digests outside ingress). Formatting them is
+# a follow-up together with those guard findings.
+exclude = ["scripts/qualify-recipe", "scripts/reuse-development-image"]
 
 [tool.pyright]
 # One checker for the whole repository. scripts/check-python-types runs it from
 # the control environment, which carries the union of both projects'
 # dependencies, so import resolution is complete.
 pythonVersion = "3.14"
-typeCheckingMode = "basic"
+# The Controller and CI run Linux: a Mac hook checks the same platform.
+pythonPlatform = "Linux"
+typeCheckingMode = "standard"
 # Mirror the import roots the test suites add to sys.path, so static analysis
 # resolves the same modules the runtime does.
 extraPaths = ["src", "scripts", "agent_protocol/src", "control/src", "tests/scripts", "nas_setup/src"]
-include = ["control/src", "src", "nas_setup/src", "nas_setup/hatch_build.py", "tests", "control/tests"]
+# The extensionless scripts are not globbed (pyright reads *.py only);
+# scripts/check-python-types passes them, from Ruff's file selection.
+include = [
+    "control/src",
+    "src",
+    "nas_setup/src",
+    "nas_setup/hatch_build.py",
+    "agent_protocol/src",
+    "agent_protocol/tests",
+    "tests",
+    "control/tests",
+    "scripts",
+    "tools",
+]
 exclude = [
     "**/generated_control/**",
     "**/node_modules/**",
     "**/.venv/**",
     "**/__pycache__/**",
 ]
+# The agent protocol runs on the Sparks, which have Python 3.12.
+executionEnvironments = [
+    { root = "agent_protocol/src", pythonVersion = "3.12", extraPaths = ["agent_protocol/src"] },
+    { root = "." },
+]
+# Strict-mode checks with behaviour value, on everywhere. A stale ignore fails,
+# so no baseline is needed.
+reportUnnecessaryTypeIgnoreComment = "error"
+reportMatchNotExhaustive = "error"
+reportUnnecessaryIsInstance = "error"
+reportUnnecessaryComparison = "error"
+reportUnnecessaryContains = "error"
+reportUnnecessaryCast = "error"
+reportDeprecated = "error"
+reportMissingTypeArgument = "error"
+reportSelfClsParameterName = "error"
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "."]
+# scripts/: the sibling modules the repository scripts import by bare name.
+pythonpath = ["src", ".", "scripts"]
 testpaths = ["tests"]
 # Hang guard only. Per-test timing (10 s, or @pytest.mark.slow up to 60 s)
 # lives in tools/pytest_budget.py: reported for every test, enforced only on

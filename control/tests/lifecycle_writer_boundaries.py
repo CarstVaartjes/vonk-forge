@@ -479,7 +479,7 @@ class _Resolver:
                 env[node.target.id] = model
         elif isinstance(node, ast.NamedExpr):
             model = self.model_of(node.value, env)
-            if model is not None and isinstance(node.target, ast.Name):
+            if model is not None:
                 env[node.target.id] = model
         elif isinstance(node, ast.With):
             for item in node.items:

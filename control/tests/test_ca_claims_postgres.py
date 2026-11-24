@@ -9,7 +9,9 @@ from threading import Event
 import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
+
 from vonk_control.db.connections import build_engine
+from vonk_control.db.connections import build_engine as db_build_engine
 from vonk_control.enrollment.contract import EnrollmentGrant
 from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.model_primitives import Base
@@ -34,11 +36,11 @@ class SlowAuthority(RecordingAuthority):
         self.entered = Event()
         self.release = Event()
 
-    def issue_node(self, node_id, public_key_pem, now, *, request):
+    def issue_node(self, node_id, csr_pem, now, *, request):
         if node_id == self.pause_node:
             self.entered.set()
             assert self.release.wait(30)
-        return super().issue_node(node_id, public_key_pem, now, request=request)
+        return super().issue_node(node_id, csr_pem, now, request=request)
 
 
 def prepare(postgres_engine, provider):
@@ -56,7 +58,7 @@ def enroll(service, node_id):
     return issued
 
 
-@pytest.mark.parametrize("purpose", ("enrollment", "rotation"))
+@pytest.mark.parametrize("purpose", ["enrollment", "rotation"])
 def test_slow_issuer_does_not_hold_an_unrelated_postgres_claim(
     postgres_engine, purpose
 ):
@@ -137,7 +139,8 @@ def test_postgres_grant_lock_conflict_ends_observation_and_same_request_recovers
             assert not provider.calls
             with sessions() as observer:
                 original = observer.get(AgentEnrollmentGrant, grant.id)
-                assert original is not None and original.consumed_at is None
+                assert original is not None
+                assert original.consumed_at is None
                 assert observer.scalar(select(AgentEnrollment)) is None
         restarted = EnrollmentService(sessions, provider, clock=lambda: NOW)
         issued = restarted.submit(grant.token, request, evidence(request))
@@ -151,7 +154,6 @@ def test_postgres_grant_lock_conflict_ends_observation_and_same_request_recovers
 def test_enrollment_transactions_commit_durably_on_async_controller_connections(
     postgres_engine,
 ):
-    from vonk_control.db.connections import build_engine as db_build_engine
 
     engine = db_build_engine(postgres_engine.url.render_as_string(hide_password=False))
     try:

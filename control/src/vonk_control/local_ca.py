@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -24,6 +24,7 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.capability_reply import CapabilityReason
 from vonk_agent_protocol.lifecycle_vocabulary import ErrorCategory, WaitReason
 from vonk_agent_protocol.outcome import UnknownError
@@ -32,21 +33,20 @@ from vonk_agent_protocol.state_machines import (
     CertificateIssuancePurpose,
     CertificateRequestMode,
 )
-
-from .ca_issuance_contract import CertificateIssuanceBinding
-from .capabilities import CapabilityConfigurationError
-from .models.fleet import (
+from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
+from vonk_control.capabilities import CapabilityConfigurationError
+from vonk_control.models.fleet import (
     AgentCertificate,
     LocalCertificateIssuance,
     LocalCertificateRevocation,
 )
-from .pki import (
+from vonk_control.pki import (
     IssuedCertificate,
     _load_node_csr,
     _read_regular_secret_file,
     _utc_timestamp,
 )
-from .step_ca import (
+from vonk_control.step_ca import (
     _DEFAULT_CERTIFICATE_LIFETIME_SECONDS,
     _KID,
     _MAX_CRL_WINDOW,
@@ -118,7 +118,7 @@ class LocalCertificateAuthority(NodeCertificateAuthority):
         """No transport resources to close."""
 
     @contextmanager
-    def _session(self, *, write: bool = False) -> Iterator[Session]:
+    def _session(self, *, write: bool = False) -> Generator[Session]:
         try:
             with self._sessions() as session:
                 if write:
@@ -129,7 +129,7 @@ class LocalCertificateAuthority(NodeCertificateAuthority):
         except SQLAlchemyError as error:
             raise StepCAUnavailable("local CA journal is unavailable") from error
 
-    def check_health(self) -> None | UnknownError:
+    def check_health(self) -> UnknownError | None:
         try:
             with self._session() as session:
                 session.execute(select(LocalCertificateIssuance.request_id).limit(1))

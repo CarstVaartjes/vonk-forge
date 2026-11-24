@@ -7,7 +7,7 @@ the words come from ``cli_states_generated``, generated from the contract by
 
 from __future__ import annotations
 
-from .cli_states_generated import (
+from cluster_profiles.cli_states_generated import (
     CANCELLED,
     FAILED,
     LIVE_LIFECYCLE_STATES,

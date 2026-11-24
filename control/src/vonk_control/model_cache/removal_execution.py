@@ -11,11 +11,11 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
-
-from ..agent_operation_facts import aware as _aware
-from ..artifact_jobs.lifecycle import (
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     check_removal_fence_nowait,
@@ -23,35 +23,51 @@ from ..artifact_jobs.lifecycle import (
     lock_removal_fences,
     retryable_artifact_database_error,
 )
-from ..artifact_reference_scan.model_references import model_set_reference_findings
-from ..artifact_reference_scan.types import ArtifactReferenceFinding, _reason_projection
-from ..failure_classification import disposition
-from ..lifecycle.evidence import Residue
-from ..lifecycle.types import Effect, Outcome, Reported
-from ..models.cache import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
-from ..models.execution import RecipeInstallation
-from ..models.fleet import FleetProfileApplication
-from ..models.jobs import Job
-from ..models.operations import ArtifactDistributionAssignment
-from ..validation_detail import validation_error_detail
-from . import states as model_cache_states
-from .constants import _RETRY_BASE_SECONDS, REMOVAL_BATCH_SECONDS, SCHEMA_VERSION
-from .contract import (
+from vonk_control.artifact_reference_scan.model_references import (
+    model_set_reference_findings,
+)
+from vonk_control.artifact_reference_scan.types import (
+    ArtifactReferenceFinding,
+    _reason_projection,
+)
+from vonk_control.failure_classification import disposition
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.types import Effect, Outcome, Reported
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.constants import (
+    _RETRY_BASE_SECONDS,
+    REMOVAL_BATCH_SECONDS,
+    SCHEMA_VERSION,
+)
+from vonk_control.model_cache.contract import (
     ModelCacheRemovalPayload,
     ModelCacheRemovalResult,
     ModelCacheSetState,
 )
-from .errors import ModelCacheStorageRefused, _ArtifactWriterBusy
-from .persistence import (
+from vonk_control.model_cache.errors import (
+    ModelCacheStorageRefused,
+    _ArtifactWriterBusy,
+)
+from vonk_control.model_cache.persistence import (
     _operation_progress,
     _operation_removal,
     _store_operation_payload,
     _updated,
 )
-from .progress import cache_phase, progress_document
+from vonk_control.model_cache.progress import cache_phase, progress_document
+from vonk_control.models.cache import (
+    ModelCacheOperation,
+    ModelCacheSet,
+    ModelCacheSetArtifact,
+)
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import ArtifactDistributionAssignment
+from vonk_control.validation_detail import validation_error_detail
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class RemovalExecutionMixin:

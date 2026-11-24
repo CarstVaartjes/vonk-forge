@@ -8,13 +8,14 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import Table, create_engine, event, insert
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import (
     OperationCheckpoint,
     OperationMemberProgress,
     OperationProgress,
+    canonical_message,
     normalize_operation_progress,
 )
 from vonk_control.bounded_json import require_mapping, require_sequence, text
@@ -275,10 +276,12 @@ def test_failure_evidence_restored_diagnostics_obey_the_byte_limit() -> None:
     assert cause["value"] == "oom_killed"
     stderr = require_mapping(diagnostics["stderr"], "stderr retained")
     tail = text(stderr["text"])
-    assert tail is not None and tail.startswith("Killed")
+    assert tail is not None
+    assert tail.startswith("Killed")
     assert stderr["truncated"] is True
     dropped = stderr["dropped_bytes"]
-    assert isinstance(dropped, int) and dropped > 0
+    assert isinstance(dropped, int)
+    assert dropped > 0
 
 
 @pytest.mark.parametrize("partial", [False, True])

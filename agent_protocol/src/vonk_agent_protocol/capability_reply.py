@@ -6,7 +6,7 @@ from enum import StrEnum
 
 from pydantic import ConfigDict
 
-from .wire_model import StrictJSONModel
+from vonk_agent_protocol.wire_model import StrictJSONModel
 
 
 class ControllerCapability(StrEnum):

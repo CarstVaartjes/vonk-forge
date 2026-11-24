@@ -4,6 +4,7 @@ import json
 import runpy
 import shutil
 import subprocess
+from configparser import ConfigParser
 from pathlib import Path
 
 import pytest
@@ -24,7 +25,6 @@ PACKAGED_UNITS = [
 )
 def test_control_services_keep_memory_and_survive_workload_oom(name: str) -> None:
     # Catches packaging that lets workload pressure evict either control process.
-    from configparser import ConfigParser
 
     unit = ConfigParser(strict=False)
     unit.read(ROOT / "packaging/systemd" / name)
@@ -94,7 +94,6 @@ def test_verifier_analyzes_the_packaged_rust_agent_units() -> None:
 
 
 def test_agent_orders_driver_without_udevadm_and_allows_namespace_recovery() -> None:
-    from configparser import ConfigParser
 
     unit = ConfigParser(interpolation=None, strict=False)
     agent = (ROOT / "packaging/systemd/vonk-forge-agent.service").read_text()

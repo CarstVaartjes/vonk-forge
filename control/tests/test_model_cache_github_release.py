@@ -14,12 +14,15 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_forge_contracts import ModelDefinition, document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.bounded_retry import REQUEST_PAUSES
+from vonk_control.lifecycle.model_cache import RECOVERY_BUDGET
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
-from vonk_forge_contracts import ModelDefinition, document_sha256
 
 NOW = datetime(2026, 9, 27, 12, tzinfo=UTC)
 REPOSITORY = "https://github.com/valeoai/NAF"
@@ -274,7 +277,8 @@ def test_github_source_accepts_large_ids_permitted_by_canonical_contract(
     assert isinstance(source, dict)
     source["release_id"] = release_id
     assets = source["assets"]
-    assert isinstance(assets, list) and isinstance(assets[0], dict)
+    assert isinstance(assets, list)
+    assert isinstance(assets[0], dict)
     assets[0]["asset_id"] = asset_id
     model = ModelDefinition.model_validate(document)
     digest, _selector = _insert_model(sessions, model)
@@ -317,7 +321,8 @@ def test_mutable_release_metadata_cannot_veto_exact_verified_content(
     digest, _selector = _insert_model(sessions, _model(data))
     release = _release_document(data)
     assets = release["assets"]
-    assert isinstance(assets, list) and isinstance(assets[0], dict)
+    assert isinstance(assets, list)
+    assert isinstance(assets[0], dict)
     asset = assets[0]
     if change == "wrong-release":
         release["id"] = RELEASE_ID + 1
@@ -607,7 +612,7 @@ def test_denied_source_never_transfers_and_new_authorized_request_progresses(
 
 
 @pytest.mark.parametrize(
-    "status,headers",
+    ("status", "headers"),
     [
         (429, {"Retry-After": "17"}),
         (304, {"Retry-After": "17"}),
@@ -668,10 +673,6 @@ def test_incomplete_redirect_observes_until_deadline_then_fresh_exact_request_he
     sessions, tmp_path: Path, response_shape: str
 ):
     """Catches transient redirect observations ending as permanent trust refusals."""
-    from datetime import timedelta
-
-    from vonk_control.lifecycle.model_cache import RECOVERY_BUDGET
-    from vonk_control.models.cache import ModelCacheOperation
 
     now = [NOW]
     healthy = [False]
@@ -693,19 +694,24 @@ def test_incomplete_redirect_observes_until_deadline_then_fresh_exact_request_he
     try:
         _, original = _preview_and_start(service, digest, str(uuid4()))
         service.run_pending()
-        assert responses and all(reply.is_closed for reply in responses)
+        assert responses
+        assert all(reply.is_closed for reply in responses)
         with sessions() as session:
             waiting = session.get(ModelCacheOperation, original.id)
-            assert waiting is not None and waiting.completed_at is None
-            assert waiting.lease_deadline is None and waiting.next_action_at is not None
+            assert waiting is not None
+            assert waiting.completed_at is None
+            assert waiting.lease_deadline is None
+            assert waiting.next_action_at is not None
         spec = service.resolve_artifact_set(model_content_sha256=digest).artifacts[0]
         assert not service._object_path(spec.sha256).exists()
         now[0] += RECOVERY_BUDGET + timedelta(seconds=1)
         service.run_pending()
         with sessions() as session:
             ended = session.get(ModelCacheOperation, original.id)
-            assert ended is not None and ended.completed_at is not None
-            assert ended.lease_deadline is None and ended.next_action_at is None
+            assert ended is not None
+            assert ended.completed_at is not None
+            assert ended.lease_deadline is None
+            assert ended.next_action_at is None
         healthy[0] = True
         _, fresh = _preview_and_start(service, digest, str(uuid4()))
         assert fresh.id != original.id

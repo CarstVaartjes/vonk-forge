@@ -7,6 +7,7 @@ import os
 import stat
 import subprocess
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/supersede-release-runs"
@@ -14,7 +15,13 @@ APT = "Publish accepted ARM64 Spark agent package to apt dev"
 AUTHORITY = "Accept one complete source generation"
 
 
-def _fake_gh(tmp_path: Path, runs: list[dict], jobs: dict, ancestors: set, fail=False):
+def _fake_gh(
+    tmp_path: Path,
+    runs: list[dict[str, Any]],
+    jobs: dict[str, Any],
+    ancestors: set[str],
+    fail=False,
+):
     """A ``gh`` that answers run, job and compare reads and records cancels."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -49,7 +56,7 @@ def _fake_gh(tmp_path: Path, runs: list[dict], jobs: dict, ancestors: set, fail=
     return bin_dir
 
 
-def _run(identifier: int, number: int, sha: str, **fields) -> dict:
+def _run(identifier: int, number: int, sha: str, **fields) -> dict[str, Any]:
     return {
         "id": identifier,
         "run_number": number,
@@ -63,7 +70,7 @@ def _run(identifier: int, number: int, sha: str, **fields) -> dict:
 
 def _newer_release(
     tmp_path: Path, bin_dir: Path
-) -> tuple[subprocess.CompletedProcess, list]:
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     result = subprocess.run(
         [str(SCRIPT), "--repository", "o/r", "--run-number", "20", "--sha", "new"],
         capture_output=True,

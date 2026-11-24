@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import http.client
+import itertools
 import json
 import sys
 import tarfile
@@ -10,13 +12,33 @@ import threading
 import time
 import types
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from scripts.development_slice_client import SliceError
 from tests.acceptance import spark_upgrade_carry as carry
+from tests.acceptance import test_spark_lifecycle as lifecycle
 from tests.acceptance.test_spark_lifecycle import LifecycleError
+from vonk_agent_protocol.agent_words import ProfileReportedPhase
+from vonk_agent_protocol.state_machines import (
+    CertificateState,
+    RouteState,
+    RunState,
+)
+from vonk_control.fleet_projection.common import (
+    CapacityReservations,
+    FleetNode,
+    FleetSnapshot,
+    NodeConnection,
+    RunPresence,
+)
+from vonk_control.run_readiness import GroupHealth
+from vonk_control.run_switch_contract.phase_results import (
+    RunSwitchFinalVerifyResult,
+)
 
 
 def _lane(probes: list[carry.ProbeResult]) -> carry.UpgradeCarryLifecycle:
@@ -176,7 +198,8 @@ def test_the_first_release_is_skipped_visibly(tmp_path: Path, monkeypatch, capsy
         "::notice title=Upgrade-carry acceptance skipped::" in capsys.readouterr().out
     )
     report = json.loads(output.read_text())
-    assert report["status"] == "skipped" and "no previous promoted" in report["reason"]
+    assert report["status"] == "skipped"
+    assert "no previous promoted" in report["reason"]
 
 
 CLEANUP_ID = "11111111-1111-4111-8111-111111111111"
@@ -186,11 +209,6 @@ INSTALLATION_ID = "55555555-5555-4555-8555-555555555555"
 
 
 def _serving_receipt(run_id: str):
-    from vonk_agent_protocol.agent_words import ProfileReportedPhase
-    from vonk_agent_protocol.state_machines import RouteState, RunState
-    from vonk_control.run_switch_contract.phase_results import (
-        RunSwitchFinalVerifyResult,
-    )
 
     return RunSwitchFinalVerifyResult.model_validate_json(
         json.dumps(
@@ -208,21 +226,6 @@ def _serving_receipt(run_id: str):
 
 
 def _serving_fleet(installation_id: str, run_id: str):
-    from datetime import UTC, datetime
-
-    from vonk_agent_protocol.state_machines import (
-        CertificateState,
-        RouteState,
-        RunState,
-    )
-    from vonk_control.fleet_projection.common import (
-        CapacityReservations,
-        FleetNode,
-        FleetSnapshot,
-        NodeConnection,
-        RunPresence,
-    )
-    from vonk_control.run_readiness import GroupHealth
 
     node_id = "spk_0123456789abcdef0123456789abcdef"
     run = RunPresence(
@@ -305,9 +308,6 @@ def test_serving_identity_reobserves_unknown_and_ends_without_poisoning_fresh_lo
     monkeypatch,
 ):
     """Catches treating stale Fleet/receipt evidence as a permanent refusal."""
-    import itertools
-
-    from tests.acceptance import test_spark_lifecycle as lifecycle
 
     lane = object.__new__(carry.UpgradeCarryLifecycle)
     receipt = _serving_receipt(RUN_ID)
@@ -418,7 +418,8 @@ def test_a_superseded_load_is_followed_to_its_automatic_retry(monkeypatch):
     result = lane._await_profile_application(
         dict(replies["first"]), label="editorial successor profile load", node_id="n"
     )
-    assert result["id"] == "retry" and result["state"] == "succeeded"
+    assert result["id"] == "retry"
+    assert result["state"] == "succeeded"
 
 
 def test_a_superseded_load_without_a_successor_still_fails(monkeypatch):
@@ -471,7 +472,8 @@ def test_a_fixture_the_live_library_withdrew_is_imported_and_served_once_more(
 
     assert lane._offered_once_more(serve, imported.append) == "serving"
     # The second attempt uses its own request keys, after a fresh import.
-    assert imported == ["-again"] and served == ["", "-again"]
+    assert imported == ["-again"]
+    assert served == ["", "-again"]
 
 
 def test_a_failure_without_a_library_withdrawal_is_not_retried(monkeypatch):
@@ -517,7 +519,6 @@ def test_an_unreadable_sync_status_keeps_the_phase_failure(monkeypatch):
 
 def test_acceptance_scripts_define_everything_before_their_entry_point():
     """A helper defined after the __main__ block does not exist when run as a script."""
-    import ast
 
     root = Path(__file__).resolve().parent / "acceptance"
     late: list[str] = []
@@ -725,14 +726,22 @@ def test_revision_lookup_retries_a_failed_gh_call(monkeypatch):
     assert carry._revision_through_api("sha") == "rev\n"
 
 
-def _run_main(monkeypatch, tmp_path, *arguments: str) -> dict:
+def _run_main(monkeypatch, tmp_path, *arguments: str) -> dict[str, Any]:
     monkeypatch.delenv("VONK_ACCEPTANCE_TEST_MODE", raising=False)
     output = tmp_path / "report.json"
     monkeypatch.setattr(
         sys,
         "argv",
-        ["carry", "--channel", "dev", "--run-id", "1", "--output", str(output)]
-        + list(arguments),
+        [
+            "carry",
+            "--channel",
+            "dev",
+            "--run-id",
+            "1",
+            "--output",
+            str(output),
+            *list(arguments),
+        ],
     )
     assert carry.main() == 0
     return json.loads(output.read_text(encoding="utf-8"))
@@ -832,11 +841,13 @@ def test_a_cleanup_application_is_accepted_whole_and_refused_when_damaged():
     lifecycle._current_release = lambda: types.SimpleNamespace(  # type: ignore[method-assign]
         contract=types.SimpleNamespace(check_json_response=lambda *_args: None)
     )
-    check = lambda application: lifecycle._validate_cleanup_application(
-        application,
-        installation_ids=["5b6a3f2e-1c4d-4e8f-9a0b-1c2d3e4f5a62"],
-        run_id="5b6a3f2e-1c4d-4e8f-9a0b-1c2d3e4f5a61",
-    )
+
+    def check(application):
+        return lifecycle._validate_cleanup_application(
+            application,
+            installation_ids=["5b6a3f2e-1c4d-4e8f-9a0b-1c2d3e4f5a62"],
+            run_id="5b6a3f2e-1c4d-4e8f-9a0b-1c2d3e4f5a61",
+        )
 
     check(_cleanup_application())
     with pytest.raises(LifecycleError, match="removal receipt is incomplete"):

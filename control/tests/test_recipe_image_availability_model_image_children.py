@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     SecurityRefusalReason,
@@ -28,6 +29,7 @@ from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.jobs.documents import (
     AvailabilityModelChild,
 )
+from vonk_control.lifecycle.image_availability import CANCEL_BUDGET
 from vonk_control.model_cache.contract import (
     ModelCacheCounters,
     ModelCacheRepairPreviewResponse,
@@ -621,7 +623,8 @@ def test_late_verified_image_result_cannot_publish_after_cancellation(
     assert retained.is_file()
     with sessions() as session:
         row = session.get(Job, operation.id)
-        assert row is not None and row.state == "cancelled"
+        assert row is not None
+        assert row.state == "cancelled"
         assert "image_result" not in row.payload
         assert "image_reference_intent" not in row.payload
     assert_ended_without_blocking(
@@ -826,7 +829,6 @@ def test_cancelling_reference_intent_rejects_stale_or_fenced_claim(
         row = session.get(Job, operation.id)
         assert row is not None
         assert "image_reference_intent" not in row.payload
-    from vonk_control.lifecycle.image_availability import CANCEL_BUDGET
 
     elapsed = service._clock() + CANCEL_BUDGET + timedelta(seconds=1)
     service._clock = lambda: elapsed

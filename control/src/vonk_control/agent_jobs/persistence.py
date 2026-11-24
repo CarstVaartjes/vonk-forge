@@ -8,24 +8,28 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
-from ..admission_locking import (
+from vonk_control.admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
     label_transaction,
     lock_admission_rows,
 )
-from ..lifecycle.agent_operation import AgentOperationAdapter, parked_orders, same_order
-from ..lifecycle.reconciler import settle
-from ..lifecycle.types import Lifecycle, Tick
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from .contracts import _LOGGER
-from .ownership import observation_ownership
-from .retirement import operator_resume_candidates_in_session
+from vonk_control.agent_jobs.contracts import _LOGGER
+from vonk_control.agent_jobs.ownership import observation_ownership
+from vonk_control.agent_jobs.retirement import operator_resume_candidates_in_session
+from vonk_control.lifecycle.agent_operation import (
+    AgentOperationAdapter,
+    parked_orders,
+    same_order,
+)
+from vonk_control.lifecycle.reconciler import settle
+from vonk_control.lifecycle.types import Lifecycle, Tick
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
 
 if TYPE_CHECKING:
-    from .service import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
 
 
 class _OrderStore:

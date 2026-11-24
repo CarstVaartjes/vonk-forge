@@ -57,7 +57,10 @@ class PhaseTimings:
         if not summary:
             return
         table = "".join(f"| {name} | {seconds} |\n" for name, seconds in self.rows)
-        with contextlib.suppress(OSError), open(summary, "a", encoding="utf-8") as out:
+        with (
+            contextlib.suppress(OSError),
+            Path(summary).open("a", encoding="utf-8") as out,
+        ):
             out.write(
                 f"#### {label} phase timings\n\n| phase | seconds |\n|---|---|\n{table}\n"
             )
@@ -107,7 +110,7 @@ curl --fail --location --silent --show-error \\
     return ["/bin/sh", "-c", script, "vonk-bootstrap", url, *arguments]
 
 
-def write_all(write: Callable[[bytes], int], payload: bytes) -> None:
+def write_all(write: Callable[[bytes], int | None], payload: bytes) -> None:
     """Write a complete payload or fail instead of silently truncating it."""
     offset = 0
     while offset < len(payload):
@@ -179,7 +182,7 @@ def run_interactive(
     if pid == 0:
         try:
             os.chdir(cwd)
-            os.execvpe(argv[0], argv, child_environment)
+            os.execvpe(argv[0], argv, child_environment)  # noqa: S606 -- the exec or pty spawn is intended
         except OSError:
             os._exit(127)
 
@@ -231,11 +234,9 @@ def run_interactive(
             missing = ", ".join(prompt for prompt, _ in pending)
             raise AcceptanceError(f"interactive prompts were not observed: {missing}")
         return rendered
-    except BaseException:
-        try:
+    except BaseException as error:
+        with contextlib.suppress(ProcessLookupError):
             os.killpg(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
         if status is None:
             reap_deadline = time.monotonic() + 5  # wall-clock: grace, SIGKILL next
             child = 0
@@ -248,7 +249,9 @@ def run_interactive(
                     os.killpg(pid, signal.SIGKILL)
                 child, _ = os.waitpid(pid, 0)
             if child != pid:
-                raise AcceptanceError("interactive child could not be reaped")
+                raise AcceptanceError(
+                    "interactive child could not be reaped"
+                ) from error
         raise
     finally:
         os.close(terminal)
@@ -460,12 +463,12 @@ def https_over_command(
         or any(character in path for character in "\0\r\n")
         or (client_certificate is None) != (client_key is None)
         or method not in {"DELETE", "GET", "PATCH", "POST", "PUT"}
-        or (body is not None and not isinstance(body, bytes))
+        or (body is not None and not isinstance(body, bytes))  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
         or (body is not None and len(body) > MAXIMUM_HTTPS_BODY_BYTES)
         or (method == "GET" and body is not None)
         or not allowed_statuses
         or any(
-            not isinstance(status, int)
+            not isinstance(status, int)  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
             or isinstance(status, bool)
             or not 100 <= status <= 599
             for status in allowed_statuses
@@ -475,10 +478,10 @@ def https_over_command(
             or any(character in name for character in "\0\r\n:")
             or any(character in value for character in "\0\r\n")
             for name, value in request_headers.items()
-            if isinstance(name, str) and isinstance(value, str)
+            if isinstance(name, str) and isinstance(value, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
         )
         or any(
-            not isinstance(name, str) or not isinstance(value, str)
+            not isinstance(name, str) or not isinstance(value, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
             for name, value in request_headers.items()
         )
         or any(
@@ -583,10 +586,8 @@ def https_over_command(
             raise AcceptanceError(
                 f"tailnet HTTPS endpoint returned {status_line[:200]!r}"
             )
-        try:
+        with contextlib.suppress(BrokenPipeError, OSError, ValueError):
             process.stdin.close()
-        except (BrokenPipeError, OSError, ValueError):
-            pass
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise AcceptanceError("HTTPS tunnel timed out waiting for child exit")
@@ -602,20 +603,14 @@ def https_over_command(
             f"tailnet HTTPS endpoint is unavailable ({type(error).__name__}: {error})"
         ) from error
     finally:
-        try:
+        with contextlib.suppress(BrokenPipeError, OSError, ValueError):
             process.stdin.close()
-        except (BrokenPipeError, OSError, ValueError):
-            pass
         if process.poll() is None:
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 process.terminate()
-            except ProcessLookupError:
-                pass
         try:
             process.wait(timeout=5)  # wall-clock: terminate grace; kill follows
         except subprocess.TimeoutExpired:
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 process.kill()
-            except ProcessLookupError:
-                pass
             process.wait()

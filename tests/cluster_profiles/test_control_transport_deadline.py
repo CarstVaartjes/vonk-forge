@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import inspect
 import ipaddress
 import json
 import os
@@ -21,6 +22,7 @@ from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -29,6 +31,12 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 from test_control_client_requests import _artifact_job_response, _not_adopted
+
+from cluster_profiles import cli, control_transport
+from cluster_profiles.control_client.errors import ControlTransportError
+from cluster_profiles.control_client.transfers import ControlClient
+from cluster_profiles.control_transport import HTTPSResponse
+from control.tests.test_observation_transfer import _large_snapshot
 from vonk_control.observation.transfer import (
     OBSERVATION_MEDIA_TYPE,
     ObservationTransferChunk,
@@ -38,11 +46,6 @@ from vonk_control.observation.transfer import (
     observation_response,
 )
 from vonk_control.strict_json import serialize_json_value
-
-from cluster_profiles import cli
-from cluster_profiles.control_client.errors import ControlTransportError
-from cluster_profiles.control_client.transfers import ControlClient
-from control.tests.test_observation_transfer import _large_snapshot
 
 KEY = "11111111-1111-4111-8111-111111111111"
 
@@ -137,7 +140,8 @@ def https_peer(tmp_path, monkeypatch):
             state["calls"].append((self.command, self.path, b""))
             self.respond()
 
-        do_PUT = do_POST
+        def do_PUT(self):
+            self.do_POST()
 
         def respond(self):
             body = state.get("body", b'{"detail":"fixture response"}')
@@ -181,7 +185,7 @@ def https_peer(tmp_path, monkeypatch):
             except (BrokenPipeError, ConnectionResetError, ssl.SSLError):
                 state["closed"].set()
 
-        def log_message(self, *_args):
+        def log_message(self, format: str, *args: object) -> None:
             pass
 
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -232,7 +236,7 @@ def _fresh_read(client, state):
 
 
 @pytest.mark.parametrize(
-    "stage,status", [("headers", 202), ("body", 202), ("body", 403)]
+    ("stage", "status"), [("headers", 202), ("body", 202), ("body", 403)]
 )
 def test_elapsed_deadline_closes_slow_https_and_retains_received_evidence(
     https_peer, stage, status
@@ -277,7 +281,8 @@ def test_elapsed_deadline_closes_slow_https_and_retains_received_evidence(
 def test_tls_peer_eof_before_request_is_observed_without_write_failure(https_peer):
     _, state = https_peer
     origin = urllib.parse.urlsplit(state["url"])
-    assert origin.hostname is not None and origin.port is not None
+    assert origin.hostname is not None
+    assert origin.port is not None
     context = ssl.create_default_context(cafile=os.environ["SSL_CERT_FILE"])
     with (
         socket.create_connection((origin.hostname, origin.port), timeout=0.25) as raw,
@@ -289,7 +294,7 @@ def test_tls_peer_eof_before_request_is_observed_without_write_failure(https_pee
 
 
 @pytest.mark.parametrize(
-    "status,acceptance,calls", [(403, "refused", 1), (202, "unknown", 4)]
+    ("status", "acceptance", "calls"), [(403, "refused", 1), (202, "unknown", 4)]
 )
 def test_cli_slow_response_never_repeats_post_without_authoritative_absence(
     https_peer, status, acceptance, calls
@@ -305,7 +310,8 @@ def test_cli_slow_response_never_repeats_post_without_authoritative_absence(
         )
     elapsed = time.monotonic() - started
     result = json.loads(output.getvalue())
-    assert exit_code == 2 and result["submission"]["acceptance"] == acceptance
+    assert exit_code == 2
+    assert result["submission"]["acceptance"] == acceptance
     assert result["request_key"] == KEY
     assert elapsed < 4 * DEADLINE, (
         f"submission escaped its {3 * DEADLINE}s total budget: {elapsed:.3f}s"
@@ -341,7 +347,6 @@ def test_cancelled_dns_cannot_delay_exit_or_send_a_late_request(
     https_peer, monkeypatch
 ):
     _, state = https_peer
-    from pathlib import Path
 
     original = socket.getaddrinfo
     release = threading.Event()
@@ -428,7 +433,8 @@ def test_redirect_cannot_forward_authenticated_request(https_peer):
             "/api/model/chosen/download",
             {"request_key": KEY},
         )
-    assert len(state["calls"]) == 1 and state["calls"][0][1] != "/redirected"
+    assert len(state["calls"]) == 1
+    assert state["calls"][0][1] != "/redirected"
     _fresh_read(client, state)
 
 
@@ -544,8 +550,10 @@ raise SystemExit(cli.main(sys.argv[2:], control_client=client))
             process.kill()
             process.communicate(timeout=30)
     result = json.loads(output)
-    assert process.returncode == 2 and result["submission"]["acceptance"] == "unknown"
-    assert result["request_key"] == KEY and not state["calls"]
+    assert process.returncode == 2
+    assert result["submission"]["acceptance"] == "unknown"
+    assert result["request_key"] == KEY
+    assert not state["calls"]
     assert "Traceback" not in error
 
 
@@ -555,10 +563,6 @@ def _wedged_loop_response(monkeypatch, *, interrupt: bool):
     This is what a Ctrl-C raised inside the loop's bookkeeping leaves behind:
     the next ``run`` fails with "Event loop stopped before Future completed".
     """
-
-    from types import SimpleNamespace
-
-    from cluster_profiles import control_transport
 
     async def refuses(_self) -> None:
         raise RuntimeError("Event loop stopped before Future completed.")
@@ -620,7 +624,8 @@ def test_ctrl_c_inside_a_response_block_is_not_replaced_by_a_cleanup_failure(
             raise KeyboardInterrupt
     except KeyboardInterrupt:
         interrupted = True
-    assert interrupted and response.closed
+    assert interrupted
+    assert response.closed
     _fresh_loop(monkeypatch)
 
 
@@ -635,7 +640,8 @@ def test_a_cleanup_failure_with_nothing_in_flight_is_still_reported(monkeypatch)
         closed_successfully = True
     except RuntimeError:
         pass
-    assert not closed_successfully and response.closed
+    assert not closed_successfully
+    assert response.closed
     _fresh_loop(monkeypatch)
 
 
@@ -649,9 +655,10 @@ def test_continuous_valid_observation_progress_cannot_extend_attempt(
     response = observation_response(snapshot, resource="fleet")
 
     async def collect() -> bytes:
-        parts: list[bytes] = []
-        async for part in response.body_iterator:
-            parts.append(part.encode() if isinstance(part, str) else bytes(part))
+        parts: list[bytes] = [
+            part.encode() if isinstance(part, str) else bytes(part)
+            async for part in response.body_iterator
+        ]
         return b"".join(parts)
 
     original = asyncio.run(collect()).splitlines()
@@ -699,7 +706,8 @@ def test_continuous_valid_observation_progress_cannot_extend_attempt(
     assert time.monotonic() - started < 3 * DEADLINE
     context = cast(ControlTransportError, failure[0]).context
     assert context is not None
-    assert context.http_status == 200 and context.request_id == "deadline-fixture"
+    assert context.http_status == 200
+    assert context.request_id == "deadline-fixture"
     assert cast(ControlTransportError, failure[0]).retry_after_seconds == 120
     assert state["records_sent"] > 2, "no repeated valid-record progress was exercised"
     assert len(state["calls"]) == 1
@@ -714,8 +722,6 @@ def test_continuous_valid_observation_progress_cannot_extend_attempt(
 
 def test_sigint_during_executor_shutdown_finishes_cleanup(monkeypatch):
     """Ctrl-C at coroutine creation must not abandon Runner shutdown."""
-
-    import inspect
 
     transport, request = _wedged_loop_response(monkeypatch, interrupt=False)
 
@@ -737,7 +743,8 @@ def test_sigint_during_executor_shutdown_finishes_cleanup(monkeypatch):
     monkeypatch.setattr(loop, "shutdown_default_executor", interrupt_shutdown)
     with pytest.raises(KeyboardInterrupt):
         response.close()
-    assert response.closed and loop.is_closed()
+    assert response.closed
+    assert loop.is_closed()
     assert all(
         inspect.getcoroutinestate(work) == inspect.CORO_CLOSED for work in coroutines
     )
@@ -748,9 +755,6 @@ def test_sigint_during_executor_shutdown_finishes_cleanup(monkeypatch):
 
 def test_interrupt_before_runner_adopts_read_closes_coroutines(monkeypatch):
     """A signal before task creation cannot leak read or deadline coroutines."""
-    import inspect
-
-    from cluster_profiles.control_transport import HTTPSResponse
 
     response = object.__new__(HTTPSResponse)
     response._deadline = 1
@@ -791,7 +795,6 @@ def test_sigint_landing_as_the_runner_arms_is_still_a_ctrl_c(monkeypatch):
     A SIGINT in that window cancels the task but is forgotten, so the runner
     re-raises CancelledError. The transport must still report Ctrl-C (exit 130).
     """
-    from cluster_profiles.control_transport import HTTPSResponse
 
     real_signal = signal.signal
     delivered = []
@@ -820,7 +823,6 @@ def test_sigint_landing_as_the_runner_arms_is_still_a_ctrl_c(monkeypatch):
 
 def test_a_cancel_in_a_worker_thread_is_not_relabelled_a_ctrl_c():
     """Only a run that armed Runner's SIGINT handler may report Ctrl-C."""
-    from cluster_profiles.control_transport import HTTPSResponse
 
     outcome = []
 

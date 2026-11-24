@@ -14,9 +14,14 @@ from pathlib import Path
 
 import httpx2
 import pytest
+from fastapi import Depends, FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import ModelDefinition, document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_control.auth import Actor
 from vonk_control.bounded_json import (
     require_integer,
     require_mapping,
@@ -24,6 +29,7 @@ from vonk_control.bounded_json import (
     text,
 )
 from vonk_control.failure_classification import is_security_failure
+from vonk_control.model_cache.api import install_model_operator_routes
 from vonk_control.model_cache.constants import ProviderKind
 from vonk_control.model_cache.contract import (
     ModelCacheOperationProgress,
@@ -38,7 +44,6 @@ from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.settings import MODEL_CACHE_PARALLEL_DOWNLOADS
-from vonk_forge_contracts import ModelDefinition, document_sha256
 
 NOW = datetime(2026, 9, 6, 12, tzinfo=UTC)
 
@@ -119,6 +124,7 @@ def _drain(
     return_on_wait: bool = False,
 ) -> None:
     deadline = time.monotonic() + timeout_seconds
+    observed = None
     while time.monotonic() < deadline:
         service.tick()
         observed = service.get_operation(operation_id)
@@ -132,6 +138,7 @@ def _drain(
             return
         # Let the transfer thread commit without a CPU-speed-dependent poll cap.
         time.sleep(0.01)
+    assert observed is not None
     raise AssertionError(
         f"background operation did not settle: state={observed.state}, "
         f"completed={observed.progress.get('completed_artifacts')}/"
@@ -177,7 +184,8 @@ def test_single_job_saturates_all_controller_transfer_slots(tmp_path: Path) -> N
     _drain(service, operation.id)
     assert service.get_operation(operation.id).state == "succeeded"
     service.close()
-    assert client is not None and client.is_closed is False
+    assert client is not None
+    assert client.is_closed is False
     client.close()
 
 
@@ -264,6 +272,7 @@ def test_failed_future_waits_for_sibling_before_finalizing_failure(
     assert service.get_operation(operation.id).state == "running"
     release_sibling.set()
     deadline = time.monotonic() + 10
+    final = None
     while time.monotonic() < deadline:
         service.tick()
         final = service.get_operation(operation.id)
@@ -272,6 +281,7 @@ def test_failed_future_waits_for_sibling_before_finalizing_failure(
         time.sleep(0.01)
     # The integrity failure settles only after the sibling finished; the bad
     # bytes were discarded and the operation waits for its automatic retry.
+    assert final is not None
     assert final.state == "queued"
     assert final.failure is not None
     assert final.failure["retryable"] is True
@@ -771,7 +781,8 @@ def test_close_checkpoints_active_transfer_and_fresh_service_resumes(
     _drain(fresh, operation.id)
     assert fresh.get_operation(operation.id).state == "succeeded"
     fresh.close()
-    assert client is not None and fresh_client is not None
+    assert client is not None
+    assert fresh_client is not None
     client.close()
     fresh_client.close()
 
@@ -854,6 +865,7 @@ def test_hf_access_recheck_resumes_the_exact_retained_transfer(
     assert len(requests) == 2
 
     key = "00000000-0000-4000-8000-000000000402"
+    accepted = None
     for _ in range(2):
         accepted = service.check_access_and_resume(
             first.id,
@@ -864,6 +876,7 @@ def test_hf_access_recheck_resumes_the_exact_retained_transfer(
         )
         assert accepted.artifact_set_sha256 == first.artifact_set_sha256
         assert len(requests) == 2  # durable acceptance precedes worker HTTP effects
+    assert accepted is not None
     current_id = accepted.id
     assert service.get_operation(first.id).state == LifecycleState.CANCELLED
     service.tick()
@@ -896,10 +909,6 @@ def test_hf_access_recheck_resumes_the_exact_retained_transfer(
 def test_resume_access_keeps_its_own_receipt_while_an_older_transfer_is_live(
     tmp_path: Path,
 ) -> None:
-    from fastapi import Depends, FastAPI
-    from fastapi.testclient import TestClient
-    from vonk_control.auth import Actor
-    from vonk_control.model_cache.api import install_model_operator_routes
 
     sessions = _database(tmp_path)
     token_path = tmp_path / "hf-token"
@@ -959,7 +968,8 @@ def test_resume_access_keeps_its_own_receipt_while_an_older_transfer_is_live(
         LifecycleState.BACKOFF,
     }
     failure = service.get_operation(newer.id).failure
-    assert failure is not None and failure["code"] == "access_denied"
+    assert failure is not None
+    assert failure["code"] == "access_denied"
 
     actor = Actor("operator", "administrator")
     app = FastAPI()
@@ -1062,6 +1072,7 @@ def test_two_controller_services_share_one_upstream_object_transfer(
 
 def _drain_until(service, operation_id: str, now: list[datetime], states: set[str]):
     deadline = time.monotonic() + 10
+    observed = None
     while time.monotonic() < deadline:
         now[0] += timedelta(seconds=600)
         service.tick()
@@ -1069,6 +1080,7 @@ def _drain_until(service, operation_id: str, now: list[datetime], states: set[st
         if observed.state in states:
             return observed
         time.sleep(0.01)
+    assert observed is not None
     raise AssertionError(f"operation did not reach {states}: {observed.state}")
 
 
@@ -1097,8 +1109,10 @@ def test_two_consecutive_digest_mismatches_end_the_download_with_evidence(
     assert ended.failure is not None
     assert ended.failure["retryable"] is False
     detail = str(ended.failure["detail"])
-    assert str(artifact["sha256"]) in detail and "2 consecutive" in detail
-    assert ended.blockers == () and ended.next_attempt_at is None
+    assert str(artifact["sha256"]) in detail
+    assert "2 consecutive" in detail
+    assert ended.blockers == ()
+    assert ended.next_attempt_at is None
     for _ in range(3):
         now[0] += timedelta(seconds=600)
         service.tick()
@@ -1107,7 +1121,8 @@ def test_two_consecutive_digest_mismatches_end_the_download_with_evidence(
     serve_pinned[0] = True
     fresh = _start(service, [artifact], "00000000-0000-4000-8000-000000000454")
     done = _drain_until(service, fresh.id, now, {"succeeded", "failed"})
-    assert done.id != ended.id and done.state == "succeeded"
+    assert done.id != ended.id
+    assert done.state == "succeeded"
     service.close()
     assert client is not None
     client.close()
@@ -1147,7 +1162,8 @@ def test_two_files_that_both_keep_mismatching_end_the_download(
     assert first["download_bytes"] == second["download_bytes"]
     operation = _start(service, [first, second], "00000000-0000-4000-8000-000000000456")
     ended = _drain_until(service, operation.id, now, {"succeeded", "failed"})
-    assert ended.state == "failed" and ended.failure is not None
+    assert ended.state == "failed"
+    assert ended.failure is not None
     assert is_security_failure(str(ended.failure["code"]))
     assert ended.failure["retryable"] is False
     assert "2 consecutive" in str(ended.failure["detail"])

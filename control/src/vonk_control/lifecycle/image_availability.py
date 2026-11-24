@@ -60,7 +60,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
@@ -68,25 +68,12 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitOwnerKind,
     WaitReason,
 )
-
-from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
-from ..jobs import states as job_states
-from ..models.jobs import Job
-from ..persisted_waits import (
-    initialize_wait,
-    lifecycle_wait,
-    typed_wait_reason,
-    wait_due,
-)
-from ..recipe_image_availability.clocks_contract import StoredAvailabilityClocks
-from ..recipe_image_availability.removal_contract import RECIPE_CACHE_REMOVE_KIND
-from ..recipe_update_batches.contract import UPDATE_KIND
-from ..stall_window import stall_deadline
-from ..stored.json_values import read_row_column
-from ..strict_json import serialize_json_value
-from .adapter import Dispatch
-from .core import STOP_BUDGET, transition
-from .types import (
+from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import AvailabilityJobPayload
+from vonk_control.lifecycle.adapter import Dispatch
+from vonk_control.lifecycle.core import STOP_BUDGET, transition
+from vonk_control.lifecycle.types import (
     TERMINAL_STATES,
     CancelRequested,
     Claimed,
@@ -101,9 +88,19 @@ from .types import (
     State,
     StopResult,
 )
-
-if TYPE_CHECKING:
-    from ..jobs.documents import AvailabilityJobPayload
+from vonk_control.models.jobs import Job
+from vonk_control.persisted_waits import initialize_wait, lifecycle_wait, wait_due
+from vonk_control.recipe_image_availability.clocks_contract import (
+    StoredAvailabilityClocks,
+)
+from vonk_control.recipe_image_availability.removal_contract import (
+    RECIPE_CACHE_REMOVE_KIND,
+)
+from vonk_control.recipe_update_batches.contract import UPDATE_KIND
+from vonk_control.stall_window import stall_deadline
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import serialize_json_value
+from vonk_control.wait_contract import typed_wait_reason
 
 KIND = "image-availability"
 OPERATION_KIND = "recipe.image.availability.v2"
@@ -266,25 +263,25 @@ class ImageAvailabilityAdapter:
 
     # ------------------------------------------------------- kind questions
 
-    def irreversible(self, row: Lifecycle) -> bool:
+    def irreversible(self, _row: Lifecycle) -> bool:
         return False  # receipts and fenced steps make every repeat safe
 
-    def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
+    def retry_not_before(self, _row: Lifecycle, _now: datetime) -> datetime | None:
         return None
 
-    def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
+    def execute(self, _row: Lifecycle, _attempt: int) -> Dispatch:
         return Dispatch()  # the owner's worker claims its own work
 
-    def observe(self, row: Lifecycle) -> Observed:
+    def observe(self, _row: Lifecycle) -> Observed:
         return Observed(Effect.UNKNOWN)  # the owner's cancel pass is the inspection
 
-    def stop(self, row: Lifecycle) -> StopResult:
+    def stop(self, _row: Lifecycle) -> StopResult:
         return StopResult.UNCONFIRMED  # likewise: the owner stops its children
 
-    def actions(self, row: Lifecycle) -> tuple[str, ...]:
+    def actions(self, _row: Lifecycle) -> tuple[str, ...]:
         return ()  # nothing here waits for a person
 
-    def children(self, row: Lifecycle) -> tuple[Lifecycle, ...]:
+    def children(self, _row: Lifecycle) -> tuple[Lifecycle, ...]:
         return ()
 
     # ---------------------------------------------------------------- apply
@@ -295,7 +292,7 @@ class ImageAvailabilityAdapter:
         after: Lifecycle,
         now: datetime,
         *,
-        reason: str | None | _Keep = KEEP,
+        reason: str | _Keep | None = KEEP,
         visible: str | None = None,
         payload: AvailabilityJobPayload | None = None,
     ) -> AvailabilityJobPayload | None:
@@ -303,8 +300,6 @@ class ImageAvailabilityAdapter:
 
         Return the updated typed payload; the caller stores it through its contract.
         """
-
-        from ..jobs.documents import AvailabilityJobPayload
 
         now = aware(now)
         if after.state is State.BACKOFF:
@@ -367,7 +362,7 @@ class ImageAvailabilityAdapter:
         now: datetime,
         *,
         row: Lifecycle | None = None,
-        reason: str | None | _Keep = KEEP,
+        reason: str | _Keep | None = KEEP,
         visible: str | None = None,
     ) -> Decision:
         """Feed ``event`` to the core and write what it decides, inline.
@@ -472,7 +467,7 @@ class ImageAvailabilityAdapter:
         after: Lifecycle,
         now: datetime,
         *,
-        reason: str | None | _Keep = KEEP,
+        reason: str | _Keep | None = KEEP,
         payload: AvailabilityJobPayload | None = None,
     ) -> AvailabilityJobPayload | None:
         """Write a decision :meth:`plan_failure` returned."""
@@ -615,25 +610,25 @@ class PrebuiltImageAdapter:
         job.updated_at = now
         return decision.row
 
-    def irreversible(self, row: Lifecycle) -> bool:
+    def irreversible(self, _row: Lifecycle) -> bool:
         return False
 
-    def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
+    def retry_not_before(self, _row: Lifecycle, _now: datetime) -> datetime | None:
         return None
 
-    def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
+    def execute(self, _row: Lifecycle, _attempt: int) -> Dispatch:
         return Dispatch()
 
-    def observe(self, row: Lifecycle) -> Observed:
+    def observe(self, _row: Lifecycle) -> Observed:
         return Observed(Effect.UNKNOWN)
 
-    def stop(self, row: Lifecycle) -> StopResult:
+    def stop(self, _row: Lifecycle) -> StopResult:
         return StopResult.UNCONFIRMED
 
-    def actions(self, row: Lifecycle) -> tuple[str, ...]:
+    def actions(self, _row: Lifecycle) -> tuple[str, ...]:
         return ()
 
-    def children(self, row: Lifecycle) -> tuple[Lifecycle, ...]:
+    def children(self, _row: Lifecycle) -> tuple[Lifecycle, ...]:
         return ()
 
 

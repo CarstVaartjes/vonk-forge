@@ -12,10 +12,9 @@ from vonk_agent_protocol.wire_model import (
     OperationMemberProgress,
     OperationProgress,
 )
-
-from ..operations.item_contract import OperationResultFacts
-from ..run_switch_contract.operations import RunSwitchOperation
-from ..strict_json import read_stored_model
+from vonk_control.operations.item_contract import OperationResultFacts
+from vonk_control.run_switch_contract.operations import RunSwitchOperation
+from vonk_control.strict_json import read_stored_model
 
 
 def _activity_progress(operation: RunSwitchOperation) -> OperationProgress:

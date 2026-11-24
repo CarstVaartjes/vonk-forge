@@ -5,13 +5,13 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import os
 import shutil
 import subprocess
 import sys
 import time
 import zipfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -170,7 +170,7 @@ def _inputs(
         check=True,
         capture_output=True,
     )
-    os.chmod(signing_key, 0o600)
+    signing_key.chmod(0o600)
     subprocess.run(
         ["openssl", "pkey", "-in", signing_key, "-pubout", "-out", signing_public_key],
         check=True,
@@ -368,7 +368,7 @@ def _acceptance_receipt(
         receipt,
         {
             "channel": plan["channel"],
-            "gates": {name: True for name in sorted(ACCEPTANCE_GATES)},
+            "gates": dict.fromkeys(sorted(ACCEPTANCE_GATES), True),
             "generation": generation or plan["generation"],
             "issued_at": int(time.time()),
             "run_id": 123456,
@@ -616,7 +616,7 @@ def _accept_command(
 def accepted_spark_proof(
     tmp_path_factory: pytest.TempPathFactory,
     assembled_publication: Path,
-) -> tuple[Path, Path, dict]:
+) -> tuple[Path, Path, dict[str, Any]]:
     """One assembled publication with a valid NAS report and ARM64 proof."""
 
     tmp_path = tmp_path_factory.mktemp("spark-proof")

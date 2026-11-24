@@ -7,44 +7,50 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import AgentOperation, AgentResult, canonical_message
-from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
 
-from .. import agent_operation_states
-from ..agent_operation_facts import attempt_is_live
-from ..agent_operation_facts import aware as _aware
-from ..agent_operation_facts import (
-    operation_start_deadline as _operation_start_deadline,
-)
-from ..agent_operation_facts import (
-    start_deadline as _start_deadline,
-)
-from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.types import CancelRequested, LeaseLapsed, Reported
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..own_cleanup import CLEANUP_KINDS
-from .contracts import (
-    _WORKLOAD_INTENT_OPERATIONS,
+from vonk_agent_protocol.agent_operations import AgentOperation
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.contracts import AgentResult
+from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.contracts import (
     OFF_LANE_OPERATIONS,
     ClaimOrder,
     mutations_conflict,
 )
-from .evidence import (
+from vonk_control.agent_jobs.evidence import (
     _failure_result,
     _is_refusal_reason,
     _reconciled_dead_attempt_reason,
 )
-from .predicates import _claim_predicate
-from .retirement import operator_resume_candidates_in_session
-from .retry import superseded_cancellation_deadline
-from .stored import column_field, column_is_document, column_value
+from vonk_control.agent_jobs.predicates import _claim_predicate
+from vonk_control.agent_jobs.retirement import operator_resume_candidates_in_session
+from vonk_control.agent_jobs.retry import superseded_cancellation_deadline
+from vonk_control.agent_jobs.stored import (
+    column_field,
+    column_is_document,
+    column_value,
+)
+from vonk_control.agent_operation_facts import (
+    _WORKLOAD_INTENT_OPERATIONS,
+    attempt_is_live,
+)
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.agent_operation_facts import (
+    operation_start_deadline as _operation_start_deadline,
+)
+from vonk_control.agent_operation_facts import start_deadline as _start_deadline
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.types import CancelRequested, LeaseLapsed, Reported
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.own_cleanup import CLEANUP_KINDS
 
 if TYPE_CHECKING:
-    from .service import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
 
 
 def _cancel_superseded_operation(
@@ -186,7 +192,6 @@ def _reconcile_dead_running_operation(
 
 
 def _settle_lapsed(
-    self: AgentJobService,
     session: Session,
     operation: StoredOperation,
     attempt: AgentOperationAttempt | None,

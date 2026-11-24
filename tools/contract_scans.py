@@ -29,6 +29,7 @@ import json
 import re
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
@@ -206,9 +207,9 @@ def python_models(root: Path = ROOT) -> dict[tuple[str, str], tuple[str, ...]]:
 
 
 def python_registry_problems(
-    root: Path = ROOT, registry: dict | None = None
+    root: Path = ROOT, registry: dict[str, Any] | None = None
 ) -> list[str]:
-    document: dict = (
+    document: dict[str, Any] = (
         json.loads((root / "tools/python-model-registry.json").read_text())
         if registry is None
         else registry
@@ -223,8 +224,10 @@ def python_registry_problems(
                 "move it to agent_protocol or a registered contract module"
             )
     present = {file for file, _ in models}
-    for module in sorted(modules - present):
-        problems.append(f"registry module {module} defines no model (stale entry)")
+    problems.extend(
+        f"registry module {module} defines no model (stale entry)"
+        for module in sorted(modules - present)
+    )
     allowed = {
         tuple(sorted(item["models"])) for item in document.get("allowed_duplicates", [])
     }
@@ -243,6 +246,8 @@ def python_registry_problems(
             seen.add(key)
             if key not in allowed:
                 problems.append(f"duplicate model definitions: {', '.join(key)}")
-    for key in sorted(allowed - seen):
-        problems.append(f"allowed duplicate {', '.join(key)} no longer occurs (stale)")
+    problems.extend(
+        f"allowed duplicate {', '.join(key)} no longer occurs (stale)"
+        for key in sorted(allowed - seen)
+    )
     return problems

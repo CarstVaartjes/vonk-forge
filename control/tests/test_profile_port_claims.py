@@ -5,9 +5,10 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import ReservationState, RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )
@@ -43,7 +44,8 @@ def _ready_profile(tmp_path, engine, *, node_count=1):
     with sessions() as session:
         mapping_id = session.scalar(select(ClusterMapping.id))
         build_id = session.scalar(select(RecipeBuild.id))
-        assert mapping_id is not None and build_id is not None
+        assert mapping_id is not None
+        assert build_id is not None
     installed = installed_recipe(
         lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
     )
@@ -167,7 +169,8 @@ def test_profile_ports_block_competing_start_and_transfer_without_a_gap(
     with sessions() as session:
         for claim_id in claim_ids:
             retained = session.get(ResourceReservation, claim_id)
-            assert retained is not None and retained.state == "active"
+            assert retained is not None
+            assert retained.state == "active"
 
 
 @pytest.mark.parametrize("node_count", [1, 2])
@@ -206,7 +209,8 @@ def test_profile_port_promise_preserves_live_owner_and_survives_reviewed_stop(
                 )
             )
         )
-        assert promised and old_ports
+        assert promised
+        assert old_ports
         assert all(claim.state == "promised" for claim in promised)
         assert all(claim.state == "active" for claim in old_ports)
         counts = FleetProjection._reservations(session, nodes)
@@ -228,7 +232,8 @@ def test_profile_port_promise_preserves_live_owner_and_survives_reviewed_stop(
     # stop, which the agents send on their own a little later.
     with sessions() as session:
         stopped = session.get(RecipeRun, old.owner_id)
-        assert stopped is not None and stopped.stopped_at is not None
+        assert stopped is not None
+        assert stopped.stopped_at is not None
         stopped_at = stopped.stopped_at
         latest = {
             snapshot.node_id: snapshot
@@ -283,7 +288,8 @@ def test_profile_port_promise_preserves_live_owner_and_survives_reviewed_stop(
     with sessions() as session:
         for claim_id in old_ids:
             old_claim = session.get(ResourceReservation, claim_id)
-            assert old_claim is not None and old_claim.state == "released"
+            assert old_claim is not None
+            assert old_claim.state == "released"
         for claim_id in promised_ids:
             claim = session.get(ResourceReservation, claim_id)
             assert claim is not None
@@ -309,10 +315,14 @@ def test_restart_adopts_committed_start_before_reassessing_its_owned_ports(
         return result
 
     monkeypatch.setattr(executor, "execute", crash_after_start)
-    with pytest.raises(SystemExit):
+
+    def expected_failure():
         for _ in range(16):
             planner.tick()
             profiles.tick()
+
+    with pytest.raises(SystemExit):
+        expected_failure()
     lifecycle = planner._lifecycle
     assert lifecycle is not None
     with sessions() as session:
@@ -357,11 +367,9 @@ def test_restart_adopts_committed_start_before_reassessing_its_owned_ports(
         )
         for claim_id in claim_ids:
             claim = session.get(ResourceReservation, claim_id)
-            assert (
-                claim is not None
-                and claim.state == "active"
-                and claim.owner_id == child.owner_id
-            )
+            assert claim is not None
+            assert claim.state == "active"
+            assert claim.owner_id == child.owner_id
 
 
 @pytest.mark.parametrize("change", ["released", "amount", "intent"])
@@ -413,7 +421,7 @@ def test_run_repairs_changed_profile_port_bookkeeping(
             workload_intent_ordinal=ordinal,
         )
 
-    if change in ("intent",):
+    if change == "intent":
         with pytest.raises(Exception) as _ending:
             start()
         with sessions.begin() as session:
@@ -424,7 +432,8 @@ def test_run_repairs_changed_profile_port_bookkeeping(
     child = start()
     with sessions() as session:
         run = session.get(RecipeRun, child.owner_id)
-        assert run is not None and run.state == RunState.STARTING
+        assert run is not None
+        assert run.state == RunState.STARTING
         claims = tuple(
             session.scalars(
                 select(ResourceReservation).where(
@@ -433,9 +442,8 @@ def test_run_repairs_changed_profile_port_bookkeeping(
                 )
             )
         )
-        assert claims and all(
-            claim.state == ReservationState.ACTIVE for claim in claims
-        )
+        assert claims
+        assert all(claim.state == ReservationState.ACTIVE for claim in claims)
 
 
 @pytest.mark.parametrize("kind", ["port", "unified-memory"])
@@ -463,6 +471,7 @@ def test_busy_runtime_handoff_retries_the_original_claim_after_releasing_sql(
         )
         assert claim is not None
         claim_id = claim.id
+        operation = None
         for _ in range(12):
             planner.tick()
             profiles.tick()
@@ -472,19 +481,16 @@ def test_busy_runtime_handoff_retries_the_original_claim_after_releasing_sql(
                 and operation.result.retry_reason == "run.capacity_busy"
             ):
                 break
+        assert operation is not None
         assert operation.state == LifecycleState.RUNNING
-        assert (
-            operation.result is not None
-            and operation.result.retry_reason == "run.capacity_busy"
-        )
+        assert operation.result is not None
+        assert operation.result.retry_reason == "run.capacity_busy"
         due = operation.next_attempt_at
         assert due is not None
         assert not planner.tick()
         with sessions() as observer:
             assert not tuple(observer.scalars(select(RecipeRun)))
-    after_due = (
-        due if isinstance(due, datetime) else datetime.fromisoformat(due)
-    ) + timedelta(seconds=1)
+    after_due = due + timedelta(seconds=1)
     lifecycle = planner._lifecycle
     assert lifecycle is not None
     planner._clock = profiles._clock = lifecycle._clock = lambda: after_due
@@ -519,9 +525,7 @@ def test_new_profile_intent_releases_only_the_previous_port_promise(
                 )
             )
         )
-        assert previous_claims and all(
-            claim.state == "released" for claim in previous_claims
-        )
-        assert current_claims and all(
-            claim.state == "promised" for claim in current_claims
-        )
+        assert previous_claims
+        assert all(claim.state == "released" for claim in previous_claims)
+        assert current_claims
+        assert all(claim.state == "promised" for claim in current_claims)

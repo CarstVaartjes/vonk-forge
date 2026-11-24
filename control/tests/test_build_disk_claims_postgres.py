@@ -6,14 +6,31 @@ import uuid
 from datetime import timedelta
 
 import pytest
+from sqlalchemy import select
+
+from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentFailureResult
+from vonk_agent_protocol.agent_operations import AgentOperation as WireOperation
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import AgentOperation as WireOperation
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.contracts import AgentResult
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    AgentResultState,
+    FailureCode,
+    LifecycleState,
+)
+from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_agent_protocol.state_machines import ReservationState
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
+from vonk_control.inventory.repository import (
+    InventoryRepository,
+    NodeInventoryReport,
+)
 from vonk_control.jobs.documents import RecipeBuildParent
+from vonk_control.lifecycle_preflight import LifecyclePreflight
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import AgentCertificate
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.owner_liveness import OwnerKind
@@ -21,7 +38,9 @@ from vonk_control.recipe_operations.execution_contract import parse_stored_build
 
 from .recipe_operations_support import NOW, setup_services
 from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service
+from .test_build_cancellation_recovery import _services
 from .test_disk_reservations import _record_disk
+from .test_runtime_preflight import result as preflight_result
 
 
 def _inject_build(sessions, ready_build, node_id, state, *, failed_row=False):
@@ -150,25 +169,6 @@ def test_retry_reacquires_disk_before_dispatch_and_resumes_when_space_returns(
     tmp_path, postgres_engine, capacity_returns
 ):
     """A released envelope cannot let a due retry oversubscribe a later load."""
-    from sqlalchemy import select
-    from vonk_agent_protocol.contracts import (
-        AgentFailureKind,
-        AgentFailureResult,
-        AgentResult,
-    )
-    from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, FailureCode
-    from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
-    from vonk_control.agent_jobs.service import AgentJobService
-    from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
-    from vonk_control.inventory.repository import (
-        InventoryRepository,
-        NodeInventoryReport,
-    )
-    from vonk_control.lifecycle_preflight import LifecyclePreflight
-    from vonk_control.models.fleet import AgentCertificate
-
-    from .test_build_cancellation_recovery import _services
-    from .test_runtime_preflight import result as preflight_result
 
     sessions, _builds, operations, _storage, now, node_id, revision, plan = _services(
         tmp_path, postgres_engine
@@ -223,7 +223,8 @@ def test_retry_reacquires_disk_before_dispatch_and_resumes_when_space_returns(
         order = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == parent.id)
         )
-        assert order is not None and order.state == LifecycleState.BACKOFF
+        assert order is not None
+        assert order.state == LifecycleState.BACKOFF
         assert order.next_action_at is not None
         assert order.recovery_deadline is not None
         deadline = order.recovery_deadline
@@ -271,7 +272,8 @@ def test_retry_reacquires_disk_before_dispatch_and_resumes_when_space_returns(
     assert claim() is None
     with sessions() as session:
         order = session.get(AgentOperation, order.id)
-        assert order is not None and order.current_attempt == 1
+        assert order is not None
+        assert order.current_attempt == 1
         assert order.state == LifecycleState.BACKOFF
         assert order.status_reason is not None
         assert "disk" in order.status_reason
@@ -312,7 +314,8 @@ def test_retry_reacquires_disk_before_dispatch_and_resumes_when_space_returns(
     clock[0] += timedelta(seconds=3)
     inventory(1024**4)
     second = claim()
-    assert second is not None and second.payload == first.payload
+    assert second is not None
+    assert second.payload == first.payload
     with sessions() as session:
         assert (
             outstanding_disk_reservation_bytes(

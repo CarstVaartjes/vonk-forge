@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
+
 from vonk_agent_protocol.lifecycle_vocabulary import ErrorCategory, WaitReason
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownError
 from vonk_agent_protocol.route_activation import (
@@ -28,10 +29,9 @@ from vonk_agent_protocol.route_activation import (
     SupervisorAcknowledgement,
     SupervisorPhase,
 )
-
-from ..strict_json import read_stored_model
-from .litellm import LiteLlmConfig
-from .route_bundle_contract import RouteBundleDocument
+from vonk_control.gateway.litellm import LiteLlmConfig
+from vonk_control.gateway.route_bundle_contract import RouteBundleDocument
+from vonk_control.strict_json import read_stored_model
 
 # A publication claim is a short critical section, so a bounded nonblocking
 # claim is enough: the reconciler retries the whole publication, which is safer
@@ -63,7 +63,7 @@ def _aware(value: datetime, label: str) -> datetime:
     return value.astimezone(UTC)
 
 
-def _parse_time(value: object, label: str) -> datetime | None:
+def _parse_time(value: object) -> datetime | None:
     if not isinstance(value, str):
         return None
     try:
@@ -138,7 +138,7 @@ class FileSupervisorAcknowledger:
         while True:
             now = _aware(self._clock(), "supervisor acknowledgement clock")
             if self._matches(marker, required, now=now):
-                return
+                return None
             if self._monotonic() >= deadline:
                 return _unknown(WaitReason.RUNTIME_EFFECT_UNCONFIRMED)
             self._sleep(self._poll_seconds)
@@ -169,9 +169,7 @@ class FileSupervisorAcknowledger:
         ):
             return False
         try:
-            acknowledged = _parse_time(
-                acknowledgement.acknowledged_at, "acknowledgement timestamp"
-            )
+            acknowledged = _parse_time(acknowledgement.acknowledged_at)
         except RouteRuntimeError:
             return False
         return (
@@ -214,7 +212,7 @@ class AtomicRouteBundlePublisher:
         self, marker: ActivationMarker, required: SupervisorPhase
     ) -> UnknownError | None:
         if self._await_supervisor_ack is None:
-            return
+            return None
         try:
             return self._await_supervisor_ack(marker, required)
         except (RouteRuntimeError, SecurityRefusalError):
@@ -302,7 +300,7 @@ class AtomicRouteBundlePublisher:
         while True:
             try:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                return
+                return None
             except BlockingIOError:
                 if time.monotonic() >= deadline:
                     return _unknown(WaitReason.LEASE_LAPSED)
@@ -380,7 +378,7 @@ class AtomicRouteBundlePublisher:
                 output.write(content)
                 output.flush()
                 os.fsync(output.fileno())
-            os.replace(temporary, target)
+            temporary.replace(target)
             directory = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
             try:
                 os.fsync(directory)
@@ -406,9 +404,7 @@ class AtomicRouteBundlePublisher:
                 return
         self._atomic_write(target, content, mode=0o640)
 
-    def inspect(
-        self, *, expected: ActivationMarker | None = None
-    ) -> ActivationMarker | UnknownError:
+    def inspect(self) -> ActivationMarker | UnknownError:
         marker = self._read_marker(optional=False, verify_files=True)
         assert marker is not None
         # A stale expectation is observation evidence, never a reason to refuse

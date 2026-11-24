@@ -20,7 +20,8 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
-from vonk_control.model_cache.catalog_helpers import _validate_source
+
+from vonk_control.model_cache.source_helpers import _validate_source
 from vonk_control.models.cache import (
     ModelCacheOperation,
     ModelCacheSet,
@@ -61,7 +62,7 @@ def test_a_vanished_operation_is_skipped_not_raised(cache):
     service._schedule_background_download(missing, force=False)
     service._set_operation_progress(
         missing,
-        None,  # type: ignore[arg-type] - never reached for a vanished operation
+        None,
         phase="downloading",
         completed_artifacts=0,
         downloaded_bytes=0,
@@ -191,7 +192,8 @@ def test_a_running_operation_under_a_live_lease_is_never_retired(cache, tmp_path
     with sessions() as session:
         stored = session.get(ModelCacheOperation, operation.id)
         assert stored is not None
-        assert stored.state == "running" and stored.fence == "another-process"
+        assert stored.state == "running"
+        assert stored.fence == "another-process"
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -247,9 +249,8 @@ def test_a_damaged_set_manifest_does_not_block_reconcile_or_listing(
         model_content_sha256="c" * 64,
         request_key="00000000-0000-4000-8000-00000000b022",
     )
-    assert (
-        fresh.id != other.id and fresh.artifact_set_sha256 == other.artifact_set_sha256
-    )
+    assert fresh.id != other.id
+    assert fresh.artifact_set_sha256 == other.artifact_set_sha256
     assert service.manifest_for_artifact_set(str(fresh.artifact_set_sha256)).artifacts
     assert fresh.state == "succeeded"
 
@@ -285,7 +286,8 @@ def test_unsafe_artifact_paths_are_still_refused(cache, tmp_path: Path):
     path, size, _digest = service.cached_artifact_file(
         set_digest, object_digest, "weights.bin"
     )
-    assert path.is_file() and size == len(b"served bytes")
+    assert path.is_file()
+    assert size == len(b"served bytes")
     for unsafe in ("../weights.bin", "/etc/passwd"):
         with pytest.raises(Exception) as _ending:
             service.cached_artifact_file(set_digest, object_digest, unsafe)
@@ -375,7 +377,8 @@ def test_a_removal_whose_set_row_is_gone_ends_instead_of_waiting_forever(
     assert shared.read_bytes() == b"abc"
     with sessions() as session:
         sibling_row = session.get(ModelCacheSet, sibling_set)
-        assert sibling_row is not None and sibling_row.state == "cached"
+        assert sibling_row is not None
+        assert sibling_row.state == "cached"
     release_ended_gates(service)
     fresh = _force_model_request(
         service,

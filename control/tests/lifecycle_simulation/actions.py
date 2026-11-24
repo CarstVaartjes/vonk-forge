@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 from sqlalchemy import select
+
 from vonk_control.models.execution import (
     STOPPABLE_RUN_STATES,
     RecipeInstallation,

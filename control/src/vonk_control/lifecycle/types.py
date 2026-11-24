@@ -14,8 +14,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import ClassVar
 
+from vonk_agent_protocol.agent_operations import AgentFailureKind
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import AgentFailureKind
 from vonk_agent_protocol.lifecycle_vocabulary import (
     TERMINAL_LIFECYCLE_STATES,
     LifecycleEffect,
@@ -25,8 +25,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     OutcomeKind,
     StopOutcome,
 )
-
-from ..failure_classification import disposition, error_detail
+from vonk_control.failure_classification import disposition, error_detail
 
 #: The closed vocabulary is defined once, in the shared contract
 #: (``vonk_agent_protocol.lifecycle_vocabulary``), and generated for Rust and

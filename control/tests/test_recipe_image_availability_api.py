@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock
 
 import pytest
@@ -9,6 +9,13 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from httpx2 import Response
 from pydantic import ValidationError
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from cluster_profiles.generated_control.models.recipe_image_availability_response import (
+    RecipeImageAvailabilityResponse as GeneratedAvailabilityResponse,
+)
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.auth import Actor
@@ -18,6 +25,7 @@ from vonk_control.cache_removal_review import (
 )
 from vonk_control.jobs.documents import AvailabilityJobResult, AvailabilityModelChild
 from vonk_control.lifecycle.evidence import BookkeepingReason, Residue
+from vonk_control.model_primitives import Base
 from vonk_control.recipe_image_availability.api import (
     RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS,
     _child,
@@ -35,6 +43,19 @@ from vonk_control.recipe_image_availability.view_contract import (
 from vonk_control.recipe_operations.availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationCancellationResult,
+)
+from vonk_control.runtime_image_preparation.storage import (
+    FilesystemRuntimeImageStorage,
+)
+
+from .recipe_image_availability_support import (
+    ARCHIVE_SHA,
+    Transport,
+    _add_head,
+    _add_revision,
+    _recipe,
+    _runtime,
+    _service,
 )
 
 
@@ -270,9 +291,6 @@ def test_recipe_operation_observation_is_readable_by_any_authenticated_actor() -
     assert observation["recipe_revision_id"] is None
     assert observation["recipe_content_sha256"] is None
     assert observation["residue"]["reason"] == "row-incomplete"
-    from cluster_profiles.generated_control.models.recipe_image_availability_response import (
-        RecipeImageAvailabilityResponse as GeneratedAvailabilityResponse,
-    )
 
     generated = GeneratedAvailabilityResponse.from_dict(observation)
     assert generated.request is None
@@ -632,25 +650,6 @@ def test_recipe_cancel_requires_mutation_role_and_returns_durable_request() -> N
 
 def test_download_repairs_a_damaged_local_receipt_and_admits_fresh_requests(tmp_path):
     """Catch treating stored receipt syntax as malformed operator input (T-3)."""
-    from datetime import UTC, timedelta
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    from sqlalchemy.pool import StaticPool
-    from vonk_control.model_primitives import Base
-    from vonk_control.runtime_image_preparation.storage import (
-        FilesystemRuntimeImageStorage,
-    )
-
-    from .recipe_image_availability_support import (
-        ARCHIVE_SHA,
-        Transport,
-        _add_head,
-        _add_revision,
-        _recipe,
-        _runtime,
-        _service,
-    )
 
     recipe = _recipe("recipe-source-build.json")
     engine = create_engine(

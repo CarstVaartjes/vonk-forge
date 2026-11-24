@@ -13,6 +13,7 @@ together, and a healer that trusts the record sees nothing wrong.
 
 from __future__ import annotations
 
+import contextlib
 import http.client
 import json
 import logging
@@ -432,8 +433,8 @@ class Container:
     def inspect(cls, docker: Docker, identity: str) -> Container:
         row = docker.request("GET", f"/containers/{quote(identity, safe='')}/json")
         networks = {}
-        for name, endpoint in (row["NetworkSettings"]["Networks"] or {}).items():
-            endpoint = endpoint or {}
+        for name, observed in (row["NetworkSettings"]["Networks"] or {}).items():
+            endpoint = observed or {}
             aliases = endpoint.get("Aliases") or []
             if not isinstance(name, str) or any(
                 not isinstance(alias, str) for alias in aliases
@@ -654,10 +655,9 @@ class Reconciler:
                 # Docker answers 304 for an already stopped container.
                 if "304" not in str(error):
                     raise
-            try:
+            # Gone already: Compose or an operator removed it first.
+            with contextlib.suppress(DockerNotFound):
                 self.docker.request("DELETE", f"/containers/{identity}?v=false")
-            except DockerNotFound:
-                pass  # Gone already: Compose or an operator removed it first.
             log(Reason.RETIRED, service=service, container=row.get("Names"))
         return kept
 
@@ -711,7 +711,7 @@ class Reconciler:
         running, when the network lists no endpoint for it. A pending repair
         also owes the networks it disconnected and has not yet seen attached.
         """
-        owed = [n for n in (pending.networks if pending else {})]
+        owed = list(pending.networks if pending else {})
         declared = self.topology.declared(self.project, container.service)
         names = dict.fromkeys([*container.networks, *owed, *declared])
         broken = []
@@ -903,7 +903,7 @@ def own_project(docker: Docker) -> str | None:
     return (labels or {}).get(PROJECT_LABEL)
 
 
-def terminate(signum: int, frame: FrameType | None) -> None:
+def terminate(_signum: int, _frame: FrameType | None) -> None:
     # Unwind through `finally`, so a repair in progress starts its container.
     raise SystemExit(0)
 

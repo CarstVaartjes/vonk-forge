@@ -12,6 +12,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import Index, PrimaryKeyConstraint, UniqueConstraint, event, select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_control.admission_locking import (
     CONSTRAINTS,
     Conflict,
@@ -158,7 +159,7 @@ def test_a_released_port_promised_elsewhere_replans_instead_of_resuming(
             )
         )
 
-    with pytest.raises(ConstraintReplan) as taken, sessions.begin() as session:
+    def expected_failure(session):
         application = session.get(FleetProfileApplication, loaded.id)
         assert application is not None
         profile_claim_restore.restore_released_profile_claims(
@@ -168,6 +169,9 @@ def test_a_released_port_promised_elsewhere_replans_instead_of_resuming(
             memory_floor_bytes=0,
             inventory_max_age_seconds=300,
         )
+
+    with pytest.raises(ConstraintReplan) as taken, sessions.begin() as session:
+        expected_failure(session)
 
     assert taken.value.constraint == "uq_promised_node_port"
     assert not _promises(sessions, loaded.id)
@@ -208,7 +212,8 @@ def test_a_request_key_raced_by_the_same_request_returns_the_original(
     finally:
         event.remove(Session, "before_flush", other_process_commits_first)
 
-    assert winner and replayed.id == winner[0].id
+    assert winner
+    assert replayed.id == winner[0].id
     with sessions() as session:
         assert session.scalars(
             select(Job.id).where(Job.request_id == request_id)

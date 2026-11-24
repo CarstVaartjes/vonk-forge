@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import platform
 import re
 import shlex
@@ -14,12 +15,17 @@ import tomllib
 from pathlib import Path
 
 sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
-import os
 
 # The sibling helper, however this file is loaded.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from check_environment import ensure_control, ensure_web
-from hook_words_generated import HookFailureCode, HookFailureKind
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+from check_environment import (  # noqa: E402 -- the sibling helpers import after this file's directory is on sys.path, however it is loaded
+    ensure_control,
+    ensure_web,
+)
+from hook_words_generated import (  # noqa: E402 -- the sibling helpers import after this file's directory is on sys.path, however it is loaded
+    HookFailureCode,
+    HookFailureKind,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -209,8 +215,7 @@ def main() -> None:
     rust = any(
         file.endswith(".rs")
         or file in {"Cargo.toml", "Cargo.lock", "clippy.toml", "rust-toolchain.toml"}
-        or file.startswith("rust/")
-        and file.endswith("Cargo.toml")
+        or (file.startswith("rust/") and file.endswith("Cargo.toml"))
         for file in changed
     )
     run(["python3", "scripts/check-staged-python"])

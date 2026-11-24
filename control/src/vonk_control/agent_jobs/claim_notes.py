@@ -8,30 +8,20 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.contracts import AgentClaim
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.state_machines import CertificateRecordState
-
-from .. import agent_operation_states
-from ..auth import AgentSource
-from ..categorized_errors import InvalidValue
-from ..gpu.health import GPU_HEALTH_CODES
-from ..jobs.agent_contract import ClaimFacts
-from ..logging import redact_text
-from ..models.fleet import AgentCertificate, AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..persisted_waits import read_wait
-from .contracts import (
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.contracts import (
     _BOUNDARY_REFUSAL_PREFIXES,
     _CLAIM_REFUSAL_PREFIX,
     _CONCLUDED_OUTCOMES,
     _DATABASE_REPOLL_SECONDS,
     _LOGGER,
 )
-from .evidence import _is_refusal_reason
-from .predicates import (
+from vonk_control.agent_jobs.evidence import _is_refusal_reason
+from vonk_control.agent_jobs.predicates import (
     _claim_condition_facts,
     _claim_note_reason,
     _claim_predicate,
@@ -39,10 +29,24 @@ from .predicates import (
     _held_claim_conditions,
     _refusal_reason,
 )
-from .stored import column_field, column_is_document, column_value
+from vonk_control.agent_jobs.stored import (
+    column_field,
+    column_is_document,
+    column_value,
+)
+from vonk_control.auth import AgentSource
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.gpu.health import GPU_HEALTH_CODES
+from vonk_control.jobs.agent_contract import ClaimFacts
+from vonk_control.logging import redact_text
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.persisted_waits import read_wait
 
 if TYPE_CHECKING:
-    from .service import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
 
 
 def claim_next_operation(
@@ -53,7 +57,7 @@ def claim_next_operation(
     *,
     runtime_identity: object,
     preflight_fingerprint: str | None = None,
-    hostname: str | None = None,
+    hostname: object = None,
     source: AgentSource | None = None,
     claim_fence: str | None = None,
 ) -> AgentClaim | None:
@@ -168,7 +172,6 @@ def _record_claim_refusal(
 
 
 def _write_refusal_note(
-    self: AgentJobService,
     session: Session,
     *,
     operation: StoredOperation | None,
@@ -393,7 +396,7 @@ def _excluded_work_refusal(
             condition.check,
             facts.model_copy(
                 update=_claim_condition_facts(
-                    condition.check, operation, attempt, node, now
+                    condition.check, operation, attempt, node
                 ).model_dump(exclude_none=True)
             ),
         )

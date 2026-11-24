@@ -5,24 +5,24 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from pydantic import BaseModel, ValidationError
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
-from ..content_identity import ImageContent, differing_image_fields
-from ..preparation_contract import (
-    RuntimeImageIdentity,
-)
-from ..run_switch_contract.evidence import RunSwitchPhase
-from ..run_switch_contract.observation import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.content_identity import ImageContent, differing_image_fields
+from vonk_control.preparation_contract import RuntimeImageIdentity
+from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+from vonk_control.run_switch_contract.observation import (
     RunSwitchArtifactGuardEvidence,
     RunSwitchObservedImageIdentity,
 )
-from ..run_switch_contract.phase_results import RunSwitchVerifyResult
-from ..run_switch_contract.plans import RunSwitchPlan
-from .errors import RunSwitchRetryLater
-from .image_receipts import _require_profile_runtime_image
-from .result_helpers import _phase_result
+from vonk_control.run_switch_contract.phase_results import RunSwitchVerifyResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
+from vonk_control.run_switch_operations.image_receipts import (
+    _require_profile_runtime_image,
+)
+from vonk_control.run_switch_operations.result_helpers import _phase_result
 
 
 def _validate_artifact_execution(

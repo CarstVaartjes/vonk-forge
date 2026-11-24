@@ -17,8 +17,15 @@ import pytest
 from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
+from cluster_profiles import cli
+from cluster_profiles.control_client.transfers import ControlClient
+from cluster_profiles.controller_cli.profile_load import (
+    _review_and_submit_profile_load,
+)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.admission_locking import acquire_admission_keys, node_admission_key
 from vonk_control.auth import Actor
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
@@ -47,10 +54,6 @@ from vonk_control.models.fleet import (
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
-from vonk_forge_contracts import RecipeDefinition, document_sha256
-
-from cluster_profiles import cli
-from cluster_profiles.control_client.transfers import ControlClient
 
 from .consumer_outcomes import not_adopted
 from .display_fixtures import reworded
@@ -337,7 +340,10 @@ def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
 def test_load_retries_a_transient_admission_owner(postgres_engine, monkeypatch) -> None:
     sessions, _api, _codec, _headers_unused, _preview = _profile_api(postgres_engine)
     now = [NOW]
-    clock = lambda: now[0]
+
+    def clock():
+        return now[0]
+
     planner = RunSwitchOperationService(sessions, clock=clock)
     profiles = build_production_fleet_profile_service(
         sessions, clock=clock, run_switch_operations=planner
@@ -365,7 +371,8 @@ def test_load_retries_a_transient_admission_owner(postgres_engine, monkeypatch) 
     application_id = response.json()["id"]
     with sessions() as session:
         accepted = session.get(FleetProfileApplication, application_id)
-        assert accepted is not None and accepted.request_key == key
+        assert accepted is not None
+        assert accepted.request_key == key
         accepted_plan = canonical_message(accepted.plan)
         intended = profiles.application(application_id).progress.intended_profile
         assert intended is not None
@@ -374,23 +381,27 @@ def test_load_retries_a_transient_admission_owner(postgres_engine, monkeypatch) 
     profiles.tick()
     assert attempts == 2
     waiting = profiles.application(application_id)
-    assert waiting.state == "queued" and waiting.next_attempt_at is not None
+    assert waiting.state == "queued"
+    assert waiting.next_attempt_at is not None
     profiles.tick()
     assert attempts == 2, "a durable retry must not run before its due time"
     now[0] = waiting.next_attempt_at
     profiles.tick()
     assert attempts == 3
     lookup = api.get(f"/api/profile/1/requests/{key}", headers=headers)
-    assert lookup.status_code == 200 and lookup.json()["id"] == application_id
+    assert lookup.status_code == 200
+    assert lookup.json()["id"] == application_id
     replay = api.post("/api/profile/1/load", headers=headers, json={"request_key": key})
-    assert replay.status_code == 202 and replay.json()["id"] == application_id
+    assert replay.status_code == 202
+    assert replay.json()["id"] == application_id
     assert attempts == 3, "same-key replay observes the existing accepted owner"
     with sessions() as session:
         assert tuple(session.scalars(select(FleetProfileApplication.id))) == (
             application_id,
         )
         accepted = session.get(FleetProfileApplication, application_id)
-        assert accepted is not None and accepted.request_key == key
+        assert accepted is not None
+        assert accepted.request_key == key
         assert canonical_message(accepted.plan) == accepted_plan
         assert (
             canonical_message(
@@ -400,7 +411,8 @@ def test_load_retries_a_transient_admission_owner(postgres_engine, monkeypatch) 
         )
         assert accepted.progress["workload_intent_ordinal"] == accepted_ordinal
         selected = session.get(FleetProfileSelection, 1)
-        assert selected is not None and selected.application_id == application_id
+        assert selected is not None
+        assert selected.application_id == application_id
 
 
 @pytest.mark.parametrize("change", ["roster", "authority", "profile"])
@@ -721,7 +733,8 @@ def _running_profile_api(tmp_path, engine):
     api, codec = _client(sessions, profiles=service)
     headers = _headers(codec, "administrator")
     preview = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
-    assert preview.status_code == 200 and preview.json()["allowed"], preview.text
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["allowed"], preview.text
     return sessions, api, headers, profile, installed, run, preview.json()
 
 
@@ -823,7 +836,8 @@ def test_workload_change_during_admission_rejects_only_unreviewed_destructive_ta
             "pending-job": (Job, "queued"),
         }[change]
         changed = session.get(model, replacement)
-        assert changed is not None and changed.state == expected
+        assert changed is not None
+        assert changed.state == expected
 
 
 def test_admission_serializes_run_replacement_until_acceptance_commits(
@@ -922,7 +936,8 @@ def test_first_dispatch_cannot_adopt_a_replacement_run_after_acceptance(
     assert waiting.next_attempt_at is not None
     with sessions() as session:
         replacement = session.get(RecipeRun, replacement_id)
-        assert replacement is not None and replacement.state == LifecycleState.RUNNING
+        assert replacement is not None
+        assert replacement.state == LifecycleState.RUNNING
         assert set(session.scalars(select(Job.id))) == before_jobs
     fresh = service.apply(profile.id, request_key=str(uuid4()), actor="admin")
     assert fresh.id != accepted.id
@@ -968,7 +983,8 @@ def test_replanned_assignment_child_cannot_add_a_stop_after_queue_creation(
         actor="admin",
     )
     preview = service.preview(profile.id)
-    assert preview.allowed and preview.summary.stops == preview.summary.starts == 1
+    assert preview.allowed
+    assert preview.summary.stops == preview.summary.starts == 1
     accepted = service.apply(
         profile.id,
         request_key=str(uuid4()),
@@ -997,13 +1013,13 @@ def test_replanned_assignment_child_cannot_add_a_stop_after_queue_creation(
             (assignment,),
             tuple(nodes),
             "admin",
-            accepted.request_key,
             1,
             accepted.progress.workload_intent_ordinal,
         )
     with sessions() as session:
         changed = session.get(RecipeRun, replacement)
-        assert changed is not None and changed.state == "running"
+        assert changed is not None
+        assert changed.state == "running"
         assert set(session.scalars(select(Job.id))) == before_jobs
 
 
@@ -1024,7 +1040,8 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
     api, codec = _client(sessions, profiles=service)
     headers = _headers(codec, "administrator")
     preview = api.post(f"/api/profile/{profile.number}/preview", headers=headers).json()
-    assert preview["allowed"] and preview["effects"]["superseded"]
+    assert preview["allowed"]
+    assert preview["effects"]["superseded"]
     with sessions() as session:
         ordinals = tuple(
             session.scalars(
@@ -1168,9 +1185,6 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
 def test_unreadable_review_binding_reobserves_changed_owner_plan_without_unreviewed_effect(
     postgres_engine, tmp_path, fault_count
 ):
-    from cluster_profiles.controller_cli.profile_load import (
-        _review_and_submit_profile_load,
-    )
 
     sessions, api, _codec, headers, original = _stopping_profile_api(
         tmp_path, postgres_engine
@@ -1224,7 +1238,8 @@ def test_unreadable_review_binding_reobserves_changed_owner_plan_without_unrevie
             content = json.dumps(preview).encode()
         if path.endswith("/load"):
             assert isinstance(payload, dict)
-            assert shown and payload["review"]["effects_digest"] == shown[-1]
+            assert shown
+            assert payload["review"]["effects_digest"] == shown[-1]
             assert payload["review"]["effects_digest"] != original["effects_digest"]
         return Response(response, content)
 
@@ -1247,7 +1262,8 @@ def test_unreadable_review_binding_reobserves_changed_owner_plan_without_unrevie
     assert result["request_key"] == key
     with sessions() as session:
         accepted = list(session.scalars(select(FleetProfileApplication)))
-        assert len(accepted) == 1 and accepted[0].id == result["id"]
+        assert len(accepted) == 1
+        assert accepted[0].id == result["id"]
     # A distinct request is immediately admitted; the review faults created no gate.
     fresh = api.post(
         "/api/profile/1/load", headers=headers, json={"request_key": str(uuid4())}
@@ -1261,9 +1277,6 @@ def test_unreadable_review_binding_reobserves_changed_owner_plan_without_unrevie
 def test_conflict_observes_original_owner_receipt_without_effect_replay(
     postgres_engine, tmp_path, monkeypatch, lookup_outage, review
 ):
-    from cluster_profiles.controller_cli.profile_load import (
-        _review_and_submit_profile_load,
-    )
 
     sessions, api, _codec, headers, _preview = _stopping_profile_api(
         tmp_path, postgres_engine
@@ -1349,4 +1362,5 @@ def test_conflict_observes_original_owner_receipt_without_effect_replay(
     fresh = api.post(
         "/api/profile/1/load", headers=headers, json={"request_key": str(uuid4())}
     )
-    assert fresh.status_code == 202 and fresh.json()["id"] != accepted_id
+    assert fresh.status_code == 202
+    assert fresh.json()["id"] != accepted_id

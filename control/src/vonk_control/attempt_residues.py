@@ -64,6 +64,7 @@ from typing import Protocol
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
@@ -73,27 +74,29 @@ from vonk_agent_protocol.state_machines import (
     InstallationState,
     RunState,
 )
-
-from vonk_control.owner_liveness import ADOPTION_WINDOW
-
-from .agent_operation_facts import aware as _aware
-from .covered_installation_claims import release_covered_installation_claims
-from .installation_transitions import end_orphaned_installation
-from .jobs import states as job_states
-from .logging import log_event
-from .machine_states import DISTRIBUTION_HELD, rank_installed
-from .models.catalog import CatalogDocumentRevision
-from .models.execution import InstallationNode, RecipeInstallation, RecipeRun
-from .models.jobs import Job
-from .models.operations import ArtifactDistributionAssignment
-from .owner_liveness import (
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.covered_installation_claims import release_covered_installation_claims
+from vonk_control.installation_transitions import end_orphaned_installation
+from vonk_control.jobs import states as job_states
+from vonk_control.logging import log_event
+from vonk_control.machine_states import DISTRIBUTION_HELD, rank_installed
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    RecipeRun,
+)
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import ArtifactDistributionAssignment
+from vonk_control.owner_liveness import (
+    ADOPTION_WINDOW,
     OWNER_SETTLE_GRACE,
     OwnerKind,
     installations_named_by_live_jobs,
     referencing_active_job,
 )
-from .persisted_waits import schedule_wait
-from .reservation_owners import release_dead_owner_reservations
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.reservation_owners import release_dead_owner_reservations
 
 _LOGGER = logging.getLogger(__name__)
 #: How long an unowned incomplete installation is left alone before it is
@@ -152,7 +155,7 @@ def unowned_never_installed(
         member_nodes = {member.node_id for member in members}
         if (
             members
-            and (wanted is None or member_nodes == wanted)
+            and (wanted is None or member_nodes == wanted)  # pyright: ignore[reportUnnecessaryComparison]  # a set and a frozenset compare equal by content
             and all(
                 member.state == InstallationNodeState.PLANNED
                 and not member.installed_bytes
@@ -316,9 +319,9 @@ class AttemptResidueReconciler:
                 Job.kind.in_(_OWNER_JOB_KINDS), Job.state.in_(job_states.LIVE)
             )
         ):
-            nodes.update(job.targets if isinstance(job.targets, list) else ())
+            nodes.update(job.targets if isinstance(job.targets, list) else ())  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             plans.add(job.authority_revision)
-            payload = job.payload if isinstance(job.payload, dict) else {}
+            payload = job.payload if isinstance(job.payload, dict) else {}  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             digest = payload.get("plan_digest")
             if isinstance(digest, str):
                 plans.add(digest)

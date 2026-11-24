@@ -22,7 +22,7 @@ from pydantic import (
     ValidationError,
     model_serializer,
 )
-from vonk_agent_protocol.contracts import DigestText
+
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_BIGINT
 from vonk_agent_protocol.lifecycle_vocabulary import ProgressAlarmCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
@@ -30,9 +30,9 @@ from vonk_agent_protocol.reason_codes.vocabulary import (
     OperationReason,
     adopt_reason_code,
 )
-
-from ..child_phases import FleetProfileChildPhase
-from ..strict_json import StrictJSONModel
+from vonk_agent_protocol.wire_model import DigestText
+from vonk_control.child_phases import FleetProfileChildPhase
+from vonk_control.strict_json import StrictJSONModel
 
 MAX_BLOCKERS = 16
 _BLOCKER_REASON = TypeAdapter(OperationReason | ProgressAlarmCode)

@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
 from vonk_control.metrics.registry import MetricsRegistry, OperationalMetricsCollector
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentCertificate, AgentNode, AgentNodeContact

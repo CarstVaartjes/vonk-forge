@@ -8,13 +8,9 @@ from uuid import uuid4
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
-from vonk_agent_protocol.contracts import (
-    AgentFailureResult,
-    AgentOperation,
-    AgentProtocolError,
-    AgentResult,
-    validate_result_for_operation,
-)
+
+from vonk_agent_protocol.agent_operations import AgentFailureResult, AgentOperation
+from vonk_agent_protocol.contracts import AgentResult, validate_result_for_operation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     ErrorCategory,
     FailureCode,
@@ -39,6 +35,7 @@ from vonk_agent_protocol.outcome import (
     outcome_state,
 )
 from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
+from vonk_agent_protocol.wire_model import AgentProtocolError
 
 FENCE = str(uuid4())
 

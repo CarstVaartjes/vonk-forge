@@ -1,13 +1,19 @@
 from __future__ import annotations
 
-from concurrent.futures import Executor, Future
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from psycopg.errors import InFailedSqlTransaction
 from sqlalchemy.exc import InternalError
+
 from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
 from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
+from vonk_agent_protocol.state_machines import CatalogSyncState
+from vonk_control.catalog import sync as catalog_sync
 from vonk_control.catalog.sync import (
+    AutomaticCatalogSync,
+    CatalogSyncUnsettled,
     ManagedRecipeCatalogSyncService,
     catalog_sync_failure_reason,
     catalog_sync_retry_delay,
@@ -15,6 +21,8 @@ from vonk_control.catalog.sync import (
 from vonk_control.recipe_packages.contracts import RecipePackageError
 
 from .signed_recipe_release import signed_recipe_releases
+from .test_catalog_sync import Inline, _fixture
+from .test_catalog_sync_topology import _Catalog, _example, _item, _sync
 
 
 class _PeriodicCatalog(ManagedRecipeCatalogSyncService):
@@ -66,7 +74,8 @@ def test_failed_sync_log_names_the_reason_bounded_and_printable() -> None:
     assert error.detail in rendered
     hostile = RecipePackageError(RecipePackageCode.RESPONSE_INVALID, "x\ny\x1b[2Jz")
     rendered = catalog_sync_failure_reason(hostile)
-    assert "\n" not in rendered and "\x1b" not in rendered
+    assert "\n" not in rendered
+    assert "\x1b" not in rendered
     assert "x y [2Jz" in rendered
     # An untyped exception's message is never echoed.
     assert "secret" not in catalog_sync_failure_reason(RuntimeError("secret"))
@@ -77,7 +86,8 @@ def test_database_sync_log_reports_server_condition_without_private_sql() -> Non
     error = InternalError("private SQL", {"parameter": "secret"}, original)
     rendered = catalog_sync_failure_reason(error)
     assert f"SQLSTATE {original.sqlstate}" in rendered
-    assert "private" not in rendered and "secret" not in rendered
+    assert "private" not in rendered
+    assert "secret" not in rendered
 
 
 class _Clock:
@@ -88,21 +98,9 @@ class _Clock:
         return self.now
 
 
-class Inline(Executor):
-    """Run the sync in the calling thread: the next tick collects its outcome."""
-
-    def submit(self, fn, /, *args, **kwargs):
-        done: Future = Future()
-        done.set_result(fn(*args, **kwargs))
-        return done
-
-
 def test_the_automatic_sync_is_asked_again_after_every_unsettled_attempt(
     tmp_path, monkeypatch
 ) -> None:
-    from vonk_control.catalog.sync import AutomaticCatalogSync, CatalogSyncUnsettled
-
-    from .test_catalog_sync_topology import _Catalog, _example, _item, _sync
 
     completed = _sync(
         tmp_path, _Catalog(None), _item(_example("recipe-source-build.json"))
@@ -145,12 +143,6 @@ def test_the_automatic_sync_is_asked_again_after_every_unsettled_attempt(
 def test_partial_receipts_back_off_then_success_resets_the_retry_episode(
     tmp_path, monkeypatch
 ):
-    from dataclasses import replace
-
-    from vonk_agent_protocol.state_machines import CatalogSyncState
-    from vonk_control.catalog import sync as catalog_sync
-
-    from .test_catalog_sync_topology import _Catalog, _example, _item, _sync
 
     completed = _sync(
         tmp_path, _Catalog(None), _item(_example("recipe-source-build.json"))
@@ -182,7 +174,8 @@ def test_partial_receipts_back_off_then_success_resets_the_retry_episode(
         clock.now += 60
     assert episodes == [1, 2, 0]
     fresh = _sync(tmp_path, _Catalog(None), _item(_example("recipe-source-build.json")))
-    assert fresh.id != completed.id and fresh.completed_at is not None
+    assert fresh.id != completed.id
+    assert fresh.completed_at is not None
 
 
 @pytest.mark.usefixtures(signed_recipe_releases.__name__)
@@ -190,11 +183,6 @@ def test_worker_runs_the_first_sync_and_then_follows_the_persisted_wait(
     tmp_path,
 ) -> None:
     """Catches a fresh install never syncing, or a restart ignoring the recorded wait."""
-    from datetime import UTC, datetime, timedelta
-
-    from vonk_control.catalog.sync import AutomaticCatalogSync
-
-    from .test_catalog_sync import _fixture
 
     sessions, catalog, reader, _item = _fixture(tmp_path)
     now = [datetime(2026, 11, 20, tzinfo=UTC)]
@@ -207,7 +195,8 @@ def test_worker_runs_the_first_sync_and_then_follows_the_persisted_wait(
         service, interval_seconds=60, monotonic=clock, executor=Inline()
     ).tick()
     first = service.latest()
-    assert first is not None and first.completed_at is not None
+    assert first is not None
+    assert first.completed_at is not None
     # A restarted worker waits out the recorded check, then syncs again.
     restarted = AutomaticCatalogSync(
         service, interval_seconds=60, monotonic=clock, executor=Inline()

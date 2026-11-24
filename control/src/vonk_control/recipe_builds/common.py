@@ -16,9 +16,11 @@ from typing import Any, Protocol
 from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import read_recipe
+from vonk_forge_contracts.recipe import RecipeSetting, RecipeSettings
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.build_import import RecipeBuildOptions
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     SecurityRefusalReason,
@@ -29,47 +31,48 @@ from vonk_agent_protocol.outcome import (
     SecurityRefusalError,
     UnknownOutcomeError,
 )
+from vonk_agent_protocol.reason_codes.images import PrebuiltImageCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_agent_protocol.state_machines import (
     NodeIdentityState,
     ReservationState,
     RunState,
 )
-from vonk_forge_contracts import read_recipe
-from vonk_forge_contracts.recipe import RecipeSetting, RecipeSettings
-
-from ..catalog.revision_contract import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.catalog.revision_contract import (
     BuildModelArtifactProjection,
     BuildResourcesProjection,
     BuildSecurityProjection,
     RecipeRevisionProjection,
 )
-from ..categorized_errors import InvalidType
-from ..categorized_faults import security_reason
-from ..fleet_profiles.capacity import profile_build_memory_claims
-from ..inventory.items import inventory_items
-from ..inventory.repository import InventorySnapshotView
-from ..memory_reservations import memory_reservations, memory_reserve_floor
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import RecipeRun, ResourceReservation, RunNode
-from ..models.fleet import AgentNode
-from ..prebuilt_images import PrebuiltDecision
-from ..recipe_operations.runtime_specs import RecipeRuntimeSpecError, recipe_topology
-from ..resource_planning.memory import memory_capacity_snapshot
-from ..runtime.adapters import (
+from vonk_control.categorized_errors import InvalidType
+from vonk_control.categorized_faults import security_reason
+from vonk_control.fleet_profiles.capacity import profile_build_memory_claims
+from vonk_control.inventory.items import inventory_items
+from vonk_control.inventory.repository import InventorySnapshotView
+from vonk_control.memory_reservations import memory_reservations, memory_reserve_floor
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
+from vonk_control.models.fleet import AgentNode
+from vonk_control.recipe_operations.runtime_specs import (
+    RecipeRuntimeSpecError,
+    recipe_topology,
+)
+from vonk_control.resource_planning.memory import memory_capacity_snapshot
+from vonk_control.runtime.adapters import (
     RuntimeAdapter,
     RuntimeAdapterError,
     resolve_runtime_adapter,
 )
-from ..source_bundles import (
+from vonk_control.source_bundles import (
     GeneratedSourceBundle,
     SourceBundleError,
     generate_source_bundle,
 )
-from ..source_policy import SourcePolicyReport, inspect_build_source_policy
-from ..stored.json_values import read_row_column
-from ..stored.states import RecipeBuildState
+from vonk_control.source_policy import SourcePolicyReport, inspect_build_source_policy
+from vonk_control.stored.rows import read_row_column
+from vonk_control.stored.states import RecipeBuildState
 
 """Durable source-build planning and exact OCI result recording."""
 
@@ -198,7 +201,7 @@ def _build_effective_settings(value: object | None) -> dict[str, object] | None:
         }
     )
     return (
-        {"values": selected, "change_effects": {name: "rebuild" for name in selected}}
+        {"values": selected, "change_effects": dict.fromkeys(selected, "rebuild")}
         if selected
         else None
     )
@@ -346,7 +349,7 @@ def _canonical_build_resources(
             RecipeBuildCode.SECURITY_INVALID,
             "canonical runtime compiler did not publish a build security envelope",
         )
-    if any(not isinstance(item, str) or not item for item in security.capabilities):
+    if any(not isinstance(item, str) or not item for item in security.capabilities):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         raise RecipeBuildUnknown(
             RecipeBuildCode.SECURITY_INVALID, "canonical build capabilities are invalid"
         )
@@ -768,3 +771,24 @@ def _digest(value: object) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+# Why a plan did or did not use the catalog's prebuilt image.  The codes are
+# stable: they are stored with the build, logged, and shown as operation
+# blockers, so an operator can tell a Spark build from an image pull.
+PREBUILT_USED = PrebuiltImageCode.USED
+
+
+@dataclass(frozen=True, slots=True)
+class PrebuiltDecision:
+    """The named outcome of choosing between a prebuilt image and a Spark build."""
+
+    code: str
+    detail: str
+
+    @property
+    def used(self) -> bool:
+        return self.code == PREBUILT_USED
+
+    def __str__(self) -> str:
+        return f"{self.code}: {self.detail}"

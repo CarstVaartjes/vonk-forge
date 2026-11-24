@@ -11,14 +11,15 @@ import sys
 from pathlib import Path
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
-from vonk_agent_protocol.contracts import (
-    AgentResult,
+
+from vonk_agent_protocol.agent_operations import (
     ArtifactDistributionResult,
     RecipeStartResult,
-    canonical_message,
 )
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, OutcomeKind
 from vonk_agent_protocol.outcome import OutcomeDone
+from vonk_agent_protocol.wire_model import canonical_message
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -27,7 +28,8 @@ def _relay(root: Path) -> tuple[ASGIApp, list[bytes]]:
     specification = importlib.util.spec_from_file_location(
         "acceptance_receipt_fault", ROOT / "tests/acceptance/receipt_fault.py"
     )
-    assert specification is not None and specification.loader is not None
+    assert specification is not None
+    assert specification.loader is not None
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
     accepted: list[bytes] = []

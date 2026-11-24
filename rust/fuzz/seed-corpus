@@ -22,7 +22,9 @@ VECTORS = ROOT / "agent_protocol/src/vonk_agent_protocol/vectors"
 def put(target: str, data: bytes) -> None:
     directory = CORPUS / target
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / hashlib.sha1(data).hexdigest()).write_bytes(data)
+    (directory / hashlib.sha1(data, usedforsecurity=False).hexdigest()).write_bytes(
+        data
+    )
 
 
 def bundle(entries: list[tuple[str, bytes | None, int]]) -> bytes:

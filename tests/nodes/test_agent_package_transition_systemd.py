@@ -30,6 +30,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 NODE = "spk_" + "2" * 32
@@ -136,7 +137,7 @@ class Package:
     agent_sha256: str
     helper_sha256: str
 
-    def source(self) -> dict:
+    def source(self) -> dict[str, Any]:
         return {
             "package_sha256": self.sha256,
             "package_signature": self.signature,
@@ -217,9 +218,9 @@ class Lane:
     def __init__(self, probe: Path, promoted: Package) -> None:
         self.probe = probe
         self.promoted = promoted
-        self.evidence: list[dict] = []
+        self.evidence: list[dict[str, Any]] = []
 
-    def send(self, operation: dict) -> dict | None:
+    def send(self, operation: dict[str, Any]) -> dict[str, Any] | None:
         command = (
             "/usr/sbin/runuser",
             "-u",
@@ -233,7 +234,9 @@ class Lane:
         reply = run(*command, input=json.dumps(operation)).stdout
         return json.loads(reply) if reply.strip() else None
 
-    def install(self, candidate: Package, deadline: int) -> tuple[str, int, dict]:
+    def install(
+        self, candidate: Package, deadline: int
+    ) -> tuple[str, int, dict[str, Any]]:
         """A signed install of the candidate, with the promoted package as source."""
         nonce = os.urandom(32).hex()
         until = int(time.time()) + deadline
@@ -289,9 +292,8 @@ class Lane:
                 "attempt_nonce": nonce,
             }
         )
-        assert confirmed and confirmed["status"] == "package-activation-confirmed", (
-            confirmed
-        )
+        assert confirmed, confirmed
+        assert confirmed["status"] == "package-activation-confirmed", confirmed
         assert receipt(nonce, "acknowledged"), f"{label}: not acknowledged"
         self.evidence.append(
             {
@@ -459,7 +461,8 @@ def main() -> None:
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--probe", type=Path, required=True)
     args = parser.parse_args()
-    assert os.geteuid() == 0 and Path("/run/systemd/system").is_dir()
+    assert os.geteuid() == 0
+    assert Path("/run/systemd/system").is_dir()
     assert run("/usr/bin/dpkg", "--print-architecture").stdout.strip() == "arm64"
     work = Path(tempfile.mkdtemp(prefix="vonk-transition-", dir="/var/tmp"))
     try:
@@ -528,7 +531,7 @@ def main() -> None:
             lane.baseline(packages)
             hold.touch()
             nonce, deadline, operation = lane.install(held, deadline=40)
-            replies: list = []
+            replies: list[dict[str, Any] | None] = []
 
             def client_send(operation=operation, replies=replies) -> None:
                 try:

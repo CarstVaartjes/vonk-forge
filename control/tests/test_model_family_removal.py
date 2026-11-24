@@ -19,6 +19,9 @@ from typing import Any
 
 import pytest
 from sqlalchemy import select
+from vonk_forge_contracts import document_sha256, read_model, read_recipe
+
+from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from vonk_control.catalog.entities import CatalogEntityService, _digest
 from vonk_control.catalog.entities import _execution_projection as execution_of
 from vonk_control.catalog.revision_contract import (
@@ -38,9 +41,6 @@ from vonk_control.recipe_update_batches.notice import (
     newest_active_revisions,
     recipe_update_notice,
 )
-from vonk_forge_contracts import document_sha256, read_model, read_recipe
-
-from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
 from .test_catalog_sync import ROOT, _fixture, _sync
 from .test_model_facts_split import NOW, _artifact_key, _store
@@ -147,7 +147,8 @@ def test_a_5_0_sync_over_stored_4_9_rows_moves_no_status_carries_peaks_and_offer
 
     with sessions() as session:
         legacy_row = session.get(CatalogDocumentRevision, legacy_recipe_id)
-        assert legacy_row is not None and legacy_row.state == "active"
+        assert legacy_row is not None
+        assert legacy_row.state == "active"
         heads = newest_active_revisions(session, [legacy_row.document_id])
         head = heads[legacy_row.document_id]
         assert head.id != legacy_recipe_id
@@ -172,15 +173,14 @@ def test_a_5_0_sync_over_stored_4_9_rows_moves_no_status_carries_peaks_and_offer
         # No re-download: the new Model head has the old artifact key.
         legacy_model_row = session.get(CatalogDocumentRevision, legacy_model_id)
         assert legacy_model_row is not None
-        new_model_rows = [
-            row
-            for row in session.scalars(
+        new_model_rows = list(
+            session.scalars(
                 select(CatalogDocumentRevision).where(
                     CatalogDocumentRevision.document_id == legacy_model_row.document_id,
                     CatalogDocumentRevision.id != legacy_model_id,
                 )
             )
-        ]
+        )
         assert [row.artifact_key for row in new_model_rows] == [model_key]
         assert new_model_rows[0].content_digest == document_sha256(entry.published)
 
@@ -219,8 +219,11 @@ def test_a_stored_4_9_model_row_still_reads_and_its_projection_drops_the_family(
     with sessions() as session:
         row = session.get(CatalogDocumentRevision, revision_id)
         assert row is not None
-        assert "family" not in row.projected["identity"]
-        assert row.document == legacy and row.artifact_key == "1" * 64
+        identity = row.projected["identity"]
+        assert isinstance(identity, dict)
+        assert "family" not in identity
+        assert row.document == legacy
+        assert row.artifact_key == "1" * 64
 
 
 def test_a_model_display_is_titled_by_its_family_not_its_own_family_title(
@@ -239,5 +242,6 @@ def test_a_model_display_is_titled_by_its_family_not_its_own_family_title(
         for model in client.list().catalog_entities
     }
     display = shown[entry["document"]["identity"]["slug"]]
-    assert display is not None and display.lineage is not None
+    assert display is not None
+    assert display.lineage is not None
     assert display.family_title == titles[display.lineage.family]
