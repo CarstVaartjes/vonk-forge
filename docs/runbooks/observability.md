@@ -159,12 +159,13 @@ the current Fleet API settings; it must not create a new node identity.
 
 `AgentIngressDown` fires when every active Spark is offline at once. The
 browser and `vonkctl` path does not use the agent ingress, so the Controller
-looks healthy. The usual cause is Caddy (`vonk-forge-caddy-1`) running without
-the `ingress` network: port 8443 is not published and Caddy has no outbound
-route, after a NAS or Docker restart that lost the network; Caddy's health
-check shows `unhealthy` while it is cut off. Nothing re-attaches it
-automatically: delete the Caddy container (not volumes) and Redeploy the
-project so Compose recreates it on all its networks. Confirm with `nc -vz <NAS LAN IP> 8443` and
+looks healthy. One cause is Caddy (`vonk-forge-caddy-1`) running without the
+`ingress` network: port 8443 is not published and Caddy has no outbound route;
+Caddy's health check shows `unhealthy` while it is cut off. The boot-time cause
+(a LAN-IP-bound publish failing before the address is up, moby#53928) is gone
+since 8443 is published on all interfaces. If Caddy is detached anyway, delete
+the Caddy container (not volumes) and Redeploy the project so Compose recreates
+it on all its networks. Confirm with `nc -vz <NAS LAN IP> 8443` and
 `vonkctl fleet`. If every node is offline with 8443 open, the cause is the
 Controller or the Spark network, not the ingress.
 

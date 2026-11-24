@@ -152,7 +152,7 @@ def test_render_replaces_every_control_image_without_resolving_operator_inputs(
             assert image in lock["images"].values()
     assert "CONTROL_API_IMAGE" not in text
     assert "CONTROL_WORKER_IMAGE" not in text
-    assert "${NAS_LAN_IP:?set reserved NAS LAN IP}" in text
+    assert "${NAS_LAN_IP:?" in text
     assert "${VONK_CONTROL_HOSTNAME:?" in text
     assert {path.name for path in tmp_path.iterdir()} == {
         "docker-compose.production.yml"

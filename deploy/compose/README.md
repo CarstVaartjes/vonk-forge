@@ -264,17 +264,21 @@ sudo docker image prune -a --force \
   --filter label=org.opencontainers.image.source=https://github.com/CarstVaartjes/vonk-forge
 ```
 
-Lost networks: after a NAS or Docker restart, Docker can lose a project network
-(seen 2026-11-03, 11-05 and 11-19, each time Caddy's `ingress`). `compose up`
-and restarts reuse the container record, so Caddy either fails to start
-(`network ... not found`) or runs on its internal networks only: `:8443` is
-closed and every Spark goes offline. Caddy's health check requires a default
-route, which exists only while `ingress` is attached, so it shows `unhealthy`,
-and the critical `AgentIngressDown` alert fires after five minutes (runbook:
-`docs/runbooks/observability.md#agent-ingress-down`). Recovery: delete the
-Caddy container (not volumes) and Redeploy; Compose recreates it on all its
-networks. A container left `created` by an aborted `up` also starts on the
-next Redeploy.
+Lost `ingress` network: on 2026-11-03, 11-05 and 11-19 Caddy came back after a
+NAS restart without `ingress`, its one non-internal network, so `:8443` was
+closed and every Spark went offline. The cause was Caddy's publish bound to the
+NAS LAN IP: at boot that address is not up yet, the bind fails, and Docker
+Engine 29.0-29.9 (UGOS ships 29.4.3) then drops the network from the
+container's record (moby/moby#53928 and #52480, fixed in 29.10.0; the bind
+failure itself is #39559). Caddy therefore publishes `8443` on all interfaces;
+that bind cannot fail at boot, so the network is no longer dropped.
+If Caddy is ever detached anyway, its health check (a default route exists only
+while `ingress` is attached) shows `unhealthy` and the critical
+`AgentIngressDown` alert fires after five minutes (runbook:
+`docs/runbooks/observability.md#agent-ingress-down`). `compose up` and restarts
+reuse the container record, so recover by deleting the Caddy container (not
+volumes) and Redeploying; Compose recreates it on all its networks. A container
+left `created` by an aborted `up` also starts on the next Redeploy.
 
 This daemon store is separate from recipe availability: recipe preparation
 copies registry bytes with skopeo into the Controller's `image-cache/oci` layout,

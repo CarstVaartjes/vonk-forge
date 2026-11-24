@@ -147,7 +147,6 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         {
             "target": 8443,
             "published": 8443,
-            "host_ip": "${NAS_LAN_IP:?set reserved NAS LAN IP}",
             "protocol": "tcp",
         }
     ]
