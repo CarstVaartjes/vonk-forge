@@ -171,7 +171,7 @@ class ModelCacheService(
         self._trusted_source_hosts = frozenset(
             host.strip().lower().rstrip(".")
             for host in trusted_source_hosts
-            if isinstance(host, str) and host.strip()  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+            if host.strip()
         )
         self._huggingface_token_path = (
             Path(huggingface_token_path) if huggingface_token_path is not None else None
