@@ -190,7 +190,7 @@ def _safe_release_document(
         document = model.model_validate_json(raw).model_dump(mode="json", by_alias=True)
     except (UnicodeDecodeError, ValueError) as error:
         raise ContractError(f"{label} is invalid") from error
-    if not isinstance(document, dict) or raw != _canonical(document):  # pyright: ignore[reportUnnecessaryIsInstance]  # the canonical-JSON check also covers the dump
+    if raw != _canonical(document):
         raise ContractError(f"{label} is not canonical JSON")
     return document
 
@@ -300,8 +300,7 @@ def recompute_publication_graphs(
         not images
         or baseline.get("images") != images
         or any(
-            not isinstance(name, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # image names are re-checked as strings
-            or not name
+            not name
             or not isinstance(image, str)
             or PINNED_IMAGE.fullmatch(image) is None
             or any(
