@@ -595,7 +595,16 @@ def _encode_phases(phases: RecoveryStartPhases) -> list[list[RecoveryStartItem]]
 def _decode_phases(
     value: list[list[RecoveryStartItem]] | None,
 ) -> RecoveryStartPhases | None:
-    if not isinstance(value, list) or not value or any(not group for group in value):
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(
+            not isinstance(group, list)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+            or not group
+            or any(not isinstance(item, RecoveryStartItem) for item in group)  # pyright: ignore[reportUnnecessaryIsInstance]  # an unexpected value is treated as unknown, not trusted
+            for group in value
+        )
+    ):
         return None
     return tuple(
         tuple((item.node_id, item.payload) for item in group) for group in value
