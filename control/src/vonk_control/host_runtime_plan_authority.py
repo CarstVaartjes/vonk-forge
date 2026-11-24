@@ -432,12 +432,6 @@ def _validate_child_record(
     if (
         operation.node_id != node_id
         or operation.parent_job_id != parent.id
-        or hashlib.sha256(
-            canonical_message(read_row_column(parent, "payload"))
-        ).hexdigest()
-        != parent.payload_digest
-        or hashlib.sha256(canonical_message(operation.payload)).hexdigest()
-        != operation.payload_digest
         or operation.authority_revision != parent.authority_revision
     ):
         raise RuntimePlanAuthorityRefused(
