@@ -1,3 +1,4 @@
+import { NoReading } from "../ui/no-reading";
 import { useId } from "react";
 import type { MetricsSeriesResponse, VisualFleetNode } from "../../api/types";
 import { fleetFigure, formatValue } from "../../lib/metric-units";
@@ -111,7 +112,7 @@ export function SparkGpuNow({
             {total ? (
               <Estimate basis={total.basis}>{formatValue(total.value, total.symbol)}</Estimate>
             ) : energy === undefined ? null : (
-              NOT_REPORTED_TEXT
+              <NoReading />
             )}
           </strong>
         </div>

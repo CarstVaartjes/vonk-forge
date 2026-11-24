@@ -158,7 +158,7 @@
   border-bottom: 1px solid var(--line-strong);
   display: flex;
   gap: 1.3rem;
-  margin-top: 1rem;
+  margin-top: 0.5rem;
   overflow-x: auto;
   padding-inline: 0.15rem;
 }
@@ -187,7 +187,7 @@
   display: flex;
   gap: 1rem;
   justify-content: space-between;
-  margin: 1.55rem 0 1rem;
+  margin: 0.9rem 0 0.75rem;
 }
 
 .library-subview-heading h2,
@@ -1017,8 +1017,8 @@
   display: grid;
   gap: 0.5rem 1rem;
   grid-template-columns: minmax(0, 1fr) auto;
-  margin: 0.75rem 0;
-  padding: 0.6rem 0.75rem;
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
 }
 .library-toolbar-row {
   align-items: center;
@@ -1048,13 +1048,24 @@
   font-weight: 700;
   gap: 0.5rem;
 }
+.library-toolbar-sparks > span {
+  flex: 0 0 auto;
+}
+/* One row at every width: a narrow screen scrolls the Spark counts sideways instead of wrapping them. */
 .library-toolbar .segmented {
+  flex-wrap: nowrap;
   gap: 0.2rem;
   margin-left: 0;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
   padding: 2px;
+  scrollbar-width: thin;
 }
 .library-toolbar .segmented button {
   align-items: baseline;
+  flex: 0 0 auto;
+  white-space: nowrap;
   display: inline-flex;
   font-size: 0.875rem;
   gap: 0.3rem;
@@ -1158,10 +1169,7 @@
     width: 100%;
   }
   .library-toolbar .segmented {
-    flex: 1;
-  }
-  .library-toolbar .segmented button {
-    flex: 1;
+    flex: 1 1 0;
   }
 }
 

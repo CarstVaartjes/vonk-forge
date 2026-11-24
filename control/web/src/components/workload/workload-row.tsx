@@ -1,3 +1,4 @@
+import { NoReading } from "../ui/no-reading";
 import "./workload-row.css";
 import type { ReactNode } from "react";
 import type { MetricsSeriesResponse } from "../../api/types";
@@ -116,7 +117,7 @@ export function WorkloadRow({
                 <small>{total.unit}</small>
               </>
             ) : (
-              NOT_REPORTED_TEXT
+              <NoReading />
             )}
           </strong>
         </div>
