@@ -1,11 +1,8 @@
+import type { Vital } from "../../lib/fleet";
+import { NoReading } from "./no-reading";
 /** A gauge with its words beside it, so colour is never the only signal. */
-export function Meter({
-  label,
-  vital,
-}: {
-  label: string;
-  vital: { percent: number | null; text: string; amber: boolean };
-}) {
+export function Meter({ label, vital }: { label: string; vital: Vital }) {
+  if (vital.text === null) return <NoReading hint={vital.reason} />;
   if (vital.percent === null) return <>{vital.text}</>;
   return (
     <span className="meter-cell">

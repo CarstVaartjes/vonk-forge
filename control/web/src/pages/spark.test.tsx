@@ -221,7 +221,7 @@ test("the frame shows the Spark's own facts, or Not reported", () => {
   first.unmount();
   show({ ...node, agent_runtime: null });
   expect(screen.getByRole("list", { name: "Facts" })).toHaveTextContent(/Agent.*Not reported/);
-  expect(screen.getByRole("list", { name: "Facts" })).toHaveTextContent(/Uptime.*Not reported/);
+  expect(screen.getByRole("list", { name: "Facts" })).toHaveTextContent(/Uptime\s*\W?Not reported/);
 });
 
 test("an address that names no enrolled Spark says so", () => {

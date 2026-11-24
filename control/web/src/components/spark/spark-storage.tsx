@@ -16,7 +16,7 @@ export function SparkStorage({ node }: { node: VisualFleetNode }) {
     <section className="card spark-panel-card" aria-labelledby={id}>
       <header>
         <h2 id={id}>Storage</h2>
-        <strong>{nodeVitals(node).disk.text}</strong>
+        <strong>{nodeVitals(node).disk.text ?? <NoReading />}</strong>
       </header>
       <MemoryIngot
         label={`${nodeDisplayName(node)} disk`}

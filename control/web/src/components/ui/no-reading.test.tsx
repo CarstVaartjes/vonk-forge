@@ -20,8 +20,8 @@ test("a figure with no reading is drawn as a muted dash with the words kept for 
   expect(screen.getByText("No token reading yet")).toBeVisible();
 });
 
-// String formatters in lib/fleet.ts feed text that is not rendered by React (CLI parity, sort keys, tooltips);
-// every component draws the missing reading through NoReading.
+// lib/fleet.ts keeps the text for its plain-string formatters (formatBytes and friends, used in sentences and attributes);
+// every component draws a missing reading through NoReading.
 test("only no-reading.tsx and the lib/fleet.ts formatters name the not-reported text", () => {
   const allowed = new Set([join(root, "lib", "fleet.ts"), join(here, "no-reading.tsx")]);
   const offenders = sources(root).filter(
