@@ -114,7 +114,7 @@ def typescript_shapes(root: Path = ROOT) -> list[tuple[str, str]]:
 
 # -- Python ------------------------------------------------------------------------
 
-PY_REGISTRY = TOOLS / "python-model-registry.json"
+PY_REGISTRY = "tools/python-model-registry.json"
 PY_SCAN_DIRS = (
     "agent_protocol/src",
     "control/src",
@@ -229,16 +229,14 @@ class ModelRegistry(BaseModel):
     allowed_duplicates: list[AllowedDuplicate] = []
 
 
+def load_model_registry(root: Path = ROOT) -> ModelRegistry:
+    return ModelRegistry.model_validate_json((root / PY_REGISTRY).read_text())
+
+
 def python_registry_problems(
     root: Path = ROOT, registry: ModelRegistry | None = None
 ) -> list[str]:
-    document = (
-        ModelRegistry.model_validate_json(
-            (root / "tools/python-model-registry.json").read_text()
-        )
-        if registry is None
-        else registry
-    )
+    document = load_model_registry(root) if registry is None else registry
     modules = {entry.module for entry in document.modules}
     problems: list[str] = []
     models = python_models(root)
