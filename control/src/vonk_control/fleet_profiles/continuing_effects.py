@@ -37,7 +37,6 @@ from vonk_control.fleet_profiles.persistence import (
     _persisted_profile_scope,
     _workload_intent_ordinal,
 )
-from vonk_control.fleet_profiles.projection_support import _digest
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.documents import RunSwitchJobPayload
 from vonk_control.lifecycle.evidence import Residue
@@ -91,7 +90,6 @@ def _stop_binding_is_exact(
         or job.kind != ProfileChildJobKind.STOP.value
         or job.request_id != request_key
         or not isinstance(job.payload, dict)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
-        or job.payload_digest != _digest(job.payload)
     ):
         return False
     payload = read_row_column(job, "payload")
