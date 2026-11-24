@@ -374,10 +374,8 @@ def _runtime_image_receipt(
 
 
 def _build_package(build: RecipeBuild) -> dict[str, object]:
-    if (
-        build.state != RecipeBuildState.SUCCEEDED
-        or not isinstance(build.image_digest, str)
-        or not isinstance(build.build_input_sha256, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+    if build.state != RecipeBuildState.SUCCEEDED or not isinstance(
+        build.image_digest, str
     ):
         raise ExecutionPlanEvidenceUnknown(
             "successful Controller build receipt is unavailable"

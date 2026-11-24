@@ -158,7 +158,7 @@ def consume_orphan_cleanup(
             if not failures and exact
             else "cleanup target observation ended",
         )
-    if projected and recorded is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
+    if projected:
         job.result = serialize_json_value(
             recorded.model_copy(update={"node_evidence": receipts})
         )
