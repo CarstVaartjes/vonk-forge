@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from vonk_agent_protocol.agent_operations import AgentFailureResult
+from vonk_agent_protocol.identifiers import NodeId
 from vonk_agent_protocol.reason_codes.evidence import OperationFailureCode
 from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control import agent_operation_states
@@ -17,7 +18,6 @@ from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationCancellationView,
 )
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
-from vonk_control.operation_api.constants import NodeIdentifier
 from vonk_control.operation_api.contracts import (
     JobDetailResponse,
     JobOperationProgress,
@@ -78,7 +78,7 @@ def _required_bool(value: object, detail: str) -> bool:
     return value
 
 
-def _required_node_ids(value: object) -> list[NodeIdentifier]:
+def _required_node_ids(value: object) -> list[NodeId]:
     """Read a persisted node-id array, failing closed on a wrong shape."""
 
     return [

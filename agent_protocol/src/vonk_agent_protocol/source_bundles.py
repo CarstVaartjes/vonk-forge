@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import PurePosixPath
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
+from vonk_agent_protocol.identifiers import Digest
 from vonk_agent_protocol.wire_model import WireModel, canonical_message
-
-Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
 class SourceBundleFile(WireModel):

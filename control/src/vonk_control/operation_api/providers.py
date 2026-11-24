@@ -12,13 +12,13 @@ from sqlalchemy import String, and_, cast, false, func, or_, select, true
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement, SQLColumnExpression
 
+from vonk_agent_protocol.identifiers import NODE_PATTERN
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
 from vonk_agent_protocol.outcome import SecurityRefusalError
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.auth import CursorCodec, CursorError, cursor_key
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
-from vonk_control.operation_api.constants import NODE_PATTERN
 from vonk_control.operation_api.contracts import (
     OperationApiServices,
     OperationListPage,

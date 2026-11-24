@@ -5,6 +5,7 @@ from typing import Annotated
 
 from pydantic import ConfigDict, Field, StringConstraints
 
+from vonk_agent_protocol.identifiers import UUID4_PATTERN
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.state_machines import (
@@ -15,10 +16,7 @@ from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.machine_states import EnrollmentGrantStateField
 from vonk_control.strict_json import StrictJSONModel
 
-ENROLLMENT_ID_PATTERN = (
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-)
-EnrollmentId = Annotated[str, StringConstraints(pattern=ENROLLMENT_ID_PATTERN)]
+EnrollmentId = Annotated[str, StringConstraints(pattern=UUID4_PATTERN)]
 
 
 class EnrollmentGrantStatus(StrictJSONModel):

@@ -22,8 +22,8 @@ from vonk_control.fleet_profile_contract.vocabulary import (
     FleetProfileEndpointState,
     FleetProfileOperationState,
     Name,
-    UuidId,
 )
+from vonk_control.identifiers import UuidId
 from vonk_control.strict_json import StrictModel
 
 

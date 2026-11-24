@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import AwareDatetime, ConfigDict, Field, StringConstraints
+from pydantic import AwareDatetime, ConfigDict, Field
 
+from vonk_agent_protocol.identifiers import NodeId
 from vonk_agent_protocol.lifecycle_vocabulary import ProgressAlarmCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
 from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
+from vonk_control.identifiers import UuidId
 from vonk_control.inventory.items_contract import PreflightInventoryItem
 from vonk_control.operations.blockers import (
     MAX_BLOCKERS,
@@ -17,16 +19,6 @@ from vonk_control.operations.blockers import (
 )
 from vonk_control.strict_json import StrictJSONModel
 from vonk_control.wait_contract import typed_wait_reason
-
-NodeId = Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
-
-
-UuidId = Annotated[
-    str,
-    StringConstraints(
-        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-    ),
-]
 
 
 class LifecyclePreflightCheckpoint(StrictJSONModel):

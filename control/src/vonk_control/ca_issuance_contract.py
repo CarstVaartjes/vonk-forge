@@ -6,13 +6,13 @@ from typing import Annotated
 from pydantic import StringConstraints, model_validator
 
 from vonk_agent_protocol.enrollment import CertificateGeneration
+from vonk_agent_protocol.identifiers import Digest
 from vonk_agent_protocol.reason_codes.admission import CertificateCode
 from vonk_agent_protocol.state_machines import (
     CertificateIssuancePurpose,
 )
 from vonk_control.strict_json import StrictJSONModel
 
-Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 Serial = Annotated[str, StringConstraints(pattern=r"^[1-9][0-9]{0,47}$")]
 Instant = Annotated[
     str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")

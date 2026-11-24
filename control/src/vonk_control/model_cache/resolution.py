@@ -27,6 +27,7 @@ from vonk_control.catalog.revision_contract import (
     CatalogRevisionContractError,
     read_shared_catalog_document,
 )
+from vonk_control.identifiers import UUID_PATTERN
 from vonk_control.model_cache.artifacts import (
     ArtifactSetManifest,
     ArtifactSpec,
@@ -44,7 +45,6 @@ from vonk_control.model_cache.catalog_helpers import (
 )
 from vonk_control.model_cache.constants import _DIGEST_PATTERN
 from vonk_control.model_cache.contract import (
-    UUID_PATTERN,
     CachedModelResolution,
     CachedRecipeResolution,
     CachedResourceEstimate,

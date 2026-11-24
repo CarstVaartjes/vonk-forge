@@ -17,6 +17,7 @@ from pydantic import (
 )
 from vonk_forge_contracts.model import ModelReference
 
+from vonk_agent_protocol.identifiers import Digest
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleEffect, LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheBlockerCode
@@ -24,6 +25,7 @@ from vonk_agent_protocol.state_machines import ModelCacheOperatorStatus
 from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
 from vonk_control.fleet_model_removal_contract import FleetModelRemovalCheckpoint
+from vonk_control.identifiers import UUID_PATTERN
 from vonk_control.machine_states import ModelFileStateField
 from vonk_control.operations.blockers import OperationBlocker
 from vonk_control.operations.contract import AvailabilityOperationFailure
@@ -32,14 +34,7 @@ from vonk_control.settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
 from vonk_control.strict_json import StrictJSONModel, StrictModel, read_stored_model
 from vonk_control.wait_contract import QueueWait
 
-DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 ARTIFACT_KEY_PATTERN = r"^[a-z][a-z0-9_.:-]{0,255}$"
-UUID_PATTERN = (
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-)
-
-Digest = Annotated[str, Field(pattern=DIGEST_PATTERN)]
 
 
 # One named type per closed set. The contract field and every helper that

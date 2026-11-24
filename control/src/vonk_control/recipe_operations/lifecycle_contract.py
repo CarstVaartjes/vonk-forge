@@ -23,6 +23,7 @@ from vonk_agent_protocol.build_import import (
     RecipeBuildCleanupEvidence,
     RecipeBuildEvidence,
 )
+from vonk_agent_protocol.identifiers import NodeId
 from vonk_agent_protocol.reason_codes.recipes import RecipeOperationCode
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.recipe_operations import (
@@ -32,7 +33,6 @@ from vonk_agent_protocol.recipe_operations import (
 )
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.identifiers import UuidId
-from vonk_control.library.contract import NodeId
 from vonk_control.strict_json import StrictJSONModel
 
 

@@ -56,13 +56,12 @@ from vonk_agent_protocol.compiled_execution_plan import (
 from vonk_agent_protocol.document_limits import (
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
 )
+from vonk_agent_protocol.identifiers import Digest, OciDigest
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.content_identity import same_model_object
 from vonk_control.runtime.spec_contract import RuntimeSpec
 from vonk_control.strict_json import StrictModel
 
-Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
-ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
 Identifier = Annotated[
     str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 ]
@@ -237,12 +236,12 @@ class CompiledModelArtifact(StrictModel):
 class VerifiedRuntimeImage(StrictModel):
     """The exact Controller-built linux/arm64 OCI archive given to each Spark."""
 
-    image_digest: ImageDigest
+    image_digest: OciDigest
     oci_layout_sha256: Digest
     image_bytes: int = Field(ge=1, le=16 * 1024**4)
     build_id: str = Field(min_length=1, max_length=128)
     # The imported OCI config differs from the image (manifest) digest.
-    local_image_config_id: ImageDigest
+    local_image_config_id: OciDigest
     runtime_interface_label: str = Field(min_length=1, max_length=128)
 
 

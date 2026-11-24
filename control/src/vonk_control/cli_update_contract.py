@@ -11,11 +11,11 @@ from typing import Any, Literal
 from fastapi import FastAPI, Response
 from pydantic import Field
 
+from vonk_agent_protocol.identifiers import Digest
 from vonk_control.build_identity import contract_fingerprint
 from vonk_control.observation.platform import (
     ApiRuntimeObservation,
     CapturedPlatformObservation,
-    Digest,
     Source,
 )
 from vonk_control.observation.platform_errors import (

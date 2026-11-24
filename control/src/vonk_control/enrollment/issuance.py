@@ -19,6 +19,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.enrollment import MAX_CSR_BYTES
+from vonk_agent_protocol.identifiers import UUID4_PATTERN
 from vonk_agent_protocol.lifecycle_vocabulary import (
     ErrorCategory,
     InvalidRequestReason,
@@ -36,7 +37,6 @@ from vonk_agent_protocol.state_machines import (
 )
 from vonk_control.categorized_errors import InvalidValue
 from vonk_control.enrollment.contract import (
-    ENROLLMENT_ID_PATTERN,
     EnrollmentGrant,
     EnrollmentGrantStatus,
     EnrollmentIssuanceClaim,
@@ -247,7 +247,7 @@ class EnrollmentCore:
         if node_id is not None:
             _validate_node_id(node_id)
         _validate_actor(actor)
-        if re.fullmatch(ENROLLMENT_ID_PATTERN, request_key) is None:
+        if re.fullmatch(UUID4_PATTERN, request_key) is None:
             raise ValueError("enrollment request key must be a canonical UUID4")
         if not 0 < ttl_seconds <= MAX_ENROLLMENT_GRANT_TTL_SECONDS:
             raise ValueError(

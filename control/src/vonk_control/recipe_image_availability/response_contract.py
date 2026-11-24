@@ -7,11 +7,11 @@ from typing import Literal
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.identifiers import Digest
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.lifecycle.evidence import Residue
-from vonk_control.model_cache.contract import Digest
 from vonk_control.operations.blockers import OperationBlocker
 from vonk_control.operations.contract import (
     AvailabilityOperationFailure,

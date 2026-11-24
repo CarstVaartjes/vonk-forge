@@ -7,17 +7,8 @@ from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints, model_validator
 
+from vonk_agent_protocol.identifiers import Digest, OciDigest, UuidId
 from vonk_agent_protocol.wire_model import WireModel
-
-Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
-OciDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
-UuidId = Annotated[
-    str,
-    StringConstraints(
-        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-    ),
-]
-NodeId = Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
 
 
 class RecipeBuildCleanupRequest(WireModel):

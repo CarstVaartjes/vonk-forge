@@ -18,7 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.enrollment import NodeId
+from vonk_agent_protocol.identifiers import NodeId
 from vonk_agent_protocol.lifecycle_vocabulary import (
     OperatorActionName,
     SecurityRefusalReason,

@@ -13,22 +13,19 @@ from pydantic import (
     model_validator,
 )
 
+from vonk_agent_protocol.identifiers import Digest, NodeId
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
+from vonk_control.identifiers import UuidId
 from vonk_control.lifecycle_preflight_contract import LifecyclePreflightCheckpoint
 from vonk_control.operations.blockers import OperationBlocker
-from vonk_control.run_switch_contract.identity import (
-    NodeId,
-    RunSwitchCancellation,
-    UuidId,
-)
+from vonk_control.run_switch_contract.identity import RunSwitchCancellation
 from vonk_control.run_switch_contract.phase_results import RunSwitchPhaseResult
 from vonk_control.run_switch_contract.progress import (
     RunSwitchMemberReceipt,
     RunSwitchProgress,
 )
 from vonk_control.run_switch_contract.vocabulary import (
-    Digest,
     RunSwitchAction,
     RunSwitchOperationKind,
     RunSwitchPhaseKind,
