@@ -71,7 +71,7 @@ from vonk_control.enrollment.types import (
     RenewalIssuanceUncertain,
 )
 from vonk_control.evidence_repeats import note_repeat, note_success
-from vonk_control.host_helper_authority import (
+from vonk_control.host_authority.helper import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
     HostRuntimeEvidenceUnavailable,
@@ -82,8 +82,11 @@ from vonk_control.http_errors import SecurityHTTPError
 from vonk_control.logging import redact_text
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
-from vonk_control.operator_acceptance import ControllerAPIRoute, operator_acceptance
-from vonk_control.operator_receipt_contract import ReceiptPolicy
+from vonk_control.operator_acceptance.receipt_contract import ReceiptPolicy
+from vonk_control.operator_acceptance.resolution import (
+    ControllerAPIRoute,
+    operator_acceptance,
+)
 from vonk_control.repeated_evidence_contract import (
     RepeatedEvidenceSubject,
     host_grant_subject,

@@ -61,11 +61,11 @@ from vonk_control.models.catalog import (
     CatalogDocumentRevision,
     RecipeSourceBundle,
 )
-from vonk_control.observed_run_memory import carry_measured_peaks
 from vonk_control.recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     recipe_topology,
 )
+from vonk_control.runs.observed_memory import carry_measured_peaks
 from vonk_control.source_bundles import (
     SourceBundleError,
     SourceBundleIntegrityRefused,

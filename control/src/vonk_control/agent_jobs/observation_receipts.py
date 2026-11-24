@@ -37,6 +37,7 @@ from vonk_control.agent_operation_facts import (
 )
 from vonk_control.agent_outcome import agent_outcome
 from vonk_control.agent_upgrades.dispatch import DispatchMixin
+from vonk_control.agent_upgrades.package_activation import matches_receipt
 from vonk_control.agent_upgrades.stored import _stored_package
 from vonk_control.cancelled_runtime import cancellation_stop_current
 from vonk_control.inventory.items import runtime_value
@@ -46,7 +47,6 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation as StoredOperation
 from vonk_control.models.operations import AgentOperationAttempt
-from vonk_control.package_activation import matches_receipt
 
 if TYPE_CHECKING:
     from vonk_control.agent_jobs.service import AgentJobService

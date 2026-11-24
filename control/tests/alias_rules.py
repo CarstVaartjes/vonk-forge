@@ -22,17 +22,17 @@ KIND = "alias checked with its own rule; use vonk_forge_contracts EndpointAlias"
 ALIAS_NAME = re.compile(r"(?:^|_)alias(?:es)?$")
 
 RUN_ALIAS_KIND = (
-    "run alias compared by hand; use run_route_name.carries_alias for the name "
+    "run alias compared by hand; use runs.route_name.carries_alias for the name "
     "a run is routed under"
 )
 RUN_ALIAS_WRITE_KIND = (
     "run alias written outside the rename module; a live run's route name "
-    "changes only through run_route_name.rename_run"
+    "changes only through runs.route_name.rename_run"
 )
 #: The name is routing metadata. The rename module owns reading and changing it
 #: on a live run; a run is created with its name only in run admission.
-RUN_ALIAS_SITES = frozenset({"control/src/vonk_control/run_route_name.py"})
-RUN_CREATION_SITES = frozenset({"control/src/vonk_control/run_admission.py"})
+RUN_ALIAS_SITES = frozenset({"control/src/vonk_control/runs/route_name.py"})
+RUN_CREATION_SITES = frozenset({"control/src/vonk_control/runs/admission.py"})
 #: The run named by a comparison side: ``run.alias``, ``RecipeRun.alias``.
 _RUN_NAME = re.compile(r"(?i)run$")
 #: Receivers whose ``.alias`` is the requested name of a start or an assignment,

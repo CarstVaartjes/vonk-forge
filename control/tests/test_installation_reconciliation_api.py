@@ -19,7 +19,7 @@ from vonk_control.auth import Actor, TokenCodec
 from vonk_control.install_admission.identity import (
     installation_plan_digest_from_stored_document,
 )
-from vonk_control.installation_reconciliation_api import (
+from vonk_control.installations.reconciliation_api import (
     INSTALLATION_RECONCILIATION_OPERATION_IDS,
     install_installation_reconciliation_routes,
 )

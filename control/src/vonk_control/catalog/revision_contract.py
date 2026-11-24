@@ -43,7 +43,7 @@ from vonk_agent_protocol.build_import import RecipeBuildOptions
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.bounded_json import require_mapping
-from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.operator_acceptance.receipt_contract import ReceiptOwner
 from vonk_control.strict_json import (
     StrictJSONModel,
     serialize_json_value,

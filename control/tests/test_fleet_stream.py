@@ -19,10 +19,9 @@ from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.db.connections import session_factory
-from vonk_control.fleet_event_contract import (
+from vonk_control.fleet_events.contract import (
     AgentOperationPayload,
     FleetEventPayload,
     InstallationNodePayload,
@@ -33,21 +32,25 @@ from vonk_control.fleet_event_contract import (
     RecipeRunPayload,
     RunNodePayload,
 )
-from vonk_control.fleet_events import (
+from vonk_control.fleet_events.outbox import (
     FleetEvent,
     FleetEventDraft,
     FleetEventRepository,
     FleetReplayBatch,
 )
-from vonk_control.fleet_projection.common import FleetSnapshot, TelemetryPoint
-from vonk_control.fleet_projection.service import FleetProjection
-from vonk_control.fleet_stream import FleetStream, _event_frame, parse_last_event_id
-from vonk_control.fleet_stream_contract import (
+from vonk_control.fleet_events.stream import (
+    FleetStream,
+    _event_frame,
+    parse_last_event_id,
+)
+from vonk_control.fleet_events.stream_contract import (
     FleetChangeEvent,
     FleetRefreshEvent,
     FleetTelemetryEvent,
     JobChange,
 )
+from vonk_control.fleet_projection.common import FleetSnapshot, TelemetryPoint
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentNode, User
 from vonk_control.models.telemetry import (
@@ -55,7 +58,8 @@ from vonk_control.models.telemetry import (
     FleetStreamEvent,
     NodeTelemetrySample,
 )
-from vonk_control.passwords import hash_password
+from vonk_control.security.browser_auth import BrowserAuthService
+from vonk_control.security.passwords import hash_password
 from vonk_control.telemetry.samples import (
     TelemetryRepository,
     TelemetrySampleView,

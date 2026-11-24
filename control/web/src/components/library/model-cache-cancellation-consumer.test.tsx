@@ -6,7 +6,7 @@ import { ApiClient } from "../../api/client";
 import { ContractViolation } from "../../api/contract-json";
 import { CancelOperation } from "../ui/cancel-operation";
 import { ToastProvider } from "../ui/toast";
-import { ModelCacheCancellationEvidence } from "../../pages/activity";
+import { ModelCacheCancellationEvidence } from "../../pages/activity-operation-details";
 
 // The focused hosted lane supplies responses emitted by the real PostgreSQL
 // owner/API recovery journey, after generating consumers from the same source.

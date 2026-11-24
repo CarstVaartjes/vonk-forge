@@ -21,7 +21,7 @@ from vonk_agent_protocol.outcome import (
 )
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleError
-from vonk_control.failure_classification import is_security_failure
+from vonk_control.failures.classification import is_security_failure
 from vonk_control.model_cache.constants import (
     _MAX_RETRY_HINT_SECONDS,
     _RETRY_BASE_SECONDS,

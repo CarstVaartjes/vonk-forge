@@ -23,7 +23,7 @@ from vonk_agent_protocol.state_machines import (
     ObservedAssignmentState,
     RunState,
 )
-from vonk_control.child_phases import FleetProfileChildPhase
+from vonk_control.fleet_profile_contract.child_phases import FleetProfileChildPhase
 from vonk_control.fleet_profile_contract.vocabulary import (
     FleetProfileAssignmentState,
     FleetProfileInstallationPolicy,

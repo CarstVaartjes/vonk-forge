@@ -35,7 +35,6 @@ from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_image_availability.contracts import (
     _CLAIM_SCAN_WINDOW,
     _MODEL_WAIT_POLL_SECONDS,
@@ -45,8 +44,9 @@ from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityClaim,
     RecipeImageAvailabilityUnknown,
 )
-from vonk_control.stall_window import Verdict, Wait, progress_verdict
 from vonk_control.strict_json import serialize_json_value
+from vonk_control.waits.persisted import schedule_wait
+from vonk_control.waits.stall_window import Verdict, Wait, progress_verdict
 
 if TYPE_CHECKING:
     from vonk_control.recipe_image_availability.service import (

@@ -22,8 +22,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_control.admission_locking import is_admission_contention, label_transaction
 from vonk_control.catalog.revision_collection import GRACE
-from vonk_control.fleet_event_contract import NodeTelemetryPayload
-from vonk_control.fleet_events import FleetEventDraft, FleetEventRepository
+from vonk_control.fleet_events.contract import NodeTelemetryPayload
+from vonk_control.fleet_events.outbox import FleetEventDraft, FleetEventRepository
 from vonk_control.inventory.items_contract import InventorySnapshotKind
 from vonk_control.inventory.repository import newest_snapshot_ids
 from vonk_control.models.fleet import (
@@ -41,7 +41,7 @@ from vonk_control.models.telemetry import (
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
-from vonk_control.step_ca import CERTIFICATE_LIFETIME
+from vonk_control.pki.step_ca import CERTIFICATE_LIFETIME
 
 _MAX_MAINTENANCE_LIMIT = 25_000
 #: One pass deletes at most this many rows per table.  Maintenance holds rows

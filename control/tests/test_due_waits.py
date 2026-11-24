@@ -39,9 +39,8 @@ from vonk_control.catalog.sync import (
     AutomaticCatalogSync,
     ManagedRecipeCatalogSyncService,
 )
-from vonk_control.coordinator_failures import CoordinatorFailures
-from vonk_control.due_waits import DueWaitBackstop, WaitSource
 from vonk_control.enrollment.service import EnrollmentService
+from vonk_control.failures.coordinator import CoordinatorFailures
 from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.jobs.queue import JobService
 from vonk_control.model_primitives import Base
@@ -50,16 +49,17 @@ from vonk_control.models.fleet import AgentIssuedCertificateRevocation
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.operations.blockers import BlockingOperation, make_blocker
-from vonk_control.persisted_waits import read_wait, schedule_wait, write_wait
+from vonk_control.pki.step_ca import StepCAUnavailable
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationProgressResult,
     RecipeOperationResult,
 )
-from vonk_control.step_ca import StepCAUnavailable
 from vonk_control.stored.rows import read_row_column
-from vonk_control.wait_contract import WaitEvidence
-from vonk_control.wait_redrive import WAIT_MODELS, wait_sources
+from vonk_control.waits.contract import WaitEvidence
+from vonk_control.waits.due import DueWaitBackstop, WaitSource
+from vonk_control.waits.persisted import read_wait, schedule_wait, write_wait
+from vonk_control.waits.redrive import WAIT_MODELS, wait_sources
 from vonk_control.worker.assembly import assemble_production_worker
 from vonk_control.worker.loop import Worker
 
@@ -88,12 +88,12 @@ def test_quiet_worker_reconstruction_redrives_the_same_fenced_job(
     script = """
 import os, signal
 from datetime import datetime
-from vonk_control.coordinator_failures import CoordinatorFailures
+from vonk_control.failures.coordinator import CoordinatorFailures
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from vonk_control.jobs.queue import JobService
 from vonk_control.models.jobs import Job
-from vonk_control.persisted_waits import schedule_wait
+from vonk_control.waits.persisted import schedule_wait
 from vonk_control.worker.loop import Worker
 sessions = sessionmaker(create_engine(os.environ['WAIT_TEST_DATABASE']))
 now = datetime.fromisoformat(os.environ['WAIT_TEST_NOW'])
@@ -177,7 +177,7 @@ def test_corrupt_first_row_cannot_starve_later_due_work(
     postgres_engine, caplog, damage
 ):
     """Catches a LIMIT-first selector repeatedly returning damaged evidence."""
-    caplog.set_level(logging.INFO, logger="vonk_control.due_waits")
+    caplog.set_level(logging.INFO, logger="vonk_control.waits.due")
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     bad, good = _job(), _job()

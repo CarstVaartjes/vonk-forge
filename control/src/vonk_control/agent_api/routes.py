@@ -13,7 +13,10 @@ from vonk_control.agent_api.common import AgentApiServices, EnrollmentRateLimite
 from vonk_control.agent_api.enrollment import install_enrollment_routes
 from vonk_control.agent_api.observations import install_observations_routes
 from vonk_control.openapi_numbers import install_canonical_openapi
-from vonk_control.operator_acceptance import ControllerAPIRoute, OperatorReceiptResolver
+from vonk_control.operator_acceptance.resolution import (
+    ControllerAPIRoute,
+    OperatorReceiptResolver,
+)
 
 
 def install_agent_routes(

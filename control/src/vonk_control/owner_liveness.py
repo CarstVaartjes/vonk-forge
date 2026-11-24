@@ -17,7 +17,7 @@ Kept on purpose by the installation arm:
 
 * an installation that is ``installed`` is live; once its Spark reported its
   disk after the install the files are in the reported free space and its claim
-  is released as covered (``covered_installation_claims``), unless a run of it
+  is released as covered (``installations.covered_claims``), unless a run of it
   is live;
 * an installation whose last operation was cancelled or retired, or was a
   cleanup (uninstall, reconcile): its effect on the Spark is uncertain, so it
@@ -81,10 +81,10 @@ from vonk_control.models.fleet import (
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.models.operations import AgentOperation as StoredOperation
-from vonk_control.stall_window import progress_deadline
 from vonk_control.stored.rows import read_row_column
 from vonk_control.stored.states import LibrarySyncRunState, RecipeBuildState
 from vonk_control.strict_json import read_stored_model
+from vonk_control.waits.stall_window import progress_deadline
 
 #: A Job in one of these has ended; nothing it owns can still be used by it.
 JOB_ENDED_STATES = job_states.words(

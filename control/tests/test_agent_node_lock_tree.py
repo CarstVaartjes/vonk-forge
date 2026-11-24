@@ -18,7 +18,7 @@ AGENT_FACING = (
     *sorted((SRC / "telemetry").glob("*.py")),
     SRC / "inventory" / "repository.py",
     SRC / "agent_contacts.py",
-    SRC / "installed_bytes.py",
+    SRC / "installations" / "installed_bytes.py",
     *sorted((SRC / "agent_api").glob("*.py")),
 )
 

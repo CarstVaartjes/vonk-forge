@@ -15,7 +15,7 @@ from vonk_control import build_identity
 from vonk_control.identity_insert import insert_identity
 from vonk_control.logging import log_event
 from vonk_control.models.jobs import ControlProcessHeartbeat
-from vonk_control.stall_window import Verdict
+from vonk_control.waits.stall_window import Verdict
 from vonk_control.worker_healthcheck import (
     WORKER_READINESS_WINDOW_SECONDS,
     WORKER_STEP_WINDOW_SECONDS,

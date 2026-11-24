@@ -13,10 +13,10 @@ from sqlalchemy import Engine, event, select
 from vonk_agent_protocol.gpu_clock import GpuClockRange
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.admission_locking import report_admission_locks
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import CompositeObjectSource, MemoryObjectSource
-from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.saved_profiles import _definition
 from vonk_control.models.cache import ModelCacheSet

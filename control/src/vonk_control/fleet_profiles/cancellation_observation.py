@@ -36,8 +36,8 @@ from vonk_control.lifecycle.fleet_profile import cancellation_state, doc_state
 from vonk_control.lifecycle.types import Effect as _LifecycleEffect
 from vonk_control.lifecycle.types import State as _LifecycleState
 from vonk_control.models.fleet import FleetProfileApplication
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.strict_json import read_stored_model
+from vonk_control.waits.persisted import schedule_wait
 
 if TYPE_CHECKING:
     from vonk_control.fleet_profiles.service import FleetProfileService

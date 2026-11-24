@@ -10,11 +10,11 @@ from threading import Lock
 from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.distribution import DistributionObject
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.distribution.delivery import DeliveryMixin
 from vonk_control.distribution.locations import ObjectLocation
 from vonk_control.distribution.registration import RegistrationMixin
 from vonk_control.distribution.types import ObjectSource
-from vonk_control.distribution_assignment import NodeDistributionAssignment
 
 
 class DistributionService(RegistrationMixin, DeliveryMixin):

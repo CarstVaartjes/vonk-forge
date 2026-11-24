@@ -1,6 +1,6 @@
 import pytest
 
-from vonk_control.passwords import (
+from vonk_control.security.passwords import (
     PasswordVerification,
     hash_password,
     verify_password,

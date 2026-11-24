@@ -30,7 +30,7 @@ from vonk_forge_contracts import CONTRACT_MAJOR
 
 from vonk_control.recipe_packages import client as recipe_packages
 from vonk_control.recipe_packages.client import PACKAGE_REPOSITORY, RecipePackageClient
-from vonk_control.recipe_release import (
+from vonk_control.recipe_packages.release import (
     RELEASE_BUNDLE,
     RELEASE_CHECKSUMS,
     RELEASE_INDEX,

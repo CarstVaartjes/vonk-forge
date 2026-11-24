@@ -19,7 +19,7 @@ from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheOperation
 from vonk_control.models.execution import ResourceReservation
 from vonk_control.models.jobs import Job, JobAttempt
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
-from vonk_control.reservation_owners import reservation_owner
+from vonk_control.reservations.owners import reservation_owner
 
 NON_BLOCKING_ENDS = frozenset({"cancelled", "superseded", "succeeded", "failed"})
 OPERATOR_WAIT_STATES = frozenset({"needs-operator", "waiting-for-operator"})

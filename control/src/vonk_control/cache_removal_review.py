@@ -20,7 +20,7 @@ from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.state_machines import AssetAvailability
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-from vonk_control.fleet_model_removal_contract import (
+from vonk_control.model_cache.fleet_removal_contract import (
     FleetModelRemovalEffects,
     FleetRemovalDisposition,
 )

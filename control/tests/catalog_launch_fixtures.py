@@ -36,12 +36,12 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 from vonk_agent_protocol.compiled_execution_plan import CompiledPlacement
-from vonk_control.compiled_execution_plan import (
+from vonk_control.execution_plan.compiled import (
     VerifiedModelObject,
     VerifiedRuntimeImage,
     compile_verified_execution_plan,
 )
-from vonk_control.execution_plan_service import _bind_runtime_artifacts, _placement
+from vonk_control.execution_plan.service import _bind_runtime_artifacts, _placement
 from vonk_control.models.mapping import ClusterMappingNode
 from vonk_control.recipe_operations.runtime_specs import compile_runtime_spec
 from vonk_control.recipe_operations.start_payloads import start_peer_addresses

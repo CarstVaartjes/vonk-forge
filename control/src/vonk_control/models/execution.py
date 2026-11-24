@@ -41,7 +41,7 @@ from vonk_control.model_primitives import (
     _state_in,
 )
 from vonk_control.models.waits import wait_due_column, wait_evidence_column
-from vonk_control.wait_contract import WaitEvidence
+from vonk_control.waits.contract import WaitEvidence
 
 
 class RecipeInstallation(Base):
@@ -159,7 +159,7 @@ class MeasuredRolePeak(Base):
     """The most memory a role of one recipe content was observed to use.
 
     One row per (recipe content digest, role), raised in place by the one
-    writer (``observed_run_memory``) and read by admission as an indexed
+    writer (``runs.observed_memory``) and read by admission as an indexed
     lookup. It belongs to the content, not to a run or an installation, so
     collecting either never forgets it.
     """

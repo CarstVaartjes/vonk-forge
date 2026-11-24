@@ -27,7 +27,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
-from vonk_control import agent_jobs, install_admission, run_admission
+from vonk_control import agent_jobs, install_admission
 from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.api import production as api
@@ -47,11 +47,12 @@ from vonk_control.models.operations import AgentOperation
 from vonk_control.recipe_builds.common import RecipeBuildPlan
 from vonk_control.recipe_operations import result_consumption
 from vonk_control.recipe_operations.service import RecipeOperationService
-from vonk_control.run_admission import RunAdmissionBusy, RunAdmissionService
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 from vonk_control.run_switch_operations import cancellation_retry, stop_planning
 from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runs import admission as run_admission
+from vonk_control.runs.admission import RunAdmissionBusy, RunAdmissionService
 
 from .artifact_jobs_support import _configure_artifact_recipe
 from .recipe_image_availability_support import _recipe, _recipe_projection

@@ -20,7 +20,7 @@ from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog.entities import CatalogEntityService
-from vonk_control.failure_classification import disposition
+from vonk_control.failures.classification import disposition
 from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.model_cache.errors import ModelCacheError
 from vonk_control.model_cache.service import ModelCacheService

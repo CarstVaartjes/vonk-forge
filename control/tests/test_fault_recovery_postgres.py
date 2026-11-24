@@ -4,9 +4,9 @@ import pytest
 from sqlalchemy import text
 
 from vonk_agent_protocol.outcome import UnknownError
-from vonk_control.local_ca import LocalCertificateAuthority
-from vonk_control.pki import IssuedCertificate
-from vonk_control.step_ca import StepCAUnavailable
+from vonk_control.pki.issuance import IssuedCertificate
+from vonk_control.pki.local_ca import LocalCertificateAuthority
+from vonk_control.pki.step_ca import StepCAUnavailable
 
 from .ca_material import NODE_ID, NOW, _csr
 from .test_local_ca import _binding, local_ca  # noqa: F401 - pytest fixture

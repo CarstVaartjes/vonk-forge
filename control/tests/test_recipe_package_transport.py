@@ -57,7 +57,6 @@ from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.recipe_builds.common import RecipeBuildUnknown
 from vonk_control.recipe_builds.service import RecipeBuildService
-from vonk_control.recipe_library_types import RecipeLibrarySnapshot, RecipePackageEntry
 from vonk_control.recipe_packages import archive
 from vonk_control.recipe_packages import client as recipe_packages
 from vonk_control.recipe_packages.client import RecipePackageClient
@@ -66,7 +65,11 @@ from vonk_control.recipe_packages.contracts import (
     RecipePackageUnsettled,
 )
 from vonk_control.recipe_packages.known_words import known_block
-from vonk_control.recipe_release import RecipeReleaseError
+from vonk_control.recipe_packages.library_types import (
+    RecipeLibrarySnapshot,
+    RecipePackageEntry,
+)
+from vonk_control.recipe_packages.release import RecipeReleaseError
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 
 from .display_fixtures import display_of_model, display_of_recipe

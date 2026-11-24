@@ -45,7 +45,7 @@ from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoo
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
 )
-from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.execution_plan.service import ControllerExecutionPlanService
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision

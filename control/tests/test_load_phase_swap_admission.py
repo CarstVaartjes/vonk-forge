@@ -51,13 +51,13 @@ from vonk_control.models.execution import (
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.operations.blockers import dump_blockers, make_blocker, read_blockers
 from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
-from vonk_control.run_admission import (
+from vonk_control.run_switch_contract.plans import RunSwitchAssessment
+from vonk_control.runs.admission import (
     RETRYABLE_PLAN_BLOCKERS,
     RunAdmissionBusy,
     RunAdmissionService,
     require_admissible,
 )
-from vonk_control.run_switch_contract.plans import RunSwitchAssessment
 from vonk_control.telemetry.samples import TelemetryRepository
 
 from .artifact_jobs_support import _configure_artifact_recipe

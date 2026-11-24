@@ -23,7 +23,6 @@ from vonk_agent_protocol.state_machines import (
     NodeIdentityState,
 )
 from vonk_control.agent_contacts import ensure_contact
-from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment.contract import EnrollmentRotationClaim
 from vonk_control.enrollment.ending import retain_ended_effect
 from vonk_control.enrollment.types import EnrollmentDenied, EnrollmentIssuanceUncertain
@@ -40,7 +39,8 @@ from vonk_control.models.fleet import (
     AgentNode,
     AgentNodeProfile,
 )
-from vonk_control.pki import IssuedCertificate
+from vonk_control.pki.issuance import IssuedCertificate
+from vonk_control.pki.issuance_contract import CertificateIssuanceBinding
 from vonk_control.security.enrollment import (
     certificate_text,
     require_fresh_identity,

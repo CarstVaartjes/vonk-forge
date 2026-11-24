@@ -21,7 +21,7 @@ from vonk_control.identifiers import UuidId
 from vonk_control.machine_states import CatalogSyncStateField
 from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
 from vonk_control.strict_json import StrictModel
-from vonk_control.wait_contract import QueueWait
+from vonk_control.waits.contract import QueueWait
 
 CATALOG_OPERATION_IDS = {
     (

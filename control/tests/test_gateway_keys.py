@@ -31,7 +31,7 @@ from vonk_control.gateway.keys import (
 )
 from vonk_control.gateway.keys_contract import GatewayKeyCreated
 from vonk_control.gateway.route_grants import GatewayInferenceRoute
-from vonk_control.operator_acceptance import ControllerAPIRoute
+from vonk_control.operator_acceptance.resolution import ControllerAPIRoute
 
 from .observed_actions import observe_action
 

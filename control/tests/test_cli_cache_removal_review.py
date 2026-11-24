@@ -23,7 +23,7 @@ from cluster_profiles.controller_cli import dispatch as dispatch_module
 from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
     FleetProfileEndpointsView,
 )
-from vonk_control.fleet_model_removal_contract import (
+from vonk_control.model_cache.fleet_removal_contract import (
     FleetModelRemovalCheckpoint,
     FleetModelRemovalEffects,
     FleetRemovalReason,

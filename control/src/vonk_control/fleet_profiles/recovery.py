@@ -54,7 +54,7 @@ from vonk_control.lifecycle.evidence import (
 from vonk_control.lifecycle.fleet_profile import FleetProfileAdapter
 from vonk_control.models.fleet import AgentNode, FleetProfileApplication
 from vonk_control.operations.blockers import OperationBlocker, make_blocker
-from vonk_control.persisted_waits import wait_due
+from vonk_control.waits.persisted import wait_due
 
 if TYPE_CHECKING:
     from vonk_control.fleet_profiles.service import FleetProfileService

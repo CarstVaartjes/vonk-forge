@@ -18,7 +18,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_control.artifact_jobs.lifecycle import ArtifactReferenceUnsettled
-from vonk_control.failure_classification import disposition
+from vonk_control.failures.classification import disposition
 from vonk_control.jobs.documents import AvailabilityJobPayload
 from vonk_control.lifecycle.image_availability import preparation_deadline
 from vonk_control.model_primitives import Base

@@ -49,13 +49,13 @@ from vonk_control.agent_api.authority import (
 )
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.compiled_artifact_contract import compile_artifact_contract
-from vonk_control.host_helper_authority import (
+from vonk_control.host_authority.helper import (
     HostHelperAuthorityError,
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
     HostRuntimeEvidenceUnavailable,
 )
-from vonk_control.host_runtime_plan_authority import (
+from vonk_control.host_authority.runtime_plan import (
     RuntimePlanUnsatisfiable,
     derive_runtime_plan_binding,
 )

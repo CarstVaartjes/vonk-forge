@@ -25,7 +25,7 @@ from vonk_control.run_switch_operations.observation_window import (
     checkpoint_verdict,
 )
 from vonk_control.run_switch_operations.result_helpers import _read_progress
-from vonk_control.stall_window import Verdict
+from vonk_control.waits.stall_window import Verdict
 
 from .agent_jobs_support import distribution_payload
 from .recipe_operations_support import NOW, setup_services

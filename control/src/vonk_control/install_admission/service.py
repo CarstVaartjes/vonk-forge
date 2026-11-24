@@ -25,7 +25,6 @@ from vonk_control.admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
-from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
 from vonk_control.fleet_profiles.capacity import inherited_profile_disk
 from vonk_control.install_admission.contracts import (
     InstallAdmissionBusy,
@@ -60,6 +59,7 @@ from vonk_control.recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     resolve_recipe_entities,
 )
+from vonk_control.reservations.disk import outstanding_disk_reservation_bytes
 from vonk_control.stored.states import (
     CatalogRevisionState,
     ClusterMappingState,

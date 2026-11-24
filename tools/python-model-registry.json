@@ -218,7 +218,7 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
-      "module": "control/src/vonk_control/ca_issuance_contract.py",
+      "module": "control/src/vonk_control/pki/issuance_contract.py",
       "kind": "controller-contract"
     },
     {
@@ -259,12 +259,12 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/compiled_execution_plan.py",
+      "module": "control/src/vonk_control/execution_plan/compiled.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
-      "module": "control/src/vonk_control/distribution_assignment.py",
+      "module": "control/src/vonk_control/distribution/assignment_contract.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
@@ -277,12 +277,12 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/failure_evidence.py",
+      "module": "control/src/vonk_control/failures/evidence.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
-      "module": "control/src/vonk_control/fleet_event_contract.py",
+      "module": "control/src/vonk_control/fleet_events/contract.py",
       "kind": "controller-contract"
     },
     {
@@ -328,7 +328,7 @@
       "reason": "API model colocated with the one derivation that fills it (Spark host checks)"
     },
     {
-      "module": "control/src/vonk_control/fleet_stream_contract.py",
+      "module": "control/src/vonk_control/fleet_events/stream_contract.py",
       "kind": "controller-contract"
     },
     {
@@ -486,7 +486,7 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
-      "module": "control/src/vonk_control/resource_planning_contract.py",
+      "module": "control/src/vonk_control/resource_planning/contract.py",
       "kind": "controller-contract",
       "reason": "Canonical recipe resource read surface using shared settings, topology, and model selection."
     },
@@ -563,7 +563,7 @@
       "reason": "base class of the Controller contract models, shared by every *_contract module"
     },
     {
-      "module": "control/src/vonk_control/wait_contract.py",
+      "module": "control/src/vonk_control/waits/contract.py",
       "kind": "controller-contract"
     },
     {
@@ -579,15 +579,15 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/operator_receipt_contract.py",
+      "module": "control/src/vonk_control/operator_acceptance/receipt_contract.py",
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/fleet_model_removal_contract.py",
+      "module": "control/src/vonk_control/model_cache/fleet_removal_contract.py",
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/coordinator_contract.py",
+      "module": "control/src/vonk_control/failures/coordinator_contract.py",
       "reason": "Canonical current worker coordinator failure and wait observation contracts.",
       "kind": "controller-contract"
     },

@@ -41,15 +41,15 @@ from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog.entities import _digest
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
-from vonk_control.execution_plan_service import (
+from vonk_control.execution_plan.service import (
     ControllerExecutionPlanService,
 )
 from vonk_control.gateway.litellm import LiteLlmGeneration, ServedModelInfo
-from vonk_control.host_helper_authority import (
+from vonk_control.host_authority.helper import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )
-from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
+from vonk_control.host_authority.runtime_plan import derive_runtime_plan_binding
 from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.inventory.items import inventory_items
 from vonk_control.inventory.repository import (
@@ -78,7 +78,7 @@ from vonk_control.recipe_operations.observation_helpers import (
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
-from vonk_control.run_admission import RunAdmissionService
+from vonk_control.runs.admission import RunAdmissionService
 from vonk_control.runtime.adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation.contracts import PulledImageEvidence
 from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image

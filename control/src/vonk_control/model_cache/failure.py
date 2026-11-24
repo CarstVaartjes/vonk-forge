@@ -16,7 +16,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.agent_operation_facts import aware as _aware
-from vonk_control.failure_classification import disposition, is_definite
+from vonk_control.failures.classification import disposition, is_definite
 from vonk_control.lifecycle.types import Reported, State
 from vonk_control.logging import redact_text
 from vonk_control.model_cache.artifacts import ArtifactSetManifest
@@ -49,8 +49,8 @@ from vonk_control.model_cache.provider_waits import hinted_until, provider_kinds
 from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
 from vonk_control.operations.blockers import make_blocker
 from vonk_control.operations.contract import AvailabilityRecoveryAction
-from vonk_control.persisted_waits import schedule_wait
-from vonk_control.wait_contract import typed_wait_reason
+from vonk_control.waits.contract import typed_wait_reason
+from vonk_control.waits.persisted import schedule_wait
 
 if TYPE_CHECKING:
     from vonk_control.model_cache.service import ModelCacheService

@@ -10,7 +10,7 @@ from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
 from vonk_agent_protocol.outcome import SecurityRefusalError
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
-from vonk_control.compiled_execution_plan import (
+from vonk_control.execution_plan.compiled import (
     DistributionObjectReceipt,
     VerifiedModelObject,
 )

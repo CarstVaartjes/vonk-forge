@@ -8,13 +8,13 @@ from sqlalchemy import select, update
 from tests.signed_recipe_release import signed_recipe_releases
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.images import ImageStoreCode, PrebuiltImageCode
+from vonk_control.image_store.oci import StoreUnknown
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import ResourceReservation
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
-from vonk_control.oci_image_store import StoreUnknown
 from vonk_control.prebuilt_images import PrebuiltImageImporter, executable_build_key
 from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.runtime_image_preparation.storage import (

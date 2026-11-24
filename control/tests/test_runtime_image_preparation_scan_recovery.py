@@ -22,7 +22,6 @@ from vonk_control.lifecycle.image_availability import CANCEL_BUDGET
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.jobs import Job
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_image_availability.availability_contract import (
     AvailabilityBuildReceipt,
 )
@@ -32,6 +31,7 @@ from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImagePreparationUnknown,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
+from vonk_control.waits.persisted import schedule_wait
 
 from .non_blocking import assert_ended_without_blocking
 from .recipe_image_availability_support import (

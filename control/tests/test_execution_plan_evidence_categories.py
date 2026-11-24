@@ -5,7 +5,7 @@ from typing import cast
 import pytest
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-from vonk_control.execution_plan_service import (
+from vonk_control.execution_plan.service import (
     _build_package,
     _image_digest,
     _runtime_image_receipt,

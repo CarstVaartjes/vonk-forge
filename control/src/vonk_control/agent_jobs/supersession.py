@@ -58,7 +58,7 @@ from vonk_control.models.operations import AgentOperationAttempt
 from vonk_control.offline_stops import pending_run_stop_nodes
 from vonk_control.own_cleanup import CLEANUP_KINDS
 from vonk_control.recovery_policy import FailureKind
-from vonk_control.stall_window import stall_deadline
+from vonk_control.waits.stall_window import stall_deadline
 
 
 def request_superseded_workload_cancellation_in_session(

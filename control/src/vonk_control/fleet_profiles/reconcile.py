@@ -23,7 +23,7 @@ from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.failure_classification import (
+from vonk_control.failures.classification import (
     error_code,
     is_definite,
     is_security_failure,
@@ -73,11 +73,11 @@ from vonk_control.operations.blockers import (
     bound_blockers,
     make_blocker,
 )
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_operations.errors import RecipeOperationConflict
-from vonk_control.reservation_owners import release_dead_owner_reservations
+from vonk_control.reservations.owners import release_dead_owner_reservations
 from vonk_control.run_switch_contract.phase_results import RunSwitchStopResult
 from vonk_control.strict_json import read_stored_model
+from vonk_control.waits.persisted import schedule_wait
 
 if TYPE_CHECKING:
     from vonk_control.fleet_profiles.service import FleetProfileService

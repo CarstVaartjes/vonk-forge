@@ -37,9 +37,9 @@ from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, WaitReaso
 from vonk_agent_protocol.outcome import OutcomeDone, OutcomeUnknown
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource
-from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.models.operations import AgentOperation

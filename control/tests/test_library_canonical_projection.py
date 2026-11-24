@@ -63,7 +63,7 @@ from vonk_control.models.catalog import (
 from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.mapping import ClusterMapping
-from vonk_control.operator_acceptance import ControllerAPIRoute
+from vonk_control.operator_acceptance.resolution import ControllerAPIRoute
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_control.strict_json import serialize_json_value

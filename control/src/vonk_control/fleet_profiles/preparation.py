@@ -57,8 +57,8 @@ from vonk_control.fleet_profiles.projection_support import _aware
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.operations.blockers import OperationBlocker, make_blocker
-from vonk_control.stall_window import latest_progress
 from vonk_control.storage_demands import StorageRelief
+from vonk_control.waits.stall_window import latest_progress
 
 if TYPE_CHECKING:
     from vonk_control.fleet_profiles.service import FleetProfileService

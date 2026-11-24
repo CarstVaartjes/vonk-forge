@@ -59,11 +59,11 @@ from vonk_control.operations.item_contract import (
     OperationOwnerReference,
     OperationResultFacts,
 )
-from vonk_control.operator_acceptance import (
+from vonk_control.operator_acceptance.receipt_contract import ReceiptPolicy
+from vonk_control.operator_acceptance.resolution import (
     OperatorReceiptResolver,
     operator_acceptance,
 )
-from vonk_control.operator_receipt_contract import ReceiptPolicy
 from vonk_control.strict_json import read_stored_model
 
 MODEL_CACHE_OPERATION_IDS = {

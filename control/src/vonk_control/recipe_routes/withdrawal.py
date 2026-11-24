@@ -21,7 +21,6 @@ from vonk_control.logging import log_event
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.jobs import Job
 from vonk_control.models.routes import RoutePublication, RoutePublicationOwner
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_operations.execution_contract import RouteWithdrawalFollowUp
 from vonk_control.recipe_routes.shared import (
     _FOLLOW_UP_REASONS,
@@ -40,6 +39,7 @@ from vonk_control.recipe_routes.shared import (
     _RecipeCandidate,
     _RecipeWithdrawal,
 )
+from vonk_control.waits.persisted import schedule_wait
 
 if TYPE_CHECKING:
     from vonk_control.recipe_routes.service import RecipeRouteService

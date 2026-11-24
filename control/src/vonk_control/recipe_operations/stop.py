@@ -34,14 +34,13 @@ from vonk_control.admission_locking import (
     set_admission_timeout,
 )
 from vonk_control.bounded_json import require_mapping
-from vonk_control.failure_classification import disposition
+from vonk_control.failures.classification import disposition
 from vonk_control.fleet_profiles.stop_contract import ProfileJobRunStopJob
 from vonk_control.jobs.documents import RecipeStopParent, controller_recipe_document
 from vonk_control.logging import redact_text
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_operations.constants import _STOP_WITHDRAWAL_ATTEMPTS
 from vonk_control.recipe_operations.errors import (
     RecipeArtifactJobCancellationPending,
@@ -60,8 +59,9 @@ from vonk_control.recipe_routes.shared import (
     RecipeRouteError,
     route_publication_transaction,
 )
-from vonk_control.run_admission import RunAdmissionBusy
+from vonk_control.runs.admission import RunAdmissionBusy
 from vonk_control.stored.rows import read_row_column
+from vonk_control.waits.persisted import schedule_wait
 
 if TYPE_CHECKING:
     from vonk_control.recipe_operations.service import RecipeOperationService

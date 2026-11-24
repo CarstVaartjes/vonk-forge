@@ -10,7 +10,7 @@ from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_control.install_admission.contracts import InstallPlanStale
 from vonk_control.models.execution import RecipeInstallation, RecipeRun
 from vonk_control.models.jobs import Job
-from vonk_control.run_admission import RunPlanInvalid
+from vonk_control.runs.admission import RunPlanInvalid
 
 from .artifact_jobs_support import _configure_artifact_recipe
 from .recipe_operations_support import installed_recipe, setup_services

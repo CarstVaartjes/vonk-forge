@@ -16,20 +16,20 @@ from vonk_agent_protocol.telemetry import TelemetrySample
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.auth import TokenCodec
 from vonk_control.db.connections import session_factory
-from vonk_control.fleet_event_contract import (
+from vonk_control.fleet_events.contract import (
     FleetEventPayload,
     JobPayload,
     RunNodePayload,
     _FleetEventModel,
 )
-from vonk_control.fleet_events import (
+from vonk_control.fleet_events.outbox import (
     FleetEventDraft,
     FleetEventRecorder,
     FleetEventRepository,
     _FleetStoredEventGap,
     _walk_payload,
 )
-from vonk_control.fleet_stream_contract import FleetChangeEvent
+from vonk_control.fleet_events.stream_contract import FleetChangeEvent
 from vonk_control.model_primitives import Base
 from vonk_control.models.execution import (
     InstallationNode,

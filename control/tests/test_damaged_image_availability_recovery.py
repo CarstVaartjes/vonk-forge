@@ -25,7 +25,8 @@ from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,
 )
-from vonk_control.image_store_collection import GRACE, ImageStoreCollector
+from vonk_control.image_store.collection import GRACE, ImageStoreCollector
+from vonk_control.image_store.oci import OciImageStore, StoredImage
 from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.inventory.repository import (
     InventoryRepository,
@@ -34,11 +35,10 @@ from vonk_control.inventory.repository import (
 from vonk_control.models.execution import ResourceReservation
 from vonk_control.models.fleet import AgentCertificate, User
 from vonk_control.models.jobs import Job
-from vonk_control.oci_image_store import OciImageStore, StoredImage
 from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_operations.availability_intent import RecipeBuildDependency
 from vonk_control.recipe_operations.service import RecipeOperationService
-from vonk_control.run_admission import RunAdmissionService
+from vonk_control.runs.admission import RunAdmissionService
 from vonk_control.runtime_image_preparation import storage as runtime_image_storage
 from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage

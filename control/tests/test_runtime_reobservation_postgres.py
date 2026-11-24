@@ -57,7 +57,7 @@ from vonk_control.agent_jobs.contracts import StaleAgentFence
 from vonk_control.agent_jobs.observation_receipts import OBSERVATION_KINDS
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_jobs.stored import column_value
-from vonk_control.host_helper_authority import (
+from vonk_control.host_authority.helper import (
     HostHelperAuthorityError,
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,

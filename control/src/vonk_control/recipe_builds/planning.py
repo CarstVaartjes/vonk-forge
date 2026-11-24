@@ -16,7 +16,6 @@ from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_control.catalog.revision_contract import RecipeRevisionProjection
-from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
 from vonk_control.fleet_profiles.read_observation import observe_selection
 from vonk_control.gpu.health import gpu_health_reason
 from vonk_control.inventory.items import runtime_value
@@ -58,6 +57,7 @@ from vonk_control.recipe_operations.execution_contract import (
     build_plan_document,
     build_policy_document,
 )
+from vonk_control.reservations.disk import outstanding_disk_reservation_bytes
 from vonk_control.runtime.adapters import RuntimeAdapter
 from vonk_control.source_policy import (
     dockerfile_base_images,

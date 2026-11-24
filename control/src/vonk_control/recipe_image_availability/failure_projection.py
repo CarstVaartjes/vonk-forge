@@ -19,7 +19,7 @@ from vonk_agent_protocol.wire_model import (
     OperationProgress,
     canonical_message,
 )
-from vonk_control.failure_classification import is_definite, is_redownload
+from vonk_control.failures.classification import is_definite, is_redownload
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.documents import AvailabilityJobResult, AvailabilityUnknownEnd
 from vonk_control.lifecycle.evidence import (
@@ -37,7 +37,6 @@ from vonk_control.operations.contract import (
     sanitize_failure_evidence,
 )
 from vonk_control.operations.progress import aggregate_progress
-from vonk_control.persisted_waits import read_wait, schedule_wait
 from vonk_control.recipe_image_availability.contracts import (
     _INTEGRITY_FAILURE_CODES,
     _LOGGER,
@@ -62,6 +61,7 @@ from vonk_control.recipe_image_availability.view_contract import (
 )
 from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import serialize_json_value
+from vonk_control.waits.persisted import read_wait, schedule_wait
 
 if TYPE_CHECKING:
     from vonk_control.recipe_image_availability.service import (

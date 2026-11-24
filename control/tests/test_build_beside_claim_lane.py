@@ -28,8 +28,8 @@ from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation as StoredOperation
 from vonk_control.operations.blockers import BlockingOperation
-from vonk_control.persisted_waits import read_wait
-from vonk_control.wait_contract import QueueWait
+from vonk_control.waits.contract import QueueWait
+from vonk_control.waits.persisted import read_wait
 
 from .agent_fences import fenced_operation
 from .agent_jobs_support import COMMIT, NODE_A, NODE_B, parent
@@ -344,7 +344,7 @@ def test_runtime_preflight_never_becomes_an_off_lane_operation() -> None:
     ``record_preflight`` stores the receipt's fingerprint as the node's current
     fingerprint: a probe runs on the claim lane, so its receipt is the newest
     host sample and no claim is sampled between the probe and its result.  The
-    claim-side comparisons (``agent_jobs/claim.py``, ``agent_acceptance.py``)
+    claim-side comparisons (``agent_jobs/claim.py``, ``operator_acceptance/agent.py``)
     read committed node state after the claim handler, so the on-lane ordering
     is the only thing keeping a claim body equal to the stored value.  If probes
     move off the lane, a receipt could be older than a claim sample: revisit

@@ -46,7 +46,7 @@ from vonk_control.artifact_jobs.api import (
 )
 from vonk_control.auth import TrustedProxyAgentIdentityMiddleware
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-from vonk_control.failure_classification import disposition as failure_disposition
+from vonk_control.failures.classification import disposition as failure_disposition
 from vonk_control.http_errors import RetryAfterMiddleware
 from vonk_control.logging import current_request_id
 from vonk_control.metrics.registry import MetricsRegistry

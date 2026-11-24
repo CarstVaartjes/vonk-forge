@@ -23,7 +23,7 @@ from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
-from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.execution_plan.service import ControllerExecutionPlanService
 from vonk_control.install_admission.contracts import (
     AdmissionReason,
     InstallAdmissionBusy,
@@ -62,7 +62,7 @@ from vonk_control.recipe_operations import persistence
 from vonk_control.recipe_operations.errors import (
     RecipeOperationConflict,
 )
-from vonk_control.run_admission import RunAdmissionBusy
+from vonk_control.runs.admission import RunAdmissionBusy
 from vonk_control.runtime_image_preparation.preparation import (
     stored_runtime_image_resolver,
 )

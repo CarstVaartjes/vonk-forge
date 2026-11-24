@@ -64,7 +64,7 @@ from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.operator_projection_api.wiring import (
     build_fleet_operator_services,
 )
-from vonk_control.step_ca import StepCAUnavailable
+from vonk_control.pki.step_ca import StepCAUnavailable
 from vonk_control.telemetry.samples import TelemetryRepository
 
 from .agent_api_support import (

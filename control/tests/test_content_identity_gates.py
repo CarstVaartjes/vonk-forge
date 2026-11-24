@@ -27,7 +27,6 @@ from vonk_control.recipe_operations.execution_contract import (
     installation_matches_runtime_image,
 )
 from vonk_control.recipe_operations.service import RecipeOperationService
-from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_contract.evidence import RunSwitchPhase
 from vonk_control.run_switch_contract.plans import RunSwitchPlan
 from vonk_control.run_switch_contract.requests import (
@@ -40,6 +39,7 @@ from vonk_control.run_switch_operations.artifact_validation import (
 )
 from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runs.admission import RunAdmissionService
 
 from .recipe_builds_support import RecordingQueue
 from .recipe_operations_support import complete_started_recipe

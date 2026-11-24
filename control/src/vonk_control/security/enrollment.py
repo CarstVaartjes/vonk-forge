@@ -20,7 +20,6 @@ from vonk_agent_protocol.state_machines import (
     EnrollmentPurpose,
     NodeIdentityState,
 )
-from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment.types import (
     EnrollmentDenied,
     EnrollmentIssuanceUncertain,
@@ -28,8 +27,9 @@ from vonk_control.enrollment.types import (
 )
 from vonk_control.enrollment.validation import _stored_utc, _utc
 from vonk_control.models.fleet import AgentCertificate, AgentEnrollmentGrant, AgentNode
-from vonk_control.pki import IssuedCertificate
-from vonk_control.step_ca import StepCAError, StepCAUnavailable
+from vonk_control.pki.issuance import IssuedCertificate
+from vonk_control.pki.issuance_contract import CertificateIssuanceBinding
+from vonk_control.pki.step_ca import StepCAError, StepCAUnavailable
 
 
 def require_grant(grant: AgentEnrollmentGrant | None) -> AgentEnrollmentGrant:

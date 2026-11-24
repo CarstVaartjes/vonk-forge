@@ -64,7 +64,6 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import (
     ArtifactDistributionAssignment,
 )
-from vonk_control.persisted_waits import read_wait
 from vonk_control.recipe_operations.execution_contract import (
     parse_stored_installation_plan,
 )
@@ -87,6 +86,7 @@ from vonk_control.unused_storage_collection.service import (
     UnusedStorageCollector,
     spark_eviction_capacity,
 )
+from vonk_control.waits.persisted import read_wait
 
 from .model_cache_support import _artifact, _download
 from .removal_settle import release_ended_gates

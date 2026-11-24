@@ -51,9 +51,9 @@ from vonk_control.jobs import states as job_states
 from vonk_control.lifecycle.fleet_profile import doc_state
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.operations.blockers import PHASE_RETRY_CODE, STALL_RETRY_ATTEMPT
-from vonk_control.persisted_waits import read_wait
 from vonk_control.preparation_contract import RuntimeImageIdentity
 from vonk_control.run_switch_contract.operations import RunSwitchOperation
+from vonk_control.waits.persisted import read_wait
 
 if TYPE_CHECKING:
     from vonk_control.fleet_profiles.run_switch_adapter import (

@@ -38,7 +38,7 @@ from vonk_control.auth import Actor, TokenCodec
 from vonk_control.compiled_artifact_contract import CompiledArtifactContract
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.models.execution import RecipeInstallation, RecipeRun
-from vonk_control.operator_acceptance import ControllerAPIRoute
+from vonk_control.operator_acceptance.resolution import ControllerAPIRoute
 from vonk_control.recipe_operations.runtime_specs import _compiled_arguments
 
 from .agent_api_support import Jobs

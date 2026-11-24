@@ -1,6 +1,6 @@
 """The CLI's stall window: a local process ends only when its progress stops.
 
-The Controller's ``vonk_control.stall_window`` is the same rule for durable
+The Controller's ``vonk_control.waits.stall_window`` is the same rule for durable
 work; the CLI cannot import it, so it keeps this monotonic twin.
 """
 

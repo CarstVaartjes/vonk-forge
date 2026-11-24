@@ -26,7 +26,6 @@ from vonk_control.inventory.repository import INVENTORY_MAX_AGE
 from vonk_control.logging import log_event
 from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheSet
 from vonk_control.models.execution import InstallationNode, RecipeInstallation
-from vonk_control.persisted_waits import schedule_wait, wait_due
 from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImagePreparationError,
 )
@@ -58,6 +57,7 @@ from vonk_control.unused_storage_collection.references import (
     _model_removal_in_flight,
     _spark_settling,
 )
+from vonk_control.waits.persisted import schedule_wait, wait_due
 
 if TYPE_CHECKING:
     from vonk_control.unused_storage_collection.service import UnusedStorageCollector

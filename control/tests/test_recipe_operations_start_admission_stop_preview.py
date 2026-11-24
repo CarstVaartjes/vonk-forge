@@ -18,7 +18,7 @@ from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.admission_locking import AdmissionLockBusy as NodeLocksHeld
 from vonk_control.bounded_json import require_mapping
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
-from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
+from vonk_control.host_authority.runtime_plan import derive_runtime_plan_binding
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,

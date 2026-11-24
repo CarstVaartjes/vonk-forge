@@ -10,12 +10,12 @@ from sqlalchemy.orm import sessionmaker
 
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_control import api_preexec
-from vonk_control.browser_auth import (
-    BrowserAuthService,
-)
 from vonk_control.categorized_errors import UnsettledOutcome
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import User
+from vonk_control.security.browser_auth import (
+    BrowserAuthService,
+)
 
 
 @pytest.mark.parametrize("euid", [0, 10001])

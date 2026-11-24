@@ -42,15 +42,14 @@ from vonk_control.artifact_jobs.lifecycle import (
     reserve_removal,
 )
 from vonk_control.attempt_residues import AttemptResidueReconciler
-from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.catalog.sync import CatalogSyncUnsettled
 from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource
-from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.model_cache.service import ModelCacheService
@@ -71,10 +70,11 @@ from vonk_control.models.fleet import (
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
-from vonk_control.pki import IssuedCertificate
+from vonk_control.pki.issuance import IssuedCertificate
+from vonk_control.pki.issuance_contract import CertificateIssuanceBinding
+from vonk_control.pki.step_ca import StepCAIssuancePending
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS
 from vonk_control.recipe_operations.errors import RecipeRequestInvalid
-from vonk_control.step_ca import StepCAIssuancePending
 
 from .agent_fences import fenced_operation
 from .claim_registry import CLAIMS, NOT_CLAIMS, claim_shaped_tables

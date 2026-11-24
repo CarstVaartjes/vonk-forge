@@ -44,7 +44,7 @@ from vonk_control.models.fleet import (
     FleetProfileSelection,
 )
 from vonk_control.recipe_operations.observation_helpers import _run_is_one_shot
-from vonk_control.run_route_name import carries_alias
+from vonk_control.runs.route_name import carries_alias
 from vonk_control.strict_json import stored_document_detail
 
 if TYPE_CHECKING:

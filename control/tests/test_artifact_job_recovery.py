@@ -39,7 +39,7 @@ from vonk_control.artifact_jobs.contracts import (
     ArtifactJobUnavailableError,
 )
 from vonk_control.bounded_retry import REQUEST_PAUSES
-from vonk_control.failure_evidence import FailureEvidenceService
+from vonk_control.failures.evidence import FailureEvidenceService
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,

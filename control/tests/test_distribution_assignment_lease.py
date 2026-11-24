@@ -19,10 +19,10 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from vonk_agent_protocol.distribution import DistributionObject
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.distribution.types import DistributionError
-from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.distribution_executor.durable import DurableDistributionPhaseExecutor
 from vonk_control.distribution_executor.receipts import RuntimeImagePull
 from vonk_control.models.fleet import AgentNode

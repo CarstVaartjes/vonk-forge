@@ -119,9 +119,9 @@ from vonk_control.models.operations import AgentOperationAttempt
 from vonk_control.offline_stops import is_deferred_stop
 from vonk_control.operations.progress import progress_document
 from vonk_control.owner_liveness import order_recovery_deadline
-from vonk_control.persisted_waits import initialize_wait, lifecycle_wait, schedule_wait
-from vonk_control.stall_window import stall_deadline
 from vonk_control.stored.rows import read_row_column
+from vonk_control.waits.persisted import initialize_wait, lifecycle_wait, schedule_wait
+from vonk_control.waits.stall_window import stall_deadline
 
 #: The kinds whose repeat could repeat a visible effect (see the module docstring).
 IRREVERSIBLE_OPERATIONS = frozenset(

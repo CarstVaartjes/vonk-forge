@@ -32,14 +32,14 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 from vonk_agent_protocol.state_machines import InstallationState, RunState
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control import host_helper_authority
-from vonk_control.host_helper_authority import (
+from vonk_control.host_authority import helper as host_helper_authority
+from vonk_control.host_authority.helper import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
     HostRuntimeEvidenceUnavailable,
     HostRuntimeGrantUnsatisfiable,
 )
-from vonk_control.host_runtime_plan_authority import (
+from vonk_control.host_authority.runtime_plan import (
     RuntimePlanAuthorityError,
     RuntimePlanAuthorityRefused,
     RuntimePlanEvidenceUnavailable,
@@ -106,7 +106,7 @@ def _run(session: Session) -> RecipeRun:
 #: What leaves the run not ready for its Start, by its production writer.
 #: None is ever readied again for the same order, so none is a wait.
 _NOT_READY: dict[str, Callable[[Session], None]] = {
-    # ``installed_bytes.py``: a Spark's listing lost the installed ranks.
+    # ``installations/installed_bytes.py``: a Spark's listing lost the installed ranks.
     "installation-partial": lambda session: setattr(
         _installation(session), "state", InstallationState.PARTIAL
     ),

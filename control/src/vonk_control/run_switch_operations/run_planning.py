@@ -31,7 +31,6 @@ from vonk_control.recipe_operations.execution_contract import (
 )
 from vonk_control.recipe_operations.runtime_specs import RUNTIME_INTERFACE
 from vonk_control.resource_planning.settings import resolve_effective_settings
-from vonk_control.run_admission import PORT_ADMISSION_CODES
 from vonk_control.run_switch_contract.evidence import RunSwitchReason
 from vonk_control.run_switch_contract.observation import RunSwitchObservedImageIdentity
 from vonk_control.run_switch_contract.plans import RunSwitchPlan
@@ -49,6 +48,7 @@ from vonk_control.run_switch_operations.planning_helpers import (
     _resource_reason,
     _settings_view,
 )
+from vonk_control.runs.admission import PORT_ADMISSION_CODES
 from vonk_control.stored.states import CatalogRevisionState
 from vonk_control.strict_json import read_stored_model
 

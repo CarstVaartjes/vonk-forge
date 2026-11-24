@@ -50,7 +50,7 @@ from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.fleet import AgentNode, FleetProfileApplication
 from vonk_control.models.jobs import Job
-from vonk_control.run_route_name import carries_alias
+from vonk_control.runs.route_name import carries_alias
 from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import read_stored_document, stored_document_detail
 

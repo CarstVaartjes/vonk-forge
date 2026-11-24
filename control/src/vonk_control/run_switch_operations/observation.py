@@ -13,7 +13,7 @@ from sqlalchemy import String, and_, cast, func, literal, or_, select
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_control.bounded_json import require_integer
-from vonk_control.failure_classification import error_code, error_detail, is_definite
+from vonk_control.failures.classification import error_code, error_detail, is_definite
 from vonk_control.jobs import states as job_states
 from vonk_control.journal_models import RunSwitchJournalRepairPending
 from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown

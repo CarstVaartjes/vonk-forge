@@ -8,7 +8,7 @@ from typing import BinaryIO
 
 import pytest
 
-from vonk_control.cached_file_verification import CachedFileVerifier
+from vonk_control.model_cache.file_verification import CachedFileVerifier
 
 
 def test_repeated_reads_reuse_verification_but_same_size_changes_do_not(
@@ -27,7 +27,7 @@ def test_repeated_reads_reuse_verification_but_same_size_changes_do_not(
         return original_hasher()
 
     monkeypatch.setattr(
-        "vonk_control.cached_file_verification.hashlib.sha256", count_scan
+        "vonk_control.model_cache.file_verification.hashlib.sha256", count_scan
     )
     for _ in range(5):
         assert verifier.verify_path(path, digest, len(original))

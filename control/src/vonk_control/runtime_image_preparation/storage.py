@@ -18,8 +18,7 @@ from vonk_control.content_identity import (
     same_image,
 )
 from vonk_control.fleet_profiles.read_observation import observe_storage
-from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from vonk_control.oci_image_store import (
+from vonk_control.image_store.oci import (
     DAMAGED_MANIFEST_CODES,
     IMAGE_CACHE_DIRECTORY,
     OciImageStore,
@@ -27,6 +26,7 @@ from vonk_control.oci_image_store import (
     StoredImage,
     StoreUnknown,
 )
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from vonk_control.operations.contract import AvailabilityRecoveryAction
 from vonk_control.runtime_image_preparation.contracts import (
     _IMAGE_DIGEST,

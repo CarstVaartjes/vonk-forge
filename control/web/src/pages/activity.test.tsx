@@ -3,7 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 import { ApiError } from "../api/errors";
 import type { ControlApi, OperationDetail } from "../api/types";
-import { ActivityPage, activityStatus, operationEnded, unsuccessfulCount } from "./activity";
+import { ActivityPage } from "./activity";
+import { unsuccessfulCount } from "./activity-records";
+import { activityStatus, operationEnded } from "./activity-status";
 
 const NOW = new Date("2026-08-15T12:00:00Z");
 const REQUEST_ID = "f6e73ce3-3329-4ff4-b086-d8f87c879ce9";

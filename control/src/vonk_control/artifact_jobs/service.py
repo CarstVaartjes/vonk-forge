@@ -67,7 +67,7 @@ from vonk_control.bounded_retry import bounded_attempts
 from vonk_control.categorized_errors import InvalidValue, MissingRecord
 from vonk_control.cluster_mappings import mapping_option_choices
 from vonk_control.compiled_artifact_contract import ParameterScalar
-from vonk_control.execution_plan_service import compile_job_invocation
+from vonk_control.execution_plan.service import compile_job_invocation
 from vonk_control.identity_insert import insert_identity
 from vonk_control.lifecycle.agent_operation import (
     AgentOperationAdapter,

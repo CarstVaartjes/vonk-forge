@@ -11,7 +11,7 @@ from vonk_agent_protocol.agent_words import (
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
-from vonk_control.failure_classification import is_redownload, is_security_failure
+from vonk_control.failures.classification import is_redownload, is_security_failure
 from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
 from vonk_control.fleet_profile_contract.switch_state import FleetProfileSwitchQueueItem
 from vonk_control.fleet_profiles.persistence import (
@@ -43,7 +43,7 @@ def _ending_disposition(child: RunSwitchOperation) -> Disposition:
     """What a Run/Switch child's ending lets profile recovery do.
 
     The Run/Switch owner ends a definite failure (a ``FAIL`` or ``SECURITY``
-    :func:`~vonk_control.failure_classification.disposition`) not retryable,
+    :func:`~vonk_control.failures.classification.disposition`) not retryable,
     under its typed code; only an observation window that expired ends
     retryable.  A replay can change bytes it fetches again (a cache loss, a
     digest mismatch), and an ending its owner never typed is unknown: those are

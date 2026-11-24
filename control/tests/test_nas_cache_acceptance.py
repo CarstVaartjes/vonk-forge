@@ -14,6 +14,7 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_control.bounded_json import require_mapping, require_sequence
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.distribution.filesystem import (
     FilesystemObjectSource,
     RecipeBuildObjectSource,
@@ -21,7 +22,6 @@ from vonk_control.distribution.filesystem import (
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import CompositeObjectSource
-from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild

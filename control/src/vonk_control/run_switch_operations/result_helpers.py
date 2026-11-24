@@ -14,9 +14,9 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.bounded_json import require_mapping
-from vonk_control.distribution_assignment import NodeDistributionAssignment
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.distribution_executor.receipts import _ChildView
-from vonk_control.failure_classification import (
+from vonk_control.failures.classification import (
     disposition,
     error_detail,
     is_security_failure,
@@ -24,7 +24,6 @@ from vonk_control.failure_classification import (
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.jobs import Job
 from vonk_control.operations.blockers import OperationBlocker
-from vonk_control.persisted_waits import read_wait
 from vonk_control.recipe_operations.interfaces import RecipeOperationView
 from vonk_control.recipe_operations.lifecycle_contract import RecipeLifecycleResult
 from vonk_control.recovery_policy import FailureKind, kind_for_failure_fields
@@ -60,7 +59,8 @@ from vonk_control.run_switch_operations.errors import (
 )
 from vonk_control.run_switch_operations.planning_helpers import _aware
 from vonk_control.run_switch_operations.results import _stored_result
-from vonk_control.stall_window import stall_deadline
+from vonk_control.waits.persisted import read_wait
+from vonk_control.waits.stall_window import stall_deadline
 
 
 def _bound_workload_intent(progress: RunSwitchOperationResult) -> int:

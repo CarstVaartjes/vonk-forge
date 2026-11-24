@@ -23,7 +23,6 @@ from vonk_control.journal_models import (
 )
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
-from vonk_control.persisted_waits import clear_wait, read_wait
 from vonk_control.run_switch_contract.journal import (
     JournalRepairDisposition,
     JournalRepairPurpose,
@@ -41,6 +40,7 @@ from vonk_control.run_switch_journal_repair.discovery import (
 from vonk_control.run_switch_journal_repair.pending import _pending
 from vonk_control.run_switch_journal_repair.proof import _prove
 from vonk_control.run_switch_operations.results import _persisted_result
+from vonk_control.waits.persisted import clear_wait, read_wait
 
 
 def _try_repair_once(

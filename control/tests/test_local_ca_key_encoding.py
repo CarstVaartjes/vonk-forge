@@ -22,7 +22,7 @@ from vonk_control.capabilities import (
     RecoveringService,
 )
 from vonk_control.capability_contract import CapabilityAvailability
-from vonk_control.local_ca import LocalCertificateAuthority
+from vonk_control.pki.local_ca import LocalCertificateAuthority
 
 from .ca_material import NOW, _csr, _der, _write_material
 from .test_local_ca import _binding

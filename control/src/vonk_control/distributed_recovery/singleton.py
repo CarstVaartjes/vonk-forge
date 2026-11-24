@@ -54,10 +54,10 @@ from vonk_control.recipe_operations.start_payloads import (
     build_recipe_start_payload,
     validate_distributed_start_timeout_seconds,
 )
-from vonk_control.stall_window import stall_deadline
 from vonk_control.stored.rows import read_row_column
 from vonk_control.stored.states import ClusterMappingState
 from vonk_control.strict_json import read_stored_model
+from vonk_control.waits.stall_window import stall_deadline
 
 
 def _singleton_recovery_authority(

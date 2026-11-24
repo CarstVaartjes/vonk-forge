@@ -51,9 +51,9 @@ from vonk_control.model_cache.contract import (
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
 from vonk_control.operations.blockers import make_blocker
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.stored.json_values import write_guard_mode
 from vonk_control.strict_json import serialize_json_value
+from vonk_control.waits.persisted import schedule_wait
 
 NOW = datetime(2026, 10, 24, 12, tzinfo=UTC)
 _KINDS = ("download", "download", "repair", "remove")

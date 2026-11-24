@@ -18,7 +18,7 @@ uses `reconciliation_next_at`, AgentCertificate uses `ca_next_attempt_at`, and
 AgentIssuedCertificateRevocation uses `next_attempt_at`. Terminal state does
 not exclude a row whose wait still owns unresolved cleanup.
 
-`wait_redrive.wait_sources` binds the current owners:
+`waits.redrive.wait_sources` binds the current owners:
 
 | Owner | Normal advancement used by redrive |
 | --- | --- |

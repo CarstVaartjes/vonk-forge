@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
-from vonk_control.failure_classification import disposition, error_detail, is_definite
+from vonk_control.failures.classification import disposition, error_detail, is_definite
 
 if TYPE_CHECKING:
     from vonk_control.recipe_operations.interfaces import RecipeOperationView

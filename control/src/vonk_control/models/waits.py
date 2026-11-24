@@ -10,7 +10,7 @@ from sqlalchemy.orm import Mapped, MappedColumn, mapped_column
 
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.stored.json_values import ContractJSON
-from vonk_control.wait_contract import WaitEvidence
+from vonk_control.waits.contract import WaitEvidence
 
 
 class ScheduledWaitOwner(Protocol):

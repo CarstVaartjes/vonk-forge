@@ -1,0 +1,769 @@
+"""Durable, transactionally ordered Fleet event recording and replay."""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Any, ClassVar
+
+from sqlalchemy import event, func, insert, select, true, update
+from sqlalchemy import inspect as sqlalchemy_inspect
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
+
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_control.auth import CursorError
+from vonk_control.fleet_events.contract import (
+    AgentOperationPayload,
+    FleetEventPayload,
+    InstallationNodePayload,
+    JobPayload,
+    NodeProfilePayload,
+    NodeTelemetryPayload,
+    RecipeInstallationPayload,
+    RecipeRunPayload,
+    RunNodePayload,
+    validate_fleet_event_payload,
+)
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    RecipeRun,
+    RunNode,
+)
+from vonk_control.models.fleet import AgentNodeProfile
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.models.telemetry import (
+    FleetEventCursor,
+    FleetStreamEvent,
+    NodeInventoryItemsSnapshot,
+    NodeTelemetryLatest,
+)
+from vonk_control.strict_json import serialize_json_value
+
+EVENT_TYPES = frozenset(
+    {"node-telemetry", "node-profile", "recipe-state", "operation-state"}
+)
+MAX_EVENT_PAYLOAD_BYTES = 8 * 1024
+MAX_REPLAY_BATCH = 128
+REPLAY_RETENTION = timedelta(hours=24)
+_FORBIDDEN_PAYLOAD_KEYS = frozenset(
+    {
+        "actor",
+        "credential",
+        "credentials",
+        "endpoint",
+        "error",
+        "error_detail",
+        "evidence",
+        "evidence_digest",
+        "password",
+        "payload",
+        "plan",
+        "repository",
+        "repository_content",
+        "request",
+        "request_body",
+        "result",
+        "secret",
+        "secret_token",
+        "status_reason",
+        "token",
+    }
+)
+_PENDING_KEY = "vonk.fleet_event_drafts"
+_STAGED_KEY = "vonk.fleet_events_staged"
+_RECORDER_ATTRIBUTE = "_vonk_fleet_event_recorder"
+
+
+@dataclass(frozen=True, slots=True)
+class FleetEventDraft:
+    event_type: str
+    node_id: str | None
+    entity_kind: str
+    entity_id: str
+    payload: FleetEventPayload
+
+
+@dataclass(frozen=True, slots=True)
+class FleetEvent:
+    id: int
+    event_type: str
+    node_id: str | None
+    entity_kind: str
+    entity_id: str
+    payload: FleetEventPayload
+    occurred_at: datetime
+    expires_at: datetime
+
+
+class _FleetStoredEventGap(Exception):
+    """Unwind only replay into its owning typed refresh notice, never a refusal."""
+
+    def __init__(self, event_cursor: int) -> None:
+        super().__init__("Fleet stored event payload is unavailable")
+        self.event_cursor = event_cursor
+
+
+@dataclass(frozen=True, slots=True)
+class FleetRetentionWindow:
+    high_watermark: int
+    first_retained_id: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class FleetReplayBatch:
+    high_watermark: int
+    first_retained_id: int | None
+    events: tuple[FleetEvent, ...]
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _walk_payload(value: object) -> None:
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            if not isinstance(key, str):
+                raise TypeError("Fleet event payload keys must be strings")
+            lowered = key.lower()
+            if lowered in _FORBIDDEN_PAYLOAD_KEYS or any(
+                marker in lowered
+                for marker in (
+                    "actor",
+                    "credential",
+                    "endpoint",
+                    "error",
+                    "evidence",
+                    "password",
+                    "repository",
+                    "request",
+                    "secret",
+                    "token",
+                )
+            ):
+                raise ValueError(f"Fleet event payload field {key!r} is forbidden")
+            _walk_payload(nested)
+    elif isinstance(value, (list, tuple)):
+        for nested in value:
+            _walk_payload(nested)
+
+
+def _stored_payload(
+    draft: FleetEventDraft,
+) -> object:
+    """The JSON document of a draft's typed payload, checked before it is stored."""
+
+    if draft.event_type not in EVENT_TYPES:
+        raise ValueError("Fleet event type is not in the public vocabulary")
+    if draft.node_id is not None and not 1 <= len(draft.node_id) <= 36:
+        raise ValueError("Fleet event node_id must be at most 36 characters")
+    if not 1 <= len(draft.entity_kind) <= 32:
+        raise ValueError("Fleet event entity_kind must be at most 32 characters")
+    if not 1 <= len(draft.entity_id) <= 128:
+        raise ValueError("Fleet event entity_id must be at most 128 characters")
+    validate_fleet_event_payload(
+        draft.event_type,
+        draft.entity_kind,
+        draft.entity_id,
+        draft.node_id,
+        draft.payload,
+    )
+    payload = serialize_json_value(draft.payload)
+    _walk_payload(payload)
+    try:
+        encoded = json.dumps(
+            payload,
+            allow_nan=False,
+            sort_keys=True,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as error:
+        raise ValueError("Fleet event payload must be finite JSON") from error
+    if len(encoded) > MAX_EVENT_PAYLOAD_BYTES:
+        raise ValueError("Fleet event payload exceeds 8192 bytes")
+    return payload
+
+
+def _as_value(row: Any) -> FleetEvent:
+    return FleetEvent(
+        id=row.id,
+        event_type=row.event_type,
+        node_id=row.node_id,
+        entity_kind=row.entity_kind,
+        entity_id=row.entity_id,
+        payload=validate_fleet_event_payload(
+            row.event_type, row.entity_kind, row.entity_id, row.node_id, row.payload
+        ),
+        occurred_at=_database_utc(row.occurred_at),
+        expires_at=_database_utc(row.expires_at),
+    )
+
+
+def _database_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _cursor_allocation_statement(count: int) -> Any:
+    return (
+        update(FleetEventCursor)
+        .where(FleetEventCursor.singleton_id == 1)
+        .values(last_id=FleetEventCursor.last_id + count)
+        .returning(FleetEventCursor.last_id)
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _EventRow:
+    event_type: str
+    node_id: str | None
+    entity_kind: str
+    entity_id: str
+    payload: object
+    occurred_at: datetime
+    expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class _StagedEvent:
+    """One event of an open transaction, numbered only when it commits.
+
+    ``row`` is ``None`` for a deliberate cursor hole: an id that is allocated
+    but never stored, so replay forces an authoritative capture.
+    """
+
+    savepoint: SessionTransaction | None
+    row: _EventRow | None
+
+
+def _stage(session: Session, row: _EventRow | None) -> None:
+    staged = session.info.setdefault(_STAGED_KEY, [])
+    staged.append(_StagedEvent(session.get_nested_transaction(), row))
+
+
+def _seed_cursor(connection: Connection) -> None:
+    """Recreate a missing cursor row after the newest stored id."""
+
+    dialect_insert = sqlite_insert if connection.dialect.name == "sqlite" else pg_insert
+    last_id = select(func.coalesce(func.max(FleetStreamEvent.id), 0)).scalar_subquery()
+    connection.execute(
+        dialect_insert(FleetEventCursor)
+        .values(singleton_id=1, last_id=last_id)
+        .on_conflict_do_nothing(index_elements=[FleetEventCursor.singleton_id])
+    )
+
+
+def _number_staged_events(session: Session) -> None:
+    """Number and store the transaction's events as its last statements.
+
+    Ids must follow commit order: a capture reads ``last_id`` in the same
+    snapshot as Fleet state, and replay treats any missing id as a hole. So the
+    cursor row stays the one ordering point, but a transaction takes it only
+    here, immediately before COMMIT, and holds it for one UPDATE, one INSERT
+    and the commit itself, never across the transaction's other work or waits.
+    """
+
+    if session.in_nested_transaction():
+        return  # a savepoint release; the outermost commit numbers the events
+    # Commit flushes only after this hook; flush now so the last changes are
+    # staged too. The Core statements below leave the session clean.
+    session.flush()
+    staged: list[_StagedEvent] = session.info.pop(_STAGED_KEY, [])
+    if not staged:
+        return
+    connection = session.connection()
+    allocate = _cursor_allocation_statement(len(staged))
+    last_id = connection.execute(allocate).scalar_one_or_none()
+    if last_id is None:
+        _seed_cursor(connection)
+        last_id = connection.execute(allocate).scalar_one()
+    first_id = last_id - len(staged) + 1
+    rows = [
+        {
+            "id": first_id + offset,
+            "event_type": row.event_type,
+            "node_id": row.node_id,
+            "entity_kind": row.entity_kind,
+            "entity_id": row.entity_id,
+            "payload": row.payload,
+            "occurred_at": row.occurred_at,
+            "expires_at": row.expires_at,
+        }
+        for offset, staged_event in enumerate(staged)
+        if (row := staged_event.row) is not None
+    ]
+    if rows:
+        connection.execute(insert(FleetStreamEvent), rows)
+
+
+def _discard_rolled_back_events(session: Session, previous: SessionTransaction) -> None:
+    # A rolled-back savepoint takes its events with it; the outermost
+    # transaction's end discards everything (_discard_unfinished_events).
+    if not previous.nested:
+        return
+    staged: list[_StagedEvent] = session.info.get(_STAGED_KEY, [])
+    staged[:] = [
+        staged_event
+        for staged_event in staged
+        if not _within(staged_event.savepoint, previous)
+    ]
+
+
+def _within(savepoint: SessionTransaction | None, boundary: SessionTransaction) -> bool:
+    while savepoint is not None:
+        if savepoint is boundary:
+            return True
+        savepoint = savepoint.parent
+    return False
+
+
+def _discard_unfinished_events(
+    session: Session, transaction: SessionTransaction
+) -> None:
+    if transaction.parent is None:
+        session.info.pop(_STAGED_KEY, None)
+
+
+# Every Session, with or without the recorder: an event staged by
+# append_in_session must never outlive or escape its transaction.
+event.listen(Session, "before_commit", _number_staged_events)
+event.listen(Session, "after_soft_rollback", _discard_rolled_back_events)
+event.listen(Session, "after_transaction_end", _discard_unfinished_events)
+
+
+class FleetEventRepository:
+    def __init__(
+        self,
+        sessions: sessionmaker[Session],
+        *,
+        clock: Callable[[], datetime] = _utc_now,
+    ) -> None:
+        self._sessions = sessions
+        self._clock = clock
+
+    def append_in_session(self, session: Session, draft: FleetEventDraft) -> None:
+        """Stage one event; it gets its id and row when the transaction commits."""
+
+        payload = _stored_payload(draft)
+        occurred_at = self._clock()
+        if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
+            raise ValueError("Fleet event clock must return a timezone-aware value")
+        occurred_at = occurred_at.astimezone(UTC)
+        _stage(
+            session,
+            _EventRow(
+                event_type=draft.event_type,
+                node_id=draft.node_id,
+                entity_kind=draft.entity_kind,
+                entity_id=draft.entity_id,
+                payload=payload,
+                occurred_at=occurred_at,
+                expires_at=occurred_at + REPLAY_RETENTION,
+            ),
+        )
+
+    @staticmethod
+    def _allocate_cursor(session: Session) -> None:
+        """Reserve one id that is never stored, so replay forces a fresh capture."""
+
+        _stage(session, None)
+
+    def high_watermark(self) -> int:
+        with self._sessions() as session:
+            return self.high_watermark_in_session(session)
+
+    def high_watermark_in_session(self, session: Session) -> int:
+        value = session.scalar(
+            select(FleetEventCursor.last_id).where(FleetEventCursor.singleton_id == 1)
+        )
+        if value is None:
+            return (
+                session.scalar(select(func.coalesce(func.max(FleetStreamEvent.id), 0)))
+                or 0
+            )
+        return value
+
+    def retention_window(self, now: datetime) -> FleetRetentionWindow:
+        with self._sessions() as session:
+            high_watermark, first_retained = session.execute(
+                select(
+                    func.coalesce(
+                        select(FleetEventCursor.last_id)
+                        .where(FleetEventCursor.singleton_id == 1)
+                        .scalar_subquery(),
+                        select(func.max(FleetStreamEvent.id)).scalar_subquery(),
+                        0,
+                    ),
+                    select(func.min(FleetStreamEvent.id))
+                    .where(FleetStreamEvent.expires_at > now)
+                    .scalar_subquery(),
+                )
+            ).one()
+        return FleetRetentionWindow(
+            high_watermark=high_watermark,
+            first_retained_id=first_retained,
+        )
+
+    def after(
+        self, last_id: int, now: datetime, *, limit: int
+    ) -> tuple[FleetEvent, ...]:
+        if not 1 <= limit <= MAX_REPLAY_BATCH:
+            raise ValueError("Fleet event read limit must be between 1 and 128")
+        with self._sessions() as session:
+            rows = session.scalars(
+                select(FleetStreamEvent)
+                .where(
+                    FleetStreamEvent.id > last_id,
+                    FleetStreamEvent.expires_at > now,
+                )
+                .order_by(FleetStreamEvent.id)
+                .limit(limit)
+            ).all()
+            return tuple(_as_value(row) for row in rows)
+
+    def replay_after(
+        self, last_id: int, now: datetime, *, limit: int
+    ) -> FleetReplayBatch:
+        """Read replay rows and continuity metadata in one database snapshot."""
+
+        if type(last_id) is not int or not 0 <= last_id <= 9_223_372_036_854_775_807:
+            raise CursorError("Fleet event cursor is invalid")
+        if not 1 <= limit <= MAX_REPLAY_BATCH:
+            raise ValueError("Fleet event read limit must be between 1 and 128")
+        replay = (
+            select(
+                FleetStreamEvent.id,
+                FleetStreamEvent.event_type,
+                FleetStreamEvent.node_id,
+                FleetStreamEvent.entity_kind,
+                FleetStreamEvent.entity_id,
+                FleetStreamEvent.payload,
+                FleetStreamEvent.occurred_at,
+                FleetStreamEvent.expires_at,
+            )
+            .where(
+                FleetStreamEvent.id > last_id,
+                FleetStreamEvent.expires_at > now,
+            )
+            .order_by(FleetStreamEvent.id)
+            .limit(limit)
+            .subquery()
+        )
+        first_retained = (
+            select(func.min(FleetStreamEvent.id))
+            .where(FleetStreamEvent.expires_at > now)
+            .correlate(None)
+            .scalar_subquery()
+        )
+        cursor = select(
+            func.coalesce(
+                select(FleetEventCursor.last_id)
+                .where(FleetEventCursor.singleton_id == 1)
+                .scalar_subquery(),
+                select(func.max(FleetStreamEvent.id)).scalar_subquery(),
+                0,
+            ).label("last_id")
+        ).subquery()
+        statement = (
+            select(
+                cursor.c.last_id,
+                first_retained,
+                replay.c.id,
+                replay.c.event_type,
+                replay.c.node_id,
+                replay.c.entity_kind,
+                replay.c.entity_id,
+                replay.c.payload,
+                replay.c.occurred_at,
+                replay.c.expires_at,
+                select(func.count())
+                .select_from(FleetStreamEvent)
+                .where(
+                    FleetStreamEvent.id > last_id,
+                    FleetStreamEvent.id < first_retained,
+                    FleetStreamEvent.expires_at <= now,
+                )
+                .scalar_subquery(),
+            )
+            .select_from(cursor)
+            .outerjoin(replay, true())
+            .order_by(replay.c.id)
+        )
+        with self._sessions() as session:
+            rows = session.execute(statement).all()
+        events: list[FleetEvent] = []
+        expected = last_id + 1
+        for row in rows:
+            if row[2] is None:
+                continue
+            if row[2] != expected:
+                # A retained prefix may skip expired rows, but an absent
+                # projection is a hole requiring capture, even before row one.
+                expired_prefix = expected == last_id + 1 and (
+                    row[2] - expected == rows[0][10]
+                )
+                if not expired_prefix:
+                    raise _FleetStoredEventGap(rows[0][0])
+            expected = row[2] + 1
+            # Decode the whole row at the owning observation boundary.
+            # Timestamps and hydration metadata can be poisoned too.
+            try:
+                payload = validate_fleet_event_payload(
+                    row[3], row[5], row[6], row[4], row[7]
+                )
+                events.append(
+                    FleetEvent(
+                        id=row[2],
+                        event_type=row[3],
+                        node_id=row[4],
+                        entity_kind=row[5],
+                        entity_id=row[6],
+                        payload=payload,
+                        occurred_at=_database_utc(row[8]),
+                        expires_at=_database_utc(row[9]),
+                    )
+                )
+            except (TypeError, ValueError) as error:
+                raise _FleetStoredEventGap(rows[0][0]) from error
+        if expected <= rows[0][0] and len(events) < limit:
+            raise _FleetStoredEventGap(rows[0][0])
+        return FleetReplayBatch(
+            high_watermark=rows[0][0],
+            first_retained_id=rows[0][1],
+            events=tuple(events),
+        )
+
+
+class FleetEventRecorder:
+    """Observe public Fleet state transitions on one session factory."""
+
+    _tracked_fields: ClassVar[dict[type[object], tuple[str, ...]]] = {
+        # Creation refreshes the roster; display edits emit their own event.
+        AgentNodeProfile: (),
+        NodeInventoryItemsSnapshot: ("agent_items",),
+        NodeTelemetryLatest: ("sample_id",),
+        RecipeInstallation: ("state",),
+        InstallationNode: ("state", "installed_bytes"),
+        RecipeRun: ("state", "route_state"),
+        RunNode: ("state", "observed_memory_bytes", "observation_failure_diagnostics"),
+        Job: ("state",),
+        AgentOperation: ("state", "current_attempt"),
+    }
+
+    def __init__(
+        self,
+        sessions: sessionmaker[Session],
+        *,
+        clock: Callable[[], datetime],
+    ) -> None:
+        self._sessions = sessions
+        self._repository = FleetEventRepository(sessions, clock=clock)
+        self._listeners = (
+            ("before_flush", self._before_flush),
+            ("after_flush", self._after_flush),
+            ("after_rollback", self._after_rollback),
+            ("after_soft_rollback", self._after_soft_rollback),
+            ("after_transaction_end", self._after_transaction_end),
+        )
+
+    @classmethod
+    def install(
+        cls,
+        sessions: sessionmaker[Session],
+        *,
+        clock: Callable[[], datetime] = _utc_now,
+    ) -> FleetEventRecorder:
+        installed = getattr(sessions, _RECORDER_ATTRIBUTE, None)
+        if installed is not None:
+            return installed
+        recorder = cls(sessions, clock=clock)
+        for name, listener in recorder._listeners:
+            event.listen(sessions, name, listener)
+        setattr(sessions, _RECORDER_ATTRIBUTE, recorder)
+        return recorder
+
+    def uninstall(self) -> None:
+        if getattr(self._sessions, _RECORDER_ATTRIBUTE, None) is not self:
+            return
+        for name, listener in self._listeners:
+            event.remove(self._sessions, name, listener)
+        delattr(self._sessions, _RECORDER_ATTRIBUTE)
+
+    def _before_flush(
+        self, session: Session, _flush_context: object, _instances: object
+    ) -> None:
+        candidates: list[object] = []
+        candidates.extend(
+            value for value in session.new if type(value) in self._tracked_fields
+        )
+        for value in session.dirty:
+            fields = self._tracked_fields.get(type(value))
+            if fields is None:
+                continue
+            state = sqlalchemy_inspect(value)
+            if any(state.attrs[field].history.has_changes() for field in fields):
+                candidates.append(value)
+        if candidates:
+            session.info[_PENDING_KEY] = candidates
+        else:
+            session.info.pop(_PENDING_KEY, None)
+
+    def _after_flush(self, session: Session, _flush_context: object) -> None:
+        candidates = session.info.pop(_PENDING_KEY, ())
+        for value in sorted(candidates, key=self._candidate_order):
+            self.record_change(session, self._repository, value)
+
+    @classmethod
+    def record_change(
+        cls, session: Session, repository: FleetEventRepository, value: object
+    ) -> None:
+        """Stage the event of a tracked row's change, or a cursor hole.
+
+        An unrenderable or invalid payload preserves the source effect: a hole
+        in the cursor forces an authoritative capture rather than presenting a
+        fabricated derived event, and it never refuses the write.
+        """
+        try:
+            draft = cls._render(value)
+            _stored_payload(draft)
+        except TypeError, ValueError:
+            repository._allocate_cursor(session)
+        else:
+            repository.append_in_session(session, draft)
+
+    @classmethod
+    def _candidate_order(cls, value: object) -> tuple[int, str]:
+        source_order = tuple(cls._tracked_fields)
+        identifier = getattr(value, "id", None) or getattr(value, "node_id", "")
+        return source_order.index(type(value)), str(identifier)
+
+    @staticmethod
+    def _after_rollback(session: Session) -> None:
+        session.info.pop(_PENDING_KEY, None)
+
+    @staticmethod
+    def _after_soft_rollback(session: Session, _previous: object) -> None:
+        session.info.pop(_PENDING_KEY, None)
+
+    @staticmethod
+    def _after_transaction_end(session: Session, transaction: object) -> None:
+        if getattr(transaction, "parent", None) is None:
+            session.info.pop(_PENDING_KEY, None)
+
+    @staticmethod
+    def _render(value: object) -> FleetEventDraft:
+        if isinstance(value, AgentNodeProfile | NodeInventoryItemsSnapshot):
+            return FleetEventDraft(
+                event_type="node-profile",
+                node_id=value.node_id,
+                entity_kind="node-profile",
+                entity_id=value.node_id,
+                payload=NodeProfilePayload(node_id=value.node_id, profile_changed=True),
+            )
+        if isinstance(value, NodeTelemetryLatest):
+            return FleetEventDraft(
+                event_type="node-telemetry",
+                node_id=value.node_id,
+                entity_kind="node-telemetry-latest",
+                entity_id=value.node_id,
+                payload=NodeTelemetryPayload(
+                    node_id=value.node_id, sample_id=value.sample_id
+                ),
+            )
+        if isinstance(value, RecipeInstallation):
+            entity_kind = "recipe-installation"
+            payload = RecipeInstallationPayload(
+                entity_kind="recipe-installation",
+                entity_id=value.id,
+                recipe_revision_id=value.recipe_revision_id,
+                mapping_id=value.mapping_id,
+                mapping_generation=value.mapping_generation,
+                state=value.state,
+            )
+            return FleetEventDraft("recipe-state", None, entity_kind, value.id, payload)
+        if isinstance(value, InstallationNode):
+            entity_kind = "installation-node"
+            payload = InstallationNodePayload(
+                entity_kind="installation-node",
+                entity_id=value.id,
+                installation_id=value.installation_id,
+                node_id=value.node_id,
+                rank=value.rank,
+                role=value.role,
+                state=value.state,
+                installed_bytes=value.installed_bytes,
+                required_bytes=value.required_bytes,
+            )
+            return FleetEventDraft(
+                "recipe-state", value.node_id, entity_kind, value.id, payload
+            )
+        if isinstance(value, RecipeRun):
+            entity_kind = "recipe-run"
+            payload = RecipeRunPayload(
+                entity_kind="recipe-run",
+                entity_id=value.id,
+                installation_id=value.installation_id,
+                mapping_id=value.mapping_id,
+                mapping_generation=value.mapping_generation,
+                alias=value.alias,
+                state=value.state,
+                route_state=value.route_state,
+            )
+            return FleetEventDraft("recipe-state", None, entity_kind, value.id, payload)
+        if isinstance(value, RunNode):
+            entity_kind = "run-node"
+            payload = RunNodePayload(
+                entity_kind="run-node",
+                entity_id=value.id,
+                run_id=value.run_id,
+                node_id=value.node_id,
+                rank=value.rank,
+                role=value.role,
+                state=value.state,
+                reserved_memory_bytes=value.reserved_memory_bytes,
+                observed_memory_bytes=value.observed_memory_bytes,
+                failure_diagnostics=(
+                    FailureDiagnostics.model_validate_json(
+                        json.dumps(value.observation_failure_diagnostics)
+                    )
+                    if value.observation_failure_diagnostics
+                    else None
+                ),
+            )
+            return FleetEventDraft(
+                "recipe-state", value.node_id, entity_kind, value.id, payload
+            )
+        if isinstance(value, Job):
+            entity_kind = "job"
+            payload = JobPayload(
+                entity_kind="job",
+                entity_id=value.id,
+                kind=value.kind,
+                state=value.state,
+                target_count=len(value.targets),
+            )
+            return FleetEventDraft(
+                "operation-state", None, entity_kind, value.id, payload
+            )
+        if isinstance(value, AgentOperation):
+            entity_kind = "agent-operation"
+            payload = AgentOperationPayload(
+                entity_kind="agent-operation",
+                entity_id=value.id,
+                parent_job_id=value.parent_job_id,
+                node_id=value.node_id,
+                kind=value.kind,
+                state=value.state,
+                attempt=value.current_attempt,
+            )
+            return FleetEventDraft(
+                "operation-state", value.node_id, entity_kind, value.id, payload
+            )
+        raise TypeError(f"Unsupported Fleet event source: {type(value).__name__}")

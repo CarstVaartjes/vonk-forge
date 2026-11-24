@@ -7,7 +7,7 @@ ranks, and the run-switch receipts that started each run.
 
 - On every Spark the profile covers, the live runs are exactly its running
   assignments there (same recipe revision and alias), each serving by the
-  load's own readiness rule (``run_readiness``: a service run published, a job
+  load's own readiness rule (``runs.readiness``: a service run published, a job
   run held with its route withdrawn); an idle profile leaves nothing running.
 - Every such run belongs to the load's intent: the load (or a load it
   retries) started it, its plan keeps it as it is, or its plan adopted the
@@ -26,9 +26,9 @@ from vonk_control.models.execution import ACTIVE_RUN_STATES, RecipeRun, RunNode
 from vonk_control.models.fleet import FleetProfileApplication, FleetProfileSelection
 from vonk_control.models.jobs import Job
 from vonk_control.recipe_operations.observation_helpers import _run_is_one_shot
-from vonk_control.run_readiness import run_not_ready_for_profile
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.phase_results import RunSwitchStartResult
+from vonk_control.runs.readiness import run_not_ready_for_profile
 from vonk_control.stored.rows import read_row_column
 
 from .world import World

@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from vonk_control.compiled_execution_plan import VerifiedRuntimeImage
-from vonk_control.execution_plan_service import _runtime_image_receipt
-from vonk_control.oci_image_store import OciImageStore, StoredImage
+from vonk_control.execution_plan.compiled import VerifiedRuntimeImage
+from vonk_control.execution_plan.service import _runtime_image_receipt
+from vonk_control.image_store.oci import OciImageStore, StoredImage
 from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage

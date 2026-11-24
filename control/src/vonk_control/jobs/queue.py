@@ -23,7 +23,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_control.admission_locking import ConstraintReplay, admitting
 from vonk_control.categorized_errors import InvalidType, InvalidValue, MissingRecord
-from vonk_control.compiled_execution_plan import MAX_COMPILED_EXECUTION_PLAN_BYTES
+from vonk_control.execution_plan.compiled import MAX_COMPILED_EXECUTION_PLAN_BYTES
 from vonk_control.lifecycle.job import JobAdapter
 from vonk_control.models.jobs import Job, JobAttempt
 from vonk_control.models.operations import AgentOperation

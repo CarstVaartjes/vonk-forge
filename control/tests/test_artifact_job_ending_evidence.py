@@ -48,7 +48,7 @@ from vonk_control.agent_jobs.contracts import (
 )
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.cancelled_runtime import reconcile_cancelled_runtime
-from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
+from vonk_control.host_authority.runtime_plan import derive_runtime_plan_binding
 from vonk_control.jobs import states as job_states
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
 from vonk_control.models.execution import (

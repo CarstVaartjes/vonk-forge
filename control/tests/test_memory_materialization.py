@@ -4,9 +4,9 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models.execution import RunNode
 from vonk_control.models.operations import AgentOperation
+from vonk_control.reservations.memory import memory_reservations
 
 from .recipe_operations_support import installed_recipe, setup_services, start_evidence
 

@@ -42,6 +42,7 @@ from ..scans import (
     BACKGROUND_OWNERS,
     BOOKKEEPING_DRIFT,
     FUTURE_WORKER_MESSAGE,
+    NOT_RECIPE_PACKAGE_INGRESS,
     PRINTED_OUTPUT_KIND,
     PRINTED_OUTPUT_SCOPE,
     PRINTED_OUTPUT_WORDING,
@@ -296,8 +297,9 @@ def check_block_23(ctx: CheckContext) -> None:
                 for site in document_reads.scan_source(source, path=path)
             )
         if "identity" in modes:
-            ingress = path.startswith(
-                "control/src/vonk_control/recipe_packages/"
+            ingress = (
+                path.startswith("control/src/vonk_control/recipe_packages/")
+                and path not in NOT_RECIPE_PACKAGE_INGRESS
             ) or path in {
                 "control/src/vonk_control/catalog/entities.py",
                 "control/src/vonk_control/catalog/service.py",
@@ -365,7 +367,10 @@ def check_block_23(ctx: CheckContext) -> None:
             # No internal hashing: a row's digest is recorded once, when it is
             # written. Re-hashing the Controller's own row to decide what it is
             # refuses it whenever a newer Controller reads it back differently.
-            if not path.startswith(REHASH_INGRESS):
+            if (
+                not path.startswith(REHASH_INGRESS)
+                or path in NOT_RECIPE_PACKAGE_INGRESS
+            ):
                 rehash_tree = ast.parse(source)
                 hits.extend(
                     (node.lineno, "stored row re-hashed")

@@ -10,13 +10,13 @@ from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.categorized_errors import MissingRecord
 from vonk_control.jobs import states as job_states
 from vonk_control.models.jobs import Job
-from vonk_control.persisted_waits import read_wait, wait_due
 from vonk_control.recipe_update_batches.contract import (
     UPDATE_KIND,
     RecipeUpdateDocument,
     RecipeUpdateResponse,
     UpdateState,
 )
+from vonk_control.waits.persisted import read_wait, wait_due
 
 if TYPE_CHECKING:
     from vonk_control.recipe_update_batches.service import RecipeUpdateBatches

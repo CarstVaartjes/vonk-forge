@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, cast
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.outcome import SecurityRefusalError
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
-from vonk_control.compiled_execution_plan import VerifiedModelObject
 from vonk_control.distribution.model_cache import model_file_receipt
 from vonk_control.distribution.types import (
     DistributionError,
@@ -20,6 +19,7 @@ from vonk_control.distribution.types import (
     OpenedObject,
     contained_content,
 )
+from vonk_control.execution_plan.compiled import VerifiedModelObject
 
 if TYPE_CHECKING:
     from vonk_control.model_cache.artifacts import ArtifactSetManifest

@@ -50,7 +50,7 @@ from vonk_control.lifecycle.types import (
     StopResult,
 )
 from vonk_control.models.jobs import Job, JobAttempt
-from vonk_control.persisted_waits import lifecycle_wait, wait_due
+from vonk_control.waits.persisted import lifecycle_wait, wait_due
 
 KIND = "agent-upgrade"
 _MAX_REASON = 512

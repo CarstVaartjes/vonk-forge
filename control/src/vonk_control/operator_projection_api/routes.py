@@ -44,7 +44,8 @@ from vonk_control.observation.transfer import (
 )
 from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
 from vonk_control.operation_api.contracts import bounded_error_responses
-from vonk_control.operator_acceptance import operator_acceptance
+from vonk_control.operator_acceptance.receipt_contract import ReceiptPolicy
+from vonk_control.operator_acceptance.resolution import operator_acceptance
 from vonk_control.operator_projection_api.contracts import (
     _SELECTOR_PATTERN,
     FLEET_OPERATION_IDS,
@@ -63,8 +64,7 @@ from vonk_control.operator_projection_api.errors import (
     _require_mutation,
 )
 from vonk_control.operator_projection_api.services import FleetOperatorServices
-from vonk_control.operator_receipt_contract import ReceiptPolicy
-from vonk_control.run_states import ENDED_RUN_STATES
+from vonk_control.runs.states import ENDED_RUN_STATES
 
 
 def install_operator_projection_routes(

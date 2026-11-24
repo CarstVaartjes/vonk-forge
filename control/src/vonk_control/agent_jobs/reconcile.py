@@ -36,7 +36,7 @@ from vonk_control.agent_operation_facts import (
 from vonk_control.agent_operation_facts import aware as _aware
 from vonk_control.agent_operation_facts import fencing_intent
 from vonk_control.cancelled_runtime import cancellation_stop_current
-from vonk_control.failure_classification import disposition, error_detail, wait_reason
+from vonk_control.failures.classification import disposition, error_detail, wait_reason
 from vonk_control.lifecycle.agent_operation import (
     AgentOperationAdapter,
     lapsed_running_orders,

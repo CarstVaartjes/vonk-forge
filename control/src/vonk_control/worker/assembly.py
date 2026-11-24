@@ -24,14 +24,13 @@ from vonk_control.attempt_residues import AttemptResidueReconciler
 from vonk_control.capabilities import CapabilityRegistry
 from vonk_control.catalog.revision_collection import CatalogRevisionCollector
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.wiring import build_distribution_service_from_components
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
 )
-from vonk_control.due_waits import AdvanceWait, DueWaitBackstop, RowKey
+from vonk_control.failures.coordinator import CoordinatorFailures
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.gateway.route_grants import require_existing_recipe_routes
 from vonk_control.install_admission.service import InstallAdmissionService
@@ -43,8 +42,8 @@ from vonk_control.recipe_operations.operation_worker import RecipeOperationWorke
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
-from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runs.admission import RunAdmissionService
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_bundles import DatabaseSourceBundleStore
 from vonk_control.storage_demands import StorageDemands
@@ -54,7 +53,8 @@ from vonk_control.telemetry.maintenance import (
 )
 from vonk_control.terminal_history_collection import TerminalHistoryCollector
 from vonk_control.unused_storage_collection.service import UnusedStorageCollector
-from vonk_control.wait_redrive import wait_sources
+from vonk_control.waits.due import AdvanceWait, DueWaitBackstop, RowKey
+from vonk_control.waits.redrive import wait_sources
 
 if TYPE_CHECKING:
     from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
@@ -63,7 +63,7 @@ from vonk_control.availability_production.production import (
     build_recipe_image_availability,
 )
 from vonk_control.catalog.sync import AutomaticCatalogSync
-from vonk_control.image_store_collection import ImageStoreCollector
+from vonk_control.image_store.collection import ImageStoreCollector
 from vonk_control.model_cache.partials_collection import ModelPartialsCollector
 from vonk_control.prebuilt_images import PrebuiltImageImporter
 from vonk_control.settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS

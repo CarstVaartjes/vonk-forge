@@ -65,7 +65,6 @@ from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import InstallationNode, RecipeInstallation
 from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
-from vonk_control.observed_run_memory import observed_role_peaks
 from vonk_control.operator_projection_api.routes import (
     install_operator_projection_routes,
 )
@@ -75,6 +74,7 @@ from vonk_control.recipe_image_availability.service import (
 from vonk_control.recipe_operations.execution_contract import (
     parse_stored_installation_plan,
 )
+from vonk_control.runs.observed_memory import observed_role_peaks
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.spark_store_retention import store_retention_request
 from vonk_control.unused_storage_collection.service import spark_eviction_capacity

@@ -22,7 +22,6 @@ from vonk_agent_protocol.reason_codes.model_cache import (
     ModelCacheCode,
 )
 from vonk_control.bounded_retry import bounded_attempts
-from vonk_control.cached_file_verification import verified_files
 from vonk_control.lifecycle.types import Effect, Outcome, Reported, Tick
 from vonk_control.model_cache import states as model_cache_states
 from vonk_control.model_cache.artifacts import (
@@ -41,6 +40,7 @@ from vonk_control.model_cache.errors import (
     _huggingface_access_url,
     _retry_after_seconds,
 )
+from vonk_control.model_cache.file_verification import verified_files
 from vonk_control.model_cache.persistence import (
     _operation_progress,
     _store_operation_payload,

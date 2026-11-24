@@ -44,7 +44,7 @@ from vonk_control.models.fleet import (
     FleetProfileSelection,
     User,
 )
-from vonk_control.persisted_waits import read_wait
+from vonk_control.waits.persisted import read_wait
 
 if TYPE_CHECKING:
     from vonk_control.fleet_profiles.service import FleetProfileService

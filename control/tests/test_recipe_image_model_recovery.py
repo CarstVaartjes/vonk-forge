@@ -19,12 +19,12 @@ from vonk_control.catalog.service import CatalogService
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import Job
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
 from vonk_control.runtime_image_preparation.contracts import PulledImageEvidence
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
+from vonk_control.waits.persisted import schedule_wait
 
 from .runtime_image_fixtures import place_test_image
 

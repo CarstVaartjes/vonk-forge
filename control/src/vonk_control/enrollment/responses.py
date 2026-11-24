@@ -18,7 +18,7 @@ from vonk_control.enrollment.types import (
     EnrollmentIssuanceUncertain,
     RenewalIssuanceUncertain,
 )
-from vonk_control.pki import IssuedCertificate
+from vonk_control.pki.issuance import IssuedCertificate
 
 
 def unknown_response(

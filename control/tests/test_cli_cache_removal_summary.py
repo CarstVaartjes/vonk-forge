@@ -22,7 +22,7 @@ from vonk_control.cache_removal_review import (
     CacheRemovalReviewContent,
     seal_cache_removal_review,
 )
-from vonk_control.fleet_model_removal_contract import (
+from vonk_control.model_cache.fleet_removal_contract import (
     FleetModelRemovalCheckpoint,
     FleetModelRemovalEffects,
     FleetRemovalReason,

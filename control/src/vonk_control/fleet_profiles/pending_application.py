@@ -63,17 +63,17 @@ from vonk_control.lifecycle.fleet_profile import FleetProfileAdapter
 from vonk_control.lifecycle.types import State as _LifecycleState
 from vonk_control.models.fleet import FleetProfile, FleetProfileApplication
 from vonk_control.operations.blockers import OperationBlocker, make_blocker
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.settings import (
     PROFILE_STALL_WINDOW_SECONDS,
     STORAGE_ADMISSION_RETRY_SECONDS,
 )
-from vonk_control.stall_window import Verdict, progress_verdict
 from vonk_control.storage_demands import (
     STORAGE_EVICTION_TIMED_OUT,
     STORAGE_INSUFFICIENT,
     StorageRelief,
 )
+from vonk_control.waits.persisted import schedule_wait
+from vonk_control.waits.stall_window import Verdict, progress_verdict
 
 if TYPE_CHECKING:
     from vonk_control.fleet_profiles.service import FleetProfileService

@@ -24,7 +24,7 @@ from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import CompositeObjectSource, MemoryObjectSource
 from vonk_control.distribution.types import DistributionError
-from vonk_control.host_helper_authority import HostHelperAuthorityError
+from vonk_control.host_authority.helper import HostHelperAuthorityError
 from vonk_control.model_cache.errors import ModelCacheNotFound
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.operations import AgentOperation

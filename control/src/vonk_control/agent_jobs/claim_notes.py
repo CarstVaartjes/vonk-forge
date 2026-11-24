@@ -43,7 +43,7 @@ from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation as StoredOperation
 from vonk_control.models.operations import AgentOperationAttempt
-from vonk_control.persisted_waits import read_wait
+from vonk_control.waits.persisted import read_wait
 
 if TYPE_CHECKING:
     from vonk_control.agent_jobs.service import AgentJobService

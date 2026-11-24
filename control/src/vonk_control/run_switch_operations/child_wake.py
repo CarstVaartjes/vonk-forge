@@ -33,7 +33,6 @@ from vonk_control.lifecycle.evidence import Residue
 from vonk_control.model_cache import states as model_cache_states
 from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.models.jobs import Job
-from vonk_control.persisted_waits import read_wait, schedule_wait
 from vonk_control.recipe_operations.lifecycle_contract import START_CHILD_KINDS
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_operations.awaited_children import (
@@ -45,6 +44,7 @@ from vonk_control.run_switch_operations.constants import _OPERATION_KINDS
 from vonk_control.run_switch_operations.planning_helpers import _aware, _stored_job_plan
 from vonk_control.run_switch_operations.result_helpers import _read_progress
 from vonk_control.stored.rows import read_row_column
+from vonk_control.waits.persisted import read_wait, schedule_wait
 
 _LOGGER = logging.getLogger(__name__)
 #: Every row a run-switch child is stored in, with its live words (any other

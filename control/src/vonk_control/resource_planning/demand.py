@@ -14,6 +14,7 @@ from vonk_agent_protocol.reason_codes.resources import (
 )
 from vonk_agent_protocol.reason_codes.vocabulary import resource_term_code
 from vonk_control.bounded_json import require_integer
+from vonk_control.resource_planning.contract import ResourceRecipeProjection
 from vonk_control.resource_planning.identity import _is_digest
 from vonk_control.resource_planning.reasons import _reason
 from vonk_control.resource_planning.settings import resolve_effective_settings
@@ -24,7 +25,6 @@ from vonk_control.resource_planning.types import (
     ResourceReason,
     SettingsResolution,
 )
-from vonk_control.resource_planning_contract import ResourceRecipeProjection
 
 
 def _selected_model_bytes(

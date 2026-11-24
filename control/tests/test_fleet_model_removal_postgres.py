@@ -22,10 +22,6 @@ from vonk_control.artifact_jobs.lifecycle import (
 from vonk_control.cache_removal_review import CacheAssetDisposition
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.fleet_model_removal_contract import (
-    STORE_RETENTION_MAX_AGE,
-    FleetRemovalDisposition,
-)
 from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
@@ -38,6 +34,10 @@ from vonk_control.inventory.repository import (
 )
 from vonk_control.model_cache.contract import ModelCacheRemovalPayload
 from vonk_control.model_cache.errors import ModelCacheConflictInvalid
+from vonk_control.model_cache.fleet_removal_contract import (
+    STORE_RETENTION_MAX_AGE,
+    FleetRemovalDisposition,
+)
 from vonk_control.model_cache.persistence import _store_operation_payload
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base

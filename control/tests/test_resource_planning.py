@@ -35,9 +35,9 @@ from vonk_control.resource_planning.types import (
     ResourceEvidence,
     UnknownRunMemoryResidual,
 )
-from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_contract.evidence import EffectiveSettingsSelection
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runs.admission import RunAdmissionService
 
 
 def _recipe_settings(

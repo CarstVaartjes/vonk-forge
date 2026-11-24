@@ -29,7 +29,7 @@ from vonk_control.db.constants import (
     _DATABASE_STARTUP_TIMEOUT_SECONDS,
 )
 from vonk_control.exact_integer_adoption import reconcile_exact_integer_schema
-from vonk_control.fleet_events import FleetEventRecorder
+from vonk_control.fleet_events.outbox import FleetEventRecorder
 from vonk_control.logging import redact_text
 from vonk_control.model_primitives import Base
 from vonk_control.settings import DATABASE_WAIT_BUDGETS

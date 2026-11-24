@@ -17,7 +17,7 @@ from test_agent_deb import (
     _release_key,
 )
 
-from vonk_control.agent_package_source import load_package_source
+from vonk_control.agent_upgrades.package_source import load_package_source
 
 pytestmark = [pytest.mark.linux_only, pytest.mark.needs_dpkg_deb]
 

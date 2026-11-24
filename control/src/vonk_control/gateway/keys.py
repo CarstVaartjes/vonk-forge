@@ -51,11 +51,11 @@ from vonk_control.gateway.keys_contract import (
 from vonk_control.gateway.route_grants import BASE_KEY_ROUTES, GatewayInferenceRoute
 from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
 from vonk_control.operation_api.contracts import bounded_error_responses
-from vonk_control.operator_acceptance import (
+from vonk_control.operator_acceptance.receipt_contract import ReceiptPolicy
+from vonk_control.operator_acceptance.resolution import (
     OperatorReceiptResolver,
     operator_acceptance,
 )
-from vonk_control.operator_receipt_contract import ReceiptPolicy
 from vonk_control.runtime_init import GATEWAY_MASTER_KEY_PATH
 from vonk_control.strict_json import StrictJSONModel
 

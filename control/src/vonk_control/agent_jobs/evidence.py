@@ -28,7 +28,7 @@ from vonk_control.agent_jobs.contracts import _REFUSAL_PREFIXES, AgentResultRefu
 from vonk_control.agent_jobs.predicates import _document
 from vonk_control.agent_jobs.stored import column_field, column_message, column_value
 from vonk_control.agent_operation_facts import aware as _aware
-from vonk_control.failure_evidence import safe_text, sanitize_diagnostics
+from vonk_control.failures.evidence import safe_text, sanitize_diagnostics
 from vonk_control.fleet_profiles.stop_contract import (
     ProfileJobRunStopJob,
     ProfileStopAuthorityError,

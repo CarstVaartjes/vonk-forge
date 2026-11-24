@@ -25,7 +25,6 @@ from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_agent_protocol.telemetry import TelemetryRequest
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.agent_acceptance import InventoryAcceptance, ObservationAcceptance
 from vonk_control.agent_api.common import (
     _CANONICAL_UUID,
     _DIGEST,
@@ -48,6 +47,12 @@ from vonk_control.download_contract import download_responses
 from vonk_control.enrollment.responses import _now
 from vonk_control.http_errors import temporary_http_answer
 from vonk_control.identifiers import UuidId
+from vonk_control.installations.untracked import (
+    run_wanted_here,
+    untracked_installations,
+    untracked_runs,
+    wanted_run_ids,
+)
 from vonk_control.inventory.repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
@@ -62,11 +67,14 @@ from vonk_control.models.execution import (
     RunNode,
 )
 from vonk_control.models.mapping import ClusterMapping
-from vonk_control.operator_acceptance import operator_acceptance
-from vonk_control.operator_receipt_contract import ReceiptPolicy
+from vonk_control.operator_acceptance.agent import (
+    InventoryAcceptance,
+    ObservationAcceptance,
+)
+from vonk_control.operator_acceptance.receipt_contract import ReceiptPolicy
+from vonk_control.operator_acceptance.resolution import operator_acceptance
 from vonk_control.optimistic import Stale, transition
 from vonk_control.owner_liveness import builds_in_flight, run_has_live_operation
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.presence import PresenceError
 from vonk_control.recipe_operations.observation_helpers import (
     prepare_exact_recipe_run_observation_nodes,
@@ -75,12 +83,7 @@ from vonk_control.run_switch_operations.evidence_waits import wake_evidence_wait
 from vonk_control.source_bundles import SourceBundleError
 from vonk_control.spark_store_retention import store_retention_request
 from vonk_control.telemetry.samples import TelemetryRepository
-from vonk_control.untracked_installations import (
-    run_wanted_here,
-    untracked_installations,
-    untracked_runs,
-    wanted_run_ids,
-)
+from vonk_control.waits.persisted import schedule_wait
 
 
 def _wake_post_stop_waits(

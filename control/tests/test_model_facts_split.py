@@ -56,7 +56,7 @@ from vonk_control.models.catalog import (
     CatalogDocumentRevision,
 )
 from vonk_control.models.execution import MeasuredRolePeak, RecipeRun
-from vonk_control.observed_run_memory import observed_role_peaks
+from vonk_control.runs.observed_memory import observed_role_peaks
 
 from .display_fixtures import create_draft
 from .test_catalog_sync import _fixture, _sync

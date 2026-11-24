@@ -19,7 +19,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_control.categorized_errors import InvalidValue
-from vonk_control.failure_classification import disposition, error_detail, wait_reason
+from vonk_control.failures.classification import disposition, error_detail, wait_reason
 from vonk_control.jobs import states as job_states
 from vonk_control.lifecycle.recipe_operation import RecipeOperationAdapter
 from vonk_control.logging import log_event, redact_text
@@ -27,7 +27,6 @@ from vonk_control.models.execution import RecipeRun, RunNode
 from vonk_control.models.jobs import Job
 from vonk_control.optimistic import Stale, transition
 from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_operations.constants import _INITIAL_OBSERVATION_GRACE_SECONDS
 from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
@@ -40,7 +39,8 @@ from vonk_control.recipe_routes.shared import (
     publication_disposition,
 )
 from vonk_control.recovery_policy import RECOVERY, ROUTE_RECOVERY, WAIT_STEP, schedule
-from vonk_control.stall_window import stall_deadline
+from vonk_control.waits.persisted import schedule_wait
+from vonk_control.waits.stall_window import stall_deadline
 
 _LOGGER = logging.getLogger("vonk-control-worker")
 

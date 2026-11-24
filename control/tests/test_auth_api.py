@@ -19,14 +19,14 @@ from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.auth_api import install_auth_routes
-from vonk_control.browser_auth import (
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import User
+from vonk_control.security.browser_auth import (
     BrowserAuthService,
     BrowserIdentity,
     LoginRateLimiter,
 )
-from vonk_control.model_primitives import Base
-from vonk_control.models.fleet import User
-from vonk_control.passwords import hash_password
+from vonk_control.security.passwords import hash_password
 
 ADMIN_PASSWORD = "correct horse battery staple"
 NOW = datetime(2026, 8, 13, 9, 30, tzinfo=UTC)

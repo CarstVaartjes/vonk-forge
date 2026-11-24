@@ -52,7 +52,7 @@ def _violations(
                 errors.append(
                     f"{path}:{node.lineno}: {node.name} bypasses persisted waits"
                 )
-        if path != "persisted_waits.py" and isinstance(
+        if path != "waits/persisted.py" and isinstance(
             node, ast.Assign | ast.AnnAssign | ast.AugAssign
         ):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
@@ -111,7 +111,7 @@ def test_owner_gate_rejects_uncovered_new_writer(source: str) -> None:
 
 
 def _backstop_gaps(adapters: set[str], models: set[str], kinds: set[str]):
-    tree = ast.parse((SOURCE / "wait_redrive.py").read_text())
+    tree = ast.parse((SOURCE / "waits/redrive.py").read_text())
     registries = {
         ast.unparse(target): node.value
         for node in tree.body

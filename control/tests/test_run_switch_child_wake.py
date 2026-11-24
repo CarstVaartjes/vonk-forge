@@ -23,7 +23,6 @@ from vonk_control.jobs.documents import (
 )
 from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.models.jobs import Job
-from vonk_control.persisted_waits import read_wait
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 from vonk_control.run_switch_contract.vocabulary import RunSwitchPhaseKind
 from vonk_control.run_switch_operations.awaited_children import start_request_key
@@ -32,6 +31,7 @@ from vonk_control.run_switch_operations.planning_helpers import _aware
 from vonk_control.run_switch_operations.result_helpers import _read_progress
 from vonk_control.run_switch_operations.results import _persisted_result
 from vonk_control.stored.rows import read_row_column
+from vonk_control.waits.persisted import read_wait
 
 from .recipe_operations_support import NOW, setup_services
 from .run_switch_operations_support import (

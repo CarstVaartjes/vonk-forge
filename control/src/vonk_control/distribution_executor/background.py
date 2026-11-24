@@ -18,8 +18,8 @@ from vonk_control.run_switch_contract.phase_results import RunSwitchRuntimeImage
 from vonk_control.run_switch_operations.observation_window import checkpoint_verdict
 from vonk_control.run_switch_operations.planning_helpers import _run_switch_payload
 from vonk_control.run_switch_operations.result_helpers import _parse_persisted_result
-from vonk_control.stall_window import Verdict
 from vonk_control.stored.rows import read_row_column
+from vonk_control.waits.stall_window import Verdict
 
 if TYPE_CHECKING:
     from vonk_control.distribution_executor.preparation import (

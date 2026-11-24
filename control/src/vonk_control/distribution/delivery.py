@@ -25,7 +25,7 @@ from vonk_agent_protocol.recipe_operations import (
 from vonk_agent_protocol.state_machines import DistributionAssignmentState
 from vonk_control.agent_jobs.stored import column_field, column_value
 from vonk_control.agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
-from vonk_control.distribution_assignment import NodeDistributionAssignment
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import (

@@ -9,10 +9,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_control.image_store.oci import OciImageStore, StoredImage
 from vonk_control.lifecycle.image_availability import CANCEL_BUDGET
 from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import Job
-from vonk_control.oci_image_store import OciImageStore, StoredImage
 from vonk_control.recipe_image_availability.availability_contract import (
     AvailabilityBuildReceipt,
 )

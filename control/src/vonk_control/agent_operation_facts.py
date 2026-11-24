@@ -25,8 +25,12 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation as StoredOperation
 from vonk_control.models.operations import AgentOperationAttempt
 from vonk_control.operations.progress import stored_progress
-from vonk_control.stall_window import last_progress_at, latest_progress, stall_deadline
 from vonk_control.stored.rows import read_row_column
+from vonk_control.waits.stall_window import (
+    last_progress_at,
+    latest_progress,
+    stall_deadline,
+)
 
 LIFECYCLE_RESTART_OPERATIONS = frozenset(
     {

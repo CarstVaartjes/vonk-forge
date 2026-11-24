@@ -26,7 +26,7 @@ from vonk_control.recipe_operations import (
 )
 from vonk_control.recipe_operations.errors import RecipeBuildOwnershipBusy
 from vonk_control.recipe_operations.service import RecipeOperationService
-from vonk_control.run_admission import RunAdmissionBusy
+from vonk_control.runs.admission import RunAdmissionBusy
 
 
 def test_bounded_attempts_pause_between_repeats_only() -> None:

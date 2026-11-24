@@ -29,7 +29,7 @@ from vonk_agent_protocol.state_machines import ReservationState, RouteState, Run
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.retirement import release_owned_reservations_in_session
 from vonk_control.categorized_errors import UnsettledOutcome
-from vonk_control.distributed_lifecycle import DistributedRecoveryInvalid
+from vonk_control.distributed_recovery.lifecycle import DistributedRecoveryInvalid
 from vonk_control.gateway.litellm import LiteLlmGeneration, ServedModelInfo
 from vonk_control.jobs.documents import (
     DistributedRecoveryMarker,
@@ -55,7 +55,6 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.operations.blockers import BlockingOperation, make_blocker
 from vonk_control.owner_liveness import run_has_live_operation
-from vonk_control.persisted_waits import read_wait, schedule_wait, write_wait
 from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     RouteWithdrawalFollowUp,
@@ -68,6 +67,7 @@ from vonk_control.recipe_operations.lifecycle_contract import (
 from vonk_control.recovery_policy import DISTRIBUTED_RECOVERY, schedule
 from vonk_control.stored.rows import read_row_column
 from vonk_control.stored.states import CatalogRevisionState
+from vonk_control.waits.persisted import read_wait, schedule_wait, write_wait
 
 """Durable controller coordination for distributed recipe recovery."""
 

@@ -18,7 +18,7 @@ from vonk_control.operations.blockers import (
     make_blocker,
 )
 from vonk_control.strict_json import StrictJSONModel
-from vonk_control.wait_contract import typed_wait_reason
+from vonk_control.waits.contract import typed_wait_reason
 
 
 class LifecyclePreflightCheckpoint(StrictJSONModel):

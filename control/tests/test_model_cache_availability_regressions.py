@@ -28,7 +28,7 @@ from vonk_control.bounded_json import (
     require_sequence,
     text,
 )
-from vonk_control.failure_classification import is_security_failure
+from vonk_control.failures.classification import is_security_failure
 from vonk_control.model_cache.api import install_model_operator_routes
 from vonk_control.model_cache.constants import ProviderKind
 from vonk_control.model_cache.contract import (

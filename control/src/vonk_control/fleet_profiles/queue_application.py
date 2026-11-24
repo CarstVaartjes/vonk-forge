@@ -28,7 +28,7 @@ from vonk_agent_protocol.state_machines import (
 )
 from vonk_control.admission_locking import AdmissionRowLock, lock_admission_rows
 from vonk_control.categorized_errors import MissingRecord
-from vonk_control.failure_classification import disposition
+from vonk_control.failures.classification import disposition
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
@@ -104,7 +104,7 @@ from vonk_control.recipe_builds.cancellation import (
     BuildConsumerError,
     lock_profile_build_dependencies,
 )
-from vonk_control.run_route_name import rename_run
+from vonk_control.runs.route_name import rename_run
 from vonk_control.workload_intent import allocate_workload_intent, raise_workload_intent
 
 if TYPE_CHECKING:
