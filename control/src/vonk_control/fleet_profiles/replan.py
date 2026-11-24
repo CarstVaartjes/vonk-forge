@@ -37,7 +37,7 @@ from vonk_control.fleet_profiles.persistence import (
 from vonk_control.fleet_profiles.projection_support import (
     _aware,
     _digest,
-    _profile_document,
+    _saved_since_review,
 )
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.lifecycle.fleet_profile import FleetProfileAdapter
@@ -230,8 +230,10 @@ class FleetProfileService:
                 fresh = self.preview(
                     blocked.profile_id, excluded_application_id=application_id
                 )
+                # ``fresh`` reviews the saved row, so it records that row's
+                # revision: a save since acceptance shows as a different one.
                 if (
-                    fresh.profile_digest != intended.profile_digest
+                    fresh.profile_revision != blocked.profile_revision
                     or fresh.scope.node_ids != intended.scope.node_ids
                 ):
                     self._defer_pending_application(
@@ -240,6 +242,11 @@ class FleetProfileService:
                         blockers=_preview_blockers(blocked),
                     )
                     return None
+                # The saved revision is the accepted one, so the plan keeps the
+                # accepted identity: a newer Controller may hash it differently.
+                fresh = fresh.model_copy(
+                    update={"profile_digest": intended.profile_digest}
+                )
             else:
                 fresh = self.preview(
                     blocked.profile_id,
@@ -331,12 +338,12 @@ class FleetProfileService:
                 ):
                     return False
                 intended = _intended_profile(row, session=session)
-                if isinstance(intended, Residue):
+                plan = _persisted_profile_plan(row)
+                if isinstance(intended, Residue) or isinstance(plan, Residue):
                     return False
                 profile = session.get(FleetProfile, row.profile_id)
-                if (
-                    profile is None
-                    or _digest(_profile_document(profile)) != intended.profile_digest
+                if profile is None or _saved_since_review(
+                    plan.profile_revision, profile.revision
                 ):
                     return False
                 newest = self._execution_assignments(session, self._choices(profile))
@@ -354,9 +361,6 @@ class FleetProfileService:
                 followed = intended.model_copy(
                     update={"assignments": sorted(newest, key=lambda item: item.id)}
                 )
-                plan = _persisted_profile_plan(row)
-                if isinstance(plan, Residue):
-                    return False
                 fresh = self.preview(
                     row.profile_id,
                     execution_assignments=tuple(followed.assignments),
@@ -436,6 +440,7 @@ class FleetProfileService:
         session: Session,
         profile_id: str,
         intended: FleetProfileIntendedConfiguration,
+        profile_revision: int | None,
     ) -> tuple[FleetProfileIntendedConfiguration, str] | None:
         """The accepted intent moved onto the newest readable revisions, and why.
 
@@ -453,10 +458,7 @@ class FleetProfileService:
         if not unreadable:
             return None
         profile = session.get(FleetProfile, profile_id)
-        if (
-            profile is None
-            or _digest(_profile_document(profile)) != intended.profile_digest
-        ):
+        if profile is None or _saved_since_review(profile_revision, profile.revision):
             return None
         try:
             newest = {

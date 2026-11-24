@@ -287,7 +287,7 @@ class FleetProfileService:
                 self._validate_draft_review_identity(
                     session,
                     profile,
-                    profile_digest=preview.profile_digest,
+                    profile_revision=preview.profile_revision,
                     assignments=frozen_assignments,
                 )
             self._reserve_preview_assets(session, preview, now=now)
@@ -871,6 +871,7 @@ class FleetProfileService:
                     selected_generation is None
                     or selected_application_id is None
                     or selected_roster_digest is None
+                    or preview.profile_revision is None
                 ):
                     raise FleetProfileStalePlanConflict(
                         "Selected profile changed before roster admission"
@@ -881,11 +882,7 @@ class FleetProfileService:
                     expected_application_id=selected_application_id,
                     expected_roster_digest=selected_roster_digest,
                     profile_id=preview.profile_id,
-                    profile_revision=(
-                        preview.profile_revision
-                        if preview.profile_revision is not None
-                        else profile.revision
-                    ),
+                    profile_revision=preview.profile_revision,
                     application_id=row.id,
                     node_ids=frozen_nodes,
                     now=now,
