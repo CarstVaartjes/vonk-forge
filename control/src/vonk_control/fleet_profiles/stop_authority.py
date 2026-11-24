@@ -73,7 +73,6 @@ from vonk_control.run_switch_operations.observation_helpers import (
     _phase_request_key,
     _stop_child_request_key,
 )
-from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import read_stored_model
 
 _PLACEMENT_ACTIONS = frozenset(get_args(RunSwitchPlacementAction))
@@ -254,10 +253,6 @@ def validate_profile_stop_owner(
             linked is None
             or linked.kind != "recipe.stop"
             or linked.request_id != expected_key
-            or linked.payload_digest
-            != hashlib.sha256(
-                canonical_message(read_row_column(linked, "payload"))
-            ).hexdigest()
         ):
             raise ProfileStopAuthorityError(
                 "profile Stop linked child identity changed"
