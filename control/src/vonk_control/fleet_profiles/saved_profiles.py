@@ -250,7 +250,7 @@ class FleetProfileService:
         """The saved definition, or the typed issue that it cannot be read."""
         try:
             return _definition(row)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return self._definition_issue()
 
     def definition_number(self, number: int) -> FleetProfileDefinitionView:
@@ -354,7 +354,7 @@ class FleetProfileService:
             )
             try:
                 previous = _definition(row)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 # Equality is only an optimization. An unreadable old draft
                 # cannot prevent an authorized complete replacement.
                 previous = None

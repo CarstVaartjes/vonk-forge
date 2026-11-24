@@ -110,7 +110,7 @@ def register_job_routes(
             raise HTTPException(
                 status_code=422, detail="operation cursor is invalid"
             ) from None
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return OperationsResponse(
                 operations=None,
                 total=None,
@@ -213,7 +213,7 @@ def register_job_routes(
             raise HTTPException(
                 status_code=422, detail="job cursor is invalid"
             ) from None
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except OSError, RuntimeError, TypeError, ValueError:
             warn_unreadable_once("job operations", job_id)
             return job_response(
                 job,

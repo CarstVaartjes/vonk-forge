@@ -48,7 +48,7 @@ def _candidate(job: Job) -> RunSwitchOperationResult | None:
         return RunSwitchOperationResult.model_validate_json(
             journal_document(corrected), strict=True
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

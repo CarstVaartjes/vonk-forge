@@ -256,7 +256,7 @@ def _recipe_installation_reconcile(
     # incomplete projection pages are observed again rather than refused.
     try:
         existing = _observe_selection(read_existing, deadline=deadline)
-    except (ControlForbidden, ControlUnauthorized):
+    except ControlForbidden, ControlUnauthorized:
         raise
     except ControlClientError as error:
         if _known_http_refusal_status(error) in {401, 403}:

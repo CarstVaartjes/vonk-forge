@@ -284,7 +284,7 @@ def _operation_item(
 
     try:
         typed_progress = _persisted_profile_progress(row)
-    except (FleetProfileConflict, ValidationError, TypeError, ValueError):
+    except FleetProfileConflict, ValidationError, TypeError, ValueError:
         warn_unreadable_once("profile application", row.id)
         return _unreadable_operation_item(row)
     plan = _persisted_profile_plan(row)

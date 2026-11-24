@@ -52,9 +52,9 @@ path = "tools/hatch_build.py"
 
 [tool.ruff]
 # One owner for the Ruff version: uv.lock (control dev group). No required-version pin.
-# py313, not py314: at py314 the formatter rewrites every `except (A, B):` to
-# PEP 758's `except A, B:`, and the added-line guards re-flag those handlers.
-target-version = "py313"
+# The formatter writes PEP 758's `except A, B:`; the added-line guards read a
+# respelled header as the handler it replaces.
+target-version = "py314"
 # agent_protocol runs on the Sparks, which have Python 3.12.
 per-file-target-version = { "agent_protocol/**" = "py312" }
 # Every extensionless executable in scripts/ and bin/ is Python unless excluded

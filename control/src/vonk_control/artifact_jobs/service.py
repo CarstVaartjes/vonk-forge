@@ -429,7 +429,7 @@ class ArtifactJobService(OutputService):
                 existing_parameters = _canonical_declared_parameters(
                     existing_contract, existing.parameters
                 )
-            except (ArtifactJobError, TypeError, ValueError):
+            except ArtifactJobError, TypeError, ValueError:
                 return self._end_preparation(session, existing)
             if existing_contract.sha256() != contract_digest:
                 return self._end_preparation(session, existing)

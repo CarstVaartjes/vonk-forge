@@ -45,11 +45,11 @@ def verified_wheel_identity(
             archive.read("cluster_profiles/schemas/control-openapi.json")
         )
         control = contract_fingerprint(schema)
-    except (KeyError, ValueError, OSError):
+    except KeyError, ValueError, OSError:
         control = None
     try:
         value = json.loads(archive.read("cluster_profiles/build-identity.json"))
-    except (KeyError, ValueError, OSError):
+    except KeyError, ValueError, OSError:
         value = None
     worker = value.get("worker_contract_sha256") if isinstance(value, dict) else None
     if not isinstance(worker, str) or re.fullmatch(r"[0-9a-f]{64}", worker) is None:
@@ -78,7 +78,7 @@ def stamped_runtime_identity() -> RuntimeBuildIdentity:
         value = json.loads(
             files("cluster_profiles").joinpath("build-identity.json").read_text()
         )
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return unknown
     if not isinstance(value, dict) or value.get("schema_version") != 2:
         return unknown
@@ -101,7 +101,7 @@ def packaged_runtime_identity() -> RuntimeBuildIdentity:
             .joinpath("schemas/control-openapi.json")
             .read_text()
         )
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return unknown
     if (
         stamped.control_contract_sha256 != contract_fingerprint(schema)
@@ -135,7 +135,7 @@ def installed_content_identity() -> str | None:
                 if remaining < 0:
                     return None
                 members.append((name, hashlib.sha256(content).hexdigest()))
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return None
     return contract_fingerprint(sorted(members))
 

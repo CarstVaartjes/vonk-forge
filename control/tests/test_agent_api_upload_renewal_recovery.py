@@ -608,7 +608,7 @@ def _grant_pairs(text: str) -> list[list[tuple[str, object]]] | None:
 
     try:
         body = json.loads(text, object_pairs_hook=collect)
-    except (ValueError, RecursionError):
+    except ValueError, RecursionError:
         return None
     return objects if isinstance(body, dict) else None
 

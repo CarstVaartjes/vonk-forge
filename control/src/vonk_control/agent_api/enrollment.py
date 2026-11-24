@@ -118,7 +118,7 @@ def install_enrollment_routes(
             )
         try:
             body = json.loads(raw.decode("utf-8"))
-        except (TypeError, UnicodeDecodeError, ValueError, RecursionError):
+        except TypeError, UnicodeDecodeError, ValueError, RecursionError:
             raise HTTPException(
                 status_code=422, detail="enrollment request must be JSON"
             ) from None

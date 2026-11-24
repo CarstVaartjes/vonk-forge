@@ -58,7 +58,7 @@ class RetryHoldsMixin:
             return False
         try:
             assessment = service._lifecycle.preview_uninstall(installation_id)
-        except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError):
+        except KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError:
             return False
         return assessment.allowed and assessment.disposition == "abandon"
 

@@ -138,7 +138,7 @@ class FleetProfileService:
             return False
         try:
             ending = self._retry_ending(session, row, progress)
-        except (FleetProfileConflict, ValidationError, TypeError, ValueError):
+        except FleetProfileConflict, ValidationError, TypeError, ValueError:
             ending = ()
         if ending is None:
             # The signature explains repeated faults; it never revokes standing
@@ -219,7 +219,7 @@ class FleetProfileService:
                 try:
                     progress = _persisted_profile_progress(row)
                     ending = self._retry_ending(session, row, progress)
-                except (FleetProfileConflict, ValidationError, TypeError, ValueError):
+                except FleetProfileConflict, ValidationError, TypeError, ValueError:
                     continue
                 if row.state == LifecycleState.BACKOFF.value and ending is not None:
                     self._end_backoff(session, row, progress, now)

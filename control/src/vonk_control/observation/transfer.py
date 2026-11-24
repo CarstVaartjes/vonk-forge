@@ -212,7 +212,7 @@ def observation_response(
                     sha256=digest.hexdigest(),
                 )
             )
-        except (TypeError, ValueError, OverflowError):
+        except TypeError, ValueError, OverflowError:
             yield _record(
                 ObservationTransferError(
                     type="error",

@@ -131,7 +131,7 @@ class OperationResultFacts(BaseModel):
         if raw is not None:
             try:
                 document["diagnostics"] = read_stored_model(FailureDiagnostics, raw)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 document["diagnostics"] = None
                 document["diagnostics_invalid"] = True
         try:
@@ -139,7 +139,7 @@ class OperationResultFacts(BaseModel):
                 read_stored_model(EvidenceDrop, drop)
                 for drop in document.get("dropped_evidence") or ()
             ]
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             document["dropped_evidence"] = []
         for name in (
             "error_code",
@@ -205,7 +205,7 @@ def _bounded_failure(raw: Mapping[str, object]) -> OperationFailureEvidence | No
             retryable=safe.get("retryable") is True,
             uncertain=safe.get("uncertain") is True,
         )
-    except (KeyError, TypeError, ValueError):
+    except KeyError, TypeError, ValueError:
         return None
 
 
@@ -277,7 +277,7 @@ class OperationItem(BaseModel):
         )
         try:
             return read_stored_model(model, value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     @field_validator("blockers", mode="before")
@@ -326,7 +326,7 @@ def agent_receipt_for(
         return None, True
     try:
         parsed = validate_result_for_operation(kind, dict(result), state=state)
-    except (ValidationError, ValueError, TypeError):
+    except ValidationError, ValueError, TypeError:
         return None, True
     if isinstance(parsed, AgentFailureResult | RecipeJobRunResult):
         return parsed, False

@@ -79,7 +79,7 @@ def _core_test_input(path: str) -> bool:
         # module/class markers. Unknown or unavailable source stays conservative.
         try:
             tree = ast.parse((ROOT / path).read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, SyntaxError):
+        except OSError, UnicodeError, SyntaxError:
             return False
         for node in ast.walk(tree):
             if isinstance(node, ast.Attribute) and node.attr == "built_image":
@@ -184,7 +184,7 @@ def rust_build_inputs() -> tuple[str, ...] | None:
         text = (ROOT / WIRE_BUILD_SCRIPT).read_text(encoding="utf-8")
         block = re.search(r"for input in \[(.*?)\]", text, re.DOTALL)
         inputs = tuple(re.findall(r'"([^"]+)"', block.group(1))) if block else ()
-    except (OSError, UnicodeError):
+    except OSError, UnicodeError:
         return None
     return inputs or None
 

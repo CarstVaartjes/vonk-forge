@@ -223,7 +223,7 @@ def _run_exit_log_entries(
     try:
         diagnostics = sanitize_diagnostics(stored)
         observed_at = _aware(datetime.fromisoformat(diagnostics.collected_at))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return []
     if observed_at < cutoff:
         return []

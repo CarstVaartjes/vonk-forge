@@ -40,7 +40,7 @@ class ManagedCatalogSyncRequest(StrictModel):
         return value
 
 
-def reviewed_catalog_content(snapshot: "RecipeLibrarySnapshot") -> str:
+def reviewed_catalog_content(snapshot: RecipeLibrarySnapshot) -> str:
     """Bind content, accepting identical publication under another commit."""
 
     return hashlib.sha256(_snapshot_content(snapshot)).hexdigest()

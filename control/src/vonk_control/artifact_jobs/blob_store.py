@@ -379,7 +379,7 @@ class ArtifactBlobStore:
             ):
                 return None
             return path
-        except (ArtifactBlobInvalid, OSError):
+        except ArtifactBlobInvalid, OSError:
             return None
 
     @staticmethod

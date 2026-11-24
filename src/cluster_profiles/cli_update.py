@@ -114,7 +114,7 @@ def _download(url: str, maximum: int, *, timeout: int = 20) -> bytes:
                 raise CliUpdateIngressError(
                     "release download redirected or denied"
                 ) from error
-        except (OSError, urllib.error.URLError, TimeoutError):
+        except OSError, urllib.error.URLError, TimeoutError:
             pass
         remaining = deadline - time.monotonic()
         if attempt < 2 and remaining > 0:
@@ -404,7 +404,7 @@ def run_update(
             if not isinstance(deployed, dict):
                 raise TypeError("controller compatibility document is not an object")
             observed = CliUpdateContract.from_dict(deployed)
-        except (ControlUnauthorized, ControlForbidden):
+        except ControlUnauthorized, ControlForbidden:
             raise
         except (
             ControlClientError,
@@ -539,7 +539,7 @@ def _notice_context(
         )
         if not cache_root.is_absolute():
             return None
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return None
     return (
         cache_root / "vonkctl" / "update-notice.json",
@@ -578,7 +578,7 @@ def _read_notice(cache: Path) -> dict[str, object] | None:
         finally:
             os.close(descriptor)
         stored = json.loads(raw)
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return None
     return stored if isinstance(stored, dict) else None
 
@@ -693,7 +693,7 @@ def begin_interactive_update_check() -> None:
             pass_fds=(descriptor,),
             start_new_session=True,
         )
-    except (OSError, ValueError):
+    except OSError, ValueError:
         pass
     finally:
         os.close(descriptor)
@@ -739,7 +739,7 @@ def background_notice_check(
                 apply=False,
                 download=download,
             )
-        except (CliUpdateError, OSError, TimeoutError):
+        except CliUpdateError, OSError, TimeoutError:
             _write_notice(
                 cache,
                 _notice_record(

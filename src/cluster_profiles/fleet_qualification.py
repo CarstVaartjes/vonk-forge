@@ -485,7 +485,7 @@ def _assert_service_response(
         elif kind == "path.json-equals":
             try:
                 decoded = _strict_json_loads(value) if isinstance(value, str) else None
-            except (json.JSONDecodeError, ValueError):
+            except json.JSONDecodeError, ValueError:
                 decoded = None
             failed = decoded != expected
         elif kind == "array.path-count-equals":

@@ -54,7 +54,7 @@ def _recipe_definition(document: object) -> RecipeDefinition | None:
         return None
     try:
         return read_recipe(document)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

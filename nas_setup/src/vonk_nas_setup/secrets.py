@@ -84,7 +84,7 @@ def validate_ed25519(content: bytes, name: str) -> None:
         )
         if canonical.rstrip(b"\r\n") != content.rstrip(b"\r\n"):
             raise ValueError("not canonical")
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         raise SetupError(
             f"{name} is not a canonical Ed25519 PKCS#8 PEM private key"
         ) from None
@@ -149,7 +149,7 @@ def repair_stored_members(
         if paths.controller_server_private_key in members:
             try:
                 load_ed25519_private_key(members[paths.controller_server_private_key])
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 damaged.add(paths.controller_server_private_key)
         if paths.provisioner_public_jwk in members:
             try:
@@ -159,7 +159,7 @@ def repair_stored_members(
                     for name in ("kty", "crv", "x", "y", "kid")
                 ):
                     damaged.add(paths.provisioner_public_jwk)
-            except (ValueError, UnicodeDecodeError):
+            except ValueError, UnicodeDecodeError:
                 damaged.add(paths.provisioner_public_jwk)
     for name in damaged:
         if name not in retained:
@@ -176,7 +176,7 @@ def repair_stored_members(
             password = members[paths.password].rstrip(b"\r\n")
             serialization.load_pem_private_key(encrypted, password)
             members.update(normalized)
-        except (KeyError, ValueError, TypeError):
+        except KeyError, ValueError, TypeError:
             try:
                 normalized = normalize_intermediate_key(request, retained)
                 encrypted = normalized.get(
@@ -196,7 +196,7 @@ def repair_stored_members(
                     serialization.PublicFormat.SubjectPublicKeyInfo,
                 ):
                     raise ValueError("different signer")
-            except (KeyError, ValueError, TypeError):
+            except KeyError, ValueError, TypeError:
                 raise ObservationUnavailable from None
             members[paths.intermediate_private_key] = encrypted
             members[paths.password] = retained[paths.password]

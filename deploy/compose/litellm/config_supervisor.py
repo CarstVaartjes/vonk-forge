@@ -148,7 +148,7 @@ def _active_request() -> ActiveRequest | None:
     try:
         activation_content = ACTIVATION.read_bytes()
         marker = json.loads(activation_content)
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         return None
     try:
         activation = ActivationMarker.model_validate(marker)
@@ -175,7 +175,7 @@ def _active_request() -> ActiveRequest | None:
     try:
         exact_manifest = activation.manifest_document()
         config_document = json.loads(config.read_bytes())
-    except (OSError, KeyError, json.JSONDecodeError):
+    except OSError, KeyError, json.JSONDecodeError:
         return None
     if (
         manifest.read_bytes() != exact_manifest.canonical_bytes()
@@ -328,7 +328,7 @@ def _healthy(child: subprocess.Popen[bytes]) -> bool:
             timeout=HEALTH_TIMEOUT_SECONDS,
         ) as response:
             return response.status == 200
-    except (OSError, urllib.error.URLError):
+    except OSError, urllib.error.URLError:
         return False
 
 

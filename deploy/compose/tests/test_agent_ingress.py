@@ -1291,7 +1291,7 @@ def test_caddy_serves_the_file_the_controller_names_and_nothing_else(
                     assert isinstance(response, BufferedResponse)
                     response.body = response.read()
                     return response
-                except (ConnectionError, http.client.RemoteDisconnected):
+                except ConnectionError, http.client.RemoteDisconnected:
                     time.sleep(0.1)
             raise AssertionError("caddy did not start")
 
@@ -1455,7 +1455,7 @@ def test_docker_pulls_a_pinned_runtime_image_from_the_digest_only_store(
                 response = connection.getresponse()
                 response.body = response.read()  # type: ignore[attr-defined]
                 return response
-            except (ConnectionError, http.client.RemoteDisconnected):
+            except ConnectionError, http.client.RemoteDisconnected:
                 time.sleep(0.1)
         raise AssertionError("caddy did not start")
 
@@ -1583,7 +1583,7 @@ def test_edge_body_limit_errors_are_distinct_from_proxied_controller_limits(tmp_
                     if path == "/edge":
                         assert body == b"edge body limit"
                     break
-                except (ConnectionError, http.client.RemoteDisconnected):
+                except ConnectionError, http.client.RemoteDisconnected:
                     if time.monotonic() >= deadline:
                         raise
                     time.sleep(0.1)

@@ -237,7 +237,7 @@ def read_runtime_image_reference_intent(
         return RuntimeImageReferenceIntent.model_validate_json(
             canonical_message(value), strict=True
         )
-    except (TypeError, ValueError, ValidationError):
+    except TypeError, ValueError, ValidationError:
         return None
 
 
@@ -252,7 +252,7 @@ class RuntimeImageReceiptObservation(WireModel):
 def _parse_runtime_image_receipt(value: object) -> RuntimeImageReceipt | None:
     try:
         return RuntimeImageReceipt.model_validate_json(canonical_message(value))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

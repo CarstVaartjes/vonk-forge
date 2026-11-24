@@ -338,7 +338,7 @@ def _retry_after_seconds(headers: Mapping[str, str], *, now: datetime) -> int | 
                     raw_retry.strip(), "%a, %d %b %Y %H:%M:%S GMT"
                 ).replace(tzinfo=UTC)
                 values.append(max(0, int((retry_at - now).total_seconds())))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pass
     for name in ("ratelimit-reset", "x-ratelimit-reset"):
         raw_reset = headers.get(name)
@@ -346,7 +346,7 @@ def _retry_after_seconds(headers: Mapping[str, str], *, now: datetime) -> int | 
             continue
         try:
             reset = int(raw_reset.strip())
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         # Providers use both a delta and a Unix timestamp.  Values near the
         # current epoch are timestamps; small values are delays.

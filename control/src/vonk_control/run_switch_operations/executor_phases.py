@@ -374,7 +374,7 @@ class ExecutorPhasesMixin:
                 raise RunSwitchInstallPreflightExpired(
                     f"{RunSwitchCode.INSTALL_PREFLIGHT_EXPIRED}: {error}"
                 ) from error
-            except (InstallAdmissionBusy, RunSwitchRetryLater):
+            except InstallAdmissionBusy, RunSwitchRetryLater:
                 raise
             except (
                 KeyError,
@@ -448,7 +448,7 @@ class ExecutorPhasesMixin:
                         ),
                         workload_intent_ordinal=ordinal,
                     )
-            except (InstallAdmissionBusy, RunSwitchRetryLater):
+            except InstallAdmissionBusy, RunSwitchRetryLater:
                 raise
             except (
                 KeyError,
@@ -592,7 +592,7 @@ class ExecutorPhasesMixin:
                             request_id=reconcile_request_id,
                             workload_intent_ordinal=ordinal,
                         )
-                except (RunAdmissionBusy, RunSwitchRetryLater):
+                except RunAdmissionBusy, RunSwitchRetryLater:
                     # A competing capacity writer is recoverable.  Preserve
                     # the exact phase checkpoint so the outer service parks
                     # this operation and retries after the writer releases
@@ -675,7 +675,7 @@ class ExecutorPhasesMixin:
                         request_id=uninstall_request_id,
                         workload_intent_ordinal=ordinal,
                     )
-            except (RunAdmissionBusy, RunSwitchRetryLater):
+            except RunAdmissionBusy, RunSwitchRetryLater:
                 # Capacity contention is a retryable admission outcome.  Do
                 # not wrap it as uninstall-start-failed; the parent service
                 # will release its transaction and schedule the same exact

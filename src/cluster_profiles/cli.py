@@ -724,7 +724,7 @@ def main(
         for stream in (sys.stdout, sys.stderr):
             try:
                 descriptor = stream.fileno()
-            except (AttributeError, OSError, ValueError):
+            except AttributeError, OSError, ValueError:
                 continue
             if descriptor not in (1, 2):
                 continue

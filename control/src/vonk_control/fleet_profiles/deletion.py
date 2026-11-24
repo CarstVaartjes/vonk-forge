@@ -81,7 +81,7 @@ class FleetProfileService:
                     ),
                     actor=actor,
                 )
-            except (FleetProfileInvalid, MissingRecord):
+            except FleetProfileInvalid, MissingRecord:
                 # Already ended, already cancelling, or gone: nothing to cancel.
                 continue
 

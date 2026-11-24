@@ -162,7 +162,7 @@ class StartMixin:
                     profile_application_id=profile_application_id,
                     workload_intent_ordinal=workload_intent_ordinal,
                 )
-            except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
+            except SecurityRefusalError, InvalidRequestError, UnknownOutcomeError:
                 raise
             except (RuntimeError, ValueError, TypeError, OSError) as error:
                 raise retry_later_unless_deterministic(

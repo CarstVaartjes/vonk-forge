@@ -80,7 +80,7 @@ def consume_orphan_cleanup(
                 RecipeReconcilePayload, operation.payload, from_json=True
             )
             exact = cleanup.installation_id == owner_id
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         # The valid peer receipt remains recorded; its target is re-observed by
         # later exact owner reconciliation, never counted as freed capacity.
         pass

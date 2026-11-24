@@ -288,7 +288,7 @@ class TrustedProxyAgentIdentityMiddleware:
                 )
                 safe_scope[_AGENT_IDENTITY_SCOPE_KEY] = identity
                 safe_scope[_AGENT_SOURCE_SCOPE_KEY] = source
-            except (AuthError, KeyError):
+            except AuthError, KeyError:
                 pass
         path = safe_scope.get("path")
         scoped_identity = agent_identity_from_scope(safe_scope)
@@ -474,5 +474,5 @@ class CursorCodec:
             ):
                 raise ValueError
             return document["boundary"]
-        except (UnicodeError, ValueError, TypeError, json.JSONDecodeError):
+        except UnicodeError, ValueError, TypeError, json.JSONDecodeError:
             raise CursorError("cursor is invalid") from None

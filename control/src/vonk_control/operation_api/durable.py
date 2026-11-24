@@ -245,7 +245,7 @@ class _DurableOperationProjection:
             if any(item.expected_run_id is not None for item in assignments):
                 try:
                     snapshot = self._publication_snapshot(session)
-                except (OSError, RuntimeError, TypeError, ValueError):
+                except OSError, RuntimeError, TypeError, ValueError:
                     unavailable = True
 
         endpoints: dict[str, EndpointResponse] = {}
@@ -259,7 +259,7 @@ class _DurableOperationProjection:
         elif snapshot is not None:
             try:
                 active_marker, route_document = self._verified_routes(snapshot)
-            except (OSError, RuntimeError, TypeError, ValueError):
+            except OSError, RuntimeError, TypeError, ValueError:
                 for item in assignments:
                     if item.expected_run_id is not None:
                         states[item.assignment_id] = EndpointState.UNAVAILABLE
@@ -282,7 +282,7 @@ class _DurableOperationProjection:
                         endpoints[item.assignment_id] = self._endpoint_payload(
                             item.alias, raw, active_marker, gateway_api_base
                         )
-                    except (RuntimeError, TypeError, ValueError):
+                    except RuntimeError, TypeError, ValueError:
                         states[item.assignment_id] = EndpointState.UNAVAILABLE
                     else:
                         states[item.assignment_id] = EndpointState.PUBLISHED
@@ -298,7 +298,7 @@ class _DurableOperationProjection:
                             and current.assignments == intent.assignments
                             and current_snapshot == snapshot
                         )
-                except (OSError, RuntimeError, TypeError, ValueError):
+                except OSError, RuntimeError, TypeError, ValueError:
                     unchanged = False
                 if not unchanged:
                     # Retain the readable membership, but never present a
@@ -406,7 +406,7 @@ class _DurableOperationProjection:
                 )
                 key = cursor_key(decoded, 2)
                 boundary = (datetime.fromisoformat(key[0]), key[1])
-            except (UnicodeError, ValueError, TypeError, json.JSONDecodeError):
+            except UnicodeError, ValueError, TypeError, json.JSONDecodeError:
                 raise CursorError("operation cursor is invalid") from None
         now = _aware(self._clock())
         with self._sessions() as session:
@@ -558,7 +558,7 @@ class _DurableOperationProjection:
                 )
                 key = cursor_key(decoded, 2)
                 boundary = (datetime.fromisoformat(key[0]), key[1])
-            except (UnicodeError, ValueError, TypeError, json.JSONDecodeError):
+            except UnicodeError, ValueError, TypeError, json.JSONDecodeError:
                 raise CursorError("operation cursor is invalid") from None
         now = _aware(self._clock() if now is None else now)
         with self._sessions() as session:

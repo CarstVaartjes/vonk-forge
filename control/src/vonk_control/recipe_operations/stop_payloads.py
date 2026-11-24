@@ -235,5 +235,5 @@ def _installation_recipe_digest(installation: RecipeInstallation) -> str | None:
         return parse_stored_installation_plan(
             stored, for_uninstall=True
         ).recipe_content_sha256
-    except (RecipeExecutionContractError, TypeError, ValueError):
+    except RecipeExecutionContractError, TypeError, ValueError:
         return None

@@ -220,7 +220,7 @@ def install_authority_routes(
                 try:
                     if not evidence_available():
                         continue
-                except (KeyError, TypeError, ValueError, SQLAlchemyError):
+                except KeyError, TypeError, ValueError, SQLAlchemyError:
                     continue
                 # The authority's denied binding remains a security refusal.
                 note_grant(node_id, subject, denied=refused.denial_reason)
@@ -229,7 +229,7 @@ def install_authority_routes(
                 )
                 denial.headers = {"x-vonk-error-code": refused.denial_reason.value}
                 raise denial from None
-            except (KeyError, TypeError, ValueError, SQLAlchemyError):
+            except KeyError, TypeError, ValueError, SQLAlchemyError:
                 continue
             note_grant(node_id, subject, denied=None)
             return grant

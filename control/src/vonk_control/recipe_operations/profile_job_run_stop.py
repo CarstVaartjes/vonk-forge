@@ -238,7 +238,7 @@ def _switch_stops_run_now(operation: Job | None, run_id: str) -> bool:
             strict=True,
             from_json=True,
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     phase_index, item_index = current.phase_index, current.item_index
     return (

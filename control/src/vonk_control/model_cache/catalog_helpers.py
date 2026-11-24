@@ -215,7 +215,7 @@ def _same_model_artifact_identity(
             )
             for item in _canonical_model_artifacts(row)
         }
-    except (KeyError, TypeError, ValueError, ModelCacheResolutionError):
+    except KeyError, TypeError, ValueError, ModelCacheResolutionError:
         return False
     selected = {
         item.artifact_id: (item.path, item.sha256, item.expected_bytes)

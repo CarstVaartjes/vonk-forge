@@ -49,7 +49,7 @@ def _established_start_effect(
         return None
     try:
         status = lifecycle.run_status(child.owner_id)
-    except (KeyError, RuntimeError, TypeError, ValueError):
+    except KeyError, RuntimeError, TypeError, ValueError:
         return None
     return child.owner_id if status.healthy else None
 
@@ -69,7 +69,7 @@ def _established_stop_effect(
         return None
     try:
         status = lifecycle.run_status(child.owner_id)
-    except (KeyError, RuntimeError, TypeError, ValueError):
+    except KeyError, RuntimeError, TypeError, ValueError:
         return None
     return (
         child.owner_id
@@ -94,7 +94,7 @@ def _start_still_progressing(
         return False
     try:
         status = lifecycle.run_status(child.owner_id)
-    except (KeyError, RuntimeError, TypeError, ValueError):
+    except KeyError, RuntimeError, TypeError, ValueError:
         return False
     return status.state in ACTIVE_RUN_STATES and any(
         rank.fresh

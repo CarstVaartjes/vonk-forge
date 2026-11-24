@@ -609,7 +609,7 @@ def rederive_source_bundle_from_closure(
             "recipe source closure access was denied",
             reason=SecurityRefusalReason.PERMISSION_DENIED,
         ) from error
-    except (OSError, ValueError, SourceBundleError):
+    except OSError, ValueError, SourceBundleError:
         return None
     return bundle.archive if bundle.sha256 == source_sha256 else None
 

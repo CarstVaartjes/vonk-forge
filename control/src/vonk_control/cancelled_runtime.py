@@ -201,7 +201,7 @@ def reconcile_cancelled_runtime(
                     unattended_guard=guard,
                 )
                 progressed = True
-        except (UnknownOutcomeError, SQLAlchemyError, TypeError, ValueError):
+        except UnknownOutcomeError, SQLAlchemyError, TypeError, ValueError:
             logging.getLogger(__name__).exception(
                 "exact cancellation Stop observation deferred for %s; next worker tick rechecks",
                 job_id,

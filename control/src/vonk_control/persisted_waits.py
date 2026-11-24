@@ -75,7 +75,7 @@ def read_wait(owner: ScheduledWaitOwner) -> QueueWait | None:
         if owner.next_action_at is None:
             raise ValueError("wait has no due field")
         return QueueWait(**dict(evidence), next_check=aware(owner.next_action_at))
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         warn_unreadable_once(
             "wait",
             getattr(owner, "id", None)

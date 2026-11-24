@@ -329,7 +329,7 @@ def main() -> None:
                     and sha(HELPER) == helper_sha256
                     and sha(Path(f"/proc/{pid}/exe")) == binary_sha256
                 )
-            except (FileNotFoundError, ProcessLookupError):
+            except FileNotFoundError, ProcessLookupError:
                 # The supervised process can restart between PID and exe reads.
                 return False
 

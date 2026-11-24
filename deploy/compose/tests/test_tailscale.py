@@ -180,7 +180,7 @@ def _wait_for_service_state(
                 "advertised": sorted(advertised),
             }:
                 return
-        except (FileNotFoundError, json.JSONDecodeError):
+        except FileNotFoundError, json.JSONDecodeError:
             pass
         time.sleep(0.05)
     actual = state.read_text(encoding="utf-8") if state.exists() else "<missing>"

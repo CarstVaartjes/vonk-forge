@@ -317,7 +317,7 @@ class ExecutionMixin:
                     if retryable
                     else None
                 )
-            except (ValueError, TypeError, AttributeError):
+            except ValueError, TypeError, AttributeError:
                 # Observation never becomes a failed security decision. This
                 # observer has the same bounded reconciliation window as cleanup;
                 # issued children retain their own executor fences and lifecycle.

@@ -1599,7 +1599,7 @@ class SparkLifecycle:
                 timeout=30,
                 check=False,
             )
-        except (OSError, subprocess.SubprocessError):
+        except OSError, subprocess.SubprocessError:
             return None
 
     def _controller_startup_diagnostics(self) -> str:
@@ -3413,7 +3413,7 @@ class SparkLifecycle:
         """
         try:
             return serve("")
-        except (LifecycleError, SliceError):
+        except LifecycleError, SliceError:
             withdrawal = self._library_withdrawal()
             if withdrawal is None:
                 raise
@@ -4280,7 +4280,7 @@ class SparkLifecycle:
         try:
             rows = self._psql(query) + self._psql(pending_query)
             return [json.loads(row[0]) for row in rows if len(row) == 1]
-        except (AcceptanceError, OSError, ValueError, subprocess.SubprocessError):
+        except AcceptanceError, OSError, ValueError, subprocess.SubprocessError:
             return [{"diagnostic": "preflight evidence unavailable"}]
 
     def _request_recipe_download(
@@ -4709,7 +4709,7 @@ class SparkLifecycle:
                 }
                 if len(identities) == 1:
                     return identities.pop()
-            except (SliceError, LifecycleError, ValueError):
+            except SliceError, LifecycleError, ValueError:
                 # A projection miss is observed again under the route budget.
                 pass
             try:
@@ -4729,7 +4729,7 @@ class SparkLifecycle:
                     observed = run_result.get("phase_results")
                     if isinstance(observed, list):
                         results = observed
-            except (SliceError, LifecycleError, ValueError):
+            except SliceError, LifecycleError, ValueError:
                 pass
             time.sleep(1)
         raise LifecycleError("synthetic canary serving identity observation ended")
@@ -5005,7 +5005,7 @@ class SparkLifecycle:
         while time.monotonic() < deadline:
             try:
                 return read()
-            except (OSError, LifecycleError, ValidationError, json.JSONDecodeError):
+            except OSError, LifecycleError, ValidationError, json.JSONDecodeError:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     break
@@ -5070,7 +5070,7 @@ class SparkLifecycle:
         # A timeout or malformed reply is unknown. Never repeat this rotation.
         try:
             return read()
-        except (OSError, LifecycleError, ValidationError, json.JSONDecodeError):
+        except OSError, LifecycleError, ValidationError, json.JSONDecodeError:
             return None
 
     def _exercise_native_renewal(

@@ -45,7 +45,7 @@ def _observe_selection[T](read: Callable[[], T], *, deadline: float) -> T:
             result = read()
             _selection_remaining(deadline)
             return result
-        except (ControlForbidden, ControlUnauthorized):
+        except ControlForbidden, ControlUnauthorized:
             raise
         except (ControlClientError, OSError, TypeError, ValueError) as error:
             if isinstance(error, ControlClientError) and _known_http_refusal_status(

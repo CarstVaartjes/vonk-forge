@@ -111,7 +111,7 @@ class ResolutionMixin:
                         scope="model",
                     )
                 )
-        except (RecipeRuntimeSpecError, RuntimeError, TypeError, ValueError):
+        except RecipeRuntimeSpecError, RuntimeError, TypeError, ValueError:
             blockers.append(
                 _as_reason(
                     RunSwitchCode.RECIPE_DEPENDENCIES_UNAVAILABLE,

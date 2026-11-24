@@ -83,7 +83,7 @@ def _read_token_file(token_file: Path) -> str:
             token = bytes(content).decode().strip()
         except UnicodeDecodeError:
             raise LocalFilesystemError("control token file is invalid") from None
-    except (ControlClientError, LocalInputError):
+    except ControlClientError, LocalInputError:
         raise
     except OSError as error:
         context = local_io_context(

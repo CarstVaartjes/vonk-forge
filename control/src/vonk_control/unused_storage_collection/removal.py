@@ -184,7 +184,7 @@ def _scan_image_receipts(
         assert modified is not None
         try:
             size = images.published_archive_bytes(archive)
-        except (OSError, RuntimeImagePreparationError, ValueError):
+        except OSError, RuntimeImagePreparationError, ValueError:
             size = 0
         if size <= 0:
             # A damaged manifest is removable: its receipt names an image

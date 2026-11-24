@@ -93,7 +93,7 @@ def resolve_effective_settings(value: object) -> SettingsResolution:
                 )
             )
         return SettingsResolution(None, tuple(dict.fromkeys(reasons)))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return SettingsResolution(
             None,
             (

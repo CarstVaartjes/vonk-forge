@@ -67,7 +67,7 @@ def _qualification(value: object) -> PublishedQualificationStatusView | None:
         return None
     try:
         return PublishedQualificationStatusView.from_dict(value)
-    except (KeyError, TypeError, ValueError):
+    except KeyError, TypeError, ValueError:
         return None
 
 

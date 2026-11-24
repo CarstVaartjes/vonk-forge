@@ -418,7 +418,7 @@ def recovery_for_operation(
         for raw in supported_actions:
             try:
                 action = OperationRecoveryAction(raw)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             if action not in advertised:
                 advertised.append(action)

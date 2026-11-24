@@ -267,7 +267,7 @@ def _trusted_link(href: str) -> bool:
     try:
         parsed = urlsplit(href)
         port = parsed.port
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     return bool(
         parsed.scheme == "https"

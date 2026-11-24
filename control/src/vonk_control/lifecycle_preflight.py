@@ -227,7 +227,7 @@ class LifecyclePreflight:
                                 )
                                 if receipt is None or receipt.result != result:
                                     failure = RuntimePreflightCode.RECEIPT_MISSING
-                            except (TypeError, ValueError):
+                            except TypeError, ValueError:
                                 failure = RuntimePreflightCode.RECEIPT_INVALID
                     checkpoint.pending_jobs.pop(node_id)
                     if failure is not None:

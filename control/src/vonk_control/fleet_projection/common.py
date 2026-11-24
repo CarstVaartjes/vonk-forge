@@ -87,7 +87,7 @@ def _canonical_recipe(revision: CatalogDocumentRevision) -> RecipeDefinition | N
     # The row's digest was verified at ingress; it is read, never re-hashed.
     try:
         parsed = read_catalog_document(revision)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return parsed if isinstance(parsed, RecipeDefinition) else None
 
@@ -487,7 +487,7 @@ def _unavailable_presence[M: StrictModel](
     for name, value in observed:
         try:
             model.model_validate({**document, name: value}, strict=True)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         document[name] = value
     return model.model_validate(document, strict=True)

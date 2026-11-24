@@ -70,7 +70,7 @@ def newest_active_revisions(
             continue
         try:
             shared_catalog_document(row.kind, row.content_digest, row.document)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         newest[row.document_id] = row
     return newest

@@ -550,7 +550,8 @@ producer and consumer boundaries.
 
 Python lint, formatting and types share one configuration, the root
 `pyproject.toml`, and one locked tool version each (uv.lock, control dev group).
-Ruff runs its default rules plus the families in `[tool.ruff.lint] extend-select`;
+Ruff targets Python 3.14 (`agent_protocol` 3.12, the Sparks' Python) and runs
+its default rules plus the families in `[tool.ruff.lint] extend-select`;
 every ignore, global or per file, states its reason next to it. `extend-include`
 makes every extensionless file in `scripts/` and `bin/` Python unless
 `extend-exclude` names it as a shell script, so a new script is either linted or

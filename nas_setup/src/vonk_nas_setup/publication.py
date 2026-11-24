@@ -59,7 +59,7 @@ def validate_members(
     for request in requests.random_text:
         try:
             value = members[request.file].decode().rstrip("\r\n")
-        except (KeyError, UnicodeDecodeError):
+        except KeyError, UnicodeDecodeError:
             raise SetupError(
                 f"publication credential {request.file} is unavailable"
             ) from None
@@ -208,7 +208,7 @@ def stage_intent(
 def replay(bundle: Path) -> None:
     try:
         complete_replay(bundle)
-    except (SetupError, ValueError):
+    except SetupError, ValueError:
         # Malformed intent is preserved, then only a complete verified generation
         # may restore a group that an interrupted writer partly exposed.
         intent = bundle / INTENT

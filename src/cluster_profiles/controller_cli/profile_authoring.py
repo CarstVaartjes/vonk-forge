@@ -97,7 +97,7 @@ def _read_saved_definition(
             )
             if check is not None:
                 check(definition)
-        except (ControlClientError, KeyError, TypeError, ValueError):
+        except ControlClientError, KeyError, TypeError, ValueError:
             raise ControlMalformedResponse(
                 "saved profile definition is unavailable"
             ) from None

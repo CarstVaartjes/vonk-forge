@@ -418,7 +418,7 @@ class AdvanceMixin:
                     child_id=child_id,
                     cancellation=checkpoint_cancellation,
                 )
-            except (_RunSwitchBuildParentChanged, RecipeBuildAdmissionBusy):
+            except _RunSwitchBuildParentChanged, RecipeBuildAdmissionBusy:
                 return None
 
         def fail(

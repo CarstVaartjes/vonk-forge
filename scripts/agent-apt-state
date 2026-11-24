@@ -318,7 +318,7 @@ def _is_aptly_by_hash_alias(path: Path, root: Path, receipt: dict[str, Any]) -> 
     try:
         parent = path.parent.resolve(strict=True)
         target = path.resolve(strict=True)
-    except (OSError, RuntimeError):
+    except OSError, RuntimeError:
         return False
     return (
         target.parent == parent

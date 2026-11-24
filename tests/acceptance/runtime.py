@@ -129,7 +129,7 @@ def _process_group(root_pid: int) -> set[int]:
             suffix = (entry / "stat").read_text().rpartition(") ")[2].split()
             if int(suffix[2]) == root_pid:
                 members.add(int(entry.name))
-        except (IndexError, OSError, ValueError):
+        except IndexError, OSError, ValueError:
             continue
     return members
 
@@ -141,7 +141,7 @@ def _assert_process_values_absent(root_pid: int, forbidden: Sequence[bytes]) -> 
         for name in ("cmdline", "environ"):
             try:
                 content = Path(f"/proc/{pid}/{name}").read_bytes()
-            except (FileNotFoundError, PermissionError, ProcessLookupError):
+            except FileNotFoundError, PermissionError, ProcessLookupError:
                 continue
             if any(value in content for value in forbidden):
                 raise AcceptanceError(

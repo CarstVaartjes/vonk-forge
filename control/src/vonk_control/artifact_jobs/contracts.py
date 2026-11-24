@@ -183,7 +183,7 @@ def _active_recipe_revision(
         return None
     try:
         recipe = read_recipe(revision.document)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return revision, recipe
 

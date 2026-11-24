@@ -367,7 +367,7 @@ class FleetProfileService:
                     accepted_profile_definition=plan.profile_definition,
                     excluded_application_id=application_id,
                 )
-        except (FleetProfileConflict, ValidationError, KeyError):
+        except FleetProfileConflict, ValidationError, KeyError:
             # The ordinary admission path reports whatever is unresumable.
             return False
         blockers: list[OperationBlocker] = []
@@ -463,7 +463,7 @@ class FleetProfileService:
                 item.id: item
                 for item in self._execution_assignments(session, self._choices(profile))
             }
-        except (FleetProfileConflict, ValidationError):
+        except FleetProfileConflict, ValidationError:
             return None
         assignments: list[FleetProfileAssignment] = []
         moves: list[str] = []

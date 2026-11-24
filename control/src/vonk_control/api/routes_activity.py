@@ -133,7 +133,7 @@ def register_activity_routes(
             return operation_detail_response(
                 item, available_actions=available_actions, now=projected_at
             )
-        except (BoundedJSONError, OSError, RuntimeError, TypeError, ValueError):
+        except BoundedJSONError, OSError, RuntimeError, TypeError, ValueError:
             if not tolerate_unreadable:
                 raise
             # A corrupt row keeps its durable identity and timestamp visible;

@@ -177,7 +177,7 @@ class InstallationPreparationMixin:
             service._install_admission.refresh_install_receipts(
                 plan, now=now, profile_application_id=profile_application_id
             )
-        except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
+        except SecurityRefusalError, InvalidRequestError, UnknownOutcomeError:
             raise
         except (RuntimeError, ValueError, TypeError, OSError) as error:
             raise retry_later_unless_deterministic(
@@ -196,7 +196,7 @@ class InstallationPreparationMixin:
                     profile_application_id=profile_application_id,
                     workload_intent_ordinal=workload_intent_ordinal,
                 )
-            except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
+            except SecurityRefusalError, InvalidRequestError, UnknownOutcomeError:
                 raise
             except (RuntimeError, ValueError, TypeError, OSError) as error:
                 raise retry_later_unless_deterministic(
@@ -326,7 +326,7 @@ class InstallationPreparationMixin:
                     now=now,
                     _session=session,
                 )
-            except (RuntimeError, ValueError, KeyError):
+            except RuntimeError, ValueError, KeyError:
                 return None
             plans = fresh.compiled_plan_by_node
             if fresh.plan_digest != installation.plan_digest or not wanted <= set(

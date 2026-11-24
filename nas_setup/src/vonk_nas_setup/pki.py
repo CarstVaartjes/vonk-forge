@@ -150,7 +150,7 @@ def _decrypt_intermediate(value: bytes, password: bytes) -> bytes:
         )
         unpadder = padding.PKCS7(128).unpadder()
         return unpadder.update(padded) + unpadder.finalize()
-    except (ValueError, TypeError, KeyError, UnsupportedAlgorithm):
+    except ValueError, TypeError, KeyError, UnsupportedAlgorithm:
         raise _invalid("intermediate private key cannot be decrypted") from None
 
 
@@ -191,7 +191,7 @@ def _load_ed25519_der(plaintext: bytes) -> ed25519.Ed25519PrivateKey:
         ):
             raise _invalid("private key embedded public key does not match its signer")
         return key
-    except (ValueError, TypeError, KeyError, UnsupportedAlgorithm):
+    except ValueError, TypeError, KeyError, UnsupportedAlgorithm:
         raise _invalid("private key is not valid Ed25519 PKCS#8") from None
 
 
@@ -404,7 +404,7 @@ def _validate_jwk(value: bytes) -> None:
         ec.EllipticCurvePublicNumbers(
             coordinates[0], coordinates[1], ec.SECP256R1()
         ).public_key()
-    except (ValueError, TypeError, KeyError, UnicodeDecodeError):
+    except ValueError, TypeError, KeyError, UnicodeDecodeError:
         raise _invalid("public provisioner JWK is invalid") from None
 
 
@@ -513,7 +513,7 @@ def validate_pki_material(
         _validate_jwk(files[paths.provisioner_public_jwk])
     except KeyError:
         raise _invalid("a required PKI member is missing") from None
-    except (InvalidSignature, x509.ExtensionNotFound, UnsupportedAlgorithm):
+    except InvalidSignature, x509.ExtensionNotFound, UnsupportedAlgorithm:
         raise _invalid(
             "certificate signature or required extension is invalid"
         ) from None

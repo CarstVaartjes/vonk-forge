@@ -144,7 +144,7 @@ class FixtureRegistry:
         for key, raw_recipe in raw_recipes.items():
             try:
                 recipes[key] = _parse_recipe_fixture(key, raw_recipe, fixtures)
-            except (FixtureError, KeyError, OSError, TypeError, ValueError):
+            except FixtureError, KeyError, OSError, TypeError, ValueError:
                 continue
         raw_special = _object(document.get("special_fixtures", {}), "special_fixtures")
         special = {
@@ -157,7 +157,7 @@ class FixtureRegistry:
         for key, item in raw_service_cases.items():
             try:
                 service_cases[key] = _parse_service_case(key, item)
-            except (FixtureError, KeyError, TypeError, ValueError):
+            except FixtureError, KeyError, TypeError, ValueError:
                 continue
         raw_service_recipes = _object(
             document.get("service_recipes", {}), "service_recipes"
@@ -166,7 +166,7 @@ class FixtureRegistry:
         for key, item in raw_service_recipes.items():
             try:
                 service_recipes[key] = _parse_service_recipe(key, item, service_cases)
-            except (FixtureError, KeyError, TypeError, ValueError):
+            except FixtureError, KeyError, TypeError, ValueError:
                 continue
         registry = cls(
             fixtures,
@@ -183,7 +183,7 @@ class FixtureRegistry:
             return
         try:
             repaired = type(self).load(self._manifest_path)
-        except (FixtureError, OSError, ValueError, TypeError):
+        except FixtureError, OSError, ValueError, TypeError:
             return  # retain already verified bytes; the next request observes again
         self.fixtures = repaired.fixtures
         self.recipes = repaired.recipes

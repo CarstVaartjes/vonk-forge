@@ -508,7 +508,7 @@ class ResourceFitMixin:
                                 else 0
                             ),
                         )
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     disk_need = None
                 if disk_need is None:
                     node_blockers.append(

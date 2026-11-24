@@ -307,7 +307,7 @@ def _issuance_binding(
         return CertificateIssuanceBinding.model_validate_json(
             json.dumps(value, allow_nan=False)
         )
-    except (ValidationError, ValueError, TypeError):
+    except ValidationError, ValueError, TypeError:
         # Stored bookkeeping is a miss. A request must establish a fresh exact
         # binding; no damaged record may authorize certificate adoption.
         return None

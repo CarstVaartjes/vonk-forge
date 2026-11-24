@@ -439,7 +439,7 @@ class RotationService(EnrollmentCore):
             disposition = self._persist_rotation(issued, claim)
         except StepCAIssuancePending:
             raise
-        except (EnrollmentDenied, RenewalInProgress):
+        except EnrollmentDenied, RenewalInProgress:
             raise
         except Exception as error:
             require_provider_verification(error)
@@ -507,7 +507,7 @@ class RotationService(EnrollmentCore):
                         )
                     try:
                         return _certificate_issued(staged)
-                    except (RuntimeError, ValueError, UnicodeError):
+                    except RuntimeError, ValueError, UnicodeError:
                         binding = _issuance_binding(staged.provider_request)
                         if binding is not None:
                             return EnrollmentRotationClaim(

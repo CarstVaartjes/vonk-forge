@@ -304,7 +304,7 @@ def profile_memory_replacements(
         ):
             return ()
         return tuple(stop for stop in decision.stops if claim.node_id in stop.node_ids)
-    except (UnknownOutcomeError, TypeError, ValueError):
+    except UnknownOutcomeError, TypeError, ValueError:
         return ()
 
 
@@ -352,7 +352,7 @@ def profile_build_memory_claims(
             claim = _profile_build_memory_claim(
                 session, job, build, memory_pool=memory_pool, lock=lock
             )
-        except (UnknownOutcomeError, ValueError, KeyError, TypeError):
+        except UnknownOutcomeError, ValueError, KeyError, TypeError:
             if request_id is not None:
                 raise
             # Invalid/stale consumer evidence cannot discount capacity. A
@@ -505,7 +505,7 @@ def profile_memory_floor(session: Session, claim: ResourceReservation) -> int:
             )
         _validate_memory_claim(claim, application, claim.resource_key, requirement)
         return requirement.memory_floor_bytes
-    except (UnknownOutcomeError, TypeError, ValueError):
+    except UnknownOutcomeError, TypeError, ValueError:
         return claim.amount_bytes
 
 
@@ -645,7 +645,7 @@ def sibling_profile_ports(
             node_ids,
             workload_intent_ordinal=progress.workload_intent_ordinal,
         )
-    except (UnknownOutcomeError, TypeError, ValueError):
+    except UnknownOutcomeError, TypeError, ValueError:
         return frozenset()
     own = {
         _port_claim_id(application_id, assignment.id, node.node_id, port)
@@ -736,7 +736,7 @@ def profile_replaced_runs(session: Session, application_id: str) -> frozenset[st
             strict=True,
             from_json=True,
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return frozenset()
     return frozenset(
         effect.run_id
@@ -799,7 +799,7 @@ def kept_runs(
             strict=True,
             from_json=True,
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return kept
     return kept | plan_kept_runs(review.effects)
 

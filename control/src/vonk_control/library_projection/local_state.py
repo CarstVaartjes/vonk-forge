@@ -158,7 +158,7 @@ def _local_state_snapshot(
                     if isinstance(raw, LibraryLocalState)
                     else LibraryLocalState.model_validate_json(canonical_message(raw))
                 )
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 snapshot[digest] = LibraryLocalState(
                     controller=cast(
                         LibraryControllerState, AssetAvailability.UNKNOWN.value
@@ -185,7 +185,7 @@ def _local(
         return LibraryLocalState.model_validate_json(
             canonical_message(raw or {"controller": "not_cached"})
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         _note_unreadable(kind, digest, "local observation is unavailable")
         return LibraryLocalState(
             controller=cast(LibraryControllerState, AssetAvailability.UNKNOWN.value)
@@ -313,7 +313,7 @@ def _database_local_state(
                 continue
             try:
                 resolved = resolve_recipe_set(session, revision_id).digest
-            except (ModelCacheError, TypeError, ValueError):
+            except ModelCacheError, TypeError, ValueError:
                 # A refusal for one recipe leaves that recipe unknown; it does
                 # not fail the page.
                 _note_unreadable(

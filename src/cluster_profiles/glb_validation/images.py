@@ -272,7 +272,7 @@ def _image_bytes(blob: bytes, view: tuple[int, int], mime_type: str) -> None:
 
             with Image.open(BytesIO(value)) as image:
                 image.verify()
-        except (ImportError, OSError, SyntaxError, ValueError):
+        except ImportError, OSError, SyntaxError, ValueError:
             valid = False
     if not valid:
         raise ValueError("GLB embedded image payload does not match its MIME type")

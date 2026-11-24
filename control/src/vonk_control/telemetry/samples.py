@@ -120,7 +120,7 @@ def _same_sample(row: NodeTelemetrySample, value: TelemetrySample) -> bool:
 def _read_view(row: NodeTelemetrySample) -> TelemetrySampleView | None:
     try:
         return _view(row)
-    except (AttributeError, TypeError, ValueError):
+    except AttributeError, TypeError, ValueError:
         warn_unreadable_once("telemetry sample", row.id)
         return None
 

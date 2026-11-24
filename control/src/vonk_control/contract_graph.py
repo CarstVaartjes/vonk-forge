@@ -112,7 +112,7 @@ def _reads_raw_body(endpoint: Any) -> bool:
     # bounded readers attach their canonical model with raw_json_body instead.
     try:
         tree = ast.parse(textwrap.dedent(inspect.getsource(endpoint)))
-    except (OSError, TypeError):
+    except OSError, TypeError:
         return False
     return any(
         isinstance(node, ast.Call)

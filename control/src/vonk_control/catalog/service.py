@@ -178,7 +178,7 @@ class CatalogService:
             )
         try:
             stored = self._source_bundles.put(expected_sha256, payload)
-        except (SourceBundleRefused, SourceBundleIntegrityRefused, SourceBundleUnknown):
+        except SourceBundleRefused, SourceBundleIntegrityRefused, SourceBundleUnknown:
             raise
         except SourceBundleError as error:
             raise CatalogValidationError(error.code, error.detail) from error
@@ -704,7 +704,7 @@ class CatalogService:
                 projection_type.model_validate_json(
                     canonical_message(existing.projected)
                 )
-            except (CatalogRevisionContractError, TypeError, ValueError):
+            except CatalogRevisionContractError, TypeError, ValueError:
                 # Repair only from the validated incoming content, preserving
                 # verified generations on ordinary cache hits.
                 projection = (
@@ -835,7 +835,7 @@ def _view(revision: CatalogDocumentRevision) -> RecipeRevisionView:
 def _node_count(document: Mapping[str, object]) -> int | None:
     try:
         return recipe_topology(document).node_count
-    except (RecipeRuntimeSpecError, TypeError, ValueError):
+    except RecipeRuntimeSpecError, TypeError, ValueError:
         return None
 
 
