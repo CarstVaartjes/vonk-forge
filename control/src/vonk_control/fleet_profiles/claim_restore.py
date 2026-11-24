@@ -32,14 +32,14 @@ from vonk_control.admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
-from vonk_control.disk_reservations import outstanding_disk_charges
 from vonk_control.fleet_profiles import states as fleet_profile_states
-from vonk_control.memory_reservations import (
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.reservations.disk import outstanding_disk_charges
+from vonk_control.reservations.memory import (
     MEMORY_RESERVATION_KINDS,
     memory_reservations,
 )
-from vonk_control.models.execution import ResourceReservation
-from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.resource_planning.capacity import plan_capacity
 from vonk_control.resource_planning.memory import memory_capacity_snapshot
 from vonk_control.resource_planning.memory_kinds import memory_reservation_kind

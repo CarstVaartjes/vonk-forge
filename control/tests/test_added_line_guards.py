@@ -2596,11 +2596,11 @@ def test_a_set_matched_by_its_first_requester_is_flagged(source: str) -> None:
         ),
         # A Spark's installations by their set, or the Model next to other facts.
         (
-            "control/src/vonk_control/disk_reservations.py",
+            "control/src/vonk_control/reservations/disk.py",
             "q = select(RecipeInstallation.model_artifact_set_sha256).join(InstallationNode, j)\n",
         ),
         (
-            "control/src/vonk_control/disk_reservations.py",
+            "control/src/vonk_control/reservations/disk.py",
             "q = select(RecipeInstallation.id, RecipeInstallation.model_content_sha256).join(InstallationNode, j)\n",
         ),
     ],

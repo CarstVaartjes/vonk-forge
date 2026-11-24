@@ -97,7 +97,7 @@ from vonk_control.owner_liveness import (
     installations_named_by_live_jobs,
     referencing_active_job,
 )
-from vonk_control.reservation_owners import release_dead_owner_reservations
+from vonk_control.reservations.owners import release_dead_owner_reservations
 from vonk_control.waits.persisted import schedule_wait
 
 _LOGGER = logging.getLogger(__name__)

@@ -28,7 +28,7 @@ from vonk_control.models.jobs import Job
 from vonk_control.operations.blockers import OperationBlocker, bound_blockers
 from vonk_control.recipe_operations.errors import RecipeRequestInvalid
 from vonk_control.recipe_operations.interfaces import RecipeOperationView
-from vonk_control.reservation_owners import release_dead_owner_reservations
+from vonk_control.reservations.owners import release_dead_owner_reservations
 from vonk_control.run_switch_contract.operations import (
     RunSwitchOperation,
     RunSwitchOperationResult,

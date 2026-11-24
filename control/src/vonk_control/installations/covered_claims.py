@@ -21,7 +21,7 @@ from vonk_control.models.execution import (
     ResourceReservation,
 )
 from vonk_control.models.telemetry import NodeInventorySnapshot
-from vonk_control.reservation_owners import ReservationOwner
+from vonk_control.reservations.owners import ReservationOwner
 
 
 def release_covered_installation_claims(

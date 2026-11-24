@@ -21,7 +21,6 @@ from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_agent_protocol.state_machines import ReservationState
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
@@ -35,6 +34,7 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.owner_liveness import OwnerKind
 from vonk_control.recipe_operations.execution_contract import parse_stored_build_plan
+from vonk_control.reservations.disk import outstanding_disk_reservation_bytes
 
 from .recipe_operations_support import NOW, setup_services
 from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service

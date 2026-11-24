@@ -18,16 +18,16 @@ from vonk_agent_protocol.agent_operations import AgentOperation as WireOperation
 from vonk_agent_protocol.state_machines import ReservationState
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.attempt_residues import AttemptResidueReconciler
-from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models.execution import ResourceReservation
 from vonk_control.models.jobs import Job
 from vonk_control.owner_liveness import OWNER_SETTLE_GRACE, OwnerKind
-from vonk_control.reservation_owners import reservation_owner
+from vonk_control.reservations.disk import outstanding_disk_reservation_bytes
+from vonk_control.reservations.memory import memory_reservations
+from vonk_control.reservations.owners import reservation_owner
 
 from .recipe_builds_support import setup
 from .test_build_cancellation_recovery import _issue, _services

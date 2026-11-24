@@ -30,7 +30,6 @@ from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control.content_identity import RecipeExecution, runs_identically
 from vonk_control.dialect_insert import dialect_insert
 from vonk_control.fleet_events.outbox import FleetEventRecorder, FleetEventRepository
-from vonk_control.memory_reservations import MEMORY_RESERVATION_KINDS
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import (
     MeasuredRolePeak,
@@ -41,6 +40,7 @@ from vonk_control.models.execution import (
 )
 from vonk_control.models.telemetry import NodeInventoryResourceSnapshot
 from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
+from vonk_control.reservations.memory import MEMORY_RESERVATION_KINDS
 from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
 

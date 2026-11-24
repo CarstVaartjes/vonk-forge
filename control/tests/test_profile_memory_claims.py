@@ -13,12 +13,12 @@ from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )
 from vonk_control.jobs.documents import RecipeStopParent
-from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
 from vonk_control.models.fleet import AgentNode, FleetProfileApplication
 from vonk_control.models.jobs import Job
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.recipe_operations.errors import RecipeRequestInvalid
+from vonk_control.reservations.memory import memory_reservations
 from vonk_control.resource_planning.types import UnknownRunMemoryResidual
 from vonk_control.run_admission import RunAdmissionBusy
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult

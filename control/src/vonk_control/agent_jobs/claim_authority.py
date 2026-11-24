@@ -45,7 +45,6 @@ from vonk_control.agent_operation_facts import (
 )
 from vonk_control.agent_upgrades.package_activation import matches_receipt
 from vonk_control.cancelled_runtime import cancellation_stop_current
-from vonk_control.disk_reservations import outstanding_disk_charges
 from vonk_control.gpu.health import gpu_health_reason
 from vonk_control.inventory.repository import (
     INVENTORY_MAX_AGE_SECONDS,
@@ -77,6 +76,7 @@ from vonk_control.recipe_operations.execution_contract import (
 )
 from vonk_control.recipe_operations.observation_helpers import reinstall_in_flight
 from vonk_control.recovery_policy import WAIT_STEP
+from vonk_control.reservations.disk import outstanding_disk_charges
 from vonk_control.spark_disk import spark_free_bytes
 from vonk_control.waits.persisted import schedule_wait
 

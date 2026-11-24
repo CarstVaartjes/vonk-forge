@@ -14,7 +14,6 @@ from vonk_agent_protocol.state_machines import ReservationState
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.inventory.items import runtime_value
 from vonk_control.inventory.repository import InventoryRepository
-from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision, RecipeSourceBundle
 from vonk_control.models.execution import (
@@ -34,6 +33,7 @@ from vonk_control.recipe_builds.common import (
 )
 from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_operations.execution_contract import run_plan_document
+from vonk_control.reservations.memory import memory_reservations
 from vonk_control.run_admission import _node_document
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.plans import RunSwitchPlan

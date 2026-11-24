@@ -60,7 +60,6 @@ from vonk_control.inventory.repository import (
 from vonk_control.legal_admission import stored_model_display, territorial_admission
 from vonk_control.load_swap import swap_capacity
 from vonk_control.machine_states import rank_installed, reservation_live
-from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import (
     InstallationNode,
@@ -84,6 +83,7 @@ from vonk_control.recipe_operations.runtime_specs import (
     recipe_topology,
     resolve_recipe_entities,
 )
+from vonk_control.reservations.memory import memory_reservations
 from vonk_control.resource_planning.capacity import plan_capacity
 from vonk_control.resource_planning.memory import (
     memory_capacity_snapshot,

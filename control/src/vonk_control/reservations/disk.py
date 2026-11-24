@@ -25,7 +25,7 @@ from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )
-from vonk_control.reservation_owners import reservation_owner
+from vonk_control.reservations.owners import reservation_owner
 
 
 def model_sets_stored_on_nodes(

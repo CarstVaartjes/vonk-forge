@@ -19,11 +19,6 @@ from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import NodeIdentityState, ReservationState
 from vonk_control.attempt_residues import unowned_never_installed
 from vonk_control.catalog.revision_contract import published_steady_peaks
-from vonk_control.disk_reservations import (
-    describe_disk_charges,
-    model_sets_stored_on_node,
-    outstanding_disk_charges,
-)
 from vonk_control.fleet_profiles.capacity import reservation_visible
 from vonk_control.gpu.health import gpu_health_reason
 from vonk_control.install_admission.contracts import (
@@ -32,7 +27,6 @@ from vonk_control.install_admission.contracts import (
 )
 from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from vonk_control.load_swap import swap_capacity
-from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import ResourceReservation
 from vonk_control.models.fleet import AgentNode
@@ -41,6 +35,12 @@ from vonk_control.recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     recipe_topology,
 )
+from vonk_control.reservations.disk import (
+    describe_disk_charges,
+    model_sets_stored_on_node,
+    outstanding_disk_charges,
+)
+from vonk_control.reservations.memory import memory_reservations
 from vonk_control.resource_planning.capacity import plan_capacity, stop_can_clear_swap
 from vonk_control.resource_planning.memory import (
     memory_capacity_snapshot,

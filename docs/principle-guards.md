@@ -98,7 +98,7 @@ The same mode flags a query selecting only
 Models does this Spark hold" by the Model each installation was made for. After
 the contracts 5.0 re-digest it judged a Spark holding the files under the old
 digest empty, so the load review charged the whole model again. Ask by the set
-instead (`disk_reservations.model_sets_stored_on_node`).
+instead (`reservations.disk.model_sets_stored_on_node`).
 
 NAS coverage is required only where NAS bytes are read. A new call of
 `_require_managed_cache_coverage`, `resolve_verified_artifact_set`,

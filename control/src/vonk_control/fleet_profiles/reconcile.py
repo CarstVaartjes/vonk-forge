@@ -74,7 +74,7 @@ from vonk_control.operations.blockers import (
     make_blocker,
 )
 from vonk_control.recipe_operations.errors import RecipeOperationConflict
-from vonk_control.reservation_owners import release_dead_owner_reservations
+from vonk_control.reservations.owners import release_dead_owner_reservations
 from vonk_control.run_switch_contract.phase_results import RunSwitchStopResult
 from vonk_control.strict_json import read_stored_model
 from vonk_control.waits.persisted import schedule_wait

@@ -50,7 +50,6 @@ from vonk_control.categorized_faults import security_reason
 from vonk_control.fleet_profiles.capacity import profile_build_memory_claims
 from vonk_control.inventory.items import inventory_items
 from vonk_control.inventory.repository import InventorySnapshotView
-from vonk_control.memory_reservations import memory_reservations, memory_reserve_floor
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
@@ -59,6 +58,7 @@ from vonk_control.recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     recipe_topology,
 )
+from vonk_control.reservations.memory import memory_reservations, memory_reserve_floor
 from vonk_control.resource_planning.memory import memory_capacity_snapshot
 from vonk_control.runtime.adapters import (
     RuntimeAdapter,
