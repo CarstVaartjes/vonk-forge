@@ -808,16 +808,15 @@ profile or review a load for those observations. A lost save response may still
 commit; reconnect through the definition read before editing again. Retrying
 identical content returns the committed revision without another edit.
 
-Today each profile load is kept as its own history entry; that history is not a
-standing fleet policy. The target behavior keeps one durable selected-profile
-record in PostgreSQL, pointing to the immutable accepted load snapshot
-as desired state for the whole fleet. Saving another profile does not select it,
+Each profile load is kept as its own history entry; that history is not the
+standing fleet policy. One durable selected-profile record in PostgreSQL points
+to the immutable accepted load snapshot as desired state for the whole fleet. Saving another profile does not select it,
 and the latest load alone does not decide which profile is current. The
 Controller worker reconciles that snapshot after enrollment or revocation; a
 roster event does not need a new operator decision. A new Spark appears idle,
 while a removed Spark's independent assignment is ignored without changing the
 snapshot. If removal leaves a multi-Spark model without a required member, the
-Controller should stop and confirm the remaining reachable ranks, withdraw that
+Controller stops and confirms the remaining reachable ranks, withdraw that
 model's route, report the missing member, and continue unrelated assignments.
 Do not count a removed Spark's old run as live capacity or report an unreachable
 Spark as stopped without confirmed cleanup. If the same node ID rejoins,
@@ -1014,9 +1013,8 @@ demand beyond physical capacity remain blockers before any stop.
 An accepted load's intended configuration retains `reviewed_plan_digest`
 and its original `reviewed_application_id`, separately from the execution-attempt
 `plan_digest`. Retry admission rejects plans that add a workload stop or
-installation removal to that original review. The required numbered-load precondition, current-user
-checks, and roster/catalog fences are implemented; full resource/deletion
-coordination remains tracked in W09 of the implementation plan.
+installation removal to that original review. The required numbered-load
+precondition, current-user checks, and roster/catalog fences are implemented.
 
 Accepted installation work reserves its reviewed disk space. Other installs
 cannot consume that space while the profile is preparing. The reservation
@@ -1238,8 +1236,9 @@ remote operation state as failed.
 These rules come from the CLI operator design and hold for every command.
 Change them only together with the tests that pin them.
 
-- **Four domains.** `fleet`, `model`, `recipe` and `profile` are the operator
-  domains; `update` maintains the CLI itself. Use the existing verbs
+- **Operator domains.** `fleet`, `model`, `recipe` and `profile` are the main
+  operator domains, beside `platform`, `metrics`, `job`, `key` and `run`;
+  `auth`, `completion` and `update` maintain the CLI itself. Use the existing verbs
   (`detail`, `download`, `load`, `progress`, `remove`) instead of adding
   synonyms or aliases.
 - **Selectors.** Lists lead with the exact reusable selector; detail views

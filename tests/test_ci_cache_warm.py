@@ -8,6 +8,7 @@ setup-uv (through the python-env action) keys on the lockfiles. A warm job that
 drifts from the job it warms would save entries nothing restores.
 """
 
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -25,12 +26,25 @@ def _steps(job: dict[str, Any], prefix: str) -> list[dict[str, Any]]:
     return [s for s in job["steps"] if s.get("uses", "").startswith(prefix)]
 
 
-def _toolchain_runs(job: dict[str, Any]) -> set[str]:
-    return {
-        s["run"].strip()
+SETUP_RUST = "./.github/actions/setup-rust"
+PINNED_CHANNEL = tomllib.loads((ROOT / "rust-toolchain.toml").read_text())["toolchain"][
+    "channel"
+]
+
+
+def _restored_keys(job: dict[str, Any]) -> list[str]:
+    """Shared keys a ci.yml job restores: inline rust-cache or the setup-rust action."""
+    return [s["with"]["shared-key"] for s in _steps(job, RUST_CACHE)] + [
+        s["with"]["shared-key"] for s in _steps(job, SETUP_RUST)
+    ]
+
+
+def _warms_the_pinned_toolchain(job: dict[str, Any]) -> bool:
+    return any(
+        PINNED_CHANNEL in s.get("run", "")
         for s in job["steps"]
         if s.get("name") == "Install pinned Rust toolchain"
-    }
+    )
 
 
 def _cache_env(workflow: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]:
@@ -50,14 +64,17 @@ def test_warm_jobs_match_a_ci_job_for_every_cache_key_input() -> None:
             job
             for job in CI["jobs"].values()
             if job.get("runs-on") == warm["runs-on"]
-            and any(s["with"] == cache["with"] for s in _steps(job, RUST_CACHE))
+            and cache["with"]["shared-key"] in _restored_keys(job)
             and _cache_env(CI, job) == warm_env
-            and _toolchain_runs(warm) <= _toolchain_runs(job)
         ]
         if not twins:
             problems.append(
                 f"{name}: no ci.yml job restores this exact cache "
                 f"(effective key env {warm_env})"
+            )
+        if not _warms_the_pinned_toolchain(warm):
+            problems.append(
+                f"{name}: must install the toolchain pinned in rust-toolchain.toml"
             )
         python_env = [
             s for s in warm["steps"] if s.get("uses") == "./.github/actions/python-env"

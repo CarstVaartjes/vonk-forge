@@ -35,6 +35,28 @@ updates:
     labels: ["dependencies", "github-actions"]
     open-pull-requests-limit: 5
 
+  - package-ecosystem: "npm"
+    directories:
+      - "/control/web"
+      - "/tools/openapi-client"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "Europe/Amsterdam"
+    labels: ["dependencies", "javascript"]
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "Europe/Amsterdam"
+    labels: ["dependencies", "python"]
+    open-pull-requests-limit: 5
+
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:

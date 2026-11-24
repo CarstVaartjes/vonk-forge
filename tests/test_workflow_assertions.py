@@ -244,20 +244,31 @@ def test_pull_request_suites_sample_sweeps_and_gate_changed_test_budgets() -> No
     assert "github.event_name == 'pull_request'" in tier
     assert "github.event_name == 'merge_group'" in tier
     assert "&& 'pr' || 'full'" in tier
+    [listing] = [
+        step
+        for step in workflow["jobs"]["changes"]["steps"]
+        if "scripts/changed-tests" in step.get("run", "")
+    ]
+    assert "pull_request" in listing["if"]
+    assert "merge_group" in listing["if"]
+    assert "merge_group.base_sha" in listing["env"]["BASE_SHA"]
+    assert workflow["jobs"]["changes"]["outputs"]["changed_tests"]
     for job, command in (
         ("repository-suite", "scripts/test repository --shard"),
         ("control-suite", "scripts/test control --shard"),
     ):
         steps = workflow["jobs"][job]["steps"]
-        [listing] = [
-            step for step in steps if "scripts/changed-tests" in step.get("run", "")
+        assert not [s for s in steps if "scripts/changed-tests" in s.get("run", "")]
+        [receive] = [
+            step
+            for step in steps
+            if "needs.changes.outputs.changed_tests" in str(step.get("env", {}))
         ]
-        assert "pull_request" in listing["if"]
-        assert "merge_group" in listing["if"]
-        assert "merge_group.base_sha" in listing["env"]["BASE_SHA"]
+        assert "pull_request" in receive["if"]
+        assert "merge_group" in receive["if"]
         [run] = [step for step in steps if command in step.get("run", "")]
         assert "--test-budget-enforce" in run["run"]
-        assert steps.index(listing) < steps.index(run)
+        assert steps.index(receive) < steps.index(run)
 
 
 def test_built_recipe_library_cache_is_saved_on_main_after_the_build_under_its_restore_key() -> (

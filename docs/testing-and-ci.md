@@ -154,6 +154,10 @@ so newer local installations remain usable. The single-source guard rejects
 independent pins and floors that differ from the CI release. Container bootstrap
 installs use hash-locked PyPI wheels, including uv with its owner-derived version.
 
+The Node major CI installs is owned by `.node-version`; every `setup-node` step
+reads that file. Playwright rejects a committed `test.only` in CI and does not
+retry: a flaky test is fixed, not rerun.
+
 Install uv, Node/npm and the pinned Rust toolchain (on macOS, also prepare the
 `vonk-ci` OrbStack VM for the Linux workspace check), then run:
 

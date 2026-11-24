@@ -14,6 +14,8 @@ def test_dependabot_covers_every_container_and_action_location_weekly() -> None:
         "docker-compose": {"/deploy/compose", "/deploy/compose/tailscale"},
         "github-actions": {"/", "/.github/actions/*"},
         "cargo": {"/"},
+        "npm": {"/control/web", "/tools/openapi-client"},
+        "uv": {"/"},
     }
     covered: dict[str, set[str]] = {}
     for update in config["updates"]:

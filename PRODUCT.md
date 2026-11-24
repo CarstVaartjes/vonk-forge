@@ -43,16 +43,16 @@ available to its dependencies, and failed work must not block unrelated work.
   Sparks are idle. Saving a profile creates a draft, and loading it currently
   creates one application. A membership change before load acceptance makes
   the review stale and requires a new review.
-- Target standing profile behavior: one durable selected-profile record in
-  PostgreSQL points to the immutable accepted application snapshot for the
-  whole fleet. Other saved profiles remain drafts; application history alone
-  does not identify the current policy.
-- The Controller worker should reconcile that snapshot after enrollment or
+- Standing profile: one durable selected-profile record in PostgreSQL points
+  to the immutable accepted application snapshot for the whole fleet. Other
+  saved profiles remain drafts; application history alone does not identify the
+  current policy.
+- The Controller worker reconciles that snapshot after enrollment or
   revocation without a new operator decision. New Sparks enter idle; a removed
   Spark's independent assignment is ignored and the snapshot stays intact. If
-  removal breaks a multi-Spark placement, stop and confirm its reachable ranks,
-  withdraw its route, show a missing-member error, and continue unrelated
-  assignments. The Controller also checks accepted running assignments for
+  removal breaks a multi-Spark placement, it stops and confirms its reachable
+  ranks, withdraws its route, shows a missing-member error, and continues
+  unrelated assignments. The Controller also checks accepted running assignments for
   live-state drift and reconciles them through the existing run and route
   recovery paths.
 - Loading a ready profile shows live-versus-desired differences, prepares
