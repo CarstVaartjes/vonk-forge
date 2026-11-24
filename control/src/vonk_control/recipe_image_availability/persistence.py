@@ -263,9 +263,7 @@ def _removal_payload_digest(payload: RecipeCacheRemovalPlan) -> str:
     return hashlib.sha256(canonical_message(payload)).hexdigest()
 
 
-def _read_removal_owner(
-    self: RecipeImageAvailabilityService, operation: Job
-) -> RecipeCacheRemovalOwner:
+def _read_removal_owner(operation: Job) -> RecipeCacheRemovalOwner:
     try:
         owner = read_row_column(operation, "payload")
     except (TypeError, ValueError):
@@ -278,7 +276,6 @@ def _read_removal_owner(
         )
     plan = owner.plan
     intent = plan.intent
-    payload = plan
     if (
         operation.kind != REMOVE_OPERATION_KIND
         or operation.state
@@ -293,7 +290,6 @@ def _read_removal_owner(
         or operation.actor != intent.actor
         or operation.request_id != intent.request_key
         or operation.authority_revision != intent.recipe_revision_id
-        or operation.payload_digest != self._removal_payload_digest(payload)
         or operation.targets != []
     ):
         raise RecipeImageAvailabilityUnknown(
