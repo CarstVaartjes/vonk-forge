@@ -10,7 +10,6 @@ from typing import (
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from vonk_control.categorized_errors import MissingRecord
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.inventory.repository import INVENTORY_MAX_AGE_SECONDS
 from vonk_control.lifecycle_preflight import LifecyclePreflight
@@ -70,6 +69,4 @@ class RecipeLifecyclePhaseExecutor(
                 child = None
             if child is not None:
                 return child
-        if self._lifecycle is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
-            return self._lifecycle.get(operation_id)
-        raise MissingRecord(operation_id)
+        return self._lifecycle.get(operation_id)

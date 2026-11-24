@@ -475,39 +475,37 @@ class ResourceFitMixin:
                         if artifact_bytes is not None
                         else disk.artifact_bytes
                     )
-                    # An unstated payload size leaves the envelope incomplete.
-                    if image_size is not None and artifact_size is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
-                        set_bytes = artifact_size
-                        if (
-                            artifact_set_sha256 is not None
-                            and artifact_set_sha256
-                            in model_sets_stored_on_node(session, item.node_id)
-                        ):
-                            # The Spark's shared store already holds the model
-                            # set (an installation running it exists there), so
-                            # the install links those files and writes none.
-                            artifact_size = 0
-                        elif (
-                            missing_artifact_bytes_by_node is not None
-                            and item.node_id in missing_artifact_bytes_by_node
-                        ):
-                            # Otherwise it writes only the files the agent's
-                            # store scan does not report (install admission's
-                            # rule); no scan charges the whole set.
-                            artifact_size = missing_artifact_bytes_by_node[item.node_id]
-                            # Those scan-reported files may be unused ones the
-                            # agent could reclaim; this load keeps them. A held
-                            # set's files are linked, so never counted unused.
-                            reused_model_bytes = max(0, set_bytes - artifact_size)
-                        disk_need = installation_disk_requirement(
-                            disk,
-                            required_download_bytes=image_size + artifact_size,
-                            minimum_floor_bytes=(
-                                service._lifecycle._install_admission._disk_floor
-                                if service._lifecycle is not None
-                                else 0
-                            ),
-                        )
+                    set_bytes = artifact_size
+                    if (
+                        artifact_set_sha256 is not None
+                        and artifact_set_sha256
+                        in model_sets_stored_on_node(session, item.node_id)
+                    ):
+                        # The Spark's shared store already holds the model
+                        # set (an installation running it exists there), so
+                        # the install links those files and writes none.
+                        artifact_size = 0
+                    elif (
+                        missing_artifact_bytes_by_node is not None
+                        and item.node_id in missing_artifact_bytes_by_node
+                    ):
+                        # Otherwise it writes only the files the agent's
+                        # store scan does not report (install admission's
+                        # rule); no scan charges the whole set.
+                        artifact_size = missing_artifact_bytes_by_node[item.node_id]
+                        # Those scan-reported files may be unused ones the
+                        # agent could reclaim; this load keeps them. A held
+                        # set's files are linked, so never counted unused.
+                        reused_model_bytes = max(0, set_bytes - artifact_size)
+                    disk_need = installation_disk_requirement(
+                        disk,
+                        required_download_bytes=image_size + artifact_size,
+                        minimum_floor_bytes=(
+                            service._lifecycle._install_admission._disk_floor
+                            if service._lifecycle is not None
+                            else 0
+                        ),
+                    )
                 except TypeError, ValueError:
                     disk_need = None
                 if disk_need is None:
