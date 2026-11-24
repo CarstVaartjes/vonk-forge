@@ -134,7 +134,7 @@ class FleetProfileService:
                     self._validate_draft_review_identity(
                         session,
                         profile,
-                        profile_digest=plan.profile_digest,
+                        profile_revision=plan.profile_revision,
                         assignments=tuple(plan.resolved_assignments),
                     )
                 acquire_admission_keys(

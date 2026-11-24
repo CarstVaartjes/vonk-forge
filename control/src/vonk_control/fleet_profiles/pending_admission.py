@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
-from pydantic import ValidationError
 from sqlalchemy import or_, select, true
 
 from vonk_agent_protocol.agent_words import (
@@ -51,8 +50,7 @@ from vonk_control.fleet_profiles.persistence import (
 )
 from vonk_control.fleet_profiles.projection_support import (
     _aware,
-    _digest,
-    _profile_document,
+    _saved_since_review,
 )
 from vonk_control.jobs import states as job_states
 from vonk_control.lifecycle.evidence import Residue
@@ -370,12 +368,12 @@ class FleetProfileService:
             profile = session.get(FleetProfile, row.profile_id)
             if profile is None:
                 return True
-            try:
-                return _digest(_profile_document(profile)) != row.profile_digest
-            except ValidationError:
-                # An unreadable saved profile proves no edit: the ordinary
-                # review reports it.
-                return False
+            plan = _persisted_profile_plan(row)
+            # A damaged receipt proves no edit: the ordinary admission path
+            # retires it.
+            return not isinstance(plan, Residue) and _saved_since_review(
+                plan.profile_revision, profile.revision
+            )
 
     def _finish_pending_admission(
         self,

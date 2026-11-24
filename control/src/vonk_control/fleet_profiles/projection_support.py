@@ -607,4 +607,17 @@ def _profile_document(
     )
 
 
+def _saved_since_review(reviewed_revision: int | None, saved_revision: int) -> bool:
+    """Whether the profile was saved again after the review that bound it.
+
+    Every real edit bumps the saved ``revision`` (an equal-content replay does
+    not), so comparing it with the revision the review recorded is the whole
+    check: the live profile is never re-hashed. A review bound to no saved
+    revision (an unsaved draft) proves no edit; re-planning an accepted intent
+    then binds it to the saved revision (``preview``), so the next save is seen.
+    """
+
+    return reviewed_revision is not None and reviewed_revision != saved_revision
+
+
 _assignment_id = _choice_id

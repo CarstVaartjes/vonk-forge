@@ -448,7 +448,10 @@ class FleetProfileService:
                 # an accepted recipe revision no longer reads. A fresh load follows
                 # the newest one (a failed load keeps its end).
                 followed = self._followed_intent(
-                    session, selected.profile_id, selected.intended
+                    session,
+                    selected.profile_id,
+                    selected.intended,
+                    selected.profile_revision,
                 )
             if not roster_changed and not drift_signature and followed is None:
                 if (
