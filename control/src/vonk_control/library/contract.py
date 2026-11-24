@@ -212,6 +212,9 @@ class LibraryLocalProgress(StrictModel):
     phase: Text64 | None = None
     completed_bytes: int = Field(default=0, ge=0)
     total_bytes: int | None = Field(default=None, ge=0)
+    #: The Controller's own measured rate and time remaining, null while unsampled.
+    smoothed_bytes_per_second: float | None = Field(default=None, ge=0)
+    eta_seconds: float | None = Field(default=None, ge=0)
     #: What a waiting operation waits for (access, space, ...) and when it is
     #: checked again; empty and null while it is not waiting.
     reason: OperationReason | None = None

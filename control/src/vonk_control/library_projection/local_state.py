@@ -61,6 +61,7 @@ from vonk_control.model_cache.resolution import resolve_recipe_set
 from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet, RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.operations.progress import project_progress_for_state
 from vonk_control.operator_receipt_contract import ReceiptOwner
 from vonk_control.persisted_waits import read_wait
 from vonk_control.revision_images import revision_images
@@ -536,12 +537,17 @@ def _database_local_state(
             _note_unreadable("cache progress", operation_id, type(error).__name__)
             preparation = None
         else:
+            measured = project_progress_for_state(
+                progress.measurement, state, self._clock()
+            )
             preparation = self._cache_progress(
                 operation_id,
                 state,
                 phase=progress.measurement.phase,
                 completed=progress.measurement.completed_bytes,
                 total=progress.measurement.total_bytes,
+                rate=measured.smoothed_bytes_per_second,
+                eta=measured.eta_seconds,
                 wait=read_wait(cache_operation),
             )
         if state in model_cache_states.words(LifecycleState.CANCELLED):
