@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import json
 import re
 from collections import Counter
 from collections.abc import Iterable, Iterator
@@ -11,6 +10,7 @@ from functools import cache
 from pathlib import Path
 from typing import get_args
 
+from tools.contract_scans import load_model_registry
 from vonk_agent_protocol.agent_words import (
     RETIRED_PROGRESS_PHASE_SPELLINGS,
     ProgressPhase,
@@ -771,11 +771,11 @@ def _scan_code_positions(files: Iterable[Path] | None, root: Path) -> list[str]:
 @cache
 def contract_words(root: Path = REPO_ROOT) -> frozenset[str]:
     """Read enum definitions without importing product startup code."""
-    registry = json.loads((root / "tools/python-model-registry.json").read_text())
+    registry = load_model_registry(root)
     classes = [
         node
         for module in (
-            *(entry["module"] for entry in registry["modules"]),
+            *(entry.module for entry in registry.modules),
             AGENT_WORDS_MODULE,
         )
         for node in ast.walk(ast.parse((root / module).read_text()))
@@ -900,12 +900,9 @@ DOCKER_CONTAINER_SUBCOMMANDS = [
 
 def scan_source(source: str, *, path: str, words: frozenset[str]) -> list[int]:
     """Report literal line numbers; contract definitions and generation are owners."""
-    registry = json.loads((REPO_ROOT / "tools/python-model-registry.json").read_text())
-    if path in {entry["module"] for entry in registry["modules"]}:
-        # Only enum definitions are exempt, not other code in registered modules.
-        owner = True
-    else:
-        owner = False
+    registry = load_model_registry(REPO_ROOT)
+    # Only enum definitions are exempt, not other code in registered modules.
+    owner = path in {entry.module for entry in registry.modules}
     if (
         path in TYPESCRIPT_GENERATED
         or path
