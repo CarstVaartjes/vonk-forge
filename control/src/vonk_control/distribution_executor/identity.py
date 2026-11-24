@@ -20,8 +20,8 @@ from vonk_control.distribution.assignment_contract import NodeDistributionAssign
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.types import content_objects, plan_objects
 from vonk_control.distribution_executor.receipts import RuntimeImagePull
+from vonk_control.image_store.oci import StoreUnknown
 from vonk_control.models.execution import RecipeInstallation
-from vonk_control.oci_image_store import StoreUnknown
 from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,

@@ -80,7 +80,7 @@ def test_skopeo_image_stage_has_no_host_socket_or_privileged_runtime_contract() 
 
 def test_skopeo_is_used_only_where_images_enter_the_layered_store() -> None:
     source = ROOT / "control/src/vonk_control"
-    store = (source / "oci_image_store.py").read_text(encoding="utf-8")
+    store = (source / "image_store/oci.py").read_text(encoding="utf-8")
     preparation_modules = sorted((source / "runtime_image_preparation").rglob("*.py"))
     assert preparation_modules
 

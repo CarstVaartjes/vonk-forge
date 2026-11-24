@@ -63,7 +63,7 @@ from vonk_control.availability_production.production import (
     build_recipe_image_availability,
 )
 from vonk_control.catalog.sync import AutomaticCatalogSync
-from vonk_control.image_store_collection import ImageStoreCollector
+from vonk_control.image_store.collection import ImageStoreCollector
 from vonk_control.model_cache.partials_collection import ModelPartialsCollector
 from vonk_control.prebuilt_images import PrebuiltImageImporter
 from vonk_control.settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS

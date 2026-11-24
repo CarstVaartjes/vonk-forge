@@ -41,10 +41,7 @@ from vonk_control.artifact_jobs.lifecycle import (
 from vonk_control.artifact_reference_scan.image_references import (
     runtime_image_reference_findings,
 )
-from vonk_control.logging import log_event
-from vonk_control.models.cache import RecipeBuild
-from vonk_control.models.operations import ArtifactDistributionAssignment
-from vonk_control.oci_image_store import (
+from vonk_control.image_store.oci import (
     IMAGE_CACHE_DIRECTORY,
     REFERENCE_SCAN_FAILED,
     REFERENCED_MANIFEST_DAMAGED,
@@ -52,6 +49,9 @@ from vonk_control.oci_image_store import (
     OciImageStore,
     StoreUnknown,
 )
+from vonk_control.logging import log_event
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.operations import ArtifactDistributionAssignment
 from vonk_control.owner_liveness import builds_in_flight
 from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImagePreparationError,

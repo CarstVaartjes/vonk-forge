@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from vonk_control.oci_image_store import Collection, OciImageStore, StoredImage
+from vonk_control.image_store.oci import Collection, OciImageStore, StoredImage
 
 pytestmark = pytest.mark.skipif(
     shutil.which("skopeo") is None, reason="needs skopeo, as in the Controller image"

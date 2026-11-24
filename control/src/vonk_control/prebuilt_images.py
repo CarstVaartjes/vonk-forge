@@ -49,17 +49,17 @@ from vonk_control.catalog.revision_contract import (
     BuildSecurityProjection,
     build_policy_projection,
 )
-from vonk_control.image_store_collection import GRACE
-from vonk_control.lifecycle.image_availability import PrebuiltImageAdapter
-from vonk_control.models.cache import RecipeBuild
-from vonk_control.models.jobs import Job
-from vonk_control.oci_image_store import (
+from vonk_control.image_store.collection import GRACE
+from vonk_control.image_store.oci import (
     IMAGE_CACHE_DIRECTORY,
     STORE_BUSY,
     OciImageStore,
     OciImageStoreError,
     StoreUnknown,
 )
+from vonk_control.lifecycle.image_availability import PrebuiltImageAdapter
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.jobs import Job
 from vonk_control.recipe_builds.cancellation import build_cancellation
 from vonk_control.recipe_builds.common import (
     canonical_build,

@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 from vonk_agent_protocol.reason_codes.images import ImageStoreCode
-from vonk_control.oci_image_store import (
+from vonk_control.image_store.oci import (
     Collection,
     OciImageStore,
     StoreUnknown,

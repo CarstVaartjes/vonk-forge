@@ -11,10 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
+from vonk_control.image_store.oci import IMAGE_CACHE_DIRECTORY
 from vonk_control.inventory.repository import INVENTORY_MAX_AGE
 from vonk_control.logging import log_event
 from vonk_control.models.execution import InstallationNode, RecipeInstallation
-from vonk_control.oci_image_store import IMAGE_CACHE_DIRECTORY
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.settings import (
     STORAGE_EVICTION_RESERVE_FLOOR_BYTES,
