@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import runpy
 import threading
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import sessionmaker
 
+from vonk_control.db import connections
 from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import ControlProcessHeartbeat
+from vonk_control.settings import Settings
 from vonk_control.worker.liveness import (
     WorkerHeartbeatRecorder,
     WorkerWatchdog,
@@ -272,3 +276,32 @@ def test_blocked_step_record_never_delays_the_hung_step_restart() -> None:
     assert exits == [70]
     # The restart happened while the write was still blocked.
     assert unblocked_by_exit in ([True], [])
+
+
+def test_the_healthcheck_runs_as_its_container_runs_it(monkeypatch) -> None:
+    """Compose runs `python -m vonk_control.worker_healthcheck`: the module's
+    entry point must find every name it calls, wherever the probe then stops
+    (no /proc identity off Linux, no heartbeat in this empty fake)."""
+
+    class Sessions:
+        def __call__(self):
+            return nullcontext(self)
+
+        def scalar(self, _statement):
+            return None
+
+    monkeypatch.setattr(
+        Settings, "from_env_and_secrets", classmethod(lambda cls: _StubSettings())
+    )
+    monkeypatch.setattr(connections, "build_engine", lambda *_a, **_k: object())
+    monkeypatch.setattr(connections, "session_factory", lambda _engine: Sessions())
+    try:
+        runpy.run_module("vonk_control.worker_healthcheck", run_name="__main__")
+    except NameError:
+        raise
+    except (OSError, RuntimeError, ValueError):
+        pass  # the probe reached the process identity or the readiness check
+
+
+class _StubSettings:
+    database_url = "postgresql+psycopg://healthcheck@unused/unused"

@@ -61,10 +61,6 @@ def main() -> None:
     )
 
 
-if __name__ == "__main__":
-    main()
-
-
 def current_worker_instance_id(proc_root: Path = Path("/proc"), pid: int = 1) -> str:
     """Identify one Linux process lifetime without persistent mutable state."""
     boot_id = (proc_root / "sys/kernel/random/boot_id").read_text().strip()
@@ -80,3 +76,7 @@ def current_worker_instance_id(proc_root: Path = Path("/proc"), pid: int = 1) ->
     pid_namespace = (proc_root / str(pid) / "ns/pid").stat().st_ino
     material = f"{boot_id}\n{pid}\n{pid_namespace}\n{start_ticks}\n".encode()
     return hashlib.sha256(material).hexdigest()
+
+
+if __name__ == "__main__":
+    main()

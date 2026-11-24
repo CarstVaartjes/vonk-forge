@@ -207,3 +207,30 @@ def test_cycle_guard_reports_a_two_module_cycle_and_frees_type_checking() -> Non
         ),
     }
     assert import_cycles(modules) == [["p.a", "p.b"]]
+
+
+def main_blocks_before_definitions(source: str) -> bool:
+    """A module run with ``python -m`` executes its ``__main__`` block as soon
+    as it is reached; a definition after it does not exist yet."""
+    body = ast.parse(source).body
+    for index, node in enumerate(body):
+        if isinstance(node, ast.If) and ast.unparse(node.test) in {
+            "__name__ == '__main__'",
+            '__name__ == "__main__"',
+        }:
+            return index != len(body) - 1
+    return False
+
+
+def test_a_package_module_runs_its_main_block_last() -> None:
+    late = sorted(
+        path.relative_to(ROOT).as_posix()
+        for directory in PACKAGES.values()
+        for path in (ROOT / directory).rglob("*.py")
+        if "generated_control" not in path.parts
+        and main_blocks_before_definitions(path.read_text(encoding="utf-8"))
+    )
+    assert late == []
+    assert main_blocks_before_definitions(
+        'if __name__ == "__main__":\n    main()\ndef main(): ...\n'
+    )
