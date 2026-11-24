@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import uuid
 from collections.abc import Mapping
 from datetime import datetime
@@ -73,7 +72,6 @@ from vonk_control.run_switch_operations.observation_helpers import (
     _phase_request_key,
     _stop_child_request_key,
 )
-from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import read_stored_model
 
 _PLACEMENT_ACTIONS = frozenset(get_args(RunSwitchPlacementAction))
@@ -104,11 +102,6 @@ def validate_profile_stop_owner(
     switch_stop = profile_operation.kind == ProfileChildJobKind.RUN_SWITCH.value
     if profile_operation.kind != ProfileChildJobKind.STOP.value and not switch_stop:
         raise ProfileStopAuthorityError("profile Stop parent operation kind changed")
-    if (
-        hashlib.sha256(canonical_message(profile_operation.payload)).hexdigest()
-        != profile_operation.payload_digest
-    ):
-        raise ProfileStopAuthorityError("profile Stop parent payload digest changed")
     if (
         profile_operation.payload.get("workload_intent_ordinal")
         != authorization.workload_intent_ordinal
@@ -254,10 +247,6 @@ def validate_profile_stop_owner(
             linked is None
             or linked.kind != "recipe.stop"
             or linked.request_id != expected_key
-            or linked.payload_digest
-            != hashlib.sha256(
-                canonical_message(read_row_column(linked, "payload"))
-            ).hexdigest()
         ):
             raise ProfileStopAuthorityError(
                 "profile Stop linked child identity changed"

@@ -113,14 +113,6 @@ def _parse_operation_envelope(
 ) -> ModelCacheOperationPayload | Damaged:
     try:
         parsed = parse_model_cache_payload(operation.kind, envelope)
-        if isinstance(
-            parsed, ModelCacheRemovalPayload
-        ) and operation.plan_digest != _model_removal_intent_digest(
-            parsed, actor=operation.actor, request_key=operation.request_key
-        ):
-            return Damaged(
-                "persisted model removal intent no longer matches its accepted plan"
-            )
         if isinstance(parsed, ModelCacheDownloadPayload):
             manifest = _read_manifest_document(serialize_json_value(parsed.manifest))
             if isinstance(manifest, Damaged):

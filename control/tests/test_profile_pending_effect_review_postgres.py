@@ -371,8 +371,6 @@ def test_postgres_unknown_old_start_is_reviewed_but_only_exact_stop_releases_gan
     # a foreign generation must retain the old Start's uncertainty, without
     # rewriting its historical attempt or inventing a cancellation report.
     for fault in (
-        "parent-digest",
-        "child-digest",
         "current-attempt",
         "missing-result",
         "malformed-result",
@@ -393,11 +391,7 @@ def test_postgres_unknown_old_start_is_reviewed_but_only_exact_stop_releases_gan
             assert stop_parent is not None
             assert receipt is not None
             assert node is not None
-            if fault == "parent-digest":
-                stop_parent.payload_digest = "0" * 64
-            elif fault == "child-digest":
-                receipt.payload_digest = "0" * 64
-            elif fault == "current-attempt":
+            if fault == "current-attempt":
                 receipt.current_attempt += 1
             elif fault in {"missing-result", "malformed-result", "uncertain-result"}:
                 attempt = session.scalar(

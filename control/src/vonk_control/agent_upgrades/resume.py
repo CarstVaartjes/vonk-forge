@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
@@ -13,7 +12,6 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
 )
-from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states
 from vonk_control.agent_jobs.retry import schedule_agent_upgrade_retry
 from vonk_control.agent_upgrades.contract import AgentUpgradeRolloutPayload
@@ -33,9 +31,7 @@ from vonk_control.strict_json import read_stored_model
 if TYPE_CHECKING:
     from vonk_control.agent_upgrades.service import AgentUpgradeService
 
-from vonk_control.agent_upgrades.errors import AgentUpgradeConflict
 from vonk_control.agent_upgrades.helpers import _aware
-from vonk_control.agent_upgrades.intent import _plan_digest, _request_intent
 
 
 class ResumeMixin:
@@ -157,20 +153,6 @@ class ResumeMixin:
             if len(order) != len(set(order)) or order != parent.targets:
                 service._retire_rollout(parent, now, invalid_plan)
                 return
-            try:
-                normalized_intent = _request_intent(stored.request_intent, None)
-            except AgentUpgradeConflict:
-                service._retire_rollout(parent, now, invalid_plan)
-                return
-            if parent.payload_digest != _plan_digest(
-                sources=stored.sources,
-                authority_revision=parent.authority_revision,
-                node_ids=order,
-                package=package,
-                request_intent=normalized_intent,
-            ):
-                service._retire_rollout(parent, now, invalid_plan)
-                return
             if set(stored.sources) != set(order):
                 service._retire_rollout(
                     parent, now, "stored rollback sources are invalid"
@@ -223,8 +205,6 @@ class ResumeMixin:
                     or payload.rollback.source != source.package
                     or payload.source_package_bytes != source.package_bytes
                     or payload.source_package_url != source.package_url
-                    or operation.payload_digest
-                    != hashlib.sha256(canonical_message(operation.payload)).hexdigest()
                 ):
                     service._retire_rollout(
                         parent, now, "stored agent upgrade operation is invalid"

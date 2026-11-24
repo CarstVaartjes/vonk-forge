@@ -69,7 +69,6 @@ from .test_artifact_job_recovery import recover_unknown_job_under_new_intent
     "corruption",
     [
         "non-object-payload",
-        "payload-digest",
         "foreign-owner",
         "malformed-request-id",
         "null-request-id",
@@ -108,8 +107,6 @@ def test_artifact_submission_receipt_degrades_on_corrupt_owner(
             parent.payload_digest = hashlib.sha256(
                 canonical_message(payload)
             ).hexdigest()
-        elif corruption == "payload-digest":
-            parent.payload_digest = "0" * 64
         elif corruption == "foreign-owner":
             payload = {
                 **parent.payload,
