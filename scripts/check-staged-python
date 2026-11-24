@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import fnmatch
-import importlib.metadata
 import os
 import subprocess
 import sys
@@ -16,6 +15,7 @@ sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behin
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 from check_environment import (  # noqa: E402 -- imports follow this entry point's sys.path or environment setup
     ensure_control,
+    pyright_environment,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -117,12 +117,7 @@ def main() -> int:
     files = python_files(candidates, python)
     if not files and not full_types:
         return 0
-    check_env = {
-        **os.environ,
-        "PYRIGHT_PYTHON_FORCE_VERSION": importlib.metadata.version("pyright"),
-        "PYRIGHT_PYTHON_NODEJS_WHEEL": "1",
-        "PYRIGHT_PYTHON_GLOBAL_NODE": "0",
-    }
+    check_env = pyright_environment()
     commands = []
     if files:
         commands.extend(

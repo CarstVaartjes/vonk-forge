@@ -568,6 +568,9 @@ extensionless scripts Ruff selects; `agent_protocol/src` is checked as Python
 `# pyright: ignore[rule]` with its reason, and reportUnnecessaryTypeIgnoreComment
 fails an ignore that is no longer needed. The commit hook passes the staged
 files Ruff treats as Python; CI checks the whole tree with the same commands.
+Both run pyright through `pyright_environment()` in `scripts/check_environment.py`:
+the version is the one `uv.lock` installs (`importlib.metadata`), with the nodejs
+wheel and no global Node, so hook and CI cannot use different pyright builds.
 
 New syntax is checked by `scripts/check-added-lines [PATCH_FILE|-]`, which consumes
 an externally supplied unified diff. CI creates that patch against its explicit
