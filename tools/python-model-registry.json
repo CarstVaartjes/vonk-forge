@@ -597,6 +597,11 @@
       "reason": "Read-only typed view of the JSON Schema subset an OpenAPI response validator reads, for the published-vonkctl compatibility report; it owns no wire data."
     },
     {
+      "module": "tools/contract_scans.py",
+      "kind": "declared",
+      "reason": "Validated shape of this registry file, read by the contract scan."
+    },
+    {
       "module": "tools/single_source_values.py",
       "kind": "declared",
       "reason": "Canonical owner-registration and exact adversarial-fixture contracts for the single-source repository guard."

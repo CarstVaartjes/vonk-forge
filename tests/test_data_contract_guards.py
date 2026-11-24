@@ -193,15 +193,19 @@ def test_python_registry_rejects_unregistered_and_duplicate_models(
             name: str
         """,
     )
-    registry: scans.ModelRegistry = {
-        "modules": [{"module": "agent_protocol/src/p/a.py"}]
-    }
+    registry = scans.ModelRegistry.model_validate(
+        {
+            "schema": 1,
+            "note": "test",
+            "modules": [{"module": "agent_protocol/src/p/a.py"}],
+        }
+    )
     problems = scans.python_registry_problems(tmp_path, registry)
     assert problems
 
-    registry["modules"].append({"module": "control/src/c/elsewhere.py"})
+    registry.modules.append(scans.RegistryModule(module="control/src/c/elsewhere.py"))
     problems = scans.python_registry_problems(tmp_path, registry)
     assert problems
     _write(tmp_path, "control/src/c/elsewhere.py", "from p.a import Thing\n")
-    registry["modules"].pop()
+    registry.modules.pop()
     assert scans.python_registry_problems(tmp_path, registry) == []
