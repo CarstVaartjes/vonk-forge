@@ -346,6 +346,32 @@ def test_python_keeps_every_added_contract_literal_and_reason_code():
     assert check('# "failed" means stopped', 'ok = state == "failed"')
 
 
+@pytest.mark.parametrize(
+    ("old", "new", "flagged"),
+    [
+        # The Python 3.14 formatter's PEP 758 respelling is the same handler.
+        ("except (KeyError, ValueError):", "except KeyError, ValueError:", False),
+        # A respelling that also catches more is a new handler.
+        ("except (KeyError, OSError):", "except KeyError, ValueError:", True),
+        # A new bracketless handler replacing other code is new.
+        ("    pass", "except KeyError, ValueError:", True),
+    ],
+)
+def test_a_respelled_handler_header_is_not_an_added_line(
+    old: str, new: str, flagged: bool
+):
+    # Wrong implementation: every `except (A, B):` the formatter respelled
+    # re-reported its handler's old finding, so py314 could not be adopted.
+    path = "control/src/vonk_control/x.py"
+    source = f"try:\n    work()\n{new}\n    pass\n"
+    patch = (
+        f"--- a/{path}\n+++ b/{path}\n@@ -1,4 +1,4 @@\n"
+        f" try:\n     work()\n-{old}\n+{new}\n     pass\n"
+    )
+    added, _ = changed_lines(patch)
+    assert bool(check_source(path, source, added[path], modes=("legacy",))) is flagged
+
+
 def test_added_source_that_resembles_a_patch_header():
     patch = "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -0,0 +1 @@\n+++ b/inside-source\n"
     assert added_lines(patch) == {"x.py": {1}}

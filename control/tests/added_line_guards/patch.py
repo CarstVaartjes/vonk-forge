@@ -4,6 +4,15 @@ import re
 from difflib import SequenceMatcher
 from pathlib import Path
 
+# ``except (A, B):`` and PEP 758's ``except A, B:`` are one handler. A Python
+# 3.14 formatter respells the first as the second; the respelled line is not new.
+_BRACKETED_HANDLER = re.compile(r"(\s*except\*?)\s*\((.+)\)(\s*:.*)")
+
+
+def _handler_spelling(text: str) -> str:
+    match = _BRACKETED_HANDLER.fullmatch(text)
+    return f"{match[1]} {match[2]}{match[3]}" if match else text
+
 
 def added_lines(patch: str) -> dict[str, set[int]]:
     return changed_lines(patch)[0]
@@ -30,6 +39,15 @@ def changed_lines(patch: str) -> tuple[dict[str, set[int]], dict[str, list[str]]
     deleted: list[str] = []
 
     def finish() -> None:
+        # A respelled handler header spends the deleted header it replaces.
+        respelled = [_handler_spelling(text) for text in deleted]
+        for number, text in added.copy():
+            spelling = _handler_spelling(text)
+            if text.lstrip().startswith("except") and spelling in respelled:
+                index = respelled.index(spelling)
+                del respelled[index], deleted[index]
+                added.remove((number, text))
+                files[path].discard(number)
         if added:
             additions.append((path, added.copy()))
             added.clear()
