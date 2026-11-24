@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/ci-timeline"
+SCRIPT = ROOT / "scripts/ci/ci-timeline"
 
 
 def _module():

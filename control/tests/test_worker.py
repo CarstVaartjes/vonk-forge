@@ -19,10 +19,9 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.coordinator_contract import CoordinatorFailureEvidence
-from vonk_control.coordinator_failures import CoordinatorFailures
-from vonk_control.due_waits import DueWaitBackstop, WaitSource
-from vonk_control.failure_classification import disposition
+from vonk_control.failures.classification import disposition
+from vonk_control.failures.coordinator import CoordinatorFailures
+from vonk_control.failures.coordinator_contract import CoordinatorFailureEvidence
 from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.queue import JobService
@@ -30,10 +29,11 @@ from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.coordinator import CoordinatorFailure
 from vonk_control.observation.platform import PlatformObserver
-from vonk_control.persisted_waits import read_wait
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.telemetry import maintenance as telemetry_maintenance
+from vonk_control.waits.due import DueWaitBackstop, WaitSource
+from vonk_control.waits.persisted import read_wait
 from vonk_control.worker import __main__ as worker_main
 from vonk_control.worker import loop as worker_loop
 from vonk_control.worker.assembly import assemble_production_worker

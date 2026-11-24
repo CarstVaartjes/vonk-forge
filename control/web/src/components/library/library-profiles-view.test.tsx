@@ -9,7 +9,8 @@ import type {
   FleetProfileApplicationView,
   FleetProfilePreview,
 } from "../../api/types";
-import { forgetUnsavedProfileDrafts, LibraryProfilesView } from "./library-profiles-view";
+import { forgetUnsavedProfileDrafts } from "./library-profile-drafts";
+import { LibraryProfilesView } from "./library-profiles-view";
 import { ToastProvider } from "../ui/toast";
 
 const nodeA = "spk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";

@@ -51,7 +51,6 @@ from vonk_control.agent_upgrades.contract import (
     AgentUpgradeRolloutResult,
 )
 from vonk_control.artifact_jobs.evidence import ArtifactJobResultEvidence
-from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
@@ -63,8 +62,8 @@ from vonk_control.compiled_artifact_contract import (
     CompiledArtifactContract,
     ParameterScalar,
 )
-from vonk_control.coordinator_contract import CoordinatorFailureEvidence
-from vonk_control.fleet_event_contract import (
+from vonk_control.failures.coordinator_contract import CoordinatorFailureEvidence
+from vonk_control.fleet_events.contract import (
     AgentOperationPayload,
     InstallationNodePayload,
     JobPayload,
@@ -109,7 +108,8 @@ from vonk_control.model_cache.contract import (
     ModelCacheRemovalPayload,
     ModelCacheRepairPayload,
 )
-from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.operator_acceptance.receipt_contract import ReceiptOwner
+from vonk_control.pki.issuance_contract import CertificateIssuanceBinding
 from vonk_control.recipe_image_availability.removal_contract import (
     RecipeCacheRemovalOwner,
     RecipeCacheRemovalResult,
@@ -146,7 +146,7 @@ from vonk_control.run_switch_contract.phase_results import (
 )
 from vonk_control.stored.documents import RouteClaimMarker
 from vonk_control.stored.json_values import bind
-from vonk_control.wait_contract import WaitEvidence
+from vonk_control.waits.contract import WaitEvidence
 
 ProfileLabels = Annotated[dict[LabelName, LabelValue], Field(max_length=16)]
 

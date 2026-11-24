@@ -27,7 +27,7 @@ from vonk_control.api.application import create_app
 from vonk_control.enrollment.body import _bounded_enrollment_body
 from vonk_control.enrollment.validation import _decode_token, _digest
 from vonk_control.evidence_repeats import repeating_evidence
-from vonk_control.failure_evidence import FailureEvidenceService
+from vonk_control.failures.evidence import FailureEvidenceService
 from vonk_control.models.fleet import AgentCertificate, AgentEnrollmentGrant
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt

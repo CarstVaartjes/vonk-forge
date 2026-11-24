@@ -13,6 +13,7 @@ from vonk_agent_protocol.distribution import DistributionAssignment, Distributio
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
 from vonk_agent_protocol.outcome import SecurityRefusalError
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.distribution.filesystem import FilesystemObjectSource
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.distribution.service import DistributionService
@@ -22,7 +23,6 @@ from vonk_control.distribution.types import (
     DistributionRefused,
     DistributionUnknown,
 )
-from vonk_control.distribution_assignment import NodeDistributionAssignment
 
 from .agent_api_support import NODE_A, NODE_B, agent_headers
 from .agent_api_support import agent_system as _agent_system

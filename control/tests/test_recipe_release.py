@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from vonk_control import recipe_release
-from vonk_control.recipe_release import (
+from vonk_control.recipe_packages import release as recipe_release
+from vonk_control.recipe_packages.release import (
     RecipeReleaseError,
     parse_release_checksums,
     verify_release_checksums,

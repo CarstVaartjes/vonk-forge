@@ -26,7 +26,7 @@ from vonk_control.model_primitives import Base, _lower_hex, _state_in
 from vonk_control.models.waits import wait_due_column, wait_evidence_column
 from vonk_control.repeated_evidence_contract import RepeatedEvidence
 from vonk_control.stored.json_values import ContractJSON
-from vonk_control.wait_contract import WaitEvidence
+from vonk_control.waits.contract import WaitEvidence
 
 
 class AgentOperation(Base):

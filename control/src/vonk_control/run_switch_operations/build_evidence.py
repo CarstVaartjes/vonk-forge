@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-from vonk_control.disk_reservations import runtime_images_named_on_nodes
 from vonk_control.inventory.items import inventory_items
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision, RecipeSourceBundle
@@ -17,6 +16,7 @@ from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_plan,
 )
+from vonk_control.reservations.disk import runtime_images_named_on_nodes
 from vonk_control.run_switch_contract.evidence import (
     BuildCompatibilityEvidence,
     BuildSourceEvidence,

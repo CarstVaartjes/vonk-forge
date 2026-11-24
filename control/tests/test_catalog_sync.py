@@ -50,12 +50,12 @@ from vonk_control.models.cache import RecipeLibrarySyncRun
 from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
 from vonk_control.owner_liveness import SYNC_HEARTBEAT_WINDOW
 from vonk_control.recipe_builds.service import RecipeBuildService
-from vonk_control.recipe_library_types import (
+from vonk_control.recipe_packages.contracts import _newer_major_note
+from vonk_control.recipe_packages.library_types import (
     RecipeLibraryError,
     RecipeLibraryItem,
     RecipeLibrarySnapshot,
 )
-from vonk_control.recipe_packages.contracts import _newer_major_note
 from vonk_control.source_bundles import (
     SourceBundleStore,
     generate_source_bundle,

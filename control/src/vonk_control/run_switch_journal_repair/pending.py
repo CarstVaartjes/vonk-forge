@@ -10,13 +10,13 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.journal_models import RunSwitchJournalRepairPending
 from vonk_control.models.jobs import Job
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.run_switch_contract.identity import RunSwitchCancellation
 from vonk_control.run_switch_contract.journal import RunSwitchJournalRepairPendingState
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_journal_repair.discovery import REPAIR_WAIT, _candidate
 from vonk_control.run_switch_operations.results import _persisted_result
-from vonk_control.stall_window import stall_deadline
+from vonk_control.waits.persisted import schedule_wait
+from vonk_control.waits.stall_window import stall_deadline
 
 # A damaged observation gets a stall window that survives restarts: neither a
 # changed sample nor a new caller resets it; only a child install whose agent

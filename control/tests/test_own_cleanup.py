@@ -35,7 +35,7 @@ from vonk_agent_protocol.state_machines import ReservationState
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs import states as ajs
-from vonk_control.host_helper_authority import (
+from vonk_control.host_authority.helper import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
 )

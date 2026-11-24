@@ -12,10 +12,10 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.fleet_events import FleetEventRepository
+from vonk_control.fleet_events.outbox import FleetEventRepository
+from vonk_control.fleet_events.stream import FleetStream
+from vonk_control.fleet_events.stream_contract import FleetRefreshEvent
 from vonk_control.fleet_projection.service import FleetProjection
-from vonk_control.fleet_stream import FleetStream
-from vonk_control.fleet_stream_contract import FleetRefreshEvent
 from vonk_control.inventory.items import inventory_items
 from vonk_control.inventory.repository import (
     InventoryRepository,

@@ -33,12 +33,12 @@ from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.mapping import ClusterMappingNode
 from vonk_control.recipe_operations.observation_helpers import _run_is_one_shot
 from vonk_control.recipe_update_batches.notice import recipe_update_notice
-from vonk_control.run_readiness import (
+from vonk_control.runs.readiness import (
     GroupHealth,
     group_health,
     run_not_ready_for_profile,
 )
-from vonk_control.run_states import ENDED_RUN_STATES
+from vonk_control.runs.states import ENDED_RUN_STATES
 from vonk_control.strict_json import warn_unreadable_once
 
 if TYPE_CHECKING:

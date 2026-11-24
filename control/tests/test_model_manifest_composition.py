@@ -17,12 +17,12 @@ from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.artifact_reference_scan.model_sets import model_set_objects
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService
-from vonk_control.compiled_execution_plan import (
+from vonk_control.distribution.sources import verified_model_receipts
+from vonk_control.execution_plan.compiled import (
     VerifiedRuntimeImage,
     compile_verified_execution_plan,
 )
-from vonk_control.distribution.sources import verified_model_receipts
-from vonk_control.execution_plan_service import _bind_runtime_artifacts
+from vonk_control.execution_plan.service import _bind_runtime_artifacts
 from vonk_control.model_cache.artifacts import ArtifactSetManifest
 from vonk_control.model_cache.contract import ModelCacheDownloadPayload
 from vonk_control.model_cache.service import ModelCacheService

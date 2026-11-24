@@ -89,7 +89,6 @@ from vonk_control.lifecycle.types import (
     StopResult,
 )
 from vonk_control.models.jobs import Job
-from vonk_control.persisted_waits import initialize_wait, lifecycle_wait, wait_due
 from vonk_control.recipe_image_availability.clocks_contract import (
     StoredAvailabilityClocks,
 )
@@ -97,10 +96,11 @@ from vonk_control.recipe_image_availability.removal_contract import (
     RECIPE_CACHE_REMOVE_KIND,
 )
 from vonk_control.recipe_update_batches.contract import UPDATE_KIND
-from vonk_control.stall_window import stall_deadline
 from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import serialize_json_value
-from vonk_control.wait_contract import typed_wait_reason
+from vonk_control.waits.contract import typed_wait_reason
+from vonk_control.waits.persisted import initialize_wait, lifecycle_wait, wait_due
+from vonk_control.waits.stall_window import stall_deadline
 
 KIND = "image-availability"
 OPERATION_KIND = "recipe.image.availability.v2"

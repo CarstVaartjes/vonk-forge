@@ -10,7 +10,7 @@ superseded, possibly by a crash), the record is a residue:
   way whichever attempt left it behind;
 * an installation still ``installing`` that no live operation names (its
   owner was superseded or cancelled before any claim) is moved to ``partial``
-  by ``installation_transitions``, which makes it a leftover as below;
+  by ``installations.transitions``, which makes it a leftover as below;
 * a residue that **may have an effect** (installed or partially installed
   files, a running workload) is never released directly here. A leftover
   *incomplete installation* (failed, partial, or installed with a rank not
@@ -27,7 +27,7 @@ Separately, a *reservation* (disk, port, memory) is bookkeeping and not an
 effect: when its owner is dead (a cancelled or failed profile application, a
 stopped run, an installation with no operation issued for it, a build nothing
 runs, or an owner that no longer exists) it is released by owner state, see
-``reservation_owners``. The installation row and the files it wrote stay for
+``reservations.owners``. The installation row and the files it wrote stay for
 the cleanup path; what is on the Spark is what its next inventory reports.
 
 Ownership is decided conservatively and without owner columns: a plan, a
@@ -75,8 +75,10 @@ from vonk_agent_protocol.state_machines import (
     RunState,
 )
 from vonk_control.agent_operation_facts import aware as _aware
-from vonk_control.covered_installation_claims import release_covered_installation_claims
-from vonk_control.installation_transitions import end_orphaned_installation
+from vonk_control.installations.covered_claims import (
+    release_covered_installation_claims,
+)
+from vonk_control.installations.transitions import end_orphaned_installation
 from vonk_control.jobs import states as job_states
 from vonk_control.logging import log_event
 from vonk_control.machine_states import DISTRIBUTION_HELD, rank_installed
@@ -95,8 +97,8 @@ from vonk_control.owner_liveness import (
     installations_named_by_live_jobs,
     referencing_active_job,
 )
-from vonk_control.persisted_waits import schedule_wait
-from vonk_control.reservation_owners import release_dead_owner_reservations
+from vonk_control.reservations.owners import release_dead_owner_reservations
+from vonk_control.waits.persisted import schedule_wait
 
 _LOGGER = logging.getLogger(__name__)
 #: How long an unowned incomplete installation is left alone before it is

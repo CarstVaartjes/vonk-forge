@@ -32,8 +32,7 @@ from vonk_control.agent_jobs import reconcile as sweep
 from vonk_control.agent_jobs import results as ingress
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.db.startup import verify_schema_is_current
-from vonk_control.due_waits import DueWaitBackstop, WaitSource
-from vonk_control.failure_classification import disposition
+from vonk_control.failures.classification import disposition
 from vonk_control.models.execution import RecipeRun, RunNode
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
@@ -43,6 +42,7 @@ from vonk_control.recipe_operations.operation_worker import RecipeOperationWorke
 from vonk_control.recipe_routes import service as service_module
 from vonk_control.recipe_routes.shared import RecipeRouteNotReady
 from vonk_control.recovery_policy import ROUTE_RECOVERY, WAIT_STEP
+from vonk_control.waits.due import DueWaitBackstop, WaitSource
 
 from .agent_fences import fenced_attempt
 from .agent_jobs_support import COMMIT, parent

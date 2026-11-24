@@ -23,7 +23,7 @@ from vonk_control.artifact_reference_scan.model_references import (
     model_set_reference_reasons,
 )
 from vonk_control.catalog.queries import WITHOUT_DOCUMENT, active_head_revision
-from vonk_control.failure_classification import wait_reason
+from vonk_control.failures.classification import wait_reason
 from vonk_control.logging import log_event
 from vonk_control.model_cache.artifacts import ArtifactSetManifest
 from vonk_control.model_cache.catalog_helpers import _revision_identity

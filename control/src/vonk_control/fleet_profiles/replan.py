@@ -49,9 +49,9 @@ from vonk_control.operations.blockers import (
     bound_blockers,
     make_blocker,
 )
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
-from vonk_control.stall_window import Verdict, progress_verdict
+from vonk_control.waits.persisted import schedule_wait
+from vonk_control.waits.stall_window import Verdict, progress_verdict
 
 if TYPE_CHECKING:
     from vonk_control.fleet_profiles.service import FleetProfileService

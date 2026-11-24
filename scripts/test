@@ -30,7 +30,7 @@ SUITE is one of:
 --shard I/N       run only shard I of N (1-based), whole files per shard,
                   balanced by the measured per-file durations in --durations
                   when given (unmeasured files get the measured average)
---durations FILE  schema-1 per-file durations (scripts/collect-pytest-file-durations)
+--durations FILE  schema-1 per-file durations (scripts/ci/collect-pytest-file-durations)
 
 Arguments after -- go to pytest unchanged (for example -x or --junitxml=...).
 USAGE
@@ -148,7 +148,7 @@ elif [[ -n "$shard" ]]; then
     [[ "$shard" =~ ^([0-9]+)/([0-9]+)$ ]] || { echo "--shard must be I/N" >&2; exit 2; }
     index=$((BASH_REMATCH[1] - 1))
     total=${BASH_REMATCH[2]}
-    selector=(scripts/select-pytest-shard-files --index "$index" --total "$total" --prefix "$prefix")
+    selector=(scripts/ci/select-pytest-shard-files --index "$index" --total "$total" --prefix "$prefix")
     if [[ -n "$durations" ]]; then
         selector+=(--durations "$durations" --max-duration-age-hours 720)
     fi

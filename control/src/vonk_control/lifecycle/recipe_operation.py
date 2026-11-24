@@ -55,7 +55,7 @@ from vonk_control.lifecycle.types import (
     StopResult,
 )
 from vonk_control.models.jobs import Job
-from vonk_control.persisted_waits import initialize_wait, lifecycle_wait, wait_due
+from vonk_control.waits.persisted import initialize_wait, lifecycle_wait, wait_due
 
 KIND = "recipe-operation"
 _MAX_REASON = 1024

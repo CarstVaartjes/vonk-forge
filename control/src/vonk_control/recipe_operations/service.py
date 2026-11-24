@@ -49,7 +49,7 @@ from vonk_control.recipe_operations.supersession import SupersessionMixin
 from vonk_control.recipe_operations.terminal_projection import TerminalProjectionMixin
 from vonk_control.recipe_operations.uninstall import UninstallMixin
 from vonk_control.recipe_routes.service import RecipeRouteService
-from vonk_control.run_admission import RunAdmissionService
+from vonk_control.runs.admission import RunAdmissionService
 from vonk_control.storage_demands import StorageDemands, spark_scope
 
 

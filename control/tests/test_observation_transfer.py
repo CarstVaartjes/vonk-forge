@@ -28,13 +28,13 @@ from vonk_control.api import routes_platform as api
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from vonk_control.fleet_events.stream_contract import FleetRefreshEvent
 from vonk_control.fleet_projection.common import (
     FleetSnapshot,
     UnavailableRecipePresence,
     UnavailableRunPresence,
 )
 from vonk_control.fleet_projection.service import FleetProjection
-from vonk_control.fleet_stream_contract import FleetRefreshEvent
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentNode, AgentNodeContact
 from vonk_control.observation.platform_errors import ObservationCaptureUnavailable

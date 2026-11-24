@@ -38,8 +38,8 @@ from vonk_control.model_cache.views import CacheOperationView
 from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.operations.contract import AvailabilityOperationFailure
-from vonk_control.persisted_waits import read_wait
 from vonk_control.strict_json import read_stored_model, serialize_json_value
+from vonk_control.waits.persisted import read_wait
 
 if TYPE_CHECKING:
     from vonk_control.model_cache.service import ModelCacheService

@@ -18,7 +18,7 @@ from sqlalchemy import select, update
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
 from vonk_control.auth import CursorCodec
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.failure_classification import is_security_failure
+from vonk_control.failures.classification import is_security_failure
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.execution import (
     RecipeInstallation,

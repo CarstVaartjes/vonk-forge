@@ -24,6 +24,7 @@ from vonk_control.agent_upgrades.contract import (
     AgentUpgradePackage,
     AgentUpgradeRolloutResult,
 )
+from vonk_control.agent_upgrades.package_activation import matches_receipt
 from vonk_control.inventory.items import runtime_value
 from vonk_control.jobs import states as job_states
 from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
@@ -31,7 +32,6 @@ from vonk_control.lifecycle.types import CancelRequested
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
-from vonk_control.package_activation import matches_receipt
 from vonk_control.strict_json import read_stored_model
 
 if TYPE_CHECKING:

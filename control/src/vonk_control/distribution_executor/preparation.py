@@ -22,7 +22,7 @@ from vonk_control.content_identity import same_image
 from vonk_control.distribution_executor.background import BackgroundPreparations
 from vonk_control.distribution_executor.durable import DurableDistributionPhaseExecutor
 from vonk_control.distribution_executor.receipts import _ChildView, _phase_receipt
-from vonk_control.execution_plan_service import _bind_runtime_artifacts
+from vonk_control.execution_plan.service import _bind_runtime_artifacts
 from vonk_control.fleet_profiles.read_observation import profile_read
 from vonk_control.logging import redact_text
 from vonk_control.model_cache import states as model_cache_states

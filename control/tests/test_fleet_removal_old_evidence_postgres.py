@@ -13,8 +13,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.cache_removal_review import CacheAssetDisposition, CacheRemovalReview
-from vonk_control.fleet_model_removal_contract import FleetRemovalReason
 from vonk_control.lifecycle.evidence import BookkeepingReason
+from vonk_control.model_cache.fleet_removal_contract import FleetRemovalReason
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheSet

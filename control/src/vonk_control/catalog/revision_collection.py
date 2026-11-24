@@ -124,7 +124,7 @@ from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
 from vonk_control.models.operations import AgentOperation
 from vonk_control.owner_liveness import builds_in_flight
 from vonk_control.revision_images import revision_images
-from vonk_control.run_states import ENDED_RUN_STATES
+from vonk_control.runs.states import ENDED_RUN_STATES
 from vonk_control.stored.json_values import binding_for
 
 _LOGGER = logging.getLogger(__name__)

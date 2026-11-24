@@ -20,16 +20,15 @@ from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_control.agent_jobs.retirement import release_owned_reservations_in_session
 from vonk_control.bounded_json import require_integer
 from vonk_control.distribution_executor.receipts import _ChildView
-from vonk_control.failure_classification import error_code, is_security_failure
+from vonk_control.failures.classification import error_code, is_security_failure
 from vonk_control.jobs import states as job_states
 from vonk_control.lifecycle.run_switch import end_unclaimed_children
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.jobs import Job
 from vonk_control.operations.blockers import OperationBlocker, bound_blockers
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_operations.errors import RecipeRequestInvalid
 from vonk_control.recipe_operations.interfaces import RecipeOperationView
-from vonk_control.reservation_owners import release_dead_owner_reservations
+from vonk_control.reservations.owners import release_dead_owner_reservations
 from vonk_control.run_switch_contract.operations import (
     RunSwitchOperation,
     RunSwitchOperationResult,
@@ -57,8 +56,9 @@ from vonk_control.run_switch_operations.planning_helpers import (
 from vonk_control.run_switch_operations.provider import _ADAPTER
 from vonk_control.run_switch_operations.result_helpers import _read_progress
 from vonk_control.run_switch_operations.results import _persisted_result
-from vonk_control.stall_window import Verdict, stall_deadline
 from vonk_control.stored.rows import read_row_column
+from vonk_control.waits.persisted import schedule_wait
+from vonk_control.waits.stall_window import Verdict, stall_deadline
 
 #: How soon an ended owner offers again the work another writer held.
 _REOFFER_INTERVAL = timedelta(seconds=5)

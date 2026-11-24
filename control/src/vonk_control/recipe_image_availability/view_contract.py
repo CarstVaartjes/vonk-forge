@@ -17,7 +17,7 @@ from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationCancellationResult,
 )
 from vonk_control.strict_json import StrictJSONModel
-from vonk_control.wait_contract import QueueWait
+from vonk_control.waits.contract import QueueWait
 
 
 class RecipeImageAvailabilityView(StrictJSONModel):

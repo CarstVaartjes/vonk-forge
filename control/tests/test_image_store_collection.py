@@ -18,12 +18,12 @@ from vonk_control.agent_api.common import (
     _open_upload_storage,
     _prepare_recipe_image_upload,
 )
-from vonk_control.image_store_collection import GRACE, ImageStoreCollector
+from vonk_control.image_store.collection import GRACE, ImageStoreCollector
+from vonk_control.image_store.oci import StoredImage
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.operations import ArtifactDistributionAssignment
-from vonk_control.oci_image_store import StoredImage
 from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 

@@ -140,7 +140,7 @@ jobs:
             selected_name="${suite^^}_SELECTED"
             timing_file="$RUNNER_TEMP/$suite-durations.json"
             if [[ "${!selected_name}" == true ]]; then
-              scripts/restore-pytest-file-durations \
+              scripts/ci/restore-pytest-file-durations \
                 --repo "$GITHUB_REPOSITORY" --suite "$suite" \
                 --current-run-id "$GITHUB_RUN_ID" --output "$timing_file"
             else
@@ -920,7 +920,7 @@ jobs:
         shell: bash
         run: |
           if [[ -f "$RUNNER_TEMP/repository-junit.xml" ]]; then
-            scripts/collect-pytest-file-durations "$RUNNER_TEMP/repository-junit.xml" \
+            scripts/ci/collect-pytest-file-durations "$RUNNER_TEMP/repository-junit.xml" \
               --root . --output "$RUNNER_TEMP/repository-durations.json"
           fi
       - name: Upload measured file durations
@@ -1047,7 +1047,7 @@ jobs:
         shell: bash
         run: |
           if [[ -f "$RUNNER_TEMP/control-junit.xml" ]]; then
-            scripts/collect-pytest-file-durations "$RUNNER_TEMP/control-junit.xml" \
+            scripts/ci/collect-pytest-file-durations "$RUNNER_TEMP/control-junit.xml" \
               --root control --output "$RUNNER_TEMP/control-durations.json"
           fi
       - name: Upload measured file durations
@@ -1676,7 +1676,7 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: scripts/ci-timeline "$GITHUB_RUN_ID" --markdown >> "$GITHUB_STEP_SUMMARY"
+        run: scripts/ci/ci-timeline "$GITHUB_RUN_ID" --markdown >> "$GITHUB_STEP_SUMMARY"
       - name: Require selector and selected jobs
         env:
           NEEDS: ${{ toJSON(needs) }}

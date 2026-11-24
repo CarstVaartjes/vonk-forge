@@ -55,7 +55,6 @@ from vonk_control.lifecycle.types import (
 )
 from vonk_control.lifecycle_preflight_contract import LifecyclePreflightCheckpoint
 from vonk_control.models.jobs import Job
-from vonk_control.persisted_waits import read_wait
 from vonk_control.recovery_policy import RECOVERY
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
@@ -68,6 +67,7 @@ from vonk_control.run_switch_operations.result_helpers import _read_progress
 from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImagePreparationUnknown,
 )
+from vonk_control.waits.persisted import read_wait
 
 from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .run_switch_operations_support import (

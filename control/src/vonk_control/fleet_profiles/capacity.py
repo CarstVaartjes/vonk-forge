@@ -778,7 +778,7 @@ def plan_kept_runs(effects: FleetProfileEffects) -> frozenset[str]:
 def kept_runs(
     session: Session, kept_run_ids: Collection[str], application_id: str | None
 ) -> frozenset[str]:
-    """The runs a fit treats as kept (``memory_reservations.kept_run_residual``).
+    """The runs a fit treats as kept (``reservations.memory.kept_run_residual``).
 
     A review names them; a load's child reads the plan its load accepted. A run
     the same load started since is not kept: it adds its demand. A plan that

@@ -93,14 +93,14 @@ from vonk_control.lifecycle.types import (
 )
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.jobs import Job
-from vonk_control.persisted_waits import (
+from vonk_control.recovery_policy import RECOVERY
+from vonk_control.strict_json import read_stored_model
+from vonk_control.waits.persisted import (
     initialize_wait,
     lifecycle_wait,
     schedule_wait,
     wait_due,
 )
-from vonk_control.recovery_policy import RECOVERY
-from vonk_control.strict_json import read_stored_model
 
 KIND = "fleet-profile"
 SUPERSEDED = LifecycleState.SUPERSEDED.value

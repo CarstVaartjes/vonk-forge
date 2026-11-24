@@ -756,7 +756,7 @@ otherwise have to reason about by hand:
 
 ## Time targets
 
-`CI gate` appends the run's timeline to its step summary (`scripts/ci-timeline
+`CI gate` appends the run's timeline to its step summary (`scripts/ci/ci-timeline
 RUN_ID` prints the same for any run): every job with its runner wait and
 duration, the wall-clock time, runner-minutes and queue-minutes. The targets a
 pull request run is held to, measured on that summary:

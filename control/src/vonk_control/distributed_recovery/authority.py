@@ -13,7 +13,6 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.distributed_lifecycle import canonical_distributed_readiness
 from vonk_control.distributed_recovery.common import (
     _DAMAGED,
     _MISMATCH,
@@ -27,6 +26,7 @@ from vonk_control.distributed_recovery.common import (
     _RecoveryJobQueue,
     _unproven,
 )
+from vonk_control.distributed_recovery.lifecycle import canonical_distributed_readiness
 from vonk_control.jobs.documents import (
     DistributedRecoveryMarker,
     RecipeStartParent,
@@ -59,9 +59,9 @@ from vonk_control.recipe_operations.stop_payloads import (
     RecipeStopAuthorityError,
     durable_run_stop_payloads,
 )
-from vonk_control.stall_window import stall_deadline
 from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import read_stored_model, serialize_json_value
+from vonk_control.waits.stall_window import stall_deadline
 
 
 def _start_binds_current_run_plan(session: Session, start: Job, run: RecipeRun) -> bool:

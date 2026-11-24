@@ -38,7 +38,6 @@ from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.contracts import StaleAgentAttempt
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.auth import AgentIdentity, AgentSource
-from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment.contract import (
     EnrollmentGrant,
     EnrollmentGrantStatus,
@@ -58,8 +57,9 @@ from vonk_control.models.fleet import (
 )
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
-from vonk_control.pki import IssuedCertificate
-from vonk_control.step_ca import StepCAUnavailable
+from vonk_control.pki.issuance import IssuedCertificate
+from vonk_control.pki.issuance_contract import CertificateIssuanceBinding
+from vonk_control.pki.step_ca import StepCAUnavailable
 
 from .agent_fences import fenced_operation
 from .ca_test_authority import FixtureCertificateAuthority

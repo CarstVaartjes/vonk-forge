@@ -95,9 +95,9 @@ from vonk_control.model_cache.contract import (
     StoredCacheClocks,
 )
 from vonk_control.models.cache import ModelCacheOperation
-from vonk_control.persisted_waits import initialize_wait, lifecycle_wait, schedule_wait
-from vonk_control.stall_window import stall_deadline
 from vonk_control.strict_json import serialize_json_value
+from vonk_control.waits.persisted import initialize_wait, lifecycle_wait, schedule_wait
+from vonk_control.waits.stall_window import stall_deadline
 
 _LOGGER = logging.getLogger(__name__)
 #: States an operation is active in (everything that is not an end).

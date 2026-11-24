@@ -44,7 +44,7 @@ from vonk_control.library_projection.common import (
 from vonk_control.model_cache.resolution import ResolutionMixin
 from vonk_control.model_cache.source_helpers import _model_selector
 from vonk_control.models.catalog import CatalogDocumentRevision
-from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.operator_acceptance.receipt_contract import ReceiptOwner
 from vonk_control.request_fault import RequestFault
 from vonk_control.stored.states import CatalogRevisionState
 

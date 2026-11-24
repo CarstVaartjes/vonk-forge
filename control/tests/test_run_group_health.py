@@ -2,7 +2,7 @@
 
 from vonk_agent_protocol.reason_codes.evidence import RunDegradedReason
 from vonk_agent_protocol.state_machines import RunState
-from vonk_control.run_readiness import GroupHealth, group_health
+from vonk_control.runs.readiness import GroupHealth, group_health
 
 
 def _health(reason, run_state, *ranks, issue=False):

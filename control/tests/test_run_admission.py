@@ -34,7 +34,7 @@ from vonk_control.models.execution import (
 )
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.telemetry import NodeInventorySnapshot
-from vonk_control.run_admission import (
+from vonk_control.runs.admission import (
     RunAdmissionBusy,
     RunAdmissionService,
     RunPlanConflict,

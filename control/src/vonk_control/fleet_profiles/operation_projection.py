@@ -68,8 +68,8 @@ from vonk_control.operations.item_contract import (
     OperationOwnerReference,
     OperationResultFacts,
 )
-from vonk_control.persisted_waits import read_wait
 from vonk_control.strict_json import warn_unreadable_once
+from vonk_control.waits.persisted import read_wait
 
 if TYPE_CHECKING:
     from vonk_control.fleet_profiles.service import FleetProfileService

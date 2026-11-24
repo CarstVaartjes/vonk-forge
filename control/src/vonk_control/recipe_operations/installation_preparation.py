@@ -27,7 +27,7 @@ from vonk_agent_protocol.outcome import (
 from vonk_agent_protocol.reason_codes.admission import InstallAdmissionCode
 from vonk_agent_protocol.state_machines import InstallationNodeState, InstallationState
 from vonk_control.admission_locking import admission_attempts, admission_wait_exhausted
-from vonk_control.failure_classification import error_detail
+from vonk_control.failures.classification import error_detail
 from vonk_control.install_admission.contracts import InstallPlan
 from vonk_control.install_admission.validation import (
     require_admissible as require_install_admissible,

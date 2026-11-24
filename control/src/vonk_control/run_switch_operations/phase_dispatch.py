@@ -29,7 +29,7 @@ from vonk_control.admission_locking import (
 from vonk_control.agent_operation_facts import job_start_deadline
 from vonk_control.bounded_json import require_integer
 from vonk_control.content_identity import same_image
-from vonk_control.failure_classification import (
+from vonk_control.failures.classification import (
     error_code,
     error_detail,
     is_definite,
@@ -41,14 +41,8 @@ from vonk_control.lifecycle_preflight import end_unclaimed_probes
 from vonk_control.logging import log_event
 from vonk_control.models.jobs import Job
 from vonk_control.operations.blockers import make_blocker
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.preparation_contract import RuntimeImageIdentity
 from vonk_control.recipe_builds.common import RecipeBuildAdmissionBusy
-from vonk_control.run_admission import (
-    RETRYABLE_PLAN_BLOCKERS,
-    RUN_ADMISSION_WAIT_CODES,
-    RunAdmissionBusy,
-)
 from vonk_control.run_switch_contract.operations import RunSwitchAwaitedInventory
 from vonk_control.run_switch_contract.phase_results import RunSwitchFinalVerifyResult
 from vonk_control.run_switch_contract.progress_view import (
@@ -106,11 +100,17 @@ from vonk_control.run_switch_operations.result_helpers import (
     _read_progress,
 )
 from vonk_control.run_switch_operations.results import _persisted_result
+from vonk_control.runs.admission import (
+    RETRYABLE_PLAN_BLOCKERS,
+    RUN_ADMISSION_WAIT_CODES,
+    RunAdmissionBusy,
+)
 from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImagePreparationError,
 )
-from vonk_control.stall_window import Verdict, stall_deadline
 from vonk_control.stored.rows import read_row_column
+from vonk_control.waits.persisted import schedule_wait
+from vonk_control.waits.stall_window import Verdict, stall_deadline
 
 if TYPE_CHECKING:
     from vonk_control.run_switch_operations.service import RunSwitchOperationService

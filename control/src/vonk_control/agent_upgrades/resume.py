@@ -25,7 +25,7 @@ from vonk_control.lifecycle.agent_upgrade import UNSUPPORTED_DISPATCH
 from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from vonk_control.models.jobs import Job, JobAttempt
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
-from vonk_control.operator_receipt_contract import JobOperatorReceipt
+from vonk_control.operator_acceptance.receipt_contract import JobOperatorReceipt
 from vonk_control.strict_json import read_stored_model
 
 if TYPE_CHECKING:

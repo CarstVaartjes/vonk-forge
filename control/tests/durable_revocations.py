@@ -21,7 +21,7 @@ ENROLLMENT = "control/src/vonk_control/enrollment/"
 INTERNAL = frozenset(
     {
         "control/src/vonk_control/attempt_residues.py",
-        "control/src/vonk_control/local_ca.py",
+        "control/src/vonk_control/pki/local_ca.py",
     }
 )
 

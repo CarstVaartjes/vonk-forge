@@ -25,12 +25,11 @@ from vonk_agent_protocol.state_machines import (
     EnrollmentRecordState,
 )
 from vonk_control.api.application import create_app
-from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
-from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.enrollment.contract import EnrollmentGrant
 from vonk_control.enrollment.responses import _issued_response
 from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.enrollment.types import EnrollmentDenied
+from vonk_control.failures.coordinator import CoordinatorFailures
 from vonk_control.jobs.queue import JobService
 from vonk_control.models.fleet import (
     AgentCertificate,
@@ -39,8 +38,9 @@ from vonk_control.models.fleet import (
     AgentEnrollmentGrant,
     AgentIssuedCertificateRevocation,
 )
-from vonk_control.pki import IssuedCertificate
-from vonk_control.step_ca import StepCAIssuancePending
+from vonk_control.pki.issuance import IssuedCertificate
+from vonk_control.pki.issuance_contract import CertificateIssuanceBinding
+from vonk_control.pki.step_ca import StepCAIssuancePending
 from vonk_control.worker.loop import Worker
 
 from .agent_api_support import (

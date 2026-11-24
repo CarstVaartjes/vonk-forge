@@ -30,7 +30,6 @@ from vonk_control.availability_production.production import (
     build_recipe_image_availability,
 )
 from vonk_control.bounded_retry import REQUEST_PAUSES
-from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.capabilities import CapabilityRegistry, CapabilityUnavailableError
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import (
@@ -43,12 +42,12 @@ from vonk_control.db.connections import build_engine, session_factory
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
 )
-from vonk_control.execution_plan_service import ControllerExecutionPlanService
-from vonk_control.failure_evidence import FailureEvidenceService
-from vonk_control.fleet_events import FleetEventRepository
+from vonk_control.execution_plan.service import ControllerExecutionPlanService
+from vonk_control.failures.evidence import FailureEvidenceService
+from vonk_control.fleet_events.outbox import FleetEventRepository
+from vonk_control.fleet_events.stream import FleetStream
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.fleet_projection.service import FleetProjection
-from vonk_control.fleet_stream import FleetStream
 from vonk_control.gateway.keys import (
     GatewayKeyError,
     GatewayKeyService,
@@ -82,14 +81,15 @@ from vonk_control.recipe_operations.operation_worker import RecipeOperationWorke
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
-from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runs.admission import RunAdmissionService
 from vonk_control.runtime_image_preparation.preparation import (
     make_runtime_image_receipt_preparer,
     stored_runtime_image_resolver,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.runtime_image_preparation.transport import OciLayoutImageTransport
+from vonk_control.security.browser_auth import BrowserAuthService
 from vonk_control.settings import (
     AGENT_RELEASE_API_URL,
     ARTIFACT_JOB_RETENTION_SECONDS,

@@ -16,7 +16,7 @@ from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_control.jobs.documents import RunSwitchJobPayload
 from vonk_control.models.execution import RecipeRun, RunNode
 from vonk_control.models.jobs import Job
-from vonk_control.reservation_owners import release_dead_owner_reservations
+from vonk_control.reservations.owners import release_dead_owner_reservations
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.phase_results import RunSwitchFinalVerifyResult
 from vonk_control.run_switch_contract.requests import (

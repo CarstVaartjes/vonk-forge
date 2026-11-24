@@ -44,13 +44,16 @@ from vonk_control.fleet_projection.host_checks import host_checks, host_checks_n
 from vonk_control.fleet_projection.memory_fragmentation import (
     memory_fragmentation_warning,
 )
+from vonk_control.fleet_projection.nas_route_notice import nas_route_notice
+from vonk_control.fleet_projection.nas_transfer_rate import (
+    NasTransferNotice,
+    nas_transfer_detail,
+)
 from vonk_control.gpu.health import gpu_health_reason
 from vonk_control.inventory.items import inventory_items
 from vonk_control.inventory.repository import _validated_inventory
 from vonk_control.models.fleet import AgentCertificate, AgentNode, AgentNodeProfile
 from vonk_control.models.telemetry import NodeInventorySnapshot
-from vonk_control.nas_route_notice import nas_route_notice
-from vonk_control.nas_transfer_rate import NasTransferNotice, nas_transfer_detail
 from vonk_control.recipe_update_batches.notice import RECIPE_UPDATE_AVAILABLE
 from vonk_control.strict_json import warn_unreadable_once
 from vonk_control.telemetry.samples import TelemetrySampleView, sustained_low_cpu_clock

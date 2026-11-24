@@ -11,13 +11,13 @@ from sqlalchemy import select
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.package_source import AgentPackageSource
 from vonk_control.admission_locking import ConstraintReplay, admitting
-from vonk_control.agent_package_source import load_package_source
 from vonk_control.agent_upgrades.contract import (
     AgentUpgradePackage,
     AgentUpgradeRequestIntent,
     AgentUpgradeRolloutPayload,
     AgentUpgradeRolloutResult,
 )
+from vonk_control.agent_upgrades.package_source import load_package_source
 from vonk_control.identity_insert import insert_identity
 from vonk_control.inventory.items import runtime_value
 from vonk_control.lifecycle.agent_upgrade import AgentUpgradeAdapter

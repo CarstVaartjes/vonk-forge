@@ -24,7 +24,7 @@ from vonk_control.auth import Actor
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import User
 from vonk_control.models.jobs import Job
-from vonk_control.operator_acceptance import ControllerAPIRoute
+from vonk_control.operator_acceptance.resolution import ControllerAPIRoute
 from vonk_control.recipe_image_availability.api import (
     install_recipe_operator_routes,
 )

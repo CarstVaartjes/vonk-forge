@@ -22,12 +22,12 @@ from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 from vonk_control.api.application import create_app
 from vonk_control.api.common import _bounded_error_content
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.catalog.api import CatalogProblem
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import User
 from vonk_control.models.jobs import Job
-from vonk_control.passwords import hash_password
+from vonk_control.security.browser_auth import BrowserAuthService
+from vonk_control.security.passwords import hash_password
 
 from .test_metrics import _fleet_snapshot
 

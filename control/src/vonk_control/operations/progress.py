@@ -28,9 +28,9 @@ from vonk_control import agent_operation_states
 from vonk_control.jobs import states as job_states
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.operations.contract import same_progress_attempt
-from vonk_control.stall_window import progress_advanced
 from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import read_stored_model
+from vonk_control.waits.stall_window import progress_advanced
 
 #: Lifecycle words a stored phase can also be while the work waits for something
 #: other than bytes; the progress words that wait are ``WAITING_PHASES``.

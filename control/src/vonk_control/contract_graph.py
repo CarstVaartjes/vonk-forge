@@ -18,8 +18,8 @@ from starlette.routing import Mount, Route
 
 from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
-from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.jobs.queue import JobService
+from vonk_control.security.browser_auth import BrowserAuthService
 from vonk_control.strict_json import route_endpoint
 
 

@@ -894,7 +894,7 @@ def test_a_table_wide_lock_is_taken_only_by_its_owners():
         collector, 'sql = "lock table users in share mode"\n', {1}, modes=("locks",)
     )
     assert not check_source(collector, fence, set(), modes=("locks",))
-    owner = "control/src/vonk_control/browser_auth.py"
+    owner = "control/src/vonk_control/security/browser_auth.py"
     assert not check_source(owner, fence, {1}, modes=("locks",))
     test = "control/tests/test_catalog_revision_collection.py"
     assert not check_source(test, fence, {1}, modes=("locks",))
@@ -1571,7 +1571,10 @@ def test_the_classified_pairwise_progress_check_is_allowed():
         "    return current.phase != previous.phase\n"
     )
     assert not check_source(
-        "control/src/vonk_control/stall_window.py", source, {2}, modes=("movement",)
+        "control/src/vonk_control/waits/stall_window.py",
+        source,
+        {2},
+        modes=("movement",),
     )
     assert check_source(
         "control/src/vonk_control/other.py", source, {2}, modes=("movement",)
@@ -1861,7 +1864,7 @@ def test_nas_coverage_is_required_only_where_nas_bytes_are_read() -> None:
     target Spark already holds (a re-download after NAS eviction)."""
     source = "def receipts(cache, digest):\n    return cache.resolve_verified_artifact_set(digest)\n"
     assert check_source(
-        "control/src/vonk_control/execution_plan_service.py",
+        "control/src/vonk_control/execution_plan/service.py",
         source,
         {2},
         modes=("model-sets",),
@@ -2461,7 +2464,7 @@ def test_a_savepoint_in_a_with_block_passes(path: str, source: str) -> None:
     assert not check_source(path, source, lines, modes=("savepoints",))
 
 
-_REVOCATION_PATH = "control/src/vonk_control/browser_auth.py"
+_REVOCATION_PATH = "control/src/vonk_control/security/browser_auth.py"
 _REVOCATION_SOURCE = "def f(row):\n    row.revoked_at = now\n{extra}"
 
 
@@ -2520,7 +2523,7 @@ _RETENTION_PATH = "control/src/vonk_control/unused_storage_collection/references
             "same = newest.content_digest == running.content_digest\n",
         ),
         (
-            "control/src/vonk_control/observed_run_memory.py",
+            "control/src/vonk_control/runs/observed_memory.py",
             "same = head.content_digest == old.content_digest\n",
         ),
     ],
@@ -2593,11 +2596,11 @@ def test_a_set_matched_by_its_first_requester_is_flagged(source: str) -> None:
         ),
         # A Spark's installations by their set, or the Model next to other facts.
         (
-            "control/src/vonk_control/disk_reservations.py",
+            "control/src/vonk_control/reservations/disk.py",
             "q = select(RecipeInstallation.model_artifact_set_sha256).join(InstallationNode, j)\n",
         ),
         (
-            "control/src/vonk_control/disk_reservations.py",
+            "control/src/vonk_control/reservations/disk.py",
             "q = select(RecipeInstallation.id, RecipeInstallation.model_content_sha256).join(InstallationNode, j)\n",
         ),
     ],
@@ -2668,7 +2671,7 @@ def test_a_run_alias_compared_by_hand_is_flagged(source: str) -> None:
     ):
         assert check_source(site, source, lines, modes=("alias-rules",))
     assert not check_source(
-        "control/src/vonk_control/run_route_name.py",
+        "control/src/vonk_control/runs/route_name.py",
         source,
         lines,
         modes=("alias-rules",),
@@ -2695,7 +2698,7 @@ def test_a_run_alias_written_outside_the_rename_module_is_flagged(
     assert check_source(_ALIAS_PATH, source, lines, modes=("alias-rules",))
     assert not check_source(_ALIAS_PATH, source, set(), modes=("alias-rules",))
     assert not check_source(
-        "control/src/vonk_control/run_route_name.py",
+        "control/src/vonk_control/runs/route_name.py",
         source,
         lines,
         modes=("alias-rules",),
@@ -2714,13 +2717,13 @@ def test_a_request_side_alias_comparison_passes() -> None:
 def test_a_run_is_created_with_its_name_only_in_run_admission() -> None:
     source = "run = RecipeRun(alias=alias, plan_digest=d)\n"
     assert not check_source(
-        "control/src/vonk_control/run_admission.py",
+        "control/src/vonk_control/runs/admission.py",
         source,
         {1},
         modes=("alias-rules",),
     )
     assert check_source(
-        "control/src/vonk_control/run_admission.py",
+        "control/src/vonk_control/runs/admission.py",
         "run.alias = alias\n",
         {1},
         modes=("alias-rules",),
@@ -2735,7 +2738,7 @@ def test_demand_exceeds_capacity_is_emitted_only_at_its_classified_sites():
         # Probe: an emission on the memory path fails the rule.
         for path in (
             "control/src/vonk_control/resource_planning/capacity.py",
-            "control/src/vonk_control/run_admission.py",
+            "control/src/vonk_control/runs/admission.py",
             "control/src/vonk_control/run_switch_operations/resource_fit.py",
         ):
             assert check_source(path, probe, {1}, modes=("capacity-refusals",))

@@ -19,7 +19,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 from vonk_control.categorized_errors import SecurityRefused
-from vonk_control.failure_classification import disposition, error_code, wait_reason
+from vonk_control.failures.classification import disposition, error_code, wait_reason
 from vonk_control.fleet_profiles.error_summary import _error_summary
 from vonk_control.models.jobs import Job
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest

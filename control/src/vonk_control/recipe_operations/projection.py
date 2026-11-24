@@ -32,8 +32,8 @@ from vonk_control.admission_locking import (
     lock_admission_rows,
 )
 from vonk_control.agent_operation_facts import aware
-from vonk_control.distributed_lifecycle import DistributedLifecycleError
 from vonk_control.distributed_recovery.common import enforce_recovery_deadline
+from vonk_control.distributed_recovery.lifecycle import DistributedLifecycleError
 from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
 from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
@@ -56,7 +56,6 @@ from vonk_control.models.execution import (
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.offline_stops import deferred_stop_nodes
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_builds.cancellation import build_cancellation
 from vonk_control.recipe_operations.constants import (
     _INITIAL_OBSERVATION_GRACE_SECONDS,
@@ -102,6 +101,7 @@ from vonk_control.recipe_operations.results import (
 from vonk_control.stored.rows import read_row_column
 from vonk_control.stored.states import RecipeBuildState
 from vonk_control.strict_json import read_stored_model, serialize_json_value
+from vonk_control.waits.persisted import schedule_wait
 
 if TYPE_CHECKING:
     from vonk_control.agent_jobs.service import AgentJobService

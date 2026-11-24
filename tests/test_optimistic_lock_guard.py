@@ -469,7 +469,7 @@ def test_new_agent_node_lock_or_write_fails_outside_admission_and_security(
     ("path", "statement"),
     [
         (
-            "control/src/vonk_control/run_admission.py",
+            "control/src/vonk_control/runs/admission.py",
             'AdmissionRowLock("nodes", AgentNode, select(AgentNode))',
         ),
         (

@@ -3,11 +3,6 @@ import type {
   ArtifactJob,
   ArtifactJobCapabilities,
   ArtifactJobCreateInput,
-  ArtifactJobParameter,
-  ArtifactJobParameterValue,
-  ArtifactJobFile,
-  ArtifactJobInputRequest,
-  ArtifactJobInterface,
   LibraryApi,
   LibraryViewRecipeDetail,
 } from "../../api/types";
@@ -17,421 +12,50 @@ import {
   contractType,
   formatWire,
   isWireNumber,
-  materialize,
-  parseContractJson,
   stringifyContractJson,
   type WireNumber,
 } from "../../api/contract-numeric";
-import { LifecycleState } from "../../api/vocabulary.generated";
-import {
-  createJobTitle,
-  isTerminal,
-  jobElapsed,
-  jobInterfacesOf,
-  phaseOf,
-  type JobRecipeInterface,
-} from "../../lib/artifact-job";
+import { createJobTitle, isTerminal, jobInterfacesOf, phaseOf } from "../../lib/artifact-job";
 
 import { formatBytes } from "../../lib/fleet";
-import { humanizeIdentifier, TechnicalDetails } from "../library/library-technical-details";
+import { humanizeIdentifier } from "../library/library-technical-details";
 import { StatusPill } from "../ui/status-pill";
 import { Time } from "../ui/time";
 import { hashArtifactBlob } from "./artifact-hash";
+import {
+  CONTROLLER_FILE_LIMIT,
+  CONTROLLER_TOTAL_LIMIT,
+  type ContractState,
+  type RecipeInputSlot,
+  type Scalar,
+  boundedRequestInteger,
+  filename,
+  integerInput,
+  outputMedia,
+  parameterDefaults,
+  parameterError,
+  parameterRange,
+  scalarText,
+  wireMaximum,
+  wireMinimum,
+} from "./artifact-job-form";
+import {
+  type CancelRecovery,
+  type InputPayload,
+  abortError,
+  assertJobIdentity,
+  cancelReceipt,
+  errorText,
+  isAbort,
+  isCancelReceipt,
+  isCancelling,
+  isDefinitiveHttpRefusal,
+  mayHaveBeenAccepted,
+  recoveredInputIndexes,
+  responseStatus,
+} from "./artifact-job-submission";
+import { JobHistory, jobTone } from "./artifact-job-history";
 import "./artifact-job-workspace.css";
-
-const CONTROLLER_FILE_LIMIT = 512 * 1024 * 1024;
-const CONTROLLER_TOTAL_LIMIT = 1024 * 1024 * 1024;
-function wireMinimum<T extends WireNumber>(a: T, b: T): T {
-  return compareWire(a, b) <= 0 ? a : b;
-}
-function wireMaximum<T extends WireNumber>(a: T, b: T): T {
-  return compareWire(a, b) >= 0 ? a : b;
-}
-// Request transport fields have Controller-owned bounds within safe integers.
-// Conversion is allowed only after exact validation against that owner's bound.
-function boundedRequestInteger(value: WireNumber, maximum: number): number {
-  const native = Number(formatWire(value));
-  if (
-    !contractType(value, ["integer"]) ||
-    compareWire(value, 1) < 0 ||
-    compareWire(value, maximum) > 0 ||
-    !Number.isSafeInteger(native) ||
-    compareWire(value, native) !== 0
-  ) {
-    throw new Error("Request integer is outside the Controller transport boundary");
-  }
-  return native;
-}
-function integerInput(value: string): WireNumber | string {
-  if (!/^-?(?:0|[1-9][0-9]*)$/.test(value)) return value;
-  const parsed = materialize(parseContractJson(value));
-  return isWireNumber(parsed) && contractType(parsed, ["integer"]) ? parsed : value;
-}
-/** A cancel was accepted and the job has not settled: it completes by itself, so nobody has to act. */
-function isCancelling(job: ArtifactJob): boolean {
-  return job.cancel_requested_at != null && !isTerminal(job);
-}
-
-type RecipeInput = NonNullable<JobRecipeInterface["input"]>;
-type RecipeInputSlot = NonNullable<RecipeInput["slots"]>[number];
-// A knob value as the form holds it: typed, or the text being edited while it is not yet valid.
-type Scalar = ArtifactJobParameterValue;
-type RecipeParameter = ArtifactJobParameter;
-type ContractState =
-  | { kind: "awaiting" }
-  | { kind: "received"; parameters: RecipeParameter[] }
-  | { kind: "unreadable"; detail: string };
-type InputPayload = { declaration: ArtifactJobInputRequest; blob: Blob };
-type CancelRecovery = {
-  jobId: string;
-  runId: string;
-  reason: string;
-  requestId: string;
-  source: "upload" | "history";
-  message: string;
-};
-
-function responseStatus(value: unknown): number | undefined {
-  if (typeof value !== "object" || value === null || !("status" in value)) return undefined;
-  return typeof value.status === "number" ? value.status : undefined;
-}
-
-function mayHaveBeenAccepted(value: unknown): boolean {
-  const status = responseStatus(value);
-  return status === undefined || status === 0 || status >= 500;
-}
-
-function isDefinitiveHttpRefusal(value: unknown): boolean {
-  const status = responseStatus(value);
-  return status !== undefined && status >= 400 && status < 500;
-}
-
-function isAbort(value: unknown): boolean {
-  return (
-    (typeof DOMException !== "undefined" &&
-      value instanceof DOMException &&
-      value.name === "AbortError") ||
-    (value instanceof Error && value.name === "AbortError")
-  );
-}
-
-function assertJobIdentity(
-  job: ArtifactJob,
-  expectedJobId: string | undefined,
-  expectedRunId: string,
-  source: string,
-): void {
-  if (expectedJobId && job.id !== expectedJobId) {
-    throw new Error(`${source} returned another artifact job; expected ${expectedJobId}`);
-  }
-  if (job.run_id !== expectedRunId) {
-    throw new Error(`${source} belongs to another recipe run; expected ${expectedRunId}`);
-  }
-}
-
-function errorText(value: unknown, fallback: string): string {
-  return value instanceof Error ? value.message.slice(0, 256) : fallback;
-}
-
-function cancelReceipt(job: ArtifactJob): { requestId: string; reason: string } | undefined {
-  const evidence = job.result_evidence;
-  if (!evidence || typeof evidence !== "object") return undefined;
-  const requestId = evidence.cancel_request_id;
-  const reason = evidence.cancel_reason;
-  return typeof requestId === "string" && typeof reason === "string"
-    ? { requestId, reason }
-    : undefined;
-}
-
-function isCancelReceipt(job: ArtifactJob, requestId: string, reason: string): boolean {
-  const receipt = cancelReceipt(job);
-  return (
-    receipt?.requestId === requestId &&
-    receipt.reason === reason &&
-    (isCancelling(job) || job.state === "cancelled")
-  );
-}
-
-function recoveredInputIndexes(job: ArtifactJob, prepared: InputPayload[]): Set<number> {
-  const matched = new Set<number>();
-  for (const uploaded of job.input_files) {
-    const index = prepared.findIndex(
-      ({ declaration }) => declaration.slot === uploaded.slot && declaration.name === uploaded.name,
-    );
-    const expected = index < 0 ? undefined : prepared[index]?.declaration;
-    if (
-      !expected ||
-      matched.has(index) ||
-      compareWire(expected.size_bytes, uploaded.size_bytes) !== 0 ||
-      expected.sha256 !== uploaded.sha256
-    ) {
-      throw new Error(
-        `Durable job ${job.id} has an input that does not match the selected files; its exact draft cannot be reused.`,
-      );
-    }
-    matched.add(index);
-  }
-  return matched;
-}
-
-function abortError(): DOMException {
-  return new DOMException("Artifact job submission was cancelled", "AbortError");
-}
-
-const outputMedia: Record<ArtifactJobInterface, string[]> = {
-  "image-job": ["image/png", "image/jpeg", "image/webp"],
-  "audio-job": ["audio/wav", "audio/mpeg", "audio/flac"],
-  "video-job": ["video/mp4", "video/webm"],
-  "mesh-job": ["model/gltf-binary", "model/gltf+json"],
-  "artifact-job": [
-    "application/json",
-    "text/plain",
-    "application/octet-stream",
-    "application/pdf",
-    "image/png",
-    "image/jpeg",
-    "image/webp",
-  ],
-};
-
-function jobTone(state: string): "ok" | "warn" | "bad" | "info" {
-  if (state === LifecycleState.SUCCEEDED) return "ok";
-  if (state === LifecycleState.FAILED || state === LifecycleState.CANCELLED) return "bad";
-  if (
-    state === "running" ||
-    state === "queued" ||
-    state === LifecycleState.BACKOFF ||
-    state === LifecycleState.OBSERVING
-  )
-    return "info";
-  return "warn";
-}
-
-// The one owner of a job state's tone, shared with the Overview.
-export { jobTone };
-
-function filename(value: string): string {
-  const clean = value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-  return (clean || "input").slice(0, 128);
-}
-
-function scalarText(value: Scalar): string {
-  return isWireNumber(value) ? formatWire(value) : String(value);
-}
-
-function parameterDefaults(parameters: RecipeParameter[]): Record<string, Scalar> {
-  return Object.fromEntries(parameters.map((parameter) => [parameter.name, parameter.default]));
-}
-
-function parameterRange(parameter: RecipeParameter): string | undefined {
-  if (parameter.type !== "integer" && parameter.type !== "float") return undefined;
-  const { minimum, maximum, step } = parameter;
-  const bounds =
-    minimum != null && maximum != null
-      ? `${scalarText(minimum)} to ${scalarText(maximum)}`
-      : minimum != null
-        ? `at least ${scalarText(minimum)}`
-        : maximum != null
-          ? `at most ${scalarText(maximum)}`
-          : "";
-  if (!bounds) return undefined;
-  return step != null ? `${bounds}, in steps of ${scalarText(step)}` : bounds;
-}
-
-// Only whether the text parses; range and step are the Controller's to refuse.
-function parameterError(parameter: RecipeParameter, value: Scalar): string | undefined {
-  if (parameter.type === "integer" && !contractType(value, ["integer"]))
-    return "Enter a whole number.";
-  if (
-    parameter.type === "float" &&
-    typeof value === "string" &&
-    (value.trim() === "" || !Number.isFinite(Number(value)))
-  )
-    return "Enter a number.";
-  return undefined;
-}
-
-function OutputPreview({
-  api,
-  file,
-  job,
-}: {
-  api: LibraryApi;
-  file: ArtifactJobFile;
-  job: ArtifactJob;
-}) {
-  const url = api.artifactJobResultUrl(job.id, file.name, file.sha256);
-  const label = `${file.name}, ${file.media_type}, ${formatBytes(file.size_bytes)}`;
-  return (
-    <li className="artifact-output-row">
-      <div className="artifact-output-heading">
-        <div>
-          <strong>{file.name}</strong>
-          <span>
-            {file.media_type} · {formatBytes(file.size_bytes)}
-          </span>
-        </div>
-        <a className="button secondary" href={url} download={file.name}>
-          Download
-        </a>
-      </div>
-      {file.media_type.startsWith("image/") && (
-        <img src={url} alt={`Generated output ${file.name}`} loading="lazy" />
-      )}
-      {file.media_type.startsWith("audio/") && (
-        // biome-ignore lint/a11y/useMediaCaption: a produced file has no caption track to offer
-        <audio controls preload="metadata" aria-label={`Listen to ${label}`} src={url} />
-      )}
-      {file.media_type.startsWith("video/") && (
-        // biome-ignore lint/a11y/useMediaCaption: a produced file has no caption track to offer
-        <video controls preload="metadata" aria-label={`Watch ${label}`} src={url} />
-      )}
-      {(file.media_type === "model/gltf-binary" || file.name.toLowerCase().endsWith(".glb")) && (
-        <div className="artifact-glb-notice">
-          <strong>3D artifact ready</strong>
-          <span>
-            This browser has no trusted GLB renderer installed. Download the exact result to inspect
-            it without sending it to a third party.
-          </span>
-        </div>
-      )}
-      <TechnicalDetails compact items={[{ label: "Output SHA-256", value: file.sha256 }]} />
-    </li>
-  );
-}
-
-function JobHistory({
-  api,
-  busyJobId,
-  cancelCandidate,
-  job,
-  onCancel,
-  onConfirmCancel,
-  onPrepareRetry,
-}: {
-  api: LibraryApi;
-  busyJobId?: string | undefined;
-  cancelCandidate?: string | undefined;
-  job: ArtifactJob;
-  onCancel(jobId?: string): void;
-  onConfirmCancel(job: ArtifactJob): void;
-  onPrepareRetry(job: ArtifactJob): void;
-}) {
-  const active = !isTerminal(job);
-  return (
-    <article
-      className="artifact-job-history-row"
-      aria-label={`Artifact job ${job.id}, ${phaseOf(job)}`}
-    >
-      <header>
-        <div>
-          <StatusPill tone={jobTone(phaseOf(job))}>{humanizeIdentifier(phaseOf(job))}</StatusPill>
-          <strong>{humanizeIdentifier(job.interface)}</strong>
-          <span>
-            <Time value={job.created_at} />
-          </span>
-        </div>
-        <span>{formatBytes(job.input_total_bytes)} input</span>
-      </header>
-      {active && (
-        <div className="artifact-job-progress" role="status" aria-live="polite">
-          <span className="artifact-job-progress-track">
-            <span />
-          </span>
-          <p>
-            {job.state === "running"
-              ? "The Spark is producing artifacts."
-              : job.state === "queued"
-                ? "Waiting for the assigned Spark."
-                : "Preparing the immutable job request."}
-          </p>
-        </div>
-      )}
-      {job.status_reason && (
-        <p className="artifact-job-reason" role={job.state === "failed" ? "alert" : undefined}>
-          {job.status_reason}
-        </p>
-      )}
-      {job.result_evidence && (
-        <dl className="artifact-job-evidence">
-          {job.result_evidence.elapsed_milliseconds != null && (
-            <>
-              <dt>Elapsed</dt>
-              <dd>{jobElapsed(job, Date.now())}</dd>
-            </>
-          )}
-          {job.result_evidence.peak_memory_bytes != null && (
-            <>
-              <dt>Peak memory</dt>
-              <dd>{formatBytes(job.result_evidence.peak_memory_bytes)}</dd>
-            </>
-          )}
-        </dl>
-      )}
-      {job.state === "succeeded" && job.output_files.length === 0 && (
-        <p className="artifact-job-reason">This job succeeded without downloadable outputs.</p>
-      )}
-      {job.state === "succeeded" && job.output_files.length > 0 && (
-        <ul
-          className="artifact-output-list"
-          aria-label={`${job.output_files.length} generated outputs`}
-        >
-          {job.output_files.map((file) => (
-            <OutputPreview api={api} file={file} job={job} key={`${file.name}:${file.sha256}`} />
-          ))}
-        </ul>
-      )}
-      {isCancelling(job) && (
-        <p className="artifact-job-notice" role="status">
-          Cancellation was accepted and is waiting for the Controller to report a settled result.
-        </p>
-      )}
-      <div className="artifact-job-row-actions">
-        {active && !isCancelling(job) && cancelCandidate !== job.id && (
-          <button
-            type="button"
-            className="button secondary"
-            disabled={busyJobId === job.id}
-            onClick={() => onCancel(job.id)}
-          >
-            Cancel job
-          </button>
-        )}
-        {active && !isCancelling(job) && cancelCandidate === job.id && (
-          <>
-            <p>Cancel this job and keep its audit history?</p>
-            <button
-              type="button"
-              className="danger"
-              disabled={busyJobId === job.id}
-              onClick={() => onConfirmCancel(job)}
-            >
-              {busyJobId === job.id ? "Cancelling…" : "Confirm cancel"}
-            </button>
-            <button type="button" className="button secondary" onClick={() => onCancel(undefined)}>
-              Keep running
-            </button>
-          </>
-        )}
-        {(job.state === "failed" || job.state === "cancelled") && (
-          <button type="button" className="button secondary" onClick={() => onPrepareRetry(job)}>
-            Prepare retry
-          </button>
-        )}
-      </div>
-      <TechnicalDetails
-        compact
-        items={[
-          { label: "Job ID", value: job.id },
-          { label: "Run ID", value: job.run_id },
-          { label: "Contract SHA-256", value: job.contract_sha256 },
-          { label: "Input manifest", value: job.input_manifest_sha256 },
-          { label: "Output manifest", value: job.output_manifest_sha256 ?? "" },
-        ]}
-      />
-    </article>
-  );
-}
 
 export function ArtifactJobWorkspace({
   api,

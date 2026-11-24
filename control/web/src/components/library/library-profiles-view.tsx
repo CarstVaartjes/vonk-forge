@@ -1,23 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConnectionExamples } from "../ui/connection-examples";
-import type { MouseEvent, ReactNode } from "react";
-import {
-  addWire,
-  compareWire,
-  formatWire,
-  isWireNumber,
-  materialize,
-  parseContractJson,
-} from "../../api/contract-numeric";
+import type { MouseEvent } from "react";
+import { addWire, compareWire, formatWire, isWireNumber } from "../../api/contract-numeric";
 import type { WireNumber } from "../../api/contract-numeric";
 import { validateControlParameters } from "../../api/contract-json";
 import { ApiError } from "../../api/client";
-import {
-  ProfileAction,
-  ProfileDocumentState,
-  ProfileLoadAction,
-  TERMINAL_LIFECYCLE_STATES,
-} from "../../api/vocabulary.generated";
+import { ProfileLoadAction } from "../../api/vocabulary.generated";
 import { canonicalRecipeSelector, readableProfile } from "../../api/types";
 import type {
   ControlApi,
@@ -30,432 +18,48 @@ import type {
   FleetProfilePreview,
   VisualFleetSnapshot,
 } from "../../api/types";
-import { nodeDisplayName } from "../../lib/fleet";
 import type { LibraryRecipeRecord } from "./library-workcell";
-import { CancelOperation } from "../ui/cancel-operation";
 import { ConfirmDialog } from "../ui/confirm-dialog";
 import { StatusPill } from "../ui/status-pill";
 import { WaitingFor } from "../ui/waiting-for";
-import { useLibraryNodeName } from "./library-node-names";
-import { availabilityProgress, LibraryAvailabilityProgress } from "./library-availability-progress";
 import { ObservationNotice } from "../ui/observation-notice";
 import { useOperationObserver } from "../../hooks/use-operation-observer";
 import { EmptyState } from "../ui/empty-state";
 import { ProfileExport } from "../ui/profile-export";
 import { SkeletonRows } from "../ui/skeleton";
 import { useToast } from "../ui/toast";
-import { RecipeOptionSelects, effectiveChoices } from "../ui/recipe-option-selects";
-import type { OptionChoices, RecipeOption } from "../ui/recipe-option-selects";
+import { RecipeOptionSelects } from "../ui/recipe-option-selects";
+import type { RecipeOption } from "../ui/recipe-option-selects";
+import {
+  type AssignmentDraft,
+  type AssignmentInput,
+  type ProfileDraft,
+  blankDraft,
+  draftFromProfile,
+  draftKey,
+  fleetEntries,
+  inputFromDraft,
+  isDirty,
+  unsavedDrafts,
+} from "./library-profile-drafts";
+import {
+  loadedFirst,
+  openingProfile,
+  profileStateLabel,
+  sameNumber,
+} from "./library-profile-selection";
+import {
+  type PendingProfileLoad,
+  ended,
+  loadable,
+  nothingToChange,
+  stoppedAliases,
+  submitProfileLoad,
+} from "./library-profile-load";
+import { ProfileProgress } from "./library-profile-progress";
+import { ProfileReview } from "./library-profile-review";
 
 type Navigate = (event: MouseEvent<HTMLAnchorElement>, path: string) => void;
-type AssignmentInput = NonNullable<FleetProfileInput["assignments"]>[number];
-type AssignmentDraft = {
-  key: string;
-  recipeSelector: string;
-  assignmentName: string;
-  modelVariant: string;
-  desiredState: AssignmentInput["desired_state"];
-  sparkIds: string[];
-  optionChoices: OptionChoices;
-  gpuClock?: AssignmentInput["gpu_clock"];
-};
-type ProfileDraft = {
-  number?: FleetProfileNumber;
-  revision?: FleetProfile["revision"];
-  name: string;
-  description: string;
-  favorite: boolean;
-  installationPolicy: FleetProfileInput["installation_policy"];
-  labels: FleetProfileInput["labels"];
-  assignments: AssignmentDraft[];
-};
-type FleetEntry = { id: string; name: string; state: string };
-type PendingProfileLoad = { requestKey: string; reviewedEffectsDigest: string };
-
-/** A superseded load that names its successor is not an end: the latest-load observation continues under the successor. */
-const ended = (application: Pick<FleetProfileApplicationView, "state" | "superseded_by">) =>
-  TERMINAL_LIFECYCLE_STATES.has(application.state) &&
-  !(application.state === "superseded" && application.superseded_by);
-
-function stringField(value: unknown, key: string): string {
-  if (!value || typeof value !== "object") return "";
-  const field = (value as Record<string, unknown>)[key];
-  return typeof field === "string" ? field : "";
-}
-
-function profileAssignments(profile: FleetProfile): AssignmentDraft[] {
-  return (profile.definition.assignments ?? []).map((assignment, index) => ({
-    key: `${assignment.recipe_selector}-${index}`,
-    recipeSelector: assignment.recipe_selector,
-    assignmentName: assignment.assignment_name ?? "",
-    modelVariant: assignment.model_variant ?? "",
-    desiredState: assignment.desired_state,
-    sparkIds: [...assignment.spark_ids].sort(),
-    optionChoices: { ...(assignment.option_choices ?? {}) },
-    gpuClock: assignment.gpu_clock,
-  }));
-}
-
-function draftFromProfile(profile: FleetProfile): ProfileDraft {
-  const definition = profile.definition;
-  return {
-    number: profile.number,
-    revision: profile.revision,
-    name: definition.name ?? "",
-    description: definition.description ?? "",
-    favorite: definition.favorite ?? false,
-    installationPolicy: definition.installation_policy,
-    labels: definition.labels,
-    assignments: profileAssignments(profile),
-  };
-}
-
-function blankDraft(): ProfileDraft {
-  return {
-    name: "New fleet profile",
-    description: "A complete desired setup for the fleet.",
-    favorite: false,
-    installationPolicy: "keep-cached",
-    labels: {},
-    assignments: [],
-  };
-}
-
-/**
- * Unsaved edits are kept per profile for the session, so selecting another
- * profile or navigating away never silently discards them.
- */
-const unsavedDrafts = new Map<string, ProfileDraft>();
-/** Test seam: forget every kept unsaved draft. */
-export const forgetUnsavedProfileDrafts = () => unsavedDrafts.clear();
-const draftKey = (draft: Pick<ProfileDraft, "number">) =>
-  draft.number === undefined ? "new" : formatWire(draft.number);
-const comparable = (draft: ProfileDraft) =>
-  JSON.stringify({
-    ...draft,
-    number: draft.number === undefined ? null : formatWire(draft.number),
-    revision: draft.revision === undefined ? null : formatWire(draft.revision),
-    assignments: draft.assignments.map(({ key: _key, ...rest }) => rest),
-  });
-function isDirty(draft: ProfileDraft, profile: FleetProfile | undefined): boolean {
-  if (draft.number === undefined)
-    return draft.assignments.length > 0 || comparable(draft) !== comparable(blankDraft());
-  return !profile || comparable(draft) !== comparable(draftFromProfile(profile));
-}
-const requestedProfile = (): FleetProfileNumber | undefined => {
-  const token = new URLSearchParams(location.search).get("profile");
-  if (!token || !/^[1-9][0-9]*$/.test(token)) return undefined;
-  const value = materialize(parseContractJson(token));
-  validateControlParameters("GET", `/api/profile/${token}`, { path: { number: value } });
-  if (typeof value !== "number")
-    throw new Error("The profile number cannot be represented by the profile contract.");
-  return value;
-};
-const sameNumber = (left: WireNumber, right: WireNumber | undefined) =>
-  right !== undefined && compareWire(left, right) === 0;
-
-function fleetEntries(
-  profile: FleetProfile | undefined,
-  fleet: VisualFleetSnapshot | undefined,
-): FleetEntry[] {
-  if (profile)
-    return (profile.fleet ?? []).flatMap((item) => {
-      const id = stringField(item, "selector");
-      if (!id) return [];
-      return [
-        {
-          id,
-          name: stringField(item, "display_name") || id,
-          state: stringField(item, "state") || "Unknown",
-        },
-      ];
-    });
-  return (
-    fleet?.nodes.map((node) => ({ id: node.id, name: nodeDisplayName(node), state: "Observed" })) ??
-    []
-  );
-}
-
-function inputFromDraft(
-  draft: ProfileDraft,
-  optionsBySelector: Record<string, RecipeOption[]> = {},
-): FleetProfileInput {
-  const input: FleetProfileInput = {
-    name: draft.name,
-    description: draft.description,
-    expected_revision: draft.revision ?? 0,
-    ...(draft.installationPolicy ? { installation_policy: draft.installationPolicy } : {}),
-    ...(draft.labels ? { labels: draft.labels } : {}),
-    favorite: draft.favorite,
-    assignments: draft.assignments.map((assignment) => {
-      const selectorOptions = optionsBySelector[assignment.recipeSelector.trim()];
-      return {
-        recipe_selector: assignment.recipeSelector.trim(),
-        spark_ids: [...new Set(assignment.sparkIds)].sort(),
-        ...(assignment.assignmentName.trim()
-          ? { assignment_name: assignment.assignmentName.trim() }
-          : {}),
-        ...(assignment.modelVariant.trim()
-          ? { model_variant: assignment.modelVariant.trim() }
-          : {}),
-        ...(assignment.desiredState ? { desired_state: assignment.desiredState } : {}),
-        ...(assignment.gpuClock ? { gpu_clock: assignment.gpuClock } : {}),
-        // Every option the recipe declares is sent explicitly, defaults included.
-        option_choices: selectorOptions
-          ? effectiveChoices(selectorOptions, assignment.optionChoices)
-          : assignment.optionChoices,
-      };
-    }),
-  };
-  return input;
-}
-
-function applicationProgressRecord(
-  application: FleetProfileApplicationView,
-): Record<string, unknown> {
-  const progress = application.progress as Record<string, unknown>;
-  const child = progress.child_progress;
-  return child && typeof child === "object" ? (child as Record<string, unknown>) : progress;
-}
-
-function isAmbiguousLoadFailure(error: unknown): boolean {
-  return error instanceof TypeError || (error instanceof ApiError && error.status >= 500);
-}
-
-async function submitProfileLoad(
-  api: ControlApi,
-  number: FleetProfileNumber,
-  pending: PendingProfileLoad,
-): Promise<FleetProfileApplicationView> {
-  // The load names the effects the operator reviewed, so a plan that changed since
-  // is refused (409) instead of silently accepted. A retry sends the identical body.
-  const input = {
-    request_key: pending.requestKey,
-    review: { effects_digest: pending.reviewedEffectsDigest },
-  };
-  try {
-    return await api.loadProfile(number, input);
-  } catch (error) {
-    if (!isAmbiguousLoadFailure(error)) throw error;
-    try {
-      return await api.profileApplicationByRequest(number, pending.requestKey);
-    } catch (lookupError) {
-      if (!(lookupError instanceof ApiError && lookupError.status === 404)) throw error;
-    }
-    return api.loadProfile(number, input);
-  }
-}
-
-/** The profile the page opens on: the requested one, else the loaded one, else the first. */
-function openingProfile(profiles: FleetProfileRead[]) {
-  const requested = requestedProfile();
-  const readable = profiles.filter(readableProfile);
-  return (
-    readable.find((profile) => sameNumber(profile.number, requested)) ??
-    readable.find((profile) => profile.status === ProfileDocumentState.LOADED) ??
-    readable[0]
-  );
-}
-
-/** The list pins the loaded profile on top, then orders by number. */
-const loadedFirst = (left: FleetProfileRead, right: FleetProfileRead) =>
-  Number(right.status === ProfileDocumentState.LOADED) -
-    Number(left.status === ProfileDocumentState.LOADED) || compareWire(left.number, right.number);
-
-/** The profile state shown to people: the Controller's word, spaces for hyphens. */
-const profileStateLabel = (status: string | undefined) =>
-  status?.replaceAll("-", " ") ?? "Status unavailable";
-
-const KEEP = ProfileAction.KEEP;
-
-/** The workloads a load stops, from the reviewed effects `vonkctl run` also leads with. */
-function stoppedAliases(preview: FleetProfilePreview | undefined): string[] {
-  const effects = preview?.effects;
-  if (!effects) return [];
-  const aliases = (effects.runs ?? []).filter((run) => run.action !== KEEP).map((r) => r.alias);
-  for (const adopted of effects.adopted ?? [])
-    for (const stop of adopted.stops ?? []) aliases.push(stop.effect.alias);
-  return [...new Set(aliases)].sort();
-}
-
-/** The Controller's one answer for the plan: load it, load it after confirming stops, nothing to change, or blocked. */
-const loadable = (preview: FleetProfilePreview | undefined) =>
-  preview?.next_action === ProfileLoadAction.LOAD ||
-  preview?.next_action === ProfileLoadAction.LOAD_STOPPING;
-const nothingToChange = (preview: FleetProfilePreview | undefined) =>
-  preview?.next_action === ProfileLoadAction.NOTHING_TO_CHANGE;
-
-function ProfileProgress({
-  application,
-  cancel,
-  notice,
-}: {
-  application: FleetProfileApplicationView;
-  cancel?: ((requestKey: string) => Promise<unknown>) | undefined;
-  notice?: ReactNode;
-}) {
-  const progress = applicationProgressRecord(application);
-  // The child's measured operation carries bytes, rate, ETA and a bar per Spark. The child's
-  // own byte counts are the whole-load budget, a different quantity, so they are not shown here.
-  const measured = availabilityProgress(progress.operation ?? { phase: progress.phase });
-  const nodeName = useLibraryNodeName();
-  const nodeIds = Array.isArray(progress.node_ids)
-    ? progress.node_ids.filter((id): id is string => typeof id === "string")
-    : [];
-  return (
-    <section
-      className={`library-profile-application state-${application.state}`}
-      aria-live="polite"
-      aria-label="Profile load progress"
-    >
-      <div className="library-profile-application-heading">
-        <span>{application.state.replaceAll("-", " ")}</span>
-      </div>
-      <LibraryAvailabilityProgress progress={measured} />
-      {nodeIds.length > 0 && measured.members.length <= 1 && (
-        <ul className="library-profile-application-members" aria-label="Profile load targets">
-          {nodeIds.map((nodeId) => (
-            <li key={nodeId}>
-              <span>{nodeName(nodeId)}</span>
-              <small>Participating</small>
-            </li>
-          ))}
-        </ul>
-      )}
-      {application.status_reason && <p>{application.status_reason}</p>}
-      {application.state === "superseded" && (
-        <p className="library-profile-application-superseded">
-          Not a failure:{" "}
-          {application.superseded_by ? (
-            <>
-              this load continues as application <code>{application.superseded_by}</code>.
-            </>
-          ) : (
-            "a newer profile intent replaced this load; review it again."
-          )}
-        </p>
-      )}
-      <WaitingFor
-        blockers={application.blockers}
-        nextAttemptAt={application.next_attempt_at}
-        phase={measured.phase}
-      />
-      {notice}
-      {cancel && (
-        <CancelOperation
-          what="load"
-          consequence="Stops this profile load and reconciles what it already changed. Sparks may be left partly changed until you load again."
-          command={`vonkctl profile cancel ${application.id}`}
-          cancel={cancel}
-        />
-      )}
-    </section>
-  );
-}
-
-const SUMMARY_LABELS: [keyof FleetProfilePreview["summary"], string][] = [
-  ["starts", "start"],
-  ["stops", "stop"],
-  ["installs", "install"],
-  ["uninstalls", "uninstall"],
-  ["builds", "build"],
-  ["distributions", "distribute"],
-  ["placements", "place"],
-];
-
-/** Review changes: what applying will do, blockers first; selectors and digests stay in the detail. */
-function ProfileReview({ preview }: { preview: FleetProfilePreview }) {
-  const counts = SUMMARY_LABELS.filter(
-    ([key]) => compareWire(preview.summary?.[key] ?? 0, 0) > 0,
-  ).map(([key, label]) => `${formatWire(preview.summary[key])} ${label}`);
-  return (
-    <section className="library-profile-review" aria-label="Review changes">
-      <h4>Review changes</h4>
-      {preview.waits_for_preparation && !preview.allowed && (
-        <p className="library-profile-plain-note">
-          {[
-            "The Controller prepares this first, then loads:",
-            ...(preview.preparation_steps ?? []).map((step) => step.label),
-          ].join(" · ")}
-        </p>
-      )}
-      {preview.next_action === ProfileLoadAction.BLOCKED && preview.reasons[0] && (
-        <p className="library-profile-plain-error" role="alert">
-          {preview.reasons[0].detail}
-        </p>
-      )}
-      {(preview.reasons ?? [])
-        .slice(preview.next_action === ProfileLoadAction.BLOCKED ? 1 : 0)
-        .map((reason) => (
-          <p key={`${reason.code}:${reason.detail}`} className="library-profile-plain-note">
-            {reason.detail}
-          </p>
-        ))}
-      {(preview.effects.gpu_clocks ?? []).map((effect) => (
-        <p key={effect.node_id}>
-          GPU range on {effect.node_id}: {formatWire(effect.desired.min_mhz)}–
-          {formatWire(effect.desired.max_mhz)} MHz
-          {effect.previous_desired
-            ? ` (previous desired ${formatWire(effect.previous_desired.min_mhz)}–${formatWire(effect.previous_desired.max_mhz)} MHz)`
-            : " (previous desired unknown)"}
-          . Workloads continue if enforcement waits.
-        </p>
-      ))}
-      {(preview.effects.adopted ?? []).map((effect) => (
-        <p key={effect.application_id} className="library-profile-plain-note">
-          Existing work on {effect.node_ids.length}{" "}
-          {effect.node_ids.length === 1 ? "Spark" : "Sparks"} continues; its progress is preserved.
-        </p>
-      ))}
-      {(preview.steps ?? []).length > 0 ? (
-        <ol className="library-profile-review-steps">
-          {preview.steps.map((step) => (
-            <li key={formatWire(step.index)}>{step.label}</li>
-          ))}
-        </ol>
-      ) : (preview.effects.adopted ?? []).length > 0 ? (
-        <p>The load completes when continuing work finishes.</p>
-      ) : (
-        <p>
-          {preview.effects.gpu_clocks?.length
-            ? "Every workload already matches this profile."
-            : "Nothing changes: every Spark already matches this profile."}
-        </p>
-      )}
-      {counts.length > 0 && <p className="library-profile-review-summary">{counts.join(" · ")}</p>}
-      <details>
-        <summary>Technical detail</summary>
-        <dl>
-          <div>
-            <dt>Plan digest</dt>
-            <dd>
-              <code>{preview.plan_digest}</code>
-            </dd>
-          </div>
-          <div>
-            <dt>Profile digest</dt>
-            <dd>
-              <code>{preview.profile_digest}</code>
-            </dd>
-          </div>
-        </dl>
-        <ul>
-          {(preview.resolved_assignments ?? []).map((assignment, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: a read-only preview list without ids
-            <li key={index}>
-              <strong>{assignment.recipe_title}</strong> ·{" "}
-              <code>
-                {assignment.recipe_id}@{assignment.recipe_revision_id}
-              </code>{" "}
-              on {(assignment.nodes ?? []).map((node) => node.node_id).join(", ")}
-            </li>
-          ))}
-        </ul>
-      </details>
-    </section>
-  );
-}
-
 /** The server reports per-assignment cache counts: {cached, missing, unknown}. */
 export function cacheSummaryText(summary: Record<string, unknown> | undefined): string {
   const count = (key: string): WireNumber => {

@@ -21,7 +21,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.wire_model import canonical_message, strict_json_datetime
 from vonk_control.categorized_errors import InvalidValue
 from vonk_control.dialect_insert import dialect_insert
-from vonk_control.installed_bytes import (
+from vonk_control.installations.installed_bytes import (
     reconcile_missing_installations,
     refresh_installed_bytes,
 )

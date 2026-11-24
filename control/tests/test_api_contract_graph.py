@@ -13,10 +13,10 @@ from vonk_forge_contracts.recipe import RecipeJobInput
 from vonk_agent_protocol.compiled_execution_plan import CompiledJobInput
 from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
-from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.jobs.queue import JobService
+from vonk_control.security.browser_auth import BrowserAuthService
 
 from .agent_api_support import NODE_A, agent_headers
 from .agent_api_support import agent_system as _agent_system

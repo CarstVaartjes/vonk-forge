@@ -18,10 +18,6 @@ from sqlalchemy import select
 
 from vonk_agent_protocol.state_machines import ReservationState
 from vonk_control.attempt_residues import AttemptResidueReconciler
-from vonk_control.disk_reservations import (
-    describe_disk_charges,
-    outstanding_disk_charges,
-)
 from vonk_control.inventory.repository import MAX_INVENTORY_FUTURE_SKEW
 from vonk_control.models.execution import (
     RecipeInstallation,
@@ -31,7 +27,11 @@ from vonk_control.models.execution import (
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.jobs import Job
 from vonk_control.owner_liveness import ADOPTION_WINDOW, OWNER_SETTLE_GRACE
-from vonk_control.reservation_owners import reservation_owner
+from vonk_control.reservations.disk import (
+    describe_disk_charges,
+    outstanding_disk_charges,
+)
+from vonk_control.reservations.owners import reservation_owner
 
 from .recipe_operations_support import (
     NOW,

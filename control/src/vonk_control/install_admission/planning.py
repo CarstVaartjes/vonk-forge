@@ -22,12 +22,6 @@ from vonk_control.categorized_errors import (
     MissingRecord,
 )
 from vonk_control.cluster_mappings import validate_mapping_parameters
-from vonk_control.disk_reservations import (
-    describe_disk_charges,
-    model_sets_stored_on_nodes,
-    outstanding_disk_charges,
-    runtime_images_named_on_nodes,
-)
 from vonk_control.gpu.health import gpu_health_reason
 from vonk_control.install_admission.contracts import (
     AGENT_UPGRADE_REQUIRED_DETAIL,
@@ -57,6 +51,12 @@ from vonk_control.recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     recipe_topology,
     resolve_recipe_entities,
+)
+from vonk_control.reservations.disk import (
+    describe_disk_charges,
+    model_sets_stored_on_nodes,
+    outstanding_disk_charges,
+    runtime_images_named_on_nodes,
 )
 from vonk_control.resource_planning.types import installation_disk_requirement
 from vonk_control.runtime.preflight import (

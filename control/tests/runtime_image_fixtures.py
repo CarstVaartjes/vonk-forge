@@ -16,6 +16,7 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.image_store.oci import OCI_MANIFEST
 from vonk_control.install_admission.identity import _primary_model_sha256
 from vonk_control.inventory.repository import (
     InventoryRepository,
@@ -26,7 +27,6 @@ from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.models.execution import InstallationNode, RecipeInstallation
 from vonk_control.models.mapping import ClusterMapping
 from vonk_control.models.telemetry import NodeInventorySnapshot
-from vonk_control.oci_image_store import OCI_MANIFEST
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import serialize_json_value
 

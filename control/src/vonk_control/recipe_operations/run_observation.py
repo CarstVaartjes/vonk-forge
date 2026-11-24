@@ -27,7 +27,7 @@ from vonk_control.recipe_operations.observation_helpers import _aware, _run_is_o
 from vonk_control.recipe_operations.progress import _parent_identity, _parent_recovery
 from vonk_control.recipe_operations.rank_authority import _run_accepted_ranks
 from vonk_control.recipe_routes.shared import route_health_recovery_pending
-from vonk_control.run_admission import RunPlan
+from vonk_control.runs.admission import RunPlan
 
 if TYPE_CHECKING:
     from vonk_control.recipe_operations.service import RecipeOperationService

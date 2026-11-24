@@ -16,7 +16,6 @@ from vonk_control.categorized_errors import InvalidValue, MissingRecord
 from vonk_control.jobs import states as job_states
 from vonk_control.logging import redact_text
 from vonk_control.models.jobs import Job
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityError,
 )
@@ -34,6 +33,7 @@ from vonk_control.recipe_update_batches.contract import (
     read_update_document,
 )
 from vonk_control.strict_json import serialize_json_value
+from vonk_control.waits.persisted import schedule_wait
 
 if TYPE_CHECKING:
     from vonk_control.recipe_update_batches.service import RecipeUpdateBatches

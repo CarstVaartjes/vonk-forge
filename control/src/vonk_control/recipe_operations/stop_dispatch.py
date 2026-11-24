@@ -29,14 +29,14 @@ from vonk_control.admission_locking import (
     is_admission_contention,
 )
 from vonk_control.bounded_json import require_mapping
-from vonk_control.distributed_lifecycle import (
-    DistributedLifecycleError,
-    DistributedRecoveryInvalid,
-)
 from vonk_control.distributed_recovery.common import (
     recovery_start_plan,
     run_node_reports_absent,
     settle_absent_run_in_session,
+)
+from vonk_control.distributed_recovery.lifecycle import (
+    DistributedLifecycleError,
+    DistributedRecoveryInvalid,
 )
 from vonk_control.gateway.litellm import ServedModelInfo
 from vonk_control.jobs.documents import (
@@ -75,7 +75,7 @@ from vonk_control.recipe_operations.stop_payloads import (
     durable_run_stop_payloads,
 )
 from vonk_control.recipe_routes.shared import route_publication_transaction
-from vonk_control.run_admission import RunAdmissionBusy
+from vonk_control.runs.admission import RunAdmissionBusy
 from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import read_stored_model, serialize_json_value
 

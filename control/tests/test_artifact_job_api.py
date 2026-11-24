@@ -40,7 +40,7 @@ from vonk_control.auth import Actor
 from vonk_control.bounded_retry import bounded_attempts
 from vonk_control.compiled_artifact_contract import CompiledArtifactContract
 from vonk_control.models.execution import ArtifactJobBlob, ArtifactJobFile
-from vonk_control.operator_acceptance import ControllerAPIRoute
+from vonk_control.operator_acceptance.resolution import ControllerAPIRoute
 
 from .artifact_jobs_support import (
     artifact_create_request,

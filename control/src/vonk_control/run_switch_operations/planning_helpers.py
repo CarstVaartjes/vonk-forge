@@ -25,14 +25,14 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.categorized_errors import InvalidValue
 from vonk_control.jobs.documents import RecipeStartParent, RunSwitchJobPayload
-from vonk_control.memory_reservations import (
-    MEMORY_RESERVATION_KINDS,
-    reviewed_run_memory_reservations,
-)
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.operations.blockers import SwapShortfallEvidence
+from vonk_control.reservations.memory import (
+    MEMORY_RESERVATION_KINDS,
+    reviewed_run_memory_reservations,
+)
 from vonk_control.resource_planning.memory_kinds import memory_reservation_kinds
 from vonk_control.resource_planning.settings import resolve_effective_settings
 from vonk_control.resource_planning.types import ResourceReason

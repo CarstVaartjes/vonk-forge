@@ -1,7 +1,7 @@
 """Find a fixed wall-clock cap that ends work: the shape P1 forbids.
 
 A wait is not a failure; only a stall of the work's own progress ends it
-(``vonk_control.stall_window.progress_verdict``). The forbidden shapes build a
+(``vonk_control.waits.stall_window.progress_verdict``). The forbidden shapes build a
 deadline from an instant of the work (or a persisted one from the clock) plus
 a constant, and end the work when it passes::
 

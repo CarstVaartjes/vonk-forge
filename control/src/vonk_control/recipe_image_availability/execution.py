@@ -13,7 +13,7 @@ from vonk_forge_contracts import RecipeDefinition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-from vonk_control.failure_classification import is_security_failure
+from vonk_control.failures.classification import is_security_failure
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.documents import (
     AvailabilityJobPayload,
@@ -36,7 +36,6 @@ from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
-from vonk_control.persisted_waits import schedule_wait, wait_due
 from vonk_control.recipe_image_availability.contracts import (
     OPERATION_KIND,
     SCHEMA_VERSION,
@@ -55,6 +54,7 @@ from vonk_control.recipe_image_availability.reader_contract import (
 from vonk_control.recipe_operations.availability_intent import RecipeRetryIntent
 from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import serialize_json_value
+from vonk_control.waits.persisted import schedule_wait, wait_due
 from vonk_control.worker.memory_contract import WorkerMemoryComponent
 
 if TYPE_CHECKING:

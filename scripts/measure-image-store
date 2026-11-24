@@ -21,7 +21,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from vonk_control.oci_image_store import OciImageStore, StoredImage
+from vonk_control.image_store.oci import OciImageStore, StoredImage
 
 
 def _stored(blobs: Path) -> dict[str, int]:

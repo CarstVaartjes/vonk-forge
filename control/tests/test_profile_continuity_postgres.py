@@ -45,8 +45,8 @@ from vonk_control.models.fleet import (
     FleetProfileApplication,
 )
 from vonk_control.models.jobs import Job
-from vonk_control.persisted_waits import read_wait
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.waits.persisted import read_wait
 
 from .agent_jobs_support import canonical_start_payload
 from .fleet_profiles_support import (

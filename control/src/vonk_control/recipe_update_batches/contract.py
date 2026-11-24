@@ -22,7 +22,7 @@ from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationCancellationResult,
 )
 from vonk_control.strict_json import StrictJSONModel
-from vonk_control.wait_contract import QueueWait
+from vonk_control.waits.contract import QueueWait
 
 UPDATE_KIND = "recipe.cache.update.v2"
 Identifier = Annotated[str, Field(min_length=1, max_length=128)]

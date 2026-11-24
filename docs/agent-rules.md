@@ -109,7 +109,7 @@ unknown or stale scan as missing (the copy reuses what the agent already
 holds); fleet model removal waits for a fresh scan instead.
 A Spark holds a runtime image while an installed rank there names it (the
 helper keeps an image whose installation plan is on the host): Run/Switch and
-install admission read `disk_reservations.runtime_images_named_on_nodes` (one
+install admission read `reservations.disk.runtime_images_named_on_nodes` (one
 query for all target Sparks), and any other image is charged. Whether a rank is
 installed is `machine_states.rank_installed`, for a stored state or the
 `InstallationNode.state` column; the `rank-installed` added-line guard refuses
@@ -185,7 +185,7 @@ or a schema-1 compatibility path to make the transition appear complete.
   `model_artifact_set_sha256`, never by comparing
   `ModelCacheSet.model_content_sha256` with a Model digest. Likewise "does this
   Spark already hold the model" is the set its installations run
-  (`disk_reservations.model_sets_stored_on_node`), never their Model digests
+  (`reservations.disk.model_sets_stored_on_node`), never their Model digests
   (both: the `set-first-requester` added-line guard).
   NAS coverage is required only by the copy that reads NAS bytes; planning and
   compilation see model identity only (the `model-sets` added-line guard).

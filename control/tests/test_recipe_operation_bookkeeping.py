@@ -30,7 +30,7 @@ from vonk_agent_protocol.state_machines import ReservationState
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import recipe_operations
 from vonk_control.bounded_json import require_mapping
-from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
+from vonk_control.host_authority.runtime_plan import derive_runtime_plan_binding
 from vonk_control.install_admission.contracts import InstallEvidenceChanged
 from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.jobs.documents import DistributedRecoveryMarker
@@ -84,7 +84,7 @@ from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recipe_operations.service import (
     RecipeOperationService as recipe_operations_RecipeOperationService,
 )
-from vonk_control.run_admission import RunAdmissionService
+from vonk_control.runs.admission import RunAdmissionService
 
 from .recipe_builds_support import RecordingQueue as BuildQueue
 from .recipe_builds_support import setup as build_setup

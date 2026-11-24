@@ -46,7 +46,7 @@ from vonk_agent_protocol.state_machines import RouteState
 from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleError
 from vonk_control.distribution.types import DistributionError, DistributionUnknown
-from vonk_control.failure_classification import disposition, is_definite
+from vonk_control.failures.classification import disposition, is_definite
 from vonk_control.lifecycle.core import transition
 from vonk_control.lifecycle.types import (
     Claimed,

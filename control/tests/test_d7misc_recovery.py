@@ -50,9 +50,9 @@ from vonk_control.recipe_builds.cancellation import (
     lock_availability_build_dependency,
 )
 from vonk_control.recipe_builds.common import RecipeBuildResolution
-from vonk_control.recipe_library_types import RecipeLibrarySnapshot
 from vonk_control.recipe_packages.client import RecipePackageClient
 from vonk_control.recipe_packages.contracts import RecipePackageError
+from vonk_control.recipe_packages.library_types import RecipeLibrarySnapshot
 from vonk_control.source_bundles import (
     BundleLimits,
     SourceBundleStore,

@@ -26,7 +26,6 @@ from vonk_control.agent_api.common import AgentApiServices
 from vonk_control.agent_services import build_agent_services, build_enrollment_service
 from vonk_control.enrollment.contract import EnrollmentGrant
 from vonk_control.enrollment.service import EnrollmentService
-from vonk_control.local_ca import LocalCertificateAuthority
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import (
     AgentCertificate,
@@ -35,9 +34,10 @@ from vonk_control.models.fleet import (
     LocalCertificateIssuance,
     LocalCertificateRevocation,
 )
-from vonk_control.pki import IssuedCertificate
+from vonk_control.pki.issuance import IssuedCertificate
+from vonk_control.pki.local_ca import LocalCertificateAuthority
+from vonk_control.pki.step_ca import CERTIFICATE_LIFETIME, StepCAError
 from vonk_control.settings import Settings
-from vonk_control.step_ca import CERTIFICATE_LIFETIME, StepCAError
 from vonk_control.telemetry.maintenance import TelemetryMaintenance
 
 from .ca_material import NODE_ID, NOW, _csr, _leaf, _write_material
@@ -258,8 +258,8 @@ import json, os, sys
 from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
-from vonk_control.local_ca import LocalCertificateAuthority
+from vonk_control.pki.issuance_contract import CertificateIssuanceBinding
+from vonk_control.pki.local_ca import LocalCertificateAuthority
 body = json.load(sys.stdin)
 ca = LocalCertificateAuthority(sessions=sessionmaker(create_engine(body['url'])), **body['options'])
 ca._certificate = lambda *args: os._exit(73)
@@ -620,7 +620,7 @@ def test_production_agent_service_builder_does_not_block_startup_on_local_ca(
             calls.append(kwargs)
 
     monkeypatch.setattr(
-        "vonk_control.local_ca.LocalCertificateAuthority", FakeAuthority
+        "vonk_control.pki.local_ca.LocalCertificateAuthority", FakeAuthority
     )
     settings = _builder_settings(tmp_path, direct_fabric_cidrs="192.168.100.0/24")
 

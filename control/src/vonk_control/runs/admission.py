@@ -1,0 +1,1322 @@
+"""Mapping-fenced memory, port, capability, and fabric admission."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Collection, Iterable, Mapping, Sequence
+from contextlib import nullcontext
+from dataclasses import asdict, dataclass, replace
+from datetime import datetime
+
+from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import read_recipe
+from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
+from vonk_forge_contracts.recipe import RecipeOpenAIInterface
+
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.compiled_execution_plan import MemoryKind
+from vonk_agent_protocol.inventory import MemoryPool
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    InvalidRequestReason,
+    ResourceBlockerCode,
+    RunAdmissionCode,
+)
+from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+from vonk_agent_protocol.state_machines import (
+    InstallationState,
+    ReservationState,
+    RouteState,
+    RunState,
+)
+from vonk_control.admission_locking import (
+    AdmissionLockBusy,
+    AdmissionRowLock,
+    acquire_admission_keys,
+    admission_attempts,
+    is_admission_contention,
+    lock_admission_rows,
+    node_admission_key,
+)
+from vonk_control.catalog.revision_contract import published_steady_peaks
+from vonk_control.categorized_errors import InvalidType, InvalidValue, MissingRecord
+from vonk_control.fleet_profiles.capacity import (
+    inherited_profile_memory,
+    inherited_profile_ports,
+    kept_runs,
+    reservation_visible,
+    sibling_profile_ports,
+)
+from vonk_control.fleet_profiles.port_promises import port_binds
+from vonk_control.gpu.health import gpu_health_reason
+from vonk_control.install_admission.contracts import AdmissionReason, reason_documents
+from vonk_control.inventory.repository import (
+    INVENTORY_MAX_AGE_SECONDS,
+    InventoryRepository,
+)
+from vonk_control.legal_admission import stored_model_display, territorial_admission
+from vonk_control.load_swap import swap_capacity
+from vonk_control.machine_states import rank_installed, reservation_live
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    RecipeRun,
+    ResourceReservation,
+    RunNode,
+)
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.offline_stops import deferred_stop_nodes
+from vonk_control.platform_ports import RENDEZVOUS_PORT, service_host_port_candidates
+from vonk_control.recipe_operations.execution_contract import (
+    RecipeExecutionContractError,
+    run_plan_document,
+)
+from vonk_control.recipe_operations.runtime_specs import (
+    RecipeRuntimeSpecError,
+    recipe_topology,
+    resolve_recipe_entities,
+)
+from vonk_control.reservations.memory import memory_reservations
+from vonk_control.resource_planning.capacity import plan_capacity
+from vonk_control.resource_planning.memory import (
+    memory_capacity_snapshot,
+    memory_requirement,
+)
+from vonk_control.resource_planning.memory_kinds import memory_reservation_kind
+from vonk_control.runs.observed_memory import observed_role_peaks, recent_best_available
+from vonk_control.stored.states import CatalogRevisionState, ClusterMappingState
+from vonk_control.topology import Placement, TopologyError, validate_topology
+
+_PORT_CONFLICTS = {
+    "service": (
+        RunAdmissionCode.PORT_OCCUPIED,
+        "Port {port} is already reserved on this GPU node.",
+    ),
+    "rendezvous": (
+        RunAdmissionCode.RENDEZVOUS_PORT_OCCUPIED,
+        "Multi-node rendezvous port {port} is already reserved.",
+    ),
+}
+PORT_ADMISSION_CODES = frozenset(code for code, _ in _PORT_CONFLICTS.values())
+
+
+@dataclass(frozen=True, slots=True)
+class RunPortDemand:
+    """The ports one mapped rank requires, including before installation.
+
+    ``service_candidates`` are the host ports the endpoint may take, in
+    allocation order; ``service_port`` is the one chosen for this rank (the
+    first candidate until ``allocated`` picks a free one). A logical job has
+    neither.
+    """
+
+    service_candidates: tuple[int, ...]
+    rendezvous_port: int | None
+    service_port: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.service_port is None and self.service_candidates:
+            object.__setattr__(self, "service_port", self.service_candidates[0])
+
+    @property
+    def logical_job(self) -> bool:
+        return not self.service_candidates
+
+    @property
+    def plan_port(self) -> int:
+        # The current run receipt has an integer port even for a logical job.
+        # That placeholder is never admitted or reserved as a network port.
+        return 1024 if self.service_port is None else self.service_port
+
+    @property
+    def required_ports(self) -> tuple[int, ...]:
+        return tuple(
+            sorted(
+                {
+                    port
+                    for port in (self.service_port, self.rendezvous_port)
+                    if port is not None
+                }
+            )
+        )
+
+    def with_service_port(self, port: int) -> RunPortDemand:
+        return replace(self, service_port=port)
+
+
+def run_port_demand(
+    document: Mapping[str, object], *, node_count: int, endpoint_owner: bool
+) -> RunPortDemand:
+    interfaces = document.get("interfaces")
+    if not isinstance(interfaces, list):
+        raise InvalidType("recipe interfaces are invalid")
+    interface = next(
+        (
+            item
+            for item in interfaces
+            if isinstance(item, Mapping) and item.get("adapter") == "openai"
+        ),
+        None,
+    )
+    artifact_interfaces = [
+        item
+        for item in interfaces
+        if isinstance(item, Mapping)
+        and item.get("adapter")
+        in {"audio-job", "video-job", "image-job", "mesh-job", "artifact-job"}
+    ]
+    if interface is None and len(artifact_interfaces) == 1:
+        # A job on several Sparks rendezvous like a service does; it serves no
+        # endpoint, so only the owner reserves the rendezvous port.
+        return RunPortDemand(
+            (), RENDEZVOUS_PORT if node_count > 1 and endpoint_owner else None
+        )
+    port = interface.get("port") if interface is not None else None
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise InvalidType("recipe interface port is invalid")
+    return RunPortDemand(
+        service_host_port_candidates(port, node_count=node_count),
+        RENDEZVOUS_PORT if node_count > 1 and endpoint_owner else None,
+    )
+
+
+def allocate_service_port(
+    session: Session,
+    node_id: str,
+    demand: RunPortDemand,
+    *,
+    excluded_run_ids: Sequence[str] = (),
+    excluded_profile_application_ids: Sequence[str] = (),
+    planned_ports: Collection[int] = (),
+) -> RunPortDemand:
+    """Choose the first authorised endpoint host port not taken on the node.
+
+    The platform owns host ports: a recipe's declared port is only the
+    container port. Every caller that admits or plans a run resolves its demand
+    here so that review, admission and the reservation agree. A port is taken
+    by an active binding, a live promise, or ``planned_ports``: the ports the
+    same profile load gives its other assignments on this Spark. When every
+    candidate is taken the first stays chosen and ``run_port_blockers``
+    reports it.
+    """
+
+    if len(demand.service_candidates) < 2:
+        return demand
+    keys = tuple(str(port) for port in demand.service_candidates)
+    occupied = _taken_ports(
+        session,
+        node_id,
+        keys,
+        excluded_run_ids=excluded_run_ids,
+        excluded_profile_application_ids=excluded_profile_application_ids,
+        planned_ports=planned_ports,
+    )
+    # A reviewed profile promised a specific port to this load. The promise is
+    # what the run must consume, so it is chosen first even when an earlier
+    # candidate has since been released.
+    promised = (
+        set(
+            session.scalars(
+                select(ResourceReservation.resource_key).where(
+                    ResourceReservation.node_id == node_id,
+                    ResourceReservation.kind == "port",
+                    ResourceReservation.state == ReservationState.PROMISED,
+                    ResourceReservation.owner_kind == "fleet-profile",
+                    ResourceReservation.owner_id.in_(
+                        tuple(excluded_profile_application_ids)
+                    ),
+                    ResourceReservation.resource_key.in_(keys),
+                )
+            )
+        )
+        if excluded_profile_application_ids
+        else set()
+    )
+    ordered = sorted(
+        demand.service_candidates, key=lambda port: (str(port) not in promised,)
+    )
+    free = next((port for port in ordered if str(port) not in occupied), None)
+    return demand if free is None else demand.with_service_port(free)
+
+
+def _taken_ports(
+    session: Session,
+    node_id: str,
+    keys: Sequence[str],
+    *,
+    excluded_run_ids: Sequence[str],
+    excluded_profile_application_ids: Sequence[str],
+    planned_ports: Collection[int],
+) -> set[str]:
+    return {str(port) for port in planned_ports if str(port) in keys} | set(
+        session.scalars(
+            select(ResourceReservation.resource_key).where(
+                ResourceReservation.node_id == node_id,
+                ResourceReservation.kind == "port",
+                ResourceReservation.state.in_(
+                    (ReservationState.ACTIVE, ReservationState.PROMISED)
+                ),
+                port_binds(),
+                reservation_visible(
+                    excluded_profile_application_ids,
+                    excluded_run_ids=excluded_run_ids,
+                ),
+                ResourceReservation.resource_key.in_(keys),
+            )
+        )
+    )
+
+
+def run_port_blockers(
+    session: Session,
+    node_id: str,
+    demand: RunPortDemand,
+    *,
+    excluded_run_ids: Sequence[str] = (),
+    excluded_profile_application_ids: Sequence[str] = (),
+    planned_ports: Collection[int] = (),
+) -> tuple[AdmissionReason, ...]:
+    wanted = {*demand.service_candidates, *demand.required_ports}
+    occupied = _taken_ports(
+        session,
+        node_id,
+        tuple(str(port) for port in wanted),
+        excluded_run_ids=excluded_run_ids,
+        excluded_profile_application_ids=excluded_profile_application_ids,
+        planned_ports=planned_ports,
+    )
+    blockers = []
+    for kind, port in (
+        ("service", demand.service_port),
+        ("rendezvous", demand.rendezvous_port),
+    ):
+        if port is None:
+            continue
+        code, detail = _PORT_CONFLICTS[kind]
+        if kind == "rendezvous" and port == demand.service_port:
+            blockers.append(
+                AdmissionReason(
+                    code, f"Port {port} is required by both serving and rendezvous."
+                )
+            )
+        elif (
+            kind == "service"
+            and len(demand.service_candidates) > 1
+            and all(str(item) in occupied for item in demand.service_candidates)
+        ):
+            taken = " and ".join(str(item) for item in demand.service_candidates)
+            blockers.append(
+                AdmissionReason(
+                    code,
+                    f"Every endpoint port ({taken}) is already reserved on this GPU node.",
+                )
+            )
+        elif (kind == "rendezvous" or len(demand.service_candidates) <= 1) and str(
+            port
+        ) in occupied:
+            blockers.append(AdmissionReason(code, detail.format(port=port)))
+    return tuple(blockers)
+
+
+class RunPlanConflict(RuntimeError):
+    code = RunAdmissionCode.PLAN_INVALID
+
+
+class RunPlanInvalid(InvalidRequestError, RunPlanConflict):
+    """The run plan is stale, invalid or blocked by admission evidence: the
+    request is rejected and asked again against the current plan."""
+
+    def __init__(
+        self,
+        *args: object,
+        reason: InvalidRequestReason | None = InvalidRequestReason.CONFLICT,
+    ) -> None:
+        super().__init__(*args, reason=reason)
+
+
+class RunAdmissionBusy(UnknownOutcomeError, RunPlanConflict):
+    """A competing capacity writer or retryable plan blocker holds this admission.
+
+    The class code ``run.capacity_busy`` names lock contention only.  Any other
+    reason the same admission must be retried carries its own typed code (and
+    the blocker list it was derived from), so the waiting operation can show the
+    real cause instead of a generic busy writer.
+    """
+
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
+
+    code = RunAdmissionCode.CAPACITY_BUSY
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str | None = None,
+        blockers: Sequence[AdmissionReason] = (),
+    ) -> None:
+        super().__init__(message)
+        if code is not None:
+            self.code = code
+        self.blockers = tuple(blockers)
+
+    @property
+    def detail(self) -> str | None:
+        """The underlying cause for a wait; ``None`` for plain lock contention."""
+
+        if self.blockers:
+            return _blocker_text(self.blockers)
+        return str(self) if self.code != RunAdmissionBusy.code else None
+
+
+def _blocker_text(blockers: Iterable[AdmissionReason]) -> str:
+    return "; ".join(f"{item.code}: {item.detail}" for item in blockers)
+
+
+#: Typed non-contention waits a run admission can name besides plan blockers.
+RUN_ADMISSION_WAIT_CODES = (
+    RunAdmissionCode.TARGET_MEMBERSHIP_CHANGED,
+    RunAdmissionCode.MAPPING_NOT_READY,
+)
+
+RETRYABLE_PLAN_BLOCKERS = frozenset(
+    {
+        ProjectionCode.NODE_GPU_REQUIRES_RESET,
+        ProjectionCode.NODE_GPU_UNAVAILABLE,
+        RunAdmissionCode.INVENTORY_MISSING,
+        RunAdmissionCode.STALE_INVENTORY,
+        RunAdmissionCode.INSUFFICIENT_MEMORY,
+        RunAdmissionCode.INSUFFICIENT_SWAP,
+        RunAdmissionCode.PORT_OCCUPIED,
+        RunAdmissionCode.RENDEZVOUS_PORT_OCCUPIED,
+        ResourceBlockerCode.INSUFFICIENT,
+    }
+)
+
+
+def _admission_code(code: str) -> str:
+    """The run admission word for one capacity-fit reason.
+
+    A swap shortfall keeps its own word: it names a different remedy, and a
+    reviewed stop clears it only when swap in use alone keeps the load out.
+    """
+
+    if code == ResourceBlockerCode.INSUFFICIENT_SWAP:
+        return RunAdmissionCode.INSUFFICIENT_SWAP
+    if code.startswith(ResourceBlockerCode.INSUFFICIENT):
+        return RunAdmissionCode.INSUFFICIENT_MEMORY
+    return code
+
+
+def require_admissible(plan: RunPlan) -> None:
+    if plan.allowed:
+        return
+    blockers = tuple(reason for item in plan.nodes for reason in item.blockers)
+    codes = {reason.code for reason in blockers}
+    if codes and codes <= RETRYABLE_PLAN_BLOCKERS:
+        # Keep the first blocker's own typed code and every detail: this is a
+        # wait on named evidence (memory, port, inventory), not a busy writer.
+        first = min(blockers, key=lambda reason: reason.code)
+        raise RunAdmissionBusy(
+            f"run is waiting for current inventory or capacity: {_blocker_text(blockers)}",
+            code=first.code,
+            blockers=blockers,
+        )
+    raise RunPlanInvalid(
+        "run.plan_invalid: run plan is blocked by current admission evidence"
+        + (f" ({_blocker_text(blockers)})" if blockers else "")
+    )
+
+
+def _active_recipe_revision(
+    session: Session,
+    revision_id: str | None,
+) -> CatalogDocumentRevision | None:
+    """Load only an active canonical Recipe revision for run admission."""
+
+    if not isinstance(revision_id, str) or not revision_id:
+        return None
+    statement = select(CatalogDocumentRevision).where(
+        CatalogDocumentRevision.id == revision_id,
+        CatalogDocumentRevision.kind == "recipe",
+        CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
+    )
+    return session.scalar(statement)
+
+
+@dataclass(frozen=True, slots=True)
+class RunNodePlan:
+    node_id: str
+    rank: int
+    role: str
+    endpoint_owner: bool
+    port: int
+    allowed: bool
+    inventory_observed_at: datetime | None
+    memory_kind: MemoryKind
+    required_memory_bytes: int
+    available_memory_bytes: int | None
+    active_reserved_bytes: int
+    free_after_bytes: int | None
+    memory_floor_bytes: int
+    fabric_address: str | None
+    fabric_bandwidth_mbps: int | None
+    rendezvous_port: int | None
+    blockers: tuple[AdmissionReason, ...]
+    warnings: tuple[AdmissionReason, ...]
+    memory_pool: MemoryPool | None
+    #: The load phase's peak when it rises above ``required_memory_bytes``.
+    load_memory_bytes: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RunPlan:
+    installation_id: str
+    alias: str
+    mapping_id: str
+    mapping_generation: int
+    recipe_revision_id: str
+    allowed: bool
+    nodes: tuple[RunNodePlan, ...]
+    plan_digest: str
+
+
+def require_same_execution(reviewed: RunPlan, current: RunPlan) -> None:
+    """Re-observe capacity without replacing the reviewed execution effects."""
+
+    def identity(plan: RunPlan) -> tuple[object, ...]:
+        return (
+            plan.installation_id,
+            plan.mapping_id,
+            plan.mapping_generation,
+            plan.recipe_revision_id,
+            tuple(
+                (
+                    node.node_id,
+                    node.rank,
+                    node.role,
+                    node.endpoint_owner,
+                    node.port,
+                    node.memory_kind,
+                    node.required_memory_bytes,
+                    node.memory_floor_bytes,
+                    node.fabric_address,
+                    node.rendezvous_port,
+                    node.memory_pool,
+                )
+                for node in plan.nodes
+            ),
+        )
+
+    if identity(reviewed) != identity(current):
+        raise RunPlanInvalid(
+            RunAdmissionCode.PLAN_STALE, reason=InvalidRequestReason.SUPERSEDED
+        )
+
+
+class RunAdmissionService:
+    def __init__(
+        self,
+        sessions: sessionmaker[Session],
+        *,
+        inventory_max_age: int = INVENTORY_MAX_AGE_SECONDS,
+        memory_floor_bytes: int = PLATFORM_MEMORY_FLOOR_BYTES,
+    ) -> None:
+        self._sessions = sessions
+        self._inventory = InventoryRepository(sessions)
+        self._max_age = inventory_max_age
+        self._floor = memory_floor_bytes
+
+    def plan_run(
+        self,
+        installation_id: str,
+        alias: str,
+        *,
+        now: datetime,
+        released_run_ids: Collection[str] = (),
+        kept_run_ids: Collection[str] = (),
+        _session: Session | None = None,
+        profile_application_id: str | None = None,
+        excluded_profile_application_ids: Sequence[str] = (),
+    ) -> RunPlan:
+        """Build the admission plan for one run.
+
+        ``released_run_ids`` names runs that a reviewed plan stops before it
+        starts this one.  Their Stop phase releases their reservations, so
+        counting those bytes here refuses the replacement for the workload it
+        replaces -- the deadlock an operator can only break by hand.  This is a
+        preview-only relaxation: accepting the run still re-derives the plan
+        without it and refuses when the Stop did not really release the
+        capacity (``run.plan_stale_or_blocked``). ``kept_run_ids`` (with the
+        runs the load's accepted plan keeps) are already on their Sparks and
+        add no demand (``kept_runs``).
+        """
+        with (
+            nullcontext(_session) if _session is not None else self._sessions()
+        ) as session:
+            installation = session.get(RecipeInstallation, installation_id)
+            if installation is None:
+                raise MissingRecord(installation_id)
+            if installation.state != InstallationState.INSTALLED:
+                raise InvalidValue(
+                    "recipe installation is not complete",
+                    reason=InvalidRequestReason.NOT_READY,
+                )
+            mapping = session.get(ClusterMapping, installation.mapping_id)
+            if (
+                mapping is None
+                or mapping.state != ClusterMappingState.READY
+                or mapping.generation != installation.mapping_generation
+            ):
+                raise InvalidValue(
+                    "cluster mapping generation changed after installation",
+                    reason=InvalidRequestReason.CONFLICT,
+                )
+            revision = _active_recipe_revision(session, installation.recipe_revision_id)
+            if revision is None or revision.state != CatalogRevisionState.ACTIVE:
+                raise InvalidValue(
+                    "recipe revision is unavailable",
+                    reason=InvalidRequestReason.NOT_FOUND,
+                )
+            try:
+                resolved_entities = resolve_recipe_entities(session, revision)
+                # The tolerantly parsed Models, never the raw stored documents:
+                # a row an older contract wrote still carries a retired field.
+                parsed_models = resolved_entities.models
+            except (TypeError, ValueError) as error:  # RecipeRuntimeSpecError too
+                raise InvalidValue(
+                    "exact recipe dependencies are unavailable",
+                    reason=InvalidRequestReason.NOT_FOUND,
+                ) from error
+            resolved_models = resolved_entities.model_revisions
+            model_documents = {
+                (item.publisher, item.slug, item.content_digest): parsed_models[
+                    item.content_digest
+                ]
+                for item in resolved_models
+                if item.content_digest in parsed_models
+            }
+            model_version = resolved_models[0] if resolved_models else None
+            model_display = stored_model_display(session, model_version)
+            observed_peaks = observed_role_peaks(session, revision.content_digest)
+            measured_peaks = published_steady_peaks(revision)
+            legal_admission = territorial_admission(
+                model_display,
+                operation="run",
+            )
+            mapping_nodes = tuple(
+                session.scalars(
+                    select(ClusterMappingNode)
+                    .where(ClusterMappingNode.mapping_id == mapping.id)
+                    .order_by(ClusterMappingNode.rank)
+                )
+            )
+            # A planned Stop never discounts an offline rank's unreconciled
+            # effects, even after foreground completion released its other ranks.
+            deferred_ranks = {
+                (job.owner_id, node_id)
+                for job in session.scalars(
+                    select(Job).where(
+                        Job.kind == "recipe.stop",
+                        Job.owner_id.in_(
+                            select(RecipeRun.id).where(
+                                RecipeRun.state.in_([RunState.LOST, RunState.STOPPING])
+                            )
+                        ),
+                    )
+                )
+                for node_id in deferred_stop_nodes(job)
+            }
+            unreconciled_ranks: dict[str, list[tuple[str, str, RunState]]] = {}
+            for node_id, run_id, run_alias, run_state in session.execute(
+                select(RunNode.node_id, RecipeRun.id, RecipeRun.alias, RecipeRun.state)
+                .join(RecipeRun, RecipeRun.id == RunNode.run_id)
+                .where(
+                    RunNode.node_id.in_(
+                        [mapping_node.node_id for mapping_node in mapping_nodes]
+                    ),
+                    RunNode.state != RunState.STOPPED,
+                    RecipeRun.state.in_([RunState.LOST, RunState.STOPPING]),
+                )
+                .order_by(RunNode.node_id, RecipeRun.id)
+            ):
+                deferred = (run_id, node_id) in deferred_ranks
+                if run_state == RunState.STOPPING and not deferred:
+                    continue
+                if run_id in released_run_ids and not deferred:
+                    continue
+                unreconciled_ranks.setdefault(node_id, []).append(
+                    (run_id, run_alias, RunState(run_state))
+                )
+            installed_nodes = {
+                (row.node_id, row.rank, row.role)
+                for row in session.scalars(
+                    select(InstallationNode).where(
+                        InstallationNode.installation_id == installation_id,
+                        rank_installed(InstallationNode.state),
+                    )
+                )
+            }
+        placements = tuple(
+            Placement(item.node_id, item.rank, item.role, item.endpoint_owner)
+            for item in mapping_nodes
+        )
+        capabilities: dict[str, tuple[str, ...]] = {}
+        snapshots = {}
+        for placement in placements:
+            try:
+                snapshot = self._inventory.latest(
+                    placement.node_id,
+                    now=now,
+                    maximum_age=self._max_age,
+                    _session=_session,
+                )
+                snapshots[placement.node_id] = snapshot
+                capabilities[placement.node_id] = tuple(snapshot.capabilities)
+            except KeyError:
+                pass
+        topology_reason: AdmissionReason | None = None
+        try:
+            ordered = validate_topology(revision.document, placements, capabilities)
+        except TopologyError as error:
+            ordered = tuple(sorted(placements, key=lambda item: item.rank))
+            topology_reason = AdmissionReason(error.code, str(error))
+        topology = recipe_topology(revision.document)
+        role_by_name = {role.name: role for role in topology.roles}
+        multi_node = len(ordered) > 1
+        endpoint_owner = next(
+            (item for item in mapping_nodes if item.endpoint_owner), None
+        )
+        if endpoint_owner is None:
+            raise InvalidType(
+                "mapping endpoint owner is missing",
+                reason=InvalidRequestReason.NOT_FOUND,
+            )
+        plans: list[RunNodePlan] = []
+        fabric_addresses: list[str] = []
+        # Both shared ledger projections apply the same owner-scoped visibility
+        # predicate; reviewed stops never discount an unrelated owner's claim.
+        for placement in ordered:
+            released = tuple(
+                run_id
+                for run_id in released_run_ids
+                if (run_id, placement.node_id) not in deferred_ranks
+            )
+            blockers = [] if topology_reason is None else [topology_reason]
+            warnings: list[AdmissionReason] = []
+            for run_id, run_alias, run_state in unreconciled_ranks.get(
+                placement.node_id, ()
+            ):
+                blockers.append(
+                    AdmissionReason(
+                        ResourceBlockerCode.RESIDENT_USAGE_UNKNOWN
+                        if run_state == RunState.STOPPING
+                        else RunAdmissionCode.UNRECONCILED_LOST_RANK,
+                        f"Spark {placement.node_id} has unreconciled rank effects for "
+                        f"model {run_alias} ({run_id}); exact Stop confirmation pending.",
+                    )
+                )
+            if legal_admission.warning is not None:
+                warnings.append(AdmissionReason(*legal_admission.warning))
+            snapshot = snapshots.get(placement.node_id)
+            health_reason = gpu_health_reason(snapshot.gpu_health if snapshot else None)
+            if health_reason is not None:
+                blockers.append(AdmissionReason(*health_reason))
+            if (
+                placement.node_id,
+                placement.rank,
+                placement.role,
+            ) not in installed_nodes:
+                blockers.append(
+                    AdmissionReason(
+                        RunAdmissionCode.NOT_INSTALLED,
+                        "Recipe content is not installed for this mapped rank.",
+                    )
+                )
+            if snapshot is None:
+                blockers.append(
+                    AdmissionReason(
+                        RunAdmissionCode.INVENTORY_MISSING,
+                        "No authenticated memory inventory is available.",
+                    )
+                )
+            elif snapshot.stale:
+                blockers.append(
+                    AdmissionReason(
+                        RunAdmissionCode.STALE_INVENTORY,
+                        "GPU node memory inventory is stale.",
+                    )
+                )
+            role = role_by_name.get(placement.role)
+            if role is None:
+                raise InvalidType("topology role memory is invalid")
+            memory_need = memory_requirement(
+                revision.document,
+                role.resources.memory,
+                placement.role,
+                model_documents,
+                observed_peak_bytes=observed_peaks.get(placement.role)
+                if snapshot is not None and snapshot.memory_pool == "shared"
+                else None,
+                measured=measured_peaks.get(placement.role),
+                platform_floor_bytes=self._floor,
+            )
+            required = memory_need.demand.total_bytes
+            if required is None:
+                raise InvalidValue(
+                    "run memory demand is unavailable for the selected settings",
+                    reason=InvalidRequestReason.NOT_FOUND,
+                )
+            memory_floor = memory_need.floor_bytes
+            memory_kind = memory_need.kind
+            with (
+                nullcontext(_session) if _session is not None else self._sessions()
+            ) as session:
+                reservations = memory_reservations(
+                    session,
+                    placement.node_id,
+                    memory_pool=snapshot.memory_pool if snapshot else None,
+                    excluded_run_ids=released,
+                    kept_run_ids=kept_runs(
+                        session, kept_run_ids, profile_application_id
+                    ),
+                    excluded_profile_application_ids=(
+                        *excluded_profile_application_ids,
+                        *((profile_application_id,) if profile_application_id else ()),
+                    ),
+                    observed_at=snapshot.observed_at if snapshot else None,
+                )
+                best_free = (
+                    recent_best_available(
+                        session, placement.node_id, snapshot.observed_at
+                    )
+                    if snapshot
+                    else None
+                )
+                swap = swap_capacity(
+                    session,
+                    placement.node_id,
+                    snapshot.host_settings if snapshot else None,
+                    excluded_run_ids=released,
+                )
+                excluded_profiles = (
+                    *excluded_profile_application_ids,
+                    *((profile_application_id,) if profile_application_id else ()),
+                )
+                # Ports the same load gives its other assignments on this Spark.
+                planned = tuple(
+                    port
+                    for node_id, port in (
+                        sibling_profile_ports(
+                            session,
+                            profile_application_id,
+                            revision.id,
+                            [item.node_id for item in ordered],
+                        )
+                        if profile_application_id
+                        else ()
+                    )
+                    if node_id == placement.node_id
+                )
+                port_demand = allocate_service_port(
+                    session,
+                    placement.node_id,
+                    run_port_demand(
+                        revision.document,
+                        node_count=len(ordered),
+                        endpoint_owner=placement.endpoint_owner,
+                    ),
+                    excluded_run_ids=released,
+                    excluded_profile_application_ids=excluded_profiles,
+                    planned_ports=planned,
+                )
+                blockers.extend(
+                    run_port_blockers(
+                        session,
+                        placement.node_id,
+                        port_demand,
+                        excluded_run_ids=released,
+                        excluded_profile_application_ids=excluded_profiles,
+                        planned_ports=planned,
+                    )
+                )
+            port = port_demand.plan_port
+            rendezvous_port = port_demand.rendezvous_port
+            if multi_node and (
+                snapshot is None
+                or snapshot.fabric_address is None
+                or snapshot.fabric_bandwidth_mbps is None
+            ):
+                blockers.append(
+                    AdmissionReason(
+                        RunAdmissionCode.FABRIC_ADDRESS_MISSING,
+                        "Authenticated direct-fabric evidence is unavailable.",
+                    )
+                )
+            if snapshot is not None and snapshot.fabric_address is not None:
+                fabric_addresses.append(snapshot.fabric_address)
+            capacity = memory_capacity_snapshot(
+                placement.node_id,
+                memory_need.kind,
+                host=(snapshot.host_memory_total_bytes, snapshot.host_memory_free_bytes)
+                if snapshot
+                else None,
+                accelerator=(
+                    snapshot.gpu_memory_total_bytes,
+                    snapshot.gpu_memory_free_bytes,
+                )
+                if snapshot
+                else None,
+                reservations=reservations,
+                memory_pool=snapshot.memory_pool if snapshot else None,
+                evidence_state="fresh"
+                if snapshot is not None and not snapshot.stale
+                else "unknown",
+                evidence_digest=snapshot.evidence_digest if snapshot else None,
+                evidence_observed_at=snapshot.observed_at if snapshot else None,
+                recent_best_free_bytes=best_free,
+                swap=swap,
+            )
+            reserved = capacity.reserved_bytes or 0
+            available = (
+                capacity.available_bytes - capacity.occupied_bytes
+                if capacity.available_bytes is not None
+                and capacity.occupied_bytes is not None
+                else None
+            )
+            memory_fit = plan_capacity(
+                {placement.node_id: memory_need.demand},
+                [capacity],
+                memory_floor_bytes=memory_floor,
+            ).nodes[0]
+            free_after = (
+                memory_fit.selected_free_after_bytes if health_reason is None else None
+            )
+            if memory_fit.required_bytes is not None:
+                # What the planner charges: an estimate claims at most the
+                # Spark less the floor.
+                required = memory_fit.required_bytes
+            # A GPU fault can leave discovery without any capacity reading.
+            # Wait for healthy inventory instead of blaming the recipe for
+            # a zero-byte physical pool the driver never measured.
+            for reason in memory_fit.reasons if health_reason is None else ():
+                projected = AdmissionReason(
+                    _admission_code(reason.code),
+                    reason.detail,
+                    reason.swap,
+                )
+                if reason.severity == "blocker":
+                    blockers.append(projected)
+                else:
+                    warnings.append(projected)
+            plans.append(
+                RunNodePlan(
+                    placement.node_id,
+                    placement.rank,
+                    placement.role,
+                    placement.node_id == endpoint_owner.node_id,
+                    port,
+                    not blockers,
+                    snapshot.observed_at if snapshot else None,
+                    memory_kind,
+                    required,
+                    available,
+                    reserved,
+                    free_after,
+                    memory_floor,
+                    snapshot.fabric_address if snapshot else None,
+                    snapshot.fabric_bandwidth_mbps if snapshot else None,
+                    rendezvous_port,
+                    tuple(blockers),
+                    tuple(warnings),
+                    snapshot.memory_pool if snapshot else None,
+                    required + memory_need.demand.load_overshoot_bytes
+                    if memory_need.demand.load_overshoot_bytes > 0
+                    else None,
+                )
+            )
+        if multi_node and len(fabric_addresses) != len(set(fabric_addresses)):
+            duplicate = AdmissionReason(
+                RunAdmissionCode.FABRIC_ADDRESS_DUPLICATE,
+                "Mapped GPU nodes must have unique direct-fabric addresses.",
+            )
+            plans = [
+                replace(item, allowed=False, blockers=(*item.blockers, duplicate))
+                for item in plans
+            ]
+        identity = {
+            "schema_version": 1,
+            "installation_id": installation_id,
+            "mapping_id": mapping.id,
+            "mapping_generation": mapping.generation,
+            "recipe_revision_id": revision.id,
+            "nodes": [_node_document(item) for item in plans],
+        }
+        digest = hashlib.sha256(
+            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        return RunPlan(
+            installation_id,
+            alias,
+            mapping.id,
+            mapping.generation,
+            revision.id,
+            all(item.allowed for item in plans),
+            tuple(plans),
+            digest,
+        )
+
+    def accept_run(self, plan: RunPlan, *, actor: str, now: datetime) -> str:
+        refused: UnknownOutcomeError | None = None
+        for _attempt in admission_attempts():
+            try:
+                with self._sessions.begin() as session:
+                    return self.accept_run_in_session(
+                        session, plan, actor=actor, now=now
+                    )
+            except UnknownOutcomeError as error:
+                refused = error
+        assert refused is not None
+        raise refused
+
+    def accept_run_in_session(
+        self,
+        session: Session,
+        plan: RunPlan,
+        *,
+        actor: str,
+        now: datetime,
+        profile_application_id: str | None = None,
+        workload_intent_ordinal: int | None = None,
+    ) -> str:
+        try:
+            reviewed = plan
+            plan = self.plan_run(
+                plan.installation_id,
+                plan.alias,
+                now=now,
+                _session=session,
+                profile_application_id=profile_application_id,
+            )
+            require_admissible(plan)
+            require_same_execution(reviewed, plan)
+            acquire_admission_keys(
+                session,
+                tuple(node_admission_key(node.node_id) for node in plan.nodes),
+                holder="run-admission",
+            )
+            return self._accept_run_locked_in_session(
+                session,
+                plan,
+                actor=actor,
+                now=now,
+                profile_application_id=profile_application_id,
+                workload_intent_ordinal=workload_intent_ordinal,
+            )
+        except AdmissionLockBusy as error:
+            raise RunAdmissionBusy("run capacity writer is busy") from error
+        except OperationalError as error:
+            if is_admission_contention(error):
+                raise RunAdmissionBusy("run capacity writer is busy") from error
+            raise
+
+    def _accept_run_locked_in_session(
+        self,
+        session: Session,
+        plan: RunPlan,
+        *,
+        actor: str,
+        now: datetime,
+        profile_application_id: str | None = None,
+        workload_intent_ordinal: int | None = None,
+    ) -> str:
+        node_ids = tuple(node.node_id for node in plan.nodes)
+        lock_admission_rows(
+            session,
+            (
+                AdmissionRowLock(
+                    "target-agent-nodes",
+                    AgentNode,
+                    select(AgentNode).where(AgentNode.node_id.in_(node_ids)),
+                ),
+                AdmissionRowLock(
+                    "reviewed-catalog-revision",
+                    CatalogDocumentRevision,
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.id == plan.recipe_revision_id
+                    ),
+                ),
+                AdmissionRowLock(
+                    "reviewed-mapping",
+                    ClusterMapping,
+                    select(ClusterMapping).where(ClusterMapping.id == plan.mapping_id),
+                ),
+                AdmissionRowLock(
+                    "reviewed-installation",
+                    RecipeInstallation,
+                    select(RecipeInstallation).where(
+                        RecipeInstallation.id == plan.installation_id
+                    ),
+                ),
+                AdmissionRowLock(
+                    "reviewed-mapping-nodes",
+                    ClusterMappingNode,
+                    select(ClusterMappingNode).where(
+                        ClusterMappingNode.mapping_id == plan.mapping_id
+                    ),
+                ),
+                AdmissionRowLock(
+                    "reviewed-installation-nodes",
+                    InstallationNode,
+                    select(InstallationNode).where(
+                        InstallationNode.installation_id == plan.installation_id
+                    ),
+                ),
+                AdmissionRowLock(
+                    "node-resource-reservations",
+                    ResourceReservation,
+                    select(ResourceReservation).where(
+                        ResourceReservation.node_id.in_(node_ids),
+                        reservation_live(ResourceReservation.state),
+                    ),
+                ),
+            ),
+        )
+        mapping = session.get(ClusterMapping, plan.mapping_id)
+        installation = session.get(RecipeInstallation, plan.installation_id)
+        revision = _active_recipe_revision(session, plan.recipe_revision_id)
+        mapping_nodes = tuple(
+            session.scalars(
+                select(ClusterMappingNode)
+                .where(ClusterMappingNode.mapping_id == plan.mapping_id)
+                .order_by(ClusterMappingNode.rank)
+            )
+        )
+        fresh = self.plan_run(
+            plan.installation_id,
+            plan.alias,
+            now=now,
+            _session=session,
+            profile_application_id=profile_application_id,
+        )
+        require_admissible(fresh)
+        require_same_execution(plan, fresh)
+        if {node.node_id for node in fresh.nodes} != set(node_ids):
+            raise RunAdmissionBusy(
+                "run target membership changed during admission",
+                code=RunAdmissionCode.TARGET_MEMBERSHIP_CHANGED,
+            )
+        plan = fresh
+        if mapping is None or mapping.state != ClusterMappingState.READY:
+            raise RunAdmissionBusy(
+                "run mapping is waiting to become ready",
+                code=RunAdmissionCode.MAPPING_NOT_READY,
+            )
+        if (
+            installation is None
+            or installation.mapping_id != plan.mapping_id
+            or installation.mapping_generation != plan.mapping_generation
+            or revision is None
+            or revision.state != CatalogRevisionState.ACTIVE
+            or tuple(
+                (node.node_id, node.rank, node.role, node.endpoint_owner)
+                for node in mapping_nodes
+            )
+            != tuple(
+                (node.node_id, node.rank, node.role, node.endpoint_owner)
+                for node in plan.nodes
+            )
+        ):
+            raise RunPlanInvalid(
+                RunAdmissionCode.PLAN_STALE, reason=InvalidRequestReason.SUPERSEDED
+            )
+        try:
+            resolve_recipe_entities(session, revision)
+        except RecipeRuntimeSpecError as error:
+            raise RunPlanInvalid(
+                RunAdmissionCode.DEPENDENCIES_STALE,
+                reason=InvalidRequestReason.SUPERSEDED,
+            ) from error
+        # The fresh plan above chose each node's endpoint host port under the
+        # node locks this admission holds; reserve exactly that port.
+        port_demands = {
+            node.node_id: _planned_port_demand(
+                run_port_demand(
+                    revision.document,
+                    node_count=len(plan.nodes),
+                    endpoint_owner=node.endpoint_owner,
+                ),
+                node,
+            )
+            for node in plan.nodes
+        }
+        inherited_ports = (
+            inherited_profile_ports(
+                session,
+                profile_application_id,
+                plan.recipe_revision_id,
+                plan.alias,
+                {
+                    node_id: demand.required_ports
+                    for node_id, demand in port_demands.items()
+                },
+                workload_intent_ordinal=workload_intent_ordinal,
+            )
+            if profile_application_id is not None
+            else {}
+        )
+        inherited_memory = (
+            inherited_profile_memory(
+                session,
+                profile_application_id,
+                plan.recipe_revision_id,
+                plan.alias,
+                {
+                    node.node_id: (
+                        node.memory_kind,
+                        node.required_memory_bytes,
+                        node.memory_pool,
+                    )
+                    for node in plan.nodes
+                },
+                workload_intent_ordinal=workload_intent_ordinal,
+            )
+            if profile_application_id is not None
+            else {}
+        )
+        logical_job = next(iter(port_demands.values())).logical_job
+        # Exact observation is the sole current run contract for every
+        # topology.  Singleton runs retain a durable generation while their
+        # rendezvous fields remain explicitly nullable.
+        observation_schema_version = 2
+        try:
+            persisted_plan = run_plan_document(
+                {
+                    "schema_version": 1,
+                    "observation_schema_version": observation_schema_version,
+                    "run_generation": 1,
+                    "installation_id": plan.installation_id,
+                    "mapping_id": plan.mapping_id,
+                    "mapping_generation": plan.mapping_generation,
+                    "recipe_revision_id": plan.recipe_revision_id,
+                    "plan_digest": plan.plan_digest,
+                    "nodes": [_node_document(item) for item in plan.nodes],
+                    "execution_mode": "one-shot-jobs" if logical_job else None,
+                    "upstream_provider": (
+                        "hosted_vllm"
+                        if read_recipe(revision.document).settings.kind == "decision"
+                        else "openai"
+                    ),
+                    "upstream_model": next(
+                        (
+                            interface.model_aliases[0]
+                            for interface in read_recipe(revision.document).interfaces
+                            if isinstance(interface, RecipeOpenAIInterface)
+                            and interface.model_aliases
+                        ),
+                        None,
+                    ),
+                }
+            )
+        except RecipeExecutionContractError as error:
+            raise RunPlanInvalid(RunAdmissionCode.PLAN_INVALID) from error
+        run = RecipeRun(
+            installation_id=plan.installation_id,
+            mapping_id=plan.mapping_id,
+            mapping_generation=plan.mapping_generation,
+            run_generation=1,
+            alias=plan.alias,
+            plan_digest=plan.plan_digest,
+            plan=persisted_plan,
+            state=RunState.PLANNED,
+            route_state=RouteState.WITHDRAWN,
+            actor=actor,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(run)
+        session.flush()
+        for node in plan.nodes:
+            session.add(
+                RunNode(
+                    run_id=run.id,
+                    node_id=node.node_id,
+                    rank=node.rank,
+                    role=node.role,
+                    state=RunState.PLANNED,
+                    port=node.port,
+                    reserved_memory_bytes=node.required_memory_bytes,
+                    updated_at=now,
+                )
+            )
+            memory_kind = memory_reservation_kind(node.memory_kind)
+            inherited = inherited_memory.get(node.node_id)
+            if inherited is not None:
+                inherited.owner_kind = "run"
+                inherited.owner_id = run.id
+                inherited.resource_key = plan.plan_digest
+                inherited.plan_digest = plan.plan_digest
+                inherited.state = ReservationState.ACTIVE
+            else:
+                session.add(
+                    ResourceReservation(
+                        node_id=node.node_id,
+                        kind=memory_kind,
+                        resource_key=plan.plan_digest,
+                        amount_bytes=node.required_memory_bytes,
+                        owner_kind="run",
+                        owner_id=run.id,
+                        state=ReservationState.ACTIVE,
+                        plan_digest=plan.plan_digest,
+                        created_at=now,
+                    )
+                )
+            for reserved_port in port_demands[node.node_id].required_ports:
+                inherited = inherited_ports.get((node.node_id, reserved_port))
+                if inherited is not None:
+                    inherited.owner_kind = "run"
+                    inherited.owner_id = run.id
+                    inherited.plan_digest = plan.plan_digest
+                    inherited.state = ReservationState.ACTIVE
+                    continue
+                session.add(
+                    ResourceReservation(
+                        node_id=node.node_id,
+                        kind="port",
+                        resource_key=str(reserved_port),
+                        amount_bytes=0,
+                        owner_kind="run",
+                        owner_id=run.id,
+                        state=ReservationState.ACTIVE,
+                        plan_digest=plan.plan_digest,
+                        created_at=now,
+                    )
+                )
+        return run.id
+
+
+def _planned_port_demand(demand: RunPortDemand, node: RunNodePlan) -> RunPortDemand:
+    return demand if demand.logical_job else demand.with_service_port(node.port)
+
+
+def _node_document(node: RunNodePlan) -> dict[str, object]:
+    document = {
+        **asdict(node),
+        "blockers": reason_documents(node.blockers),
+        "warnings": reason_documents(node.warnings),
+        "inventory_observed_at": (
+            node.inventory_observed_at.isoformat()
+            if node.inventory_observed_at
+            else None
+        ),
+    }
+    if node.load_memory_bytes is None:
+        # The stored contract omits it: a plan without a rise keeps its digest.
+        del document["load_memory_bytes"]
+    return document

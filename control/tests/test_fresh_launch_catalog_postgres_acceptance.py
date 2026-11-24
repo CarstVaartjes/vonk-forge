@@ -50,7 +50,7 @@ from vonk_control.library.contract import (
 )
 from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.models.catalog import CatalogDocumentRevision
-from vonk_control.recipe_library_types import RecipeLibraryItem
+from vonk_control.recipe_packages.library_types import RecipeLibraryItem
 from vonk_control.source_bundles import SourceBundleStore
 
 from .recipe_library_source import recipe_library_root

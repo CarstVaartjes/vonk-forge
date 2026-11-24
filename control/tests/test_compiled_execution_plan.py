@@ -25,7 +25,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
 )
 from vonk_agent_protocol.compiled_execution_plan import CompiledPlacement
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.compiled_execution_plan import (
+from vonk_control.execution_plan.compiled import (
     EMPTY_SHA256,
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
     CompiledExecutionPlanError,
@@ -37,10 +37,10 @@ from vonk_control.compiled_execution_plan import (
     materialized_model_path,
     validate_compiled_launch_payload,
 )
-from vonk_control.compiled_execution_plan import (
+from vonk_control.execution_plan.compiled import (
     compile_verified_execution_plan as _compile_verified_plan,
 )
-from vonk_control.execution_plan_service import (
+from vonk_control.execution_plan.service import (
     ControllerExecutionPlanService,
     ExecutionPlanCompilationError,
     _placement,

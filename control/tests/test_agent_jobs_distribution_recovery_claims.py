@@ -24,10 +24,10 @@ from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.predicates import _claim_predicate
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.fleet_projection.nas_transfer_rate import nas_rates
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
-from vonk_control.nas_transfer_rate import nas_rates
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .agent_jobs_support import (

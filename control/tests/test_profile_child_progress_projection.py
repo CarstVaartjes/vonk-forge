@@ -25,7 +25,7 @@ from vonk_agent_protocol.state_machines import DesiredAssignmentState
 from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control.agent_contacts import record_contact
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.execution_plan_service import (
+from vonk_control.execution_plan.service import (
     ControllerExecutionPlanService,
     _build_package,
 )
@@ -68,7 +68,7 @@ from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
 from vonk_control.run_switch_operations.results import _stored_result
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.stored.json_values import write_guard_mode
-from vonk_control.wait_contract import QueueWait
+from vonk_control.waits.contract import QueueWait
 
 from .node_contacts import contact_row
 from .preflight_fixtures import record_passing_preflight

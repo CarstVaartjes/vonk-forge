@@ -21,8 +21,8 @@ from tests.test_fleet_stream import (
     _production_stream_store,
 )
 from tests.test_observation_transfer import _app_peer, _large_snapshot
+from vonk_control.fleet_events.stream import FleetStream
 from vonk_control.fleet_projection.service import FleetProjection
-from vonk_control.fleet_stream import FleetStream
 from vonk_control.models.fleet import AgentNode, AgentNodeContact
 from vonk_control.models.telemetry import FleetStreamEvent
 from vonk_control.observation.platform_errors import ObservationCaptureUnavailable

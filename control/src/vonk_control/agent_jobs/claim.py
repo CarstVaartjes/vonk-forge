@@ -83,8 +83,8 @@ from vonk_control.models.operations import AgentOperation as StoredOperation
 from vonk_control.models.operations import AgentOperationAttempt
 from vonk_control.operations.progress import stored_progress
 from vonk_control.own_cleanup import CLEANUP_KINDS
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recovery_policy import WAIT_STEP
+from vonk_control.waits.persisted import schedule_wait
 
 if TYPE_CHECKING:
     from vonk_control.agent_jobs.service import AgentJobService

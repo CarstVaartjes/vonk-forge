@@ -1,0 +1,898 @@
+"""Failure diagnostics rendered on request from durable failure rows.
+
+No commands or network calls run here, and nothing is stored: the bundle is a
+redacted view of the attempt result, job result or progress the Controller
+already keeps, so an offline node never delays it and a later read never
+disagrees with the row it describes.
+"""
+
+from __future__ import annotations
+
+import re
+import unicodedata
+from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
+from typing import Literal
+from urllib.parse import quote
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
+from sqlalchemy import String, and_, cast, or_, select
+from sqlalchemy.orm import Session, sessionmaker
+
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
+from vonk_agent_protocol.failure_evidence import (
+    LOG_TAIL_BYTES,
+    FailureDiagnostics,
+    FailureLogTail,
+    add_known_dropped_bytes,
+)
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    FailureCode,
+    LifecycleState,
+    SecurityRefusalReason,
+)
+from vonk_control import agent_operation_states
+from vonk_control.artifact_jobs import states as ajs
+from vonk_control.bounded_json import BoundedJSONError, require_integer, sequence
+from vonk_control.failures.summary_cut import summary_cut
+from vonk_control.fleet_profiles.operation_projection import _operation_item
+from vonk_control.jobs.documents import AvailabilityJobPayload
+from vonk_control.lifecycle.job_ranks import ended_artifact_job
+from vonk_control.lifecycle.run_switch import _stored_child
+from vonk_control.logging import redact_text
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operations.blockers import OperationBlocker, read_blockers
+from vonk_control.operations.contract import OperationEvidenceDownload
+from vonk_control.operations.item_contract import (
+    OperationItem,
+    OperationResultFacts,
+    operation_item,
+)
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import StrictJSONModel, read_stored_model
+
+MAX_LOG_BYTES = LOG_TAIL_BYTES
+MAX_LOG_LINES = 32
+_SENSITIVE = re.compile(
+    r"password|secret|token|authorization|cookie|credential|private.?key|api.?key|environment",
+    re.IGNORECASE,
+)
+# A line-level filter, so every alternative must name a credential *value*, not
+# merely a topic.  A bare ``authorization`` alternative redacted any line that
+# mentioned a table such as ``runtime_image_authorizations``, and a bare
+# ``token`` alternative redacted any line that mentioned
+# ``num_speculative_tokens`` -- both are exactly the configuration and history a
+# failed workload is diagnosed from.  Assignment and authentication shapes still
+# match, and ``redact_text`` removes the credential inside them.
+_SECRET_LINE = re.compile(
+    r"(?:password|passwd|secret|token|authorization|cookie|credential)\s*[:=]"
+    r"|private[ _-]?key|api[ _-]?key"
+    r"|(?:bearer|basic)\s+\S"
+    r"|-----BEGIN|-----END",
+    re.IGNORECASE,
+)
+# An opaque value is a whole token.  Matching a run inside a longer word cut the
+# module out of every Python frame path, so a traceback arrived as
+# ``python3.[redacted opaque value].py`` and named no frame at all.
+_OPAQUE_SECRET = re.compile(
+    r"(?<![A-Za-z0-9/.])([A-Za-z0-9+/=_-]{40,})(?![A-Za-z0-9/.])"
+)
+# An opaque run is kept only as a ``name=value`` field whose value is a refusal
+# code of the contract (the enum decides):
+# ``error_code=helper_request_plan_binding_invalid``.  Anything else, name
+# included, is redacted whole: a UUID or a short value behind a name may be a
+# credential, and so may the name.  The agent applies the same rule (shared
+# vector ``opaque-value-redaction-v1.json``).
+_FIELD = re.compile(r"([A-Za-z_][A-Za-z0-9_]{0,31})=(.*)", re.DOTALL)
+_OPAQUE_MARKER = "[redacted opaque value]"
+_REFUSAL_CODES = frozenset(reason.value for reason in SecurityRefusalReason)
+
+
+def _redact_opaque(match: re.Match[str]) -> str:
+    token = match.group(1)
+    field = _FIELD.fullmatch(token)
+    if field is not None and field.group(2) in _REFUSAL_CODES:
+        return token
+    return _OPAQUE_MARKER
+
+
+# The failure-evidence closed sets are named once here so the bundle fields and
+# the helpers that build them cannot disagree. ``FailureCategory`` mirrors the
+# protocol's ``FailureDiagnostics.category`` literal set, which is defined in
+# the shared ``vonk_agent_protocol`` package rather than this module.
+EvidenceSource = Literal["agent", "controller"]
+FailureCategory = Literal[
+    "platform-policy",
+    "capacity",
+    "network",
+    "digest",
+    "timeout",
+    "runtime",
+    "unknown",
+]
+_EVIDENCE_SOURCE = TypeAdapter(EvidenceSource)
+_CATEGORY_MARKERS: tuple[tuple[FailureCategory, tuple[str, ...]], ...] = (
+    (
+        "platform-policy",
+        (
+            "permission",
+            "denied",
+            "namespace",
+            "sandbox",
+            "policy",
+            "mapping",
+            "proc-mount",
+        ),
+    ),
+    ("capacity", ("space", "storage", "capacity", "memory-limit")),
+    ("digest", ("digest", "integrity", "verification", "checksum")),
+    ("timeout", ("timeout", "deadline")),
+    ("network", ("network", "connection", "download", "upstream", "rate_limit")),
+)
+
+
+class EvidenceModel(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+
+
+class EvidenceContext(EvidenceModel):
+    operation_id: str = Field(min_length=1, max_length=128)
+    attempt: int = Field(le=MAX_DATABASE_INTEGER, ge=0)
+    kind: str = Field(min_length=1, max_length=80)
+    node_ids: list[str] = Field(max_length=128)
+    updated_at: str
+    source: EvidenceSource
+    rank: int | None = Field(default=None, ge=0, le=MAX_DATABASE_INTEGER)
+
+
+_MAX_COLLECTOR_ERRORS = 8
+
+
+class FailureEvidenceBundle(EvidenceModel):
+    schema_version: Literal[2] = 2
+    context: EvidenceContext
+    collected_at: str
+    summary: str = Field(max_length=512)
+    error_code: str = Field(min_length=1, max_length=64)
+    detail: str | None = Field(default=None, max_length=1024)
+    #: The measured exit code of the job process, when its receipt reports one.
+    exit_code: int | None = Field(default=None, ge=0, le=255)
+    diagnostics: FailureDiagnostics
+    collector_errors: list[str] = Field(max_length=_MAX_COLLECTOR_ERRORS)
+    #: What the operation was waiting for when it stopped, when it recorded that.
+    blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
+
+
+#: The states of an operation (of any kind) whose failure evidence is downloadable:
+#: a failure, a cancellation, or a wait for a person.
+FAILED_ATTEMPT_STATES = (
+    LifecycleState.FAILED.value,
+    LifecycleState.CANCELLED.value,
+    LifecycleState.NEEDS_OPERATOR.value,
+)
+
+# The attempts whose own terminal failure receipt must stay readable are the failed
+# ones and those whose executor reported the effect unknown.  A lapsed lease or a
+# supersession is not among them by itself: it owns no receipt, and its
+# operation-level reason may already describe a later attempt.  Only a receipt the
+# attempt actually kept, or the park that still names it, qualifies.  The typed
+# ``observation_cause`` tells the two kinds of observed attempt apart.
+
+
+def _aware(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _plain_text(value: str) -> str:
+    return "".join(
+        character
+        for character in value
+        if (character in "\n\t" or ord(character) >= 32)
+        and ord(character) != 127
+        and unicodedata.category(character) != "Cf"
+    )
+
+
+def safe_text(value: str) -> str:
+    value = _plain_text(value)
+    # Dropping sensitive lines handles quoted multiword assignments, partial
+    # PEM blocks and encoded values without trying to understand credentials.
+    lines = []
+    for line in value.splitlines():
+        if _SECRET_LINE.search(line):
+            lines.append("[redacted diagnostic line]")
+        else:
+            lines.append(_OPAQUE_SECRET.sub(_redact_opaque, redact_text(line)))
+    return "\n".join(lines) + ("\n" if value.endswith("\n") else "")
+
+
+def _keep_end(text: str, limit: int) -> tuple[str, int]:
+    """Keep the end of ``text`` within ``limit`` bytes, and report what it dropped.
+
+    The end is what happened last, so a bound is applied from the front.  Cutting
+    the end of a tail keeps stale lines and discards the failure that ended it.
+    The cut moves on to a line boundary unless that would leave nothing, as the
+    agent's ``clamp_tail`` does; the shared clamp vectors hold the two equal.
+    """
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text, 0
+    cut = len(encoded) - limit
+    while cut < len(encoded) and encoded[cut] & 0xC0 == 0x80:
+        cut += 1
+    boundary = encoded.find(b"\n", cut)
+    if 0 <= boundary < len(encoded) - 1:
+        cut = boundary + 1
+    return encoded[cut:].decode("utf-8"), cut
+
+
+# The Rust protocol's `omission_marker`: the line between the cause lines a
+# retained tail kept from above its window and the window itself. The shared
+# vector agent_protocol/fixtures/log-tail-omission-v1.json holds the two equal.
+_OMISSION_MARKER = re.compile(r"\[[0-9]+ bytes omitted\]")
+
+
+def _keep_retained(text: str, limit: int) -> tuple[str, int]:
+    """Bound a retained tail without losing its shape, and report what it dropped.
+
+    The agent's tail may carry cause lines kept from above its window, an
+    omission marker, then the window. Cutting from the front would drop the
+    cause first, so the window's front is cut instead; the causes keep at least
+    half the bound. Text with no marker is one tail and keeps its end.
+    """
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text, 0
+    start = 0
+    found: tuple[int, int] | None = None
+    for line in encoded.split(b"\n"):
+        if _OMISSION_MARKER.fullmatch(line.decode("utf-8")):
+            found = (start, start + len(line) + 1)
+            break
+        start += len(line) + 1
+    if found is None:
+        return _keep_end(text, limit)
+    causes, marker, window = (
+        encoded[: found[0]],
+        encoded[found[0] : found[1]],
+        encoded[found[1] :],
+    )
+    budget = limit - len(marker)
+    room = max(budget // 2, budget - len(window))
+    if len(causes) > room:
+        cut = room
+        while cut > 0 and causes[cut] & 0xC0 == 0x80:
+            cut -= 1
+        newline = causes.rfind(b"\n", 0, cut)
+        causes = causes[: newline + 1] if newline >= 0 else causes[:cut]
+    kept_window, _ = _keep_end(window.decode("utf-8"), budget - len(causes))
+    kept = causes.decode("utf-8") + marker.decode("utf-8") + kept_window
+    return kept, len(encoded) - len(kept.encode("utf-8"))
+
+
+def log_tail(value: str) -> FailureLogTail:
+    original = value.encode("utf-8")
+    truncated = len(original) > MAX_LOG_BYTES or len(value.splitlines()) > MAX_LOG_LINES
+    # Discard an incomplete leading line before sanitizing a tail: a cut
+    # Authorization/PEM prefix must not turn its remainder into visible text.
+    candidate = original[-MAX_LOG_BYTES:].decode("utf-8", errors="replace")
+    if len(original) > MAX_LOG_BYTES:
+        candidate = candidate.partition("\n")[2]
+    selected = candidate.splitlines()[-MAX_LOG_LINES:]
+    cleaned = (
+        safe_text("\n".join(selected))
+        .encode()[-MAX_LOG_BYTES:]
+        .decode("utf-8", errors="ignore")
+    )
+    return FailureLogTail(
+        text=cleaned,
+        truncated=truncated,
+        dropped_bytes=max(0, len(original) - len(candidate.encode())),
+        dropped_lines=max(0, len(value.splitlines()) - len(selected)),
+    )
+
+
+def failure_code(result: OperationResultFacts) -> tuple[str, str | None]:
+    """Return the stable error code and redacted detail a failure result names."""
+    code = result.error_code or result.code or FailureCode.OPERATION_FAILED.value
+    code = re.sub(r"[^a-z0-9_]", "_", str(code).lower())[:64]
+    if not code or not code[0].isalpha():
+        code = FailureCode.OPERATION_FAILED.value
+    detail = result.detail or result.diagnostic or result.helper_error_code
+    return code, safe_text(str(detail))[:1024] if detail is not None else None
+
+
+def classification(kind: str, result: OperationResultFacts) -> FailureCategory:
+    # Phase/state comes from typed fields. Classification uses stable emitted
+    # error/diagnostic codes, never searches logs to invent operation progress.
+    code = " ".join(
+        value or ""
+        for value in (
+            result.error_code,
+            result.code,
+            result.diagnostic,
+            result.helper_error_code,
+        )
+    ).casefold()
+    for category, markers in _CATEGORY_MARKERS:
+        if any(marker in code for marker in markers):
+            return category
+    return "runtime" if kind.startswith(("recipe.", "agent.upgrade")) else "unknown"
+
+
+class AttemptPhase(BaseModel):
+    """The one thing the evidence reads of a family's progress document."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    phase: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _tolerate(cls, value: object) -> object:
+        phase = (
+            value.get("phase")
+            if isinstance(value, Mapping)
+            else getattr(value, "phase", None)
+        )
+        return {"phase": phase if isinstance(phase, str) else None}
+
+
+class FailedAttempt(BaseModel):
+    """One failed attempt of any family: what the evidence bundle is built from."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    attempt: int
+    kind: str
+    node_ids: list[str] = Field(default_factory=list)
+    updated_at: str
+    source: EvidenceSource | None = None
+    rank: int | None = None
+    #: A Controller-owned record has no Spark operation, so no agent observations.
+    agent_operation: bool = True
+    progress: AttemptPhase | None = None
+    result: OperationResultFacts = Field(default_factory=OperationResultFacts)
+    blockers: list[OperationBlocker] | None = None
+
+    @field_validator("node_ids", mode="before")
+    @classmethod
+    def _node_ids(cls, value: object) -> object:
+        return [] if value is None else value
+
+    @field_validator("blockers", mode="before")
+    @classmethod
+    def _readable_blockers(cls, value: object) -> object:
+        return None if value is None else read_blockers(value)
+
+    @field_validator("result", mode="before")
+    @classmethod
+    def _result(cls, value: object) -> object:
+        return {} if value is None else value
+
+    @property
+    def evidence_source(self) -> EvidenceSource:
+        return self.source or ("agent" if self.node_ids else "controller")
+
+
+def _required_text(value: object, detail: str) -> str:
+    """Return a persisted string or fail loudly; the field is required."""
+
+    if not isinstance(value, str):
+        raise BoundedJSONError(f"{detail} is invalid")
+    return value
+
+
+def _optional_int(value: object, detail: str) -> int | None:
+    """Return a persisted optional integer without defaulting a wrong type."""
+
+    return None if value is None else require_integer(value, detail)
+
+
+def _required_node_ids(value: object) -> list[str]:
+    """Read the persisted node list, failing on a non-string member.
+
+    A value that is not a JSON array keeps the existing omission policy: the
+    previous ``sequence(...) or ()`` read treated it as an empty fleet.
+    """
+
+    members = sequence(value)
+    if members is None:
+        return []
+    return [_required_text(member, "operation node id") for member in members]
+
+
+def sanitize_diagnostics(value: object) -> FailureDiagnostics:
+    diagnostics = read_stored_model(FailureDiagnostics, value)
+    document = diagnostics.model_dump(mode="json")
+    for field in ("stdout", "stderr"):
+        # The agent already retained this tail from the whole stream, so the
+        # Controller only redacts it.  Re-selecting the window here would keep
+        # the head of a tail and discard the failure that ended it, and it would
+        # report a bound the agent had already reported.  Redaction can grow
+        # the text; the bound then keeps the causes ahead of the marker.
+        cleaned, dropped = _keep_retained(
+            safe_text(document[field]["text"]), MAX_LOG_BYTES
+        )
+        document[field]["text"] = cleaned
+        if dropped:
+            document[field]["truncated"] = True
+            document[field]["dropped_bytes"] = add_known_dropped_bytes(
+                document[field]["dropped_bytes"], dropped
+            )
+    for field in ("versions", "sandbox", "storage", "preflight"):
+        document[field] = [
+            {
+                "name": safe_text(prop["name"])[:64],
+                "value": "[redacted]"
+                if _SENSITIVE.search(_plain_text(prop["name"]))
+                else safe_text(prop["value"])[:256],
+            }
+            for prop in document[field]
+        ]
+    document["collector_errors"] = [
+        safe_text(error)[:256] for error in document["collector_errors"]
+    ]
+    return read_stored_model(FailureDiagnostics, document)
+
+
+def collect_failure(item: FailedAttempt, *, now: datetime) -> FailureEvidenceBundle:
+    result = item.result
+    errors: list[str] = []
+    diagnostics: FailureDiagnostics | None = None
+    if result.diagnostics_invalid:
+        errors.append("agent-diagnostics-invalid")
+    elif result.diagnostics is not None:
+        try:
+            diagnostics = sanitize_diagnostics(result.diagnostics)
+        except ValueError, TypeError:
+            errors.append("agent-diagnostics-invalid")
+    # Evidence the Controller dropped at ingress, with the field that refused it.
+    errors.extend(
+        f"{drop.code.value} at {drop.location} ({drop.error_type})"
+        for drop in result.dropped_evidence[: _MAX_COLLECTOR_ERRORS - len(errors)]
+    )
+    if diagnostics is None:
+        phase = (
+            (item.progress.phase if item.progress is not None else None)
+            or result.stage
+            or "unknown"
+        )
+        diagnostics = FailureDiagnostics(
+            collected_at=now.isoformat(),
+            phase=safe_text(str(phase))[:80],
+            category=classification(item.kind, result),
+            stdout=log_tail(result.stdout or ""),
+            stderr=log_tail(result.stderr or result.log_excerpt or ""),
+            versions=[],
+            sandbox=[],
+            storage=[],
+            preflight=[],
+            collector_errors=["agent-observations-unavailable"]
+            if item.node_ids and item.agent_operation
+            else [],
+        )
+    error_code, detail = failure_code(result)
+    summary = result.summary or result.reason or result.detail or "Operation failed"
+    return FailureEvidenceBundle(
+        context=EvidenceContext(
+            operation_id=item.id,
+            attempt=item.attempt,
+            kind=item.kind,
+            node_ids=item.node_ids[:128],
+            updated_at=item.updated_at,
+            source=item.evidence_source,
+            rank=item.rank,
+        ),
+        collected_at=now.isoformat(),
+        summary=summary_cut(safe_text(str(summary)), 512),
+        error_code=error_code,
+        detail=detail,
+        exit_code=result.exit_code,
+        diagnostics=diagnostics,
+        collector_errors=errors,
+        blockers=[
+            blocker.model_copy(
+                update={"detail": safe_text(blocker.detail)[:512] or "-"}
+            )
+            for blocker in item.blockers or []
+        ],
+    )
+
+
+def failed_attempt_condition(operation, attempt):
+    """SQL predicate: this attempt's failure evidence must stay readable.
+
+    One owner for "which attempt is a failure attempt": the diagnostics
+    download and the operator log projection both select attempts through this
+    predicate, so neither can drift into showing or hiding an attempt the other
+    disagrees about.  An attempt qualifies when its own state is a terminal
+    failure, when it lapsed its lease but kept the agent's late failure receipt,
+    or when it is the current attempt of a parked operation -- the one lapse
+    whose narrative the operation's own reason still owns.  A bare superseded
+    lapse qualifies on none of them: it kept no receipt, and the operation's
+    reason already describes a different attempt, so neither may be invented.
+    """
+
+    return or_(
+        agent_operation_states.sql_attempt_failed_or_unknown(attempt),
+        attempt.state == LifecycleState.CANCELLED.value,
+        and_(
+            agent_operation_states.sql_attempt_lapsed(attempt),
+            # A receipt is a JSON object.  An absent one is stored as the JSON
+            # ``null`` value rather than SQL NULL, so the plain ``IS NOT NULL``
+            # test would read every bare lapse as if it had kept a receipt.
+            cast(attempt.result, String) != "null",
+        ),
+        and_(
+            operation.state.in_(agent_operation_states.PARKED),
+            attempt.attempt == operation.current_attempt,
+        ),
+    )
+
+
+def _fallback_bundle(item: FailedAttempt, *, now: datetime) -> FailureEvidenceBundle:
+    """A bounded bundle for a row the collector could not read.
+
+    The download reports the collector failure separately and never echoes the
+    exception, which may quote the unredacted value that broke it.
+    """
+    empty = FailureLogTail(text="", truncated=False, dropped_bytes=0, dropped_lines=0)
+    error_code, _ = failure_code(item.result)
+    return FailureEvidenceBundle(
+        context=EvidenceContext(
+            operation_id=item.id,
+            attempt=item.attempt,
+            kind=item.kind,
+            node_ids=item.node_ids[:128],
+            updated_at=item.updated_at,
+            source="agent" if item.node_ids else "controller",
+        ),
+        collected_at=now.isoformat(),
+        summary=safe_text(
+            item.result.reason or item.result.summary or "Operation failed"
+        )[:512],
+        error_code=error_code,
+        exit_code=item.result.exit_code,
+        diagnostics=FailureDiagnostics(
+            collected_at=now.isoformat(),
+            phase="unknown",
+            category="unknown",
+            stdout=empty,
+            stderr=empty,
+            versions=[],
+            sandbox=[],
+            storage=[],
+            preflight=[],
+            collector_errors=[],
+        ),
+        collector_errors=["collector-failed"],
+    )
+
+
+def evidence_href(operation_id: str, attempt: int) -> str:
+    return f"/api/operations/{quote(operation_id, safe='')}/evidence?attempt={attempt}"
+
+
+class FailureEvidenceService:
+    """Render one failed attempt's diagnostics from its durable row on request."""
+
+    def __init__(
+        self,
+        sessions: sessionmaker[Session],
+        *,
+        clock: Callable[[], datetime] | None = None,
+    ):
+        self.sessions = sessions
+        self.clock = clock or (lambda: datetime.now(UTC))
+
+    def read(self, operation_id: str, attempt: int) -> FailureEvidenceBundle:
+        """Return the redacted bundle, or raise ``KeyError`` for no failed attempt."""
+        item = self._failed_item(operation_id, attempt)
+        if item is None:
+            raise KeyError(operation_id)
+        now = _aware(self.clock())
+        try:
+            return collect_failure(item, now=now)
+        except Exception:  # noqa: BLE001 - diagnostics cannot replace the original operation result
+            return _fallback_bundle(item, now=now)
+
+    def decorate(self, item: OperationItem) -> OperationItem:
+        """Name the diagnostics download when this failed attempt has one."""
+        if item.state not in FAILED_ATTEMPT_STATES and not item.blockers:
+            return item
+        if self._failed_item(item.id, item.attempt) is None:
+            return item
+        return item.with_evidence_download(
+            OperationEvidenceDownload(href=evidence_href(item.id, item.attempt))
+        )
+
+    def _failed_item(self, operation_id: str, attempt: int) -> FailedAttempt | None:
+        """Load one failed attempt from whichever durable family owns the id."""
+        with self.sessions() as session:
+            row = session.execute(
+                select(AgentOperation, AgentOperationAttempt)
+                .join(
+                    AgentOperationAttempt,
+                    AgentOperationAttempt.operation_id == AgentOperation.id,
+                )
+                .where(
+                    AgentOperation.id == operation_id,
+                    AgentOperationAttempt.attempt == attempt,
+                    failed_attempt_condition(AgentOperation, AgentOperationAttempt),
+                )
+            ).first()
+            if row is not None:
+                operation, member = row
+                return self._item(
+                    operation,
+                    attempt=member.attempt,
+                    kind=operation.kind,
+                    node_ids=[operation.node_id],
+                    source="agent",
+                    progress=member.progress,
+                    result=member.result,
+                )
+            job = session.get(Job, operation_id)
+            ended = None
+            if job is not None and job.state not in FAILED_ATTEMPT_STATES:
+                # A multi-rank artifact job fails when its owner rank reports;
+                # the parent Job ends only after the siblings stop, so the
+                # artifact job's own end is the failure and its words the cause.
+                ended = ended_artifact_job(session, job)
+                if (
+                    ended is not None
+                    and ajs.state_of(ended) not in FAILED_ATTEMPT_STATES
+                ):
+                    ended = None
+            if (
+                job is not None
+                and (job.state in FAILED_ATTEMPT_STATES or ended is not None)
+                # Activity numbers a Job's first attempt 1 although the row
+                # counts from 0; the download answers to the number it was
+                # advertised under as well as to the stored one.
+                and attempt in {job.current_attempt, max(1, job.current_attempt)}
+            ):
+                result = OperationResultFacts.model_validate(job.result)
+                node_ids = list(job.targets)
+                if ended is not None:
+                    # Not yet ended itself: its stored words are the siblings'
+                    # stop, not why the job failed.
+                    result = result.model_copy(
+                        update={"summary": None, "reason": ended.status_reason}
+                    )
+                elif not (result.reason or result.summary) and job.status_reason:
+                    result = result.model_copy(update={"reason": job.status_reason})
+                if result.diagnostics is None and not result.diagnostics_invalid:
+                    # A run-switch phase issues its Spark work through a child
+                    # Job, so the receipt hangs one level below that child.
+                    parents = [job.id]
+                    child_job_id = _stored_child(job.result)
+                    if child_job_id is not None:
+                        parents.append(child_job_id)
+                    # A preparation's failure names the build Job that ended
+                    # it; that build's Spark receipt is the evidence.
+                    payload = read_row_column(job, "payload")
+                    if (
+                        isinstance(payload, AvailabilityJobPayload)
+                        and payload.failure is not None
+                        and payload.failure.build_operation_id is not None
+                    ):
+                        parents.append(payload.failure.build_operation_id)
+                    child, child_node_id = self._child_failure(session, parents)
+                    if child_node_id is not None:
+                        # The Spark that produced the evidence, not the Job's
+                        # targets (a preparation targets its recipe revision).
+                        node_ids = [child_node_id]
+                    if child is not None:
+                        result = result.model_copy(
+                            update={
+                                "diagnostics": child.diagnostics,
+                                "detail": result.detail
+                                or child.detail
+                                or child.diagnostic
+                                or child.reason,
+                                "exit_code": result.exit_code
+                                if result.exit_code is not None
+                                else child.exit_code,
+                            }
+                        )
+                item = self._item(
+                    job,
+                    attempt=attempt,
+                    kind=job.kind,
+                    node_ids=node_ids,
+                    source="controller",
+                    progress=None,
+                    result=result,
+                )
+                # The typed evidence of the refusal that ended it (Run/Switch).
+                refusal = read_blockers(
+                    job.result.get("refusal")
+                    if isinstance(job.result, Mapping)
+                    else None
+                )
+                return item.model_copy(update={"blockers": refusal or None})
+            cache = session.get(ModelCacheOperation, operation_id)
+            if (
+                cache is not None
+                and cache.state in FAILED_ATTEMPT_STATES
+                and cache.attempt == attempt
+            ):
+                return self._item(
+                    cache,
+                    attempt=attempt,
+                    kind=cache.kind,
+                    node_ids=[],
+                    source="controller",
+                    progress=cache.progress,
+                    result=None,
+                )
+            application = session.get(FleetProfileApplication, operation_id)
+            if application is not None and application.state in FAILED_ATTEMPT_STATES:
+                projected = operation_item(_operation_item(application))
+                if projected.attempt != attempt:
+                    return None
+                result = (
+                    projected.result
+                    or OperationResultFacts.of(projected.failure)
+                    or OperationResultFacts()
+                )
+                if result.diagnostics is None and not result.diagnostics_invalid:
+                    child = self._application_child_diagnostics(session, application.id)
+                    if child is not None:
+                        result = result.model_copy(update={"diagnostics": child})
+                return FailedAttempt(
+                    id=projected.id,
+                    attempt=projected.attempt,
+                    kind=projected.kind,
+                    node_ids=projected.node_ids,
+                    updated_at=projected.updated_at or "",
+                    source="controller",
+                    # The Controller owns this record; exact children own the
+                    # captured Spark diagnostics carried above.
+                    agent_operation=False,
+                    progress=AttemptPhase.model_validate(projected.progress),
+                    result=result,
+                    blockers=projected.blockers,
+                )
+        return None
+
+    @staticmethod
+    def _child_failure(
+        session: Session, job_ids: list[str]
+    ) -> tuple[OperationResultFacts | None, str | None]:
+        """Spark-side facts, preferring the newest child with captured diagnostics.
+
+        A Controller-owned parent fails because a child operation failed on a
+        Spark, and that child's receipt holds the container's exit facts and
+        log tails.  Reporting only the parent's reason text was how a workload
+        that exited left empty stdout/stderr and category ``unknown``.  The
+        returned facts carry sanitized diagnostics and the receipt's exit code,
+        with the Spark the receipt came from when its diagnostics are readable.
+        """
+        row = session.execute(
+            select(AgentOperationAttempt.result, AgentOperation.node_id)
+            .join(
+                AgentOperation,
+                AgentOperationAttempt.operation_id == AgentOperation.id,
+            )
+            .where(
+                AgentOperation.parent_job_id.in_(job_ids),
+                failed_attempt_condition(AgentOperation, AgentOperationAttempt),
+            )
+            .order_by(
+                AgentOperationAttempt.result["diagnostics"]
+                .as_string()
+                .is_not(None)
+                .desc(),
+                AgentOperation.updated_at.desc(),
+                AgentOperationAttempt.attempt.desc(),
+            )
+            # Prefer captured diagnostics; otherwise retain the latest typed
+            # cause. Never cap the search behind unrelated empty receipts.
+            # One persisted receipt has the producer's bounded evidence size.
+            .limit(1)
+        ).one_or_none()
+        if row is None:
+            return OperationResultFacts.model_validate(None), None
+        result, node_id = row
+        facts = OperationResultFacts.model_validate(result)
+        diagnostics = facts.diagnostics
+        if diagnostics is None:
+            return facts, None
+        try:
+            sanitized = sanitize_diagnostics(diagnostics)
+        except TypeError, ValueError:
+            # A damaged latest receipt is unknown, not a failure of this read.
+            return None, None
+        return facts.model_copy(update={"diagnostics": sanitized}), node_id
+
+    @classmethod
+    def _application_child_diagnostics(
+        cls, session: Session, application_id: str
+    ) -> FailureDiagnostics | None:
+        """Diagnostics of the newest failed run-switch child of an application."""
+        result = session.execute(
+            select(AgentOperationAttempt.result)
+            .join(
+                AgentOperation,
+                AgentOperationAttempt.operation_id == AgentOperation.id,
+            )
+            # The Spark work of a run-switch phase hangs below the phase's own
+            # child Job, which the run-switch result names.
+            .join(
+                Job,
+                or_(
+                    AgentOperation.parent_job_id == Job.id,
+                    AgentOperation.parent_job_id
+                    == Job.result["child_operation_id"].as_string(),
+                ),
+            )
+            .where(
+                Job.kind == ProfileChildJobKind.RUN_SWITCH.value,
+                Job.state.in_(FAILED_ATTEMPT_STATES),
+                Job.result["profile_application_id"].as_string() == application_id,
+                failed_attempt_condition(AgentOperation, AgentOperationAttempt),
+                AgentOperationAttempt.result["diagnostics"].as_string().is_not(None),
+            )
+            .order_by(
+                Job.updated_at.desc(),
+                AgentOperation.updated_at.desc(),
+                AgentOperationAttempt.attempt.desc(),
+            )
+            .limit(1)
+        ).scalar_one_or_none()
+        facts = OperationResultFacts.model_validate(result)
+        diagnostics = facts.diagnostics
+        if diagnostics is None:
+            return None
+        try:
+            return sanitize_diagnostics(diagnostics)
+        except TypeError, ValueError:
+            # A damaged latest receipt is unknown, not a failure of this read.
+            return None
+
+    @staticmethod
+    def _item(
+        operation,
+        *,
+        attempt: int,
+        kind: str,
+        node_ids: list[str],
+        source: EvidenceSource,
+        progress: object,
+        result: object,
+    ) -> FailedAttempt:
+        payload = getattr(operation, "payload", None) or {}
+        return FailedAttempt(
+            id=operation.id,
+            attempt=attempt,
+            kind=kind,
+            node_ids=node_ids,
+            updated_at=_aware(operation.updated_at).isoformat(),
+            source=source,
+            rank=payload.get("rank") if type(payload.get("rank")) is int else None,
+            progress=AttemptPhase.model_validate(progress),
+            result=OperationResultFacts.model_validate(
+                result
+                or payload.get("failure")
+                or {
+                    "reason": getattr(operation, "last_error", None)
+                    or getattr(operation, "status_reason", None)
+                    or "Operation failed"
+                }
+            ),
+        )

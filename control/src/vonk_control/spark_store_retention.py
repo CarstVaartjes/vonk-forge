@@ -12,17 +12,17 @@ from vonk_agent_protocol.inventory import StoreRetentionRequest
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.resources import StorageDemandCode
 from vonk_control.agent_operation_facts import aware
-from vonk_control.fleet_model_removal_contract import (
-    FLEET_REMOVAL_DEADLINE,
-    STORE_RETENTION_MAX_AGE,
-    FleetRemovalDisposition,
-)
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.logging import log_event
 from vonk_control.model_cache.contract import CacheOperationKind
+from vonk_control.model_cache.fleet_removal_contract import (
+    FLEET_REMOVAL_DEADLINE,
+    STORE_RETENTION_MAX_AGE,
+    FleetRemovalDisposition,
+)
 from vonk_control.model_cache.persistence import _operation_removal
 from vonk_control.models.cache import (
     ArtifactLifecycleGate,

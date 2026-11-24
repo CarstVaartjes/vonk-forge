@@ -37,10 +37,10 @@ from vonk_control.distribution.types import DistributionError, DistributionUnkno
 from vonk_control.download_contract import download_responses, upload_request_body
 from vonk_control.enrollment.responses import _now
 from vonk_control.http_errors import temporary_http_answer
+from vonk_control.image_store.oci import IMAGE_CACHE_DIRECTORY
 from vonk_control.models.cache import RecipeBuild
-from vonk_control.oci_image_store import IMAGE_CACHE_DIRECTORY
-from vonk_control.operator_acceptance import operator_acceptance
-from vonk_control.operator_receipt_contract import ReceiptPolicy
+from vonk_control.operator_acceptance.receipt_contract import ReceiptPolicy
+from vonk_control.operator_acceptance.resolution import operator_acceptance
 from vonk_control.stored.states import RecipeBuildState
 from vonk_control.strict_json import _retry_later_response
 

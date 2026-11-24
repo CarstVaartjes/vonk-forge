@@ -18,7 +18,7 @@ from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.retry import abandon_idempotent_job_in_session
-from vonk_control.failure_classification import is_security_failure
+from vonk_control.failures.classification import is_security_failure
 from vonk_control.inventory.items import inventory_items
 from vonk_control.lifecycle.job import JobAdapter
 from vonk_control.lifecycle_preflight_contract import LifecyclePreflightCheckpoint
@@ -30,7 +30,6 @@ from vonk_control.operations.blockers import (
     BlockingOperation,
     make_blocker,
 )
-from vonk_control.persisted_waits import read_wait
 from vonk_control.recovery_policy import RECOVERY
 from vonk_control.runtime.preflight import (
     admission_blockers,
@@ -38,7 +37,8 @@ from vonk_control.runtime.preflight import (
     recipe_requirements,
     request_digest,
 )
-from vonk_control.wait_contract import typed_wait_reason
+from vonk_control.waits.contract import typed_wait_reason
+from vonk_control.waits.persisted import read_wait
 
 # The agent bounds probe execution. After its normal delivery/reporting window,
 # observe less frequently while that same fenced operation owns recovery.
@@ -63,7 +63,7 @@ def end_unclaimed_probes(
         )
 
 
-# Security refusals (failure_classification.is_security_failure) park the
+# Security refusals (failures.classification.is_security_failure) park the
 # preflight; everything else is transient and retried with backoff.
 def _child_error_code(result: object) -> str | None:
     """Read the typed failure code from a child attempt result, never free text."""

@@ -54,7 +54,7 @@ from vonk_control.operations.progress import (
     stored_progress,
 )
 from vonk_control.own_cleanup import CLEANUP_KINDS
-from vonk_control.stall_window import progress_advanced
+from vonk_control.waits.stall_window import progress_advanced
 
 if TYPE_CHECKING:
     from vonk_control.agent_jobs.service import AgentJobService

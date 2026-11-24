@@ -75,7 +75,7 @@ PROBES: dict[str, Probe] = {
 
 # Registry entries with no inventory before their deadline, or guarded elsewhere.
 CLASSIFIED = {
-    "vonk_control.due_waits": "deadline set on entry; work is the pass, no inventory",
+    "vonk_control.waits.due": "deadline set on entry; work is the pass, no inventory",
     "vonk_control.terminal_history_collection": "deadline precedes only the batch it bounds",
     "vonk_control.unused_storage_collection.pressure": (
         "test_unused_storage_collection: every slow step, one shared attempt budget"

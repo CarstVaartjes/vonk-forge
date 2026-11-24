@@ -11,7 +11,10 @@ from fastapi import (
 )
 
 from vonk_control.auth import MUTATION_ROLES, Actor, AuthError, TokenCodec
-from vonk_control.browser_auth import BrowserAuthenticationError, BrowserAuthService
+from vonk_control.security.browser_auth import (
+    BrowserAuthenticationError,
+    BrowserAuthService,
+)
 
 
 def make_actor_dependency(

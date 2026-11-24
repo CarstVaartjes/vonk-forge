@@ -27,12 +27,12 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import InvalidRequestError, SecurityRefusalError
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.failure_classification import (
+from vonk_control.failures.classification import (
     error_code,
     is_definite,
     is_security_failure,
 )
-from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
+from vonk_control.host_authority.runtime_plan import derive_runtime_plan_binding
 from vonk_control.model_cache.source_helpers import _validate_source
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.jobs import Job

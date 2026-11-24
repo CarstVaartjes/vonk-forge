@@ -15,7 +15,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
 )
 from vonk_agent_protocol.state_machines import NodeIdentityState
-from vonk_control.coordinator_failures import CoordinatorFailures
+from vonk_control.failures.coordinator import CoordinatorFailures
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
 from vonk_control.fleet_profiles.contracts import FleetProfileInvalid

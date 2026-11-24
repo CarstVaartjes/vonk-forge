@@ -19,7 +19,7 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.execution_plan_service import ExecutionPlanCompilationError
+from vonk_control.execution_plan.service import ExecutionPlanCompilationError
 from vonk_control.install_admission.contracts import (
     InstallAdmissionBusy,
     InstallPlanStale,

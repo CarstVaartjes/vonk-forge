@@ -278,7 +278,7 @@ def test_installed_controller_programs_use_only_the_stable_surface() -> None:
 
 def test_building_a_controller_data_type_is_refused() -> None:
     program = (
-        "from vonk_control.recipe_library_types import CatalogModel\n"
+        "from vonk_control.recipe_packages.library_types import CatalogModel\n"
         "from vonk_control.recipe_packages.client import RecipePackageClient\n"
         "import vonk_forge_contracts\n"
         "def f():\n"
@@ -287,7 +287,7 @@ def test_building_a_controller_data_type_is_refused() -> None:
     )
 
     assert set(surface_violations(program)) == {
-        "vonk_control.recipe_library_types.CatalogModel",
+        "vonk_control.recipe_packages.library_types.CatalogModel",
         "vonk_forge_contracts",
         "vonk_control.catalog.sync._private",
         "__import__",
@@ -298,7 +298,7 @@ def test_annotation_only_imports_are_free() -> None:
     program = (
         "from typing import TYPE_CHECKING\n"
         "if TYPE_CHECKING:\n"
-        "    from vonk_control.recipe_library_types import RecipeLibrarySnapshot\n"
+        "    from vonk_control.recipe_packages.library_types import RecipeLibrarySnapshot\n"
         "else:\n"
         "    from vonk_control.models import Base\n"
     )

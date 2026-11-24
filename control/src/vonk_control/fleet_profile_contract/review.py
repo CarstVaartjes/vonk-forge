@@ -47,7 +47,7 @@ from vonk_control.fleet_profile_contract.vocabulary import (
 from vonk_control.identifiers import UuidId
 from vonk_control.operations.blockers import OperationBlocker
 from vonk_control.strict_json import StrictModel
-from vonk_control.wait_contract import QueueWait
+from vonk_control.waits.contract import QueueWait
 
 
 class ProfileLoadAction(StrEnum):

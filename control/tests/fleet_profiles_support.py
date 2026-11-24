@@ -38,7 +38,6 @@ from vonk_control.models.fleet import (
     FleetProfileApplication,
     User,
 )
-from vonk_control.persisted_waits import wait_due
 from vonk_control.platform_ports import HOST_ENDPOINT_PORT
 from vonk_control.preparation_contract import (
     RolloutPreparation,
@@ -51,6 +50,7 @@ from vonk_control.run_switch_contract.evidence import (
 )
 from vonk_control.run_switch_contract.plans import RunSwitchAssessment
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.waits.persisted import wait_due
 
 from .recipe_operations_support import installed_recipe, setup_services
 from .run_switch_operations_support import (

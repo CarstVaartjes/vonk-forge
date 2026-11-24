@@ -28,7 +28,7 @@ from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeErro
 from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_control.admission_locking import ConstraintReplay, admitting
 from vonk_control.bounded_retry import REQUEST_PAUSES, bounded_attempts
-from vonk_control.failure_classification import disposition
+from vonk_control.failures.classification import disposition
 from vonk_control.gateway.litellm import LiteLlmGeneration, LiteLlmPolicy, RouteState
 from vonk_control.gateway.route_bundle_contract import RouteEndpointDocument
 from vonk_control.models.jobs import Job

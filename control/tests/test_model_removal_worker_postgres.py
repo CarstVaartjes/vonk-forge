@@ -27,7 +27,7 @@ from vonk_control.model_cache.contract import (
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_cache.views import CacheOperationView
 from vonk_control.models.cache import ModelCacheOperation
-from vonk_control.persisted_waits import schedule_wait
+from vonk_control.waits.persisted import schedule_wait
 
 from .model_cache_support import _artifact, _download, _remove_model
 from .test_model_removal_reference_lifecycle import (

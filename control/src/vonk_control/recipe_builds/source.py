@@ -23,7 +23,7 @@ from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.fleet import AgentNode
-from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.operator_acceptance.receipt_contract import ReceiptOwner
 from vonk_control.recipe_builds.common import (
     _BUILD_OBSERVATION_DELAYS,
     _BUILD_RUNTIME_INTERFACE,

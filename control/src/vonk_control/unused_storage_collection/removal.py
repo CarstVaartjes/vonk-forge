@@ -29,10 +29,10 @@ from vonk_control.artifact_reference_scan.model_references import (
     model_set_reference_findings,
 )
 from vonk_control.capabilities import CapabilityUnavailableError
+from vonk_control.image_store.oci import DAMAGED_MANIFEST_CODES, OciImageStoreError
 from vonk_control.models.cache import ModelCacheSet
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.fleet import AgentNode
-from vonk_control.oci_image_store import DAMAGED_MANIFEST_CODES, OciImageStoreError
 from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImagePreparationError,
 )

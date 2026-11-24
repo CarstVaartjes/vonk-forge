@@ -27,18 +27,17 @@ from vonk_control.artifact_jobs.api import install_artifact_job_routes
 from vonk_control.artifact_jobs.service import ArtifactJobService
 from vonk_control.auth import CursorCodec, TokenCodec
 from vonk_control.auth_api import install_auth_routes
-from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.capabilities import RecoveringService
 from vonk_control.catalog.api import install_catalog_routes
 from vonk_control.cli_update_contract import install_cli_update_contract_routes
-from vonk_control.failure_evidence import FailureEvidenceService
-from vonk_control.failure_evidence_api import install_failure_evidence_routes
+from vonk_control.failures.evidence import FailureEvidenceService
+from vonk_control.failures.evidence_api import install_failure_evidence_routes
 from vonk_control.fleet_profiles.api import install_fleet_profile_routes
 from vonk_control.fleet_profiles.application_cancel_api import (
     install_profile_application_cancel_route,
 )
 from vonk_control.gateway.keys import GatewayKeyService, install_gateway_key_routes
-from vonk_control.installation_reconciliation_api import (
+from vonk_control.installations.reconciliation_api import (
     install_installation_reconciliation_routes,
 )
 from vonk_control.metrics.prometheus_api import PrometheusReader
@@ -49,10 +48,14 @@ from vonk_control.operation_api.contracts import (
     OperationApiServices,
     bounded_error_responses,
 )
-from vonk_control.operator_acceptance import ControllerAPIRoute, OperatorReceiptResolver
+from vonk_control.operator_acceptance.resolution import (
+    ControllerAPIRoute,
+    OperatorReceiptResolver,
+)
 from vonk_control.operator_projection_api.services import FleetOperatorServices
 from vonk_control.recipe_image_availability.api import install_recipe_operator_routes
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.security.browser_auth import BrowserAuthService
 
 
 def create_app(

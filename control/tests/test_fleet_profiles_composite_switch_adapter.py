@@ -13,7 +13,7 @@ from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.distribution_assignment import NodeDistributionAssignment
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )

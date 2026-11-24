@@ -13,8 +13,8 @@ from vonk_forge_contracts import document_sha256
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.catalog.entities import CatalogEntityService
-from vonk_control.fleet_model_removal_contract import FleetRemovalReason
 from vonk_control.model_cache.contract import ModelCacheRemovalResult
+from vonk_control.model_cache.fleet_removal_contract import FleetRemovalReason
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.cache import ModelCacheSet
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision

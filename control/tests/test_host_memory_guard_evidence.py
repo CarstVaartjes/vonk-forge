@@ -6,7 +6,7 @@ import json
 from importlib.resources import files
 
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
-from vonk_control.failure_evidence import sanitize_diagnostics
+from vonk_control.failures.evidence import sanitize_diagnostics
 
 
 def _facts(summary: str) -> list[dict[str, str]]:

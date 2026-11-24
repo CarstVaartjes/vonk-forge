@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
-from vonk_control.failure_classification import disposition
+from vonk_control.failures.classification import disposition
 from vonk_control.lifecycle.core import transition
 from vonk_control.lifecycle.image_availability import ImageAvailabilityAdapter
 from vonk_control.lifecycle.types import Effect, Outcome, Reported

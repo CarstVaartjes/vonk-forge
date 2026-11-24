@@ -38,7 +38,7 @@ from vonk_control.library_projection.common import (
 from vonk_control.model_cache.contract import CacheManifest, ModelStorageSnapshot
 from vonk_control.models.cache import ModelCacheSet, RecipeLibrarySyncRun
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
-from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.operator_acceptance.receipt_contract import ReceiptOwner
 from vonk_control.stored.rows import read_row_column
 from vonk_control.stored.states import CatalogRevisionState, LibrarySyncRunState
 

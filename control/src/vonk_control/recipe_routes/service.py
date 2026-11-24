@@ -35,7 +35,6 @@ from vonk_control.models.routes import (
     RoutePublicationOwner,
 )
 from vonk_control.optimistic import Stale, transition
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operations.execution_contract import RouteWithdrawalFollowUp
 from vonk_control.recipe_operations.lifecycle_contract import RecipeOperationResult
@@ -66,6 +65,7 @@ from vonk_control.recipe_routes.shared import (
 )
 from vonk_control.recovery_policy import ROUTE_RECOVERY, schedule
 from vonk_control.stored.documents import RouteClaimMarker
+from vonk_control.waits.persisted import schedule_wait
 
 
 class RecipeRouteService:

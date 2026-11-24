@@ -103,18 +103,18 @@ listed in `tools/ts-shapes-allowlist.json` with its reason.
 | `control/web/src/components/artifact-job/artifact-hash.worker.ts` | `HashRequest` | browser-local upload hashing progress and worker messages; not API data |
 | `control/web/src/components/artifact-job/artifact-hash.worker.ts` | `WorkerScope` | browser-local upload hashing progress and worker messages; not API data |
 | `control/web/src/components/artifact-job/artifact-job-workspace.tsx` | `ActiveRun` | UI-only view model derived from generated API types for one screen; not an API document |
-| `control/web/src/components/artifact-job/artifact-job-workspace.tsx` | `CancelRecovery` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/artifact-job/artifact-job-workspace.tsx` | `InputPayload` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/artifact-job/artifact-job-workspace.tsx` | `RecipeParameter` | UI-only view model derived from generated API types for one screen; not an API document |
+| `control/web/src/components/artifact-job/artifact-job-submission.tsx` | `CancelRecovery` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/artifact-job/artifact-job-submission.tsx` | `InputPayload` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/artifact-job/artifact-job-form.tsx` | `RecipeParameter` | UI-only view model derived from generated API types for one screen; not an API document |
 | `control/web/src/components/ui/confirm-dialog.tsx` | `ConfirmDialogProps` | component props: UI-only, not API data |
 | `control/web/src/components/ui/empty-state.tsx` | `EmptyStateProps` | component props: UI-only, not API data |
 | `control/web/src/components/library/library-availability-feedback.tsx` | `AvailabilityFailure` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
 | `control/web/src/components/library/library-availability-progress.tsx` | `AvailabilityProgress` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
 | `control/web/src/components/library/library-models-view.tsx` | `LibraryModelsViewProps` | component props: UI-only, not API data |
-| `control/web/src/components/library/library-profiles-view.tsx` | `AssignmentDraft` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/library/library-profiles-view.tsx` | `FleetEntry` | UI-only view model derived from generated API types for one screen; not an API document |
-| `control/web/src/components/library/library-profiles-view.tsx` | `PendingProfileLoad` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/library/library-profiles-view.tsx` | `ProfileDraft` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/library/library-profile-drafts.tsx` | `AssignmentDraft` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/library/library-profile-drafts.tsx` | `FleetEntry` | UI-only view model derived from generated API types for one screen; not an API document |
+| `control/web/src/components/library/library-profile-load.tsx` | `PendingProfileLoad` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/library/library-profile-drafts.tsx` | `ProfileDraft` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/components/library/library-recipe-files.ts` | `SelectedRecipeFiles` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
 | `control/web/src/components/library/library-technical-details.tsx` | `TechnicalValue` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
 | `control/web/src/components/library/library-workcell.tsx` | `LibraryRecipeRecord` | UI-only view model derived from generated API types for one screen; not an API document |
@@ -124,7 +124,7 @@ listed in `tools/ts-shapes-allowlist.json` with its reason.
 | `control/web/src/components/ui/toast.tsx` | `Toasts` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/hooks/fleet-stream-state.ts` | `FleetStreamState` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/hooks/use-operation-observer.ts` | `Options` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/pages/activity.tsx` | `ActivitySummary` | UI-only view model derived from generated API types for one screen; not an API document |
+| `control/web/src/pages/activity-status.tsx` | `ActivitySummary` | UI-only view model derived from generated API types for one screen; not an API document |
 | `control/web/src/pages/login.tsx` | `LoginFailure` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
 
 ## Python contract modules
@@ -180,7 +180,7 @@ module defines its own.
 | `control/src/vonk_control/artifact_jobs/job_contract.py` | declared | 1 | The compiled job contract of a recipe revision, read before a job exists. |
 | `control/src/vonk_control/artifact_jobs/maintenance.py` | declared | 1 | Typed reports of artifact maintenance sweeps. |
 | `control/src/vonk_control/auth_api.py` | declared | 4 | Strict HTTP boundary for durable browser authentication. |
-| `control/src/vonk_control/ca_issuance_contract.py` | controller-contract | 1 | Exact accepted CA issuance binding and the typed refusal reason. |
+| `control/src/vonk_control/pki/issuance_contract.py` | controller-contract | 1 | Exact accepted CA issuance binding and the typed refusal reason. |
 | `control/src/vonk_control/cache_removal_review.py` | declared | 6 | Canonical review contract shared by cache-removal owners and clients. |
 | `control/src/vonk_control/catalog/api.py` | declared | 3 | Strict authenticated HTTP surface for the local database recipe catalog. |
 | `control/src/vonk_control/catalog/revision_contract.py` | controller-contract | 9 | Typed readers and writers for immutable catalog revision JSON columns. |
@@ -188,12 +188,12 @@ module defines its own.
 | `control/src/vonk_control/cli_update_contract.py` | controller-contract | 1 | Authenticated CLI compatibility observation; its canonical schema is generated into the installed updater package. |
 | `control/src/vonk_control/cluster_mappings.py` | declared | 2 | The identity document whose digest binds a cluster mapping plan to its exact placement. |
 | `control/src/vonk_control/compiled_artifact_contract.py` | controller-contract | 12 | Canonical compiled contract for artifact-producing recipe jobs. |
-| `control/src/vonk_control/compiled_execution_plan.py` | declared | 7 | Verified Controller receipts for the compiled Spark execution plan. |
-| `control/src/vonk_control/distribution_assignment.py` | declared | 1 | The Controller's record of one node's artifact distribution grant. |
+| `control/src/vonk_control/execution_plan/compiled.py` | declared | 7 | Verified Controller receipts for the compiled Spark execution plan. |
+| `control/src/vonk_control/distribution/assignment_contract.py` | declared | 1 | The Controller's record of one node's artifact distribution grant. |
 | `control/src/vonk_control/endpoint_contract.py` | controller-contract | 1 | Secret-free projection of one published recipe endpoint. |
 | `control/src/vonk_control/enrollment/contract.py` | controller-contract | 7 | Enrollment status, grants, exact issuance/rotation claims and local/CA revocation confirmation. |
-| `control/src/vonk_control/failure_evidence.py` | declared | 5 | Failure diagnostics rendered on request from durable failure rows. |
-| `control/src/vonk_control/fleet_event_contract.py` | controller-contract | 9 | Strict payload contracts for the durable Fleet outbox. |
+| `control/src/vonk_control/failures/evidence.py` | declared | 5 | Failure diagnostics rendered on request from durable failure rows. |
+| `control/src/vonk_control/fleet_events/contract.py` | controller-contract | 9 | Strict payload contracts for the durable Fleet outbox. |
 | `control/src/vonk_control/fleet_profile_contract/endpoints.py` | controller-contract | 3 | Fleet profile contract: endpoints. |
 | `control/src/vonk_control/fleet_profile_contract/definitions.py` | controller-contract | 19 | Fleet profile contract: definitions. |
 | `control/src/vonk_control/fleet_profile_contract/assessment.py` | controller-contract | 11 | Fleet profile contract: assessment. |
@@ -203,7 +203,7 @@ module defines its own.
 | `control/src/vonk_control/fleet_profile_contract/review.py` | controller-contract | 9 | Fleet profile contract: review. |
 | `control/src/vonk_control/fleet_profiles/contracts.py` | controller-contract | 1 | Saved profile content identity used by admission and projections. |
 | `control/src/vonk_control/fleet_projection/common.py` | declared | 14 | Complete typed projection of PostgreSQL-authoritative Fleet state, transferred through bounded immutable observation records. |
-| `control/src/vonk_control/fleet_stream_contract.py` | controller-contract | 14 | Typed JSON envelopes emitted by the Fleet Server-Sent Events stream. |
+| `control/src/vonk_control/fleet_events/stream_contract.py` | controller-contract | 14 | Typed JSON envelopes emitted by the Fleet Server-Sent Events stream. |
 | `control/src/vonk_control/gateway/keys.py` | declared | 18 | Inference gateway client keys: LiteLLM virtual keys managed by the Controller. |
 | `control/src/vonk_control/harnesses/canonical_metadata.py` | declared | 1 | Strict platform metadata for built-in canonical harnesses. |
 | `control/src/vonk_control/jobs/documents.py` | controller-contract | 45 | Typed documents of the generic job queue bound to the job columns; the kind-agnostic remainder is a declared passthrough. |
@@ -236,7 +236,7 @@ module defines its own.
 | `control/src/vonk_control/recipe_packages/contracts.py` | declared | 2 | Schema-2 recipe package reader for the Controller catalog sync. |
 | `control/src/vonk_control/recipe_update_batches/contract.py` | controller-contract | 8 | One current contract for durable recipe-update intent and observation. |
 | `control/src/vonk_control/recipe_update_batches/notice.py` | declared | 1 | One owner for "a newer revision of this recipe exists" (never restarts anything). |
-| `control/src/vonk_control/resource_planning_contract.py` | controller-contract | 2 | Canonical nested recipe topology and resource settings read projections. |
+| `control/src/vonk_control/resource_planning/contract.py` | controller-contract | 2 | Canonical nested recipe topology and resource settings read projections. |
 | `control/src/vonk_control/gateway/route_bundle_contract.py` | controller-contract | 7 | The published route bundle (`routes.json`) and the identity document whose digest names a candidate bundle. |
 | `control/src/vonk_control/gateway/keys_contract.py` | controller-contract | 3 | Wire documents of gateway client keys. |
 | `control/src/vonk_control/run_switch_contract/requests.py` | controller-contract | 15 | Run switch contract: requests. |
@@ -269,12 +269,12 @@ module defines its own.
 | `control/src/vonk_control/metrics/prometheus_api.py` | declared | 9 | Read-only fixed-query adapter to the internal Prometheus service. |
 | `control/src/vonk_control/run_switch_operations/contracts.py` | controller-contract | 1 | Typed records owned by Run/Switch orchestration. |
 | `control/src/vonk_control/source_bundle_contract.py` | controller-contract | 1 | Durable source-ingress proof bound to an exact managed file copy. |
-| `control/src/vonk_control/wait_contract.py` | controller-contract | 2 | One persisted wait observation; the owner's SQL due column owns its clock. |
+| `control/src/vonk_control/waits/contract.py` | controller-contract | 2 | One persisted wait observation; the owner's SQL due column owns its clock. |
 | `control/src/vonk_control/capability_contract.py` | controller-contract | 1 | Availability of independently recoverable Controller capabilities. |
 | `control/src/vonk_control/runtime/asset_contract.py` | controller-contract | 1 | Complete public-kit membership produced while assembling the Controller image. |
-| `control/src/vonk_control/operator_receipt_contract.py` | controller-contract | 4 | Canonical public operator acceptance references and existing-Job decisions. |
-| `control/src/vonk_control/fleet_model_removal_contract.py` | controller-contract | 6 | Reviewed, content-addressed effects of a request to remove a fleet model. |
-| `control/src/vonk_control/coordinator_contract.py` | controller-contract | 2 | Failures of worker coordinators that have not claimed an operation. |
+| `control/src/vonk_control/operator_acceptance/receipt_contract.py` | controller-contract | 4 | Canonical public operator acceptance references and existing-Job decisions. |
+| `control/src/vonk_control/model_cache/fleet_removal_contract.py` | controller-contract | 6 | Reviewed, content-addressed effects of a request to remove a fleet model. |
+| `control/src/vonk_control/failures/coordinator_contract.py` | controller-contract | 2 | Failures of worker coordinators that have not claimed an operation. |
 | `tools/client_compatibility_report.py` | declared | 8 | Report what a published vonkctl would refuse from this Controller. |
 | `tools/contract_scans.py` | declared | 3 | Static scans that keep every data class defined once, in its Pydantic contract. |
 | `tools/single_source_values.py` | declared | 3 | Owner-adjacent registrations for handwritten literal families, without debt allowances. |

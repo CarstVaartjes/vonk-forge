@@ -13,7 +13,7 @@ from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, ObservationCause
 from vonk_control import agent_operation_states
 from vonk_control.catalog.revision_collection import GRACE
-from vonk_control.failure_evidence import (
+from vonk_control.failures.evidence import (
     AttemptPhase,
     FailedAttempt,
     FailureEvidenceBundle,

@@ -31,7 +31,7 @@ from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.failure_evidence import (
+from vonk_control.failures.evidence import (
     _OMISSION_MARKER,
     FailedAttempt,
     FailureEvidenceBundle,
@@ -42,7 +42,7 @@ from vonk_control.failure_evidence import (
     safe_text,
     sanitize_diagnostics,
 )
-from vonk_control.failure_evidence_api import install_failure_evidence_routes
+from vonk_control.failures.evidence_api import install_failure_evidence_routes
 from vonk_control.model_primitives import Base
 from vonk_control.models.execution import ArtifactJob
 from vonk_control.models.fleet import AgentCertificate, AgentNode
@@ -467,7 +467,7 @@ def test_collector_failure_preserves_original_result_and_is_separate(
         raise RuntimeError("secret diagnostic error")
 
     store_failed_job(service, value)
-    monkeypatch.setattr("vonk_control.failure_evidence.collect_failure", fail)
+    monkeypatch.setattr("vonk_control.failures.evidence.collect_failure", fail)
     bundle = service.read(value["id"], 1)
     assert bundle.collector_errors == ["collector-failed"]
     assert bundle.summary == value["result"]["reason"]

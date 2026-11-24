@@ -33,7 +33,7 @@ from vonk_control.run_switch_contract.vocabulary import (
     RunSwitchSubphase,
 )
 from vonk_control.strict_json import StrictModel
-from vonk_control.wait_contract import QueueWait
+from vonk_control.waits.contract import QueueWait
 
 
 class RunSwitchRuntimeImageReferenceIntent(StrictModel):

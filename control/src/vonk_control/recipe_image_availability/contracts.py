@@ -48,7 +48,7 @@ from vonk_control.admission_locking import is_admission_contention
 from vonk_control.cache_removal_review import CacheRemovalAsset, CacheRemovalFinding
 from vonk_control.categorized_errors import InvalidValue
 from vonk_control.categorized_faults import security_reason
-from vonk_control.failure_classification import (
+from vonk_control.failures.classification import (
     disposition,
     error_code,
     is_security_failure,
@@ -60,7 +60,6 @@ from vonk_control.model_cache.views import ModelCacheRemovalScope
 from vonk_control.models.jobs import Job
 from vonk_control.operations.blockers import OperationBlocker
 from vonk_control.operations.contract import AvailabilityOperationFailure
-from vonk_control.persisted_waits import wait_due
 from vonk_control.recipe_image_availability.removal_contract import (
     RECIPE_CACHE_REMOVE_KIND,
 )
@@ -69,6 +68,7 @@ from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImageStorage,
 )
 from vonk_control.stored.json_values import JsonColumn, read_column
+from vonk_control.waits.persisted import wait_due
 
 _LOGGER = logging.getLogger(__package__)
 #: The progress ``activity`` of an operation: working now, or waiting for its turn.

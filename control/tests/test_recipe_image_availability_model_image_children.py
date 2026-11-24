@@ -46,7 +46,6 @@ from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_image_availability.api import (
     _view_document,
 )
@@ -60,6 +59,7 @@ from vonk_control.runtime_image_preparation.contracts import (
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import serialize_json_value
+from vonk_control.waits.persisted import schedule_wait
 
 from .non_blocking import assert_ended_without_blocking
 from .recipe_image_availability_support import (

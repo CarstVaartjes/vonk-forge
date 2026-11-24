@@ -30,7 +30,7 @@ from vonk_control.artifact_reference_scan.types import (
     ArtifactReferenceFinding,
     _reason_projection,
 )
-from vonk_control.failure_classification import disposition
+from vonk_control.failures.classification import disposition
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.lifecycle.types import Effect, Outcome, Reported
 from vonk_control.model_cache import states as model_cache_states

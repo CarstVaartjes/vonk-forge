@@ -16,7 +16,8 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.swap import default_swap
 from vonk_agent_protocol.telemetry import TelemetrySample
 from vonk_control.agent_contacts import record_contact
-from vonk_control.fleet_events import FleetEventRepository
+from vonk_control.fleet_events.outbox import FleetEventRepository
+from vonk_control.fleet_events.stream_contract import FleetChangeEvent
 from vonk_control.fleet_projection.common import (
     _AUTHORITY_REVISION,
     CapacityReservations,
@@ -26,7 +27,6 @@ from vonk_control.fleet_projection.common import (
     TelemetryPoint,
 )
 from vonk_control.fleet_projection.service import FleetProjection
-from vonk_control.fleet_stream_contract import FleetChangeEvent
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import (
     AgentNode,

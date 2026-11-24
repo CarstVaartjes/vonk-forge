@@ -59,9 +59,9 @@ from vonk_control.recipe_operations.start_payloads import (
     build_recipe_start_payload,
     start_peer_addresses,
 )
-from vonk_control.run_admission import RunAdmissionBusy, RunNodePlan, RunPlan
-from vonk_control.run_admission import require_admissible as require_run_admissible
-from vonk_control.run_admission import (
+from vonk_control.runs.admission import RunAdmissionBusy, RunNodePlan, RunPlan
+from vonk_control.runs.admission import require_admissible as require_run_admissible
+from vonk_control.runs.admission import (
     require_same_execution as require_same_run_execution,
 )
 from vonk_control.stored.rows import read_row_column

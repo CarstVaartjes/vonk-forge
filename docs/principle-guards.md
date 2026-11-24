@@ -73,7 +73,7 @@ an older handler of that shape is flagged too.
 
 Retention under `unused_storage_collection/` and
 `model_cache/fleet_removal.py`, the update notice (`recipe_update_notice.py`)
-and the measured-peak carry (`observed_run_memory.py`) may not compare a recipe revision's
+and the measured-peak carry (`runs/observed_memory.py`) may not compare a recipe revision's
 `content_digest` with the head's (anything named `head` or `newest`) to decide
 "is this what the head runs" (added-line mode `head-digests`,
 `control/tests/retention_head_digests.py`). A release that changes only
@@ -98,7 +98,7 @@ The same mode flags a query selecting only
 Models does this Spark hold" by the Model each installation was made for. After
 the contracts 5.0 re-digest it judged a Spark holding the files under the old
 digest empty, so the load review charged the whole model again. Ask by the set
-instead (`disk_reservations.model_sets_stored_on_node`).
+instead (`reservations.disk.model_sets_stored_on_node`).
 
 NAS coverage is required only where NAS bytes are read. A new call of
 `_require_managed_cache_coverage`, `resolve_verified_artifact_set`,
@@ -112,7 +112,7 @@ build a grant's objects with `distribution.types.plan_objects`.
 
 Three rules are whole-tree rather than added-line. The first: a failure's retry follows its
 one disposition (`vonk_agent_protocol.agent_words.Disposition`, read through
-`failure_classification.disposition`). A `WAIT` never spends a retry and never
+`failures.classification.disposition`). A `WAIT` never spends a retry and never
 ends work, a `FAIL` ends on its first occurrence with its cause as evidence,
 and only an `OBSERVE` (an effect nobody could confirm) spends the retry count.
 A spent count stops the spending, never the work: an irreversible effect still
@@ -155,10 +155,10 @@ Lock and ordering guards:
   `password_verifier` in `control/src` outside `enrollment/` unless the function
   calls `require_durable_commit` (Controller connections commit asynchronously;
   enrollment gets durability from `EnrollmentCore._transaction`). Internal
-  revocations nobody is told about (`attempt_residues.py`, `local_ca.py`) are
+  revocations nobody is told about (`attempt_residues.py`, `pki/local_ca.py`) are
   out of scope and stay asynchronous.
 - `control/tests/test_agent_node_lock_tree.py` proves telemetry, inventory,
-  contact, `installed_bytes.py` and `agent_api` modules never lock `agent_nodes` (the `optimistic`
+  contact, `installations/installed_bytes.py` and `agent_api` modules never lock `agent_nodes` (the `optimistic`
   scan, `scan_agent_node_locks`).
 - `fixed_tick_polls` (added-line mode `tick-polls`, in
   `control/tests/added_line_guards/`) refuses a test that calls

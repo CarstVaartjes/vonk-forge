@@ -8,8 +8,8 @@ from vonk_agent_protocol.state_machines import (
     CertificateRecordState,
     CertificateRotationState,
 )
-from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.models.fleet import AgentCertificate, AgentIssuedCertificateRevocation
+from vonk_control.pki.issuance_contract import CertificateIssuanceBinding
 
 
 def retain_ended_effect(

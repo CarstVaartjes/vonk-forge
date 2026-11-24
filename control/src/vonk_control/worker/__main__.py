@@ -37,7 +37,7 @@ if __name__ == "__main__":
         session_factory,
         wait_for_database,
     )
-    from vonk_control.execution_plan_service import ControllerExecutionPlanService
+    from vonk_control.execution_plan.service import ControllerExecutionPlanService
     from vonk_control.gateway.route_runtime import (
         AtomicRouteBundlePublisher,
         FileSupervisorAcknowledger,

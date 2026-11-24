@@ -94,7 +94,6 @@ from vonk_control.lifecycle_preflight import end_unclaimed_probes
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation as StoredOperation
 from vonk_control.operations.blockers import OperationBlocker, make_blocker
-from vonk_control.persisted_waits import lifecycle_wait, schedule_wait, wait_due
 from vonk_control.run_switch_contract.observation import (
     RunSwitchStoredChildIdentity,
     RunSwitchStoredIdentity,
@@ -105,7 +104,8 @@ from vonk_control.run_switch_contract.progress import RunSwitchMemberReceipt
 from vonk_control.run_switch_contract.vocabulary import RunSwitchMemberState
 from vonk_control.run_switch_operations.awaited_children import child_job_ids
 from vonk_control.run_switch_operations.observation_window import checkpoint_deadline
-from vonk_control.wait_contract import typed_wait_reason
+from vonk_control.waits.contract import typed_wait_reason
+from vonk_control.waits.persisted import lifecycle_wait, schedule_wait, wait_due
 
 KIND = "run-switch"
 WAITING = LifecycleState.NEEDS_OPERATOR.value

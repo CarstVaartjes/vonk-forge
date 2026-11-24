@@ -13,8 +13,8 @@ import ast
 from pathlib import Path
 
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
-from vonk_control.failure_classification import is_security_failure
-from vonk_control.security_edges import SECURITY_REFUSAL_EDGES, SecurityEdge
+from vonk_control.failures.classification import is_security_failure
+from vonk_control.security.edges import SECURITY_REFUSAL_EDGES, SecurityEdge
 
 from .added_line_guards.check import check_source
 
@@ -65,7 +65,7 @@ SECURITY_CLASSES: dict[str, frozenset[SecurityEdge]] = {
     "vonk_control.fleet_profiles.contracts:FleetProfilePermissionDenied": frozenset(
         {_AUTHZ}
     ),
-    "vonk_control.host_runtime_plan_authority:RuntimePlanAuthorityRefused": frozenset(
+    "vonk_control.host_authority.runtime_plan:RuntimePlanAuthorityRefused": frozenset(
         {_SIGNED}
     ),
     "vonk_control.jobs.queue:StaleAttempt": frozenset({_FENCE}),

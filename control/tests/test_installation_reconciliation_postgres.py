@@ -18,7 +18,7 @@ from vonk_agent_protocol.state_machines import (
     ReservationState,
 )
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.installed_bytes import reconcile_missing_installations
+from vonk_control.installations.installed_bytes import reconcile_missing_installations
 from vonk_control.models.execution import (
     InstallationNode,
     RecipeInstallation,

@@ -13,12 +13,12 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import InstallationState, RouteState, RunState
-from vonk_control.distributed_lifecycle import DistributedLifecycleError
 from vonk_control.distributed_recovery.common import (
     ended_run_state,
     enforce_recovery_deadline,
     recovery_start_plan,
 )
+from vonk_control.distributed_recovery.lifecycle import DistributedLifecycleError
 from vonk_control.fleet_profiles.stop_contract import ProfileJobRunStopJob
 from vonk_control.jobs.documents import (
     ProfilePartialStop,
@@ -35,7 +35,6 @@ from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_operations.intent import (
     _intent_is_current,
     _job_workload_intent,
@@ -65,6 +64,7 @@ from vonk_control.recipe_operations.run_transitions import (
 from vonk_control.recipe_operations.start_cleanup import StartCleanup, stage
 from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import serialize_json_value
+from vonk_control.waits.persisted import schedule_wait
 
 if TYPE_CHECKING:
     from vonk_control.recipe_operations.service import RecipeOperationService

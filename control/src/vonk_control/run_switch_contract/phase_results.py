@@ -15,7 +15,7 @@ from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.identifiers import Digest, NodeId
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
-from vonk_control.distribution_assignment import NodeDistributionAssignment
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.identifiers import UuidId
 from vonk_control.model_cache.contract import ModelCacheDownloadResult
 from vonk_control.operations.blockers import MAX_BLOCKERS, OperationBlocker

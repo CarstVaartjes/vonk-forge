@@ -29,8 +29,8 @@ from vonk_control.models.fleet import (
     AgentNode,
     LocalCertificateRevocation,
 )
-from vonk_control.persisted_waits import read_wait, schedule_wait
-from vonk_control.step_ca import StepCAError, StepCAUnavailable
+from vonk_control.pki.step_ca import StepCAError, StepCAUnavailable
+from vonk_control.waits.persisted import read_wait, schedule_wait
 
 from .ca_material import NODE_ID, NOW, _csr
 from .test_local_ca import local_ca as local_ca  # noqa: PLC0414 -- fixture

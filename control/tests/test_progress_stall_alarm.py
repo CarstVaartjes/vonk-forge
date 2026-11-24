@@ -53,8 +53,8 @@ from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.observation.platform import PlatformObserver
 from vonk_control.operations.blockers import BlockingOperation, make_blocker
-from vonk_control.persisted_waits import read_wait, schedule_wait, write_wait
-from vonk_control.progress_stall import PROGRESS_STALL_WINDOW
+from vonk_control.waits.persisted import read_wait, schedule_wait, write_wait
+from vonk_control.waits.progress_stall import PROGRESS_STALL_WINDOW
 
 from .fleet_profiles_support import NOW, _database, _input, _node_id, _seed, _uuid
 from .run_switch_operations_support import (

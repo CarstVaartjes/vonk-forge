@@ -24,7 +24,7 @@ from vonk_control.recipe_operations.execution_contract import (
     parse_stored_run_plan,
 )
 from vonk_control.resource_planning.types import SwapCapacity, SwapHolder
-from vonk_control.run_states import HOLDING_RUN_STATES, STARTING_RUN_STATES
+from vonk_control.runs.states import HOLDING_RUN_STATES, STARTING_RUN_STATES
 from vonk_control.swap import selected_swap
 
 

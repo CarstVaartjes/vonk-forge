@@ -22,9 +22,9 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.contracts import StaleAgentAttempt
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource
-from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.lifecycle.agent_operation import (
     retry_scheduled,
 )

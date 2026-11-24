@@ -28,6 +28,7 @@ from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.bounded_json import BoundedJSONError
 from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
+from vonk_control.failures.summary_cut import summary_cut as _summary_cut
 from vonk_control.fleet_profile_contract.assessment import (
     FleetProfilePlanStep,
     FleetProfilePlanSummary,
@@ -79,7 +80,6 @@ from vonk_control.operation_api.responses import (
 )
 from vonk_control.operations.item_contract import operation_item
 from vonk_control.recovery_policy import RecoveryPolicy
-from vonk_control.summary_cut import summary_cut as _summary_cut
 
 from .agent_fences import fenced_attempt, fenced_operation, park_for_operator
 from .observation_transfer_peer import fleet_authority, observation_document

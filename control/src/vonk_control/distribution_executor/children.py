@@ -11,7 +11,7 @@ from vonk_agent_protocol.agent_operations import AgentOperation as AgentOperatio
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileEffectState
 from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-from vonk_control.distribution_assignment import NodeDistributionAssignment
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.distribution_executor.receipts import _child_receipt, _phase_receipt
 from vonk_control.distribution_executor.verification import DistributionVerification
 from vonk_control.jobs.documents import (

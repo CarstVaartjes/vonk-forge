@@ -45,7 +45,7 @@ from vonk_agent_protocol.wire_model import (
     OperationProgress,
     canonical_message,
 )
-from vonk_control.distributed_lifecycle import (
+from vonk_control.distributed_recovery.lifecycle import (
     DistributedLifecycleError,
     canonical_distributed_readiness,
 )

@@ -20,7 +20,6 @@ from vonk_control.admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
-from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
 from vonk_control.gpu.health import gpu_health_reason
 from vonk_control.inventory.items import runtime_value
 from vonk_control.models.cache import RecipeBuild
@@ -51,6 +50,7 @@ from vonk_control.recipe_operations.execution_contract import (
     parse_stored_build_plan,
     parse_stored_build_policy,
 )
+from vonk_control.reservations.disk import outstanding_disk_reservation_bytes
 from vonk_control.spark_disk import spark_free_bytes
 from vonk_control.stored.states import CatalogRevisionState, RecipeBuildState
 

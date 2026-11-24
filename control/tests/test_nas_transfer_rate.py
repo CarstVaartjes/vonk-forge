@@ -15,16 +15,16 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import InventoryRequest, NetworkInterface
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_control.fleet_projection.common import ProjectionReason
-from vonk_control.model_primitives import Base
-from vonk_control.models.fleet import AgentNode
-from vonk_control.models.jobs import Job
-from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
-from vonk_control.nas_transfer_rate import (
+from vonk_control.fleet_projection.nas_transfer_rate import (
     NasTransferNotice,
     nas_transfer_detail,
     slow_nas_transfers,
     wifi_link_detail,
 )
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.stored.json_values import write_guard_mode
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture

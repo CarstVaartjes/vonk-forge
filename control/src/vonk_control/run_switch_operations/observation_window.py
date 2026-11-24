@@ -2,7 +2,7 @@
 
 A Run/Switch that waits for a target Spark to return, for its start to load a
 model, or for its child operation to finish is waiting on a live owner, and
-that wait never expires (``stall_window.progress_verdict``). Its observation
+that wait never expires (``waits.stall_window.progress_verdict``). Its observation
 window runs only while nothing it waits on is live, and restarts when that
 owner ended: a start that loaded for an hour leaves the full verification
 window for the route evidence that follows.
@@ -22,17 +22,17 @@ from vonk_control.models.jobs import Job
 from vonk_control.owner_liveness import Owner, OwnerKind, OwnerRef, owner
 from vonk_control.recipe_builds.common import RecipeBuildAdmissionBusy
 from vonk_control.recipe_operations.lifecycle_contract import START_CHILD_KINDS
-from vonk_control.run_admission import (
-    RETRYABLE_PLAN_BLOCKERS,
-    RUN_ADMISSION_WAIT_CODES,
-    RunAdmissionBusy,
-)
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_operations.awaited_children import awaited_jobs
 from vonk_control.run_switch_operations.constants import _FINAL_VERIFICATION_MAX_SECONDS
 from vonk_control.run_switch_operations.errors import RunSwitchPostStopEvidencePending
 from vonk_control.run_switch_operations.planning_helpers import _aware, _stored_job_plan
-from vonk_control.stall_window import Verdict, progress_deadline
+from vonk_control.runs.admission import (
+    RETRYABLE_PLAN_BLOCKERS,
+    RUN_ADMISSION_WAIT_CODES,
+    RunAdmissionBusy,
+)
+from vonk_control.waits.stall_window import Verdict, progress_deadline
 
 #: Dependency recovery before verification: stayed unreadable.
 DEPENDENCY_WINDOW = timedelta(hours=1)

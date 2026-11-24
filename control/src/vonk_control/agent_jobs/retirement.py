@@ -37,7 +37,7 @@ from vonk_control.agent_operation_facts import (
 )
 from vonk_control.agent_operation_facts import aware as _aware
 from vonk_control.categorized_errors import InvalidValue, MissingRecord
-from vonk_control.installation_transitions import end_unfinished_installation
+from vonk_control.installations.transitions import end_unfinished_installation
 from vonk_control.jobs import states as job_states
 from vonk_control.lifecycle.agent_operation import (
     AgentOperationAdapter,
@@ -54,10 +54,10 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation as StoredOperation
 from vonk_control.models.operations import AgentOperationAttempt
-from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationCancellationResult,
 )
+from vonk_control.waits.persisted import schedule_wait
 
 
 def release_owned_reservations_in_session(

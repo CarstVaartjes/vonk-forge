@@ -17,7 +17,7 @@ from vonk_control.artifact_jobs.lifecycle import (
     require_reference_open,
 )
 from vonk_control.artifact_reference_scan.model_sets import require_model_sets_open
-from vonk_control.distribution_assignment import NodeDistributionAssignment
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.identity_insert import insert_identity
 from vonk_control.models.operations import ArtifactDistributionAssignment
 

@@ -16,7 +16,7 @@ from sqlalchemy.orm import sessionmaker
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.enrollment.service import EnrollmentService
-from vonk_control.image_store_collection import ImageStoreCollector
+from vonk_control.image_store.collection import ImageStoreCollector
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.fleet import AgentCertificateRotation
@@ -27,7 +27,7 @@ from vonk_control.owner_liveness import (
     build_in_flight,
     builds_in_flight,
 )
-from vonk_control.pki import IssuedCertificate
+from vonk_control.pki.issuance import IssuedCertificate
 
 from .test_build_cancellation_recovery import _services
 from .test_enrollment import NODE_ID, Clock, RecordingAuthority, csr, enroll

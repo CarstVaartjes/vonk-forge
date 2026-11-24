@@ -12,7 +12,7 @@ from sqlalchemy import select, update
 
 from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
-from vonk_control.failure_classification import error_detail, is_definite
+from vonk_control.failures.classification import error_detail, is_definite
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.fleet import AgentNodeContact
 from vonk_control.models.jobs import Job

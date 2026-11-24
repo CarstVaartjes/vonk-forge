@@ -19,7 +19,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.state_machines import ReservationState
 from vonk_control.categorized_errors import MissingRecord
-from vonk_control.failure_classification import is_definite
+from vonk_control.failures.classification import is_definite
 from vonk_control.fleet_profile_contract.applications import FleetProfileChildOperation
 from vonk_control.fleet_profile_contract.assessment import (
     FleetProfileAdmissionDecision,

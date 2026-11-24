@@ -495,7 +495,7 @@ class SecurityRefusalReason(WireEnum):
     Authentication and authorization, identity and certificate expiry, node
     revocation, enrollment, signed package metadata, host-helper authority,
     tombstone fencing, credential denial and the digest-bound destructive-effect
-    checks of Run/Switch.  ``failure_classification`` derives its code set from
+    checks of Run/Switch.  ``failures.classification`` derives its code set from
     this enum, so the Controller and the contract cannot disagree.
     """
 

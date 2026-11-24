@@ -176,7 +176,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
             "caller-owned: the failed-start terminal projection (queue result transaction) and the recovery tick's run reaper (optimistic publication transaction) own the cleanup Stop or the lost verdict",
         ),
     },
-    "run_route_name.py": {
+    "runs/route_name.py": {
         "rename_run": (
             "d28af1decdfe0fea513ed8d69e1560a596a140bbaee47ae0d563cf9f2c85f105",
             "caller-owned: the profile admission transaction owns the rename; the next route publication pass fences the republish",

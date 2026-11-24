@@ -34,11 +34,11 @@ from vonk_agent_protocol.wire_model import (
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.distribution.filesystem import RecipeBuildObjectSource
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.distribution.wiring import build_distribution_service_from_components
-from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.distribution_executor import children as executor_module
 from vonk_control.distribution_executor import receipts as receipts_module
 from vonk_control.distribution_executor.durable import DurableDistributionPhaseExecutor

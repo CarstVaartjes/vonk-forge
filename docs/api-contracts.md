@@ -15,7 +15,7 @@ legacy compatibility.
 ## Operator acceptance receipts
 
 A successful operator mutation carries `X-Vonk-Receipt`, the JSON-encoded
-`AcceptanceReceipt` from `vonk_control.operator_receipt_contract`, and a `Link` with
+`AcceptanceReceipt` from `vonk_control.operator_acceptance.receipt_contract`, and a `Link` with
 `rel="receipt"`. Its owner, record identity, lookup URL and applicable request,
 revision and content identity resolve through the existing owner after commit.
 There is no separate receipt database. Job resume and retirement retain a typed
@@ -460,7 +460,7 @@ carries them into `wire.json` and the Rust declarations, and
 `scripts/generate-control-clients` into the OpenAPI document, the generated
 TypeScript types and the runtime constants in
 `control/web/src/api/vocabulary.generated.ts`. `vonk_control/lifecycle/types.py`,
-the adapters, `failure_classification` and the syntax guards import them;
+the adapters, `failures.classification` and the syntax guards import them;
 none keeps a second list. Add a word to the contract and regenerate; never spell
 one by hand (the added-line vocabulary guard in
 [testing and CI](testing-and-ci.md) fails the change).
@@ -647,7 +647,7 @@ these types; the guard is described in [testing and CI](testing-and-ci.md).
 
 ### Persisted Controller waits
 
-`wait_contract.WaitEvidence` owns the typed reason, dependency and owner identities,
+`waits.contract.WaitEvidence` owns the typed reason, dependency and owner identities,
 nonempty blockers, first-blocked and real-progress clocks, optional dependency
 expiry, and resume condition. Each existing durable owner stores this evidence
 in the transaction that parks its work. `QueueWait.next_check` is projected from

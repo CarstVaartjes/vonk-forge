@@ -34,9 +34,9 @@ from vonk_control.operations.item_contract import (
     OperationOwnerReference,
     operation_item,
 )
-from vonk_control.persisted_waits import read_wait
 from vonk_control.state_filters import state_filter
 from vonk_control.strict_json import warn_unreadable_once
+from vonk_control.waits.persisted import read_wait
 
 # Observation cursors confer no mutation authority. An otherwise standalone
 # provider still needs authenticated pagination when no application codec was

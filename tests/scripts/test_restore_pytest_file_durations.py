@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 SCRIPT = (
-    Path(__file__).resolve().parents[2] / "scripts" / "restore-pytest-file-durations"
+    Path(__file__).resolve().parents[2] / "scripts/ci/restore-pytest-file-durations"
 )
 
 
