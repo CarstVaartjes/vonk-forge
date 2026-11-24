@@ -1,9 +1,9 @@
+import { NoReading } from "../ui/no-reading";
 import "./spark-card.css";
 import type { ControlApi, VisualFleetNode } from "../../api/types";
 import { HISTORY_SECONDS, useTelemetryHistory } from "../../hooks/use-telemetry-history";
 import { GPU_READINGS as READINGS } from "../../lib/gpu-readings";
 import {
-  NOT_REPORTED_TEXT,
   halfUp,
   liveSample,
   nodeDisplayName,
@@ -116,7 +116,13 @@ export function SparkCard({
         </h3>
         {rank !== undefined && <span className="spark-rank">rank {rank}</span>}
         <span className="spark-uptime">
-          {uptime ? `up ${uptime}` : `Uptime: ${NOT_REPORTED_TEXT}`}
+          {uptime ? (
+            `up ${uptime}`
+          ) : (
+            <>
+              Uptime: <NoReading />
+            </>
+          )}
         </span>
       </header>
       <p className="spark-sub">
@@ -132,14 +138,14 @@ export function SparkCard({
       )}
       <div className="spark-memory">
         <span>Unified memory</span>
-        <strong>{vitals.memory.text}</strong>
+        <strong>{vitals.memory.text ?? <NoReading />}</strong>
       </div>
       <MemoryIngot label={`${name} unified memory`} memory={nodeMemorySplit(node)} />
       {node.connection.online_state === "online" && (
         <Traces api={api} node={node} now={now} color={color} name={name} />
       )}
       <div className="spark-quiet">
-        <strong>{vitals.disk.text}</strong>
+        <strong>{vitals.disk.text ?? <NoReading />}</strong>
         <span>Disk</span>
       </div>
     </section>

@@ -1,12 +1,7 @@
+import { NoReading } from "../ui/no-reading";
 import { useId } from "react";
 import type { VisualFleetNode } from "../../api/types";
-import {
-  NOT_REPORTED_TEXT,
-  formatBytes,
-  nodeDiskSplit,
-  nodeDisplayName,
-  nodeVitals,
-} from "../../lib/fleet";
+import { formatBytes, nodeDiskSplit, nodeDisplayName, nodeVitals } from "../../lib/fleet";
 import { MemoryIngot } from "../ui/memory-ingot";
 
 /**
@@ -21,7 +16,7 @@ export function SparkStorage({ node }: { node: VisualFleetNode }) {
     <section className="card spark-panel-card" aria-labelledby={id}>
       <header>
         <h2 id={id}>Storage</h2>
-        <strong>{nodeVitals(node).disk.text}</strong>
+        <strong>{nodeVitals(node).disk.text ?? <NoReading />}</strong>
       </header>
       <MemoryIngot
         label={`${nodeDisplayName(node)} disk`}
@@ -33,7 +28,7 @@ export function SparkStorage({ node }: { node: VisualFleetNode }) {
           <li key={item.installation_id}>
             <span>{item.title ?? item.installation_id}</span>
             <span className="spark-model-size">
-              {item.installed_bytes == null ? NOT_REPORTED_TEXT : formatBytes(item.installed_bytes)}
+              {item.installed_bytes == null ? <NoReading /> : formatBytes(item.installed_bytes)}
               {inUse.has(item.installation_id) ? " · in use" : ""}
             </span>
           </li>

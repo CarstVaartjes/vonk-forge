@@ -1,3 +1,4 @@
+import { NoReading } from "../components/ui/no-reading";
 import {
   addWire,
   compareWire,
@@ -39,7 +40,7 @@ import { EmptyState } from "../components/ui/empty-state";
 import { PageHeader } from "../components/ui/page-header";
 import { SkeletonBlock, SkeletonRows } from "../components/ui/skeleton";
 import { StatusPill } from "../components/ui/status-pill";
-import { NOT_REPORTED_TEXT, nodeDisplayName } from "../lib/fleet";
+import { nodeDisplayName } from "../lib/fleet";
 import { exactTime, relativeTime } from "../lib/time";
 
 export { relativeTime };
@@ -466,7 +467,7 @@ function AgentUpgradeDiagnostics({
             <dl>
               <div>
                 <dt>Observed version</dt>
-                <dd>{target.observed_identity.version || NOT_REPORTED_TEXT}</dd>
+                <dd>{target.observed_identity.version || <NoReading />}</dd>
               </div>
               <CopyableValue
                 label="Observed binary digest"

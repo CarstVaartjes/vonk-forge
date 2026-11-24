@@ -370,3 +370,39 @@ test("Library and a Recipe pass the accessibility checks and the main navigation
     "Shift+Tab",
   );
 });
+
+test("the Library Spark counts stay one scrollable row on a phone and the page does not overflow", async ({
+  page,
+}) => {
+  await serveEmptyFleet(page);
+  await serveLibrary(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/library");
+  const sparks = page.getByRole("group", { name: "Sparks per recipe" });
+  await expect(sparks).toBeVisible();
+  const buttons = sparks.getByRole("button");
+  await expect(buttons.last()).toBeAttached();
+  const shape = await sparks.evaluate((group) => {
+    const row = group.getBoundingClientRect();
+    const rects = [...group.querySelectorAll("button")].map((button) =>
+      button.getBoundingClientRect(),
+    );
+    const heights = rects.map((rect) => rect.height);
+    const tops = rects.map((rect) => Math.round(rect.top));
+    return {
+      withinPage: row.right <= document.documentElement.clientWidth + 0.5,
+      oneRow: Math.max(...tops) - Math.min(...tops) < 1,
+      tallest: Math.max(...heights),
+    };
+  });
+  expect(shape.withinPage).toBe(true);
+  expect(shape.oneRow).toBe(true);
+  expect(shape.tallest).toBeLessThan(64);
+  await buttons.last().scrollIntoViewIfNeeded();
+  await expect(buttons.last()).toBeInViewport();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    ),
+  ).toBe(true);
+});

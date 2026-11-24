@@ -1,7 +1,8 @@
+import { NoReading } from "./no-reading";
 import { useId } from "react";
 import type { VisualFleetNode } from "../../api/types";
 import { HISTORY_SECONDS, type HistoryPoint } from "../../hooks/use-telemetry-history";
-import { NOT_REPORTED_TEXT, halfUp, liveSample, nodeDisplayName } from "../../lib/fleet";
+import { halfUp, liveSample, nodeDisplayName } from "../../lib/fleet";
 import { SENSOR_READINGS } from "../../lib/sensor-readings";
 import { TraceTile } from "./trace-tile";
 
@@ -33,7 +34,11 @@ export function SensorStrip({
         <h2 id={id}>Sensors</h2>
         <span>last 30 minutes</span>
       </header>
-      {tiles.length === 0 && <p className="spark-panel-note">{NOT_REPORTED_TEXT}</p>}
+      {tiles.length === 0 && (
+        <p className="spark-panel-note">
+          <NoReading />
+        </p>
+      )}
       <div className="spark-sensors">
         {tiles.map(({ reading, value }) => (
           <TraceTile

@@ -1,3 +1,4 @@
+import { NoReading } from "../ui/no-reading";
 import { CacheOperationKind, LibraryCacheState } from "../../api/vocabulary.generated";
 import { compareWire, formatWire } from "../../api/contract-numeric";
 import type { MouseEvent } from "react";
@@ -12,7 +13,7 @@ import { formatBytes } from "../../lib/fleet";
 import { modelLibraryPath, modelKey, recipeLibraryPath } from "../../lib/library-route";
 import { LibraryCacheAction } from "./library-cache-action";
 import { LibrarySetupStrip } from "./library-setup";
-import { NOT_REPORTED, useCapabilityWords } from "./library-vocabulary";
+import { useCapabilityWords } from "./library-vocabulary";
 import type { LibraryRecipeRecord, LibraryWorkcellFilters } from "./library-workcell";
 import {
   countModels,
@@ -236,7 +237,9 @@ function ModelRevisionsRow({
               </span>
             ))
           ) : (
-            <span>{NOT_REPORTED}</span>
+            <span>
+              <NoReading />
+            </span>
           )}
         </div>
         {revisions.length > 1 && (
