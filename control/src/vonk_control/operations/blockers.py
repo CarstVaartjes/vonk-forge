@@ -23,6 +23,7 @@ from pydantic import (
     model_serializer,
 )
 
+from vonk_agent_protocol.identifiers import NodeId
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_BIGINT
 from vonk_agent_protocol.lifecycle_vocabulary import ProgressAlarmCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
@@ -44,7 +45,6 @@ PHASE_RETRY_CODE = RunSwitchCode.PHASE_RETRY
 STALL_RETRY_ATTEMPT = 3
 
 _NODE_PATTERN = re.compile(r"^spk_[0-9a-f]{32}$")
-_NODE_ID = Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
 
 
 class IdentityConflict(StrictJSONModel):
@@ -97,7 +97,7 @@ class OperationBlocker(StrictJSONModel):
     code: OperationReason | ProgressAlarmCode
     detail: Annotated[str, StringConstraints(min_length=1, max_length=512)]
     severity: Literal["info", "warning", "error"]
-    node_ids: list[_NODE_ID] = Field(default_factory=list, max_length=32)
+    node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
     identity_conflict: IdentityConflict | None = None
     #: The operation this wait is behind, when one is known.
     operation: BlockingOperation | None = None
@@ -149,7 +149,7 @@ class StallWait(StrictJSONModel):
     """One wait seen during the stall: its code and the Sparks it concerns."""
 
     code: OperationReason | ProgressAlarmCode
-    node_ids: list[_NODE_ID] = Field(default_factory=list, max_length=32)
+    node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
 
 
 class ProgressStall(StrictJSONModel):

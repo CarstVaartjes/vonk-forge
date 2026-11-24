@@ -6,9 +6,9 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, RootModel
 
+from vonk_agent_protocol.identifiers import Digest
 from vonk_agent_protocol.wire_model import WireModel
 
-InstallerDigest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 InstallerImage = Annotated[
     str,
     Field(
@@ -22,7 +22,7 @@ InstallerVersion = Annotated[
 
 class InstallerReleaseObject(WireModel):
     path: str = Field(pattern=r"^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$")
-    sha256: InstallerDigest
+    sha256: Digest
     size: int = Field(ge=1, le=1024 * 1024 * 1024)
 
 
@@ -30,7 +30,7 @@ class InstallerPackageArtifact(InstallerReleaseObject):
     architecture: Literal["linux-arm64"]
     host_signature: str = Field(pattern=r"^[0-9a-f]{128}$")
     package_version: InstallerVersion
-    target_binary_digest: InstallerDigest
+    target_binary_digest: Digest
     target_build_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
 
@@ -81,7 +81,7 @@ class InstallerCandidateBootstraps(InstallerBaselineBootstraps):
 
 class InstallerReleaseIdentity(WireModel):
     channel: Literal["dev", "stable"]
-    generation: InstallerDigest
+    generation: Digest
     images: InstallerReleaseImages
     schema_version: Literal[2]
     source_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
@@ -128,7 +128,7 @@ class CliReleaseProjection(WireModel):
     model_config = ConfigDict(extra="ignore")
     schema_version: int = Field(ge=2)
     channel: Literal["dev", "stable"]
-    generation: InstallerDigest
+    generation: Digest
     version: InstallerVersion
     source_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
     artifacts: CliReleaseArtifacts

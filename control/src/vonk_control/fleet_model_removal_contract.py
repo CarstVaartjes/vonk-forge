@@ -2,18 +2,16 @@
 
 from datetime import timedelta
 from enum import StrEnum
-from typing import Annotated
 
 from pydantic import AwareDatetime, Field
 
+from vonk_agent_protocol.identifiers import Digest
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_control.lifecycle.evidence import BookkeepingReason
 from vonk_control.strict_json import StrictJSONModel
 
 STORE_RETENTION_MAX_AGE = timedelta(minutes=10)
 FLEET_REMOVAL_DEADLINE = timedelta(hours=24)
-
-Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
 class FleetRemovalDisposition(StrEnum):

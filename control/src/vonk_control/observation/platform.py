@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
+from vonk_agent_protocol.identifiers import Digest
 from vonk_control.build_identity import RuntimeBuildIdentity, packaged_runtime_identity
 from vonk_control.capabilities import CapabilityRegistry
 from vonk_control.capability_contract import CapabilityStatus
@@ -30,7 +31,6 @@ from vonk_control.worker_healthcheck import (
 )
 
 Source = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
-Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
 class ApiRuntimeObservation(StrictModel):

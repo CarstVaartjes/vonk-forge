@@ -20,13 +20,13 @@ from pydantic import (
     StrictBool,
     StrictInt,
     StrictStr,
-    StringConstraints,
     ValidationInfo,
     field_validator,
     model_validator,
 )
 
 from vonk_agent_protocol.document_limits import MAX_ARGV_BYTES
+from vonk_agent_protocol.identifiers import Digest, OciDigest
 from vonk_agent_protocol.job_limits import (
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
@@ -35,8 +35,6 @@ from vonk_agent_protocol.job_limits import (
 )
 from vonk_agent_protocol.wire_model import AgentProtocolError
 
-Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
-ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
 _EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 # A canonical launch can project one mount for each selected model artifact,
 # plus the fixed input and output mounts.  Keep this derived from the existing
@@ -284,11 +282,11 @@ class CompiledRuntimeImage(_Strict):
     ``localhost/vonk/compiled-runtime-<oci_layout_sha256>@<image_digest>``.
     """
 
-    image_digest: ImageDigest
+    image_digest: OciDigest
     oci_layout_sha256: Digest
     image_bytes: int = Field(gt=0, le=16 * 1024**4)
     build_id: str = Field(min_length=1, max_length=128)
-    local_image_config_id: ImageDigest
+    local_image_config_id: OciDigest
     runtime_interface_label: str = Field(min_length=1, max_length=128)
 
     @property

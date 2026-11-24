@@ -11,17 +11,12 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
 
+from vonk_agent_protocol.identifiers import Digest
 from vonk_agent_protocol.package_source import AgentPackageSource
+from vonk_control.identifiers import UuidId
 from vonk_control.strict_json import StrictJSONModel
 
-UuidText = Annotated[
-    str,
-    StringConstraints(
-        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-    ),
-]
 NodeText = Annotated[str, StringConstraints(min_length=1, max_length=128)]
-DigestText = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 
 
 class _UpgradeDocument(StrictJSONModel):
@@ -39,14 +34,14 @@ class AgentUpgradePackage(_UpgradeDocument):
 
     architecture: Literal["linux-arm64"]
     package_bytes: int = Field(ge=1, le=1024**3)
-    package_sha256: DigestText
+    package_sha256: Digest
     package_signature: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{128}$")]
     package_url: Annotated[str, StringConstraints(pattern=_UPGRADE_URL)]
     package_version: Annotated[
         str, StringConstraints(pattern=r"^[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}$")
     ]
     schema_version: Literal[1]
-    target_binary_digest: DigestText
+    target_binary_digest: Digest
     target_build_digest: Annotated[
         str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
     ]
@@ -80,4 +75,4 @@ class AgentUpgradeRolloutResult(_UpgradeDocument):
     """What a rollout skipped, and the newer rollout that replaced it."""
 
     skipped: dict[NodeText, str] | None = None
-    superseded_by: UuidText | None = None
+    superseded_by: UuidId | None = None

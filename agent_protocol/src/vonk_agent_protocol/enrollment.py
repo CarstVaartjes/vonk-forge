@@ -8,6 +8,7 @@ from typing import Annotated, Self
 
 from pydantic import Field, field_validator, model_validator
 
+from vonk_agent_protocol.identifiers import Digest, NodeId
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.wire_model import StrictJSONModel, WireModel, canonical_message
@@ -28,10 +29,6 @@ def _check_response_budget(value: WireModel) -> None:
             f"enrollment response exceeds {MAX_ENROLLMENT_RESPONSE_BYTES} bytes "
             f"(observed {observed})"
         )
-
-
-NodeId = Annotated[str, Field(pattern=r"^spk_[0-9a-f]{32}$")]
-Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
 class EnrollmentEvidence(WireModel):

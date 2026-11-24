@@ -34,6 +34,7 @@ from vonk_control.fleet_profiles.contracts import (
     FleetProfilePermissionDenied,
 )
 from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.identifiers import UUID_PATTERN
 from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
 from vonk_control.operation_api.contracts import bounded_error_responses
 from vonk_control.operator_acceptance import (
@@ -43,7 +44,6 @@ from vonk_control.operator_acceptance import (
 from vonk_control.operator_receipt_contract import ReceiptPolicy
 
 #: The canonical lowercase UUID shape every durable identity in this API uses.
-_UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _PROFILE_PATH = "/api/profile/{number}"
 _APPLICATION_PATH = "/api/profile/applications/{application_id}"
 _REQUEST_PATH = "/api/profile/{number}/requests/{request_key}"
@@ -322,7 +322,7 @@ def install_fleet_profile_routes(
         operation_id="getProfileApplication",
     )
     def profile_application(
-        application_id: Annotated[str, Path(pattern=_UUID)],
+        application_id: Annotated[str, Path(pattern=UUID_PATTERN)],
         _actor: Actor = authenticated,
     ) -> FleetProfileApplicationView:
         # A client that submitted one load must be able to follow that exact
@@ -348,7 +348,7 @@ def install_fleet_profile_routes(
     )
     def profile_application_by_request(
         number: Annotated[int, Path(ge=1, le=MAX_DATABASE_INTEGER)],
-        request_key: Annotated[str, Path(pattern=_UUID)],
+        request_key: Annotated[str, Path(pattern=UUID_PATTERN)],
         actor: Actor = authenticated,
     ) -> FleetProfileApplicationView:
         try:

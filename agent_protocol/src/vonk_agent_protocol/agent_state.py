@@ -19,6 +19,7 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.compiled_execution_plan import CompiledPlacement
 from vonk_agent_protocol.contracts import AgentClaim
 from vonk_agent_protocol.helper_response import HostHelperProcessLogs
+from vonk_agent_protocol.identifiers import Digest, OciDigest, Uuid4Text
 from vonk_agent_protocol.package_upgrade import (
     PackageActivationOutcome,
     PackageActivationPhase,
@@ -27,8 +28,6 @@ from vonk_agent_protocol.package_upgrade import (
 from vonk_agent_protocol.recipe_operations import RecipeReconciliationIdentity
 from vonk_agent_protocol.wire_model import (
     MAX_RUN_GENERATION,
-    Digest,
-    Uuid4Text,
     WireModel,
     strict_json_datetime,
 )
@@ -37,7 +36,6 @@ U32 = Annotated[int, Field(ge=0, le=2**32 - 1)]
 U64 = Annotated[int, Field(ge=0, le=2**64 - 1)]
 I64 = Annotated[int, Field(ge=-(2**63), le=2**63 - 1)]
 # A daemon image id or manifest digest as the container runtime spells it.
-OciDigest = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
 
 
 class AgentGenerationPointer(WireModel):

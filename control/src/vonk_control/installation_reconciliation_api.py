@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Path, status
 
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_control.auth import MUTATION_ROLES, Actor
+from vonk_control.identifiers import UUID_PATTERN
 from vonk_control.logging import redact_text
 from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
 from vonk_control.operation_api.contracts import bounded_error_responses
@@ -25,10 +26,6 @@ from vonk_control.run_switch_contract.requests import (
 )
 from vonk_control.run_switch_operations.errors import RunSwitchOperationConflict
 
-_UUID = (
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-)
 _PREVIEW_PATH = "/api/recipe/installations/{installation_id}/reconcile/preview"
 _APPLY_PATH = "/api/recipe/installations/{installation_id}/reconcile"
 _OPERATION_PATH = "/api/run-switch/operations/{operation_id}"
@@ -119,7 +116,7 @@ def install_installation_reconciliation_routes(
     )
     @operator_acceptance(ReceiptPolicy.OBSERVATION)
     def preview_installation_reconciliation(
-        installation_id: Annotated[str, Path(pattern=_UUID)],
+        installation_id: Annotated[str, Path(pattern=UUID_PATTERN)],
         actor: Actor = authenticated,
     ) -> RunSwitchPlan:
         require_mutation(actor, _PREVIEW_PATH)
@@ -148,7 +145,7 @@ def install_installation_reconciliation_routes(
     )
     @operator_acceptance(ReceiptPolicy.INSTALLATION)
     def apply_installation_reconciliation(
-        installation_id: Annotated[str, Path(pattern=_UUID)],
+        installation_id: Annotated[str, Path(pattern=UUID_PATTERN)],
         body: InstallationReconcileRequest,
         actor: Actor = authenticated,
     ) -> RunSwitchOperation:
@@ -185,7 +182,7 @@ def install_installation_reconciliation_routes(
         operation_id="getRunSwitchOperation",
     )
     def run_switch_operation(
-        operation_id: Annotated[str, Path(pattern=_UUID)],
+        operation_id: Annotated[str, Path(pattern=UUID_PATTERN)],
         _actor: Actor = authenticated,
     ) -> RunSwitchOperation:
         try:

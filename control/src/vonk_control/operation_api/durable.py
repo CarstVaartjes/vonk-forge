@@ -11,6 +11,7 @@ from pathlib import Path
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from vonk_agent_protocol.identifiers import NODE_PATTERN
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.route_activation import ActivationMarker
@@ -56,10 +57,7 @@ from vonk_control.models.routes import (
     RoutePublication,
     RoutePublicationOwner,
 )
-from vonk_control.operation_api.constants import (
-    _ACTIVE_PUBLICATION_STATES,
-    NODE_PATTERN,
-)
+from vonk_control.operation_api.constants import _ACTIVE_PUBLICATION_STATES
 from vonk_control.operation_api.contracts import (
     AgentSummary,
     JobProgress,

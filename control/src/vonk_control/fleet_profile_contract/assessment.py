@@ -12,18 +12,17 @@ from pydantic import (
 from vonk_forge_contracts import EndpointAlias
 
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
+from vonk_agent_protocol.identifiers import Digest, NodeId
 from vonk_agent_protocol.inventory import MemoryPool
 from vonk_control.fleet_profile_contract.vocabulary import (
     DesiredAssignmentStateField,
-    Digest,
     FleetProfileAction,
     FleetProfileAssignmentState,
     FleetProfilePlanStepKind,
     Name,
-    NodeId,
     OptionChoices,
-    UuidId,
 )
+from vonk_control.identifiers import UuidId
 from vonk_control.preparation_contract import (
     CompatibilityIdentity,
     ModelArtifactIdentity,

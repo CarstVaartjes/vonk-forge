@@ -12,6 +12,7 @@ from pydantic import (
     TypeAdapter,
 )
 
+from vonk_agent_protocol.identifiers import Digest
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.recipe_image_availability.clocks_contract import readable_or_none
 from vonk_control.recipe_operations.lifecycle_contract import LifecycleNodeResult
@@ -85,7 +86,6 @@ class RunSwitchStoredIdentity(BaseModel):
     ] = None
 
 
-DigestValue = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ObservedBytes = Annotated[int, Field(ge=0)] | None
 
 
@@ -102,7 +102,7 @@ class RunSwitchArtifactGuardEvidence(BaseModel):
         readable_or_none(TypeAdapter(RuntimeImageReceipt), strict=True),
     ] = None
     artifact_set_sha256: Annotated[
-        DigestValue | None, readable_or_none(TypeAdapter(DigestValue), strict=True)
+        Digest | None, readable_or_none(TypeAdapter(Digest), strict=True)
     ] = None
     coverage: str | None = None
     downloaded_bytes: ObservedBytes = None

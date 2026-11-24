@@ -19,6 +19,7 @@ from vonk_agent_protocol.gpu_clock import (
     GpuClockPolicy,
     GpuClockRange,
 )
+from vonk_agent_protocol.identifiers import DIGEST_PATTERN, NodeId
 from vonk_agent_protocol.inventory import (
     InventoryRequest,
 )
@@ -41,6 +42,7 @@ from vonk_control.fleet_projection.host_checks import (
     HostCheckAdvice,
     Text1024,
 )
+from vonk_control.identifiers import UuidId
 from vonk_control.installation_transitions import IN_FLIGHT
 from vonk_control.machine_states import (
     CertificateStateField,
@@ -64,17 +66,6 @@ from vonk_control.strict_json import StrictModel
 from vonk_control.telemetry.samples import TelemetrySampleView
 
 """Bounded typed projection of PostgreSQL-authoritative Fleet state."""
-
-
-_REVISION_PATTERN = r"^[0-9a-f]{64}$"
-
-
-_NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
-
-
-_UUID_PATTERN = (
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-)
 
 
 _MAX_FLEET_NODES = 500
@@ -101,13 +92,7 @@ def _canonical_recipe(revision: CatalogDocumentRevision) -> RecipeDefinition | N
     return parsed if isinstance(parsed, RecipeDefinition) else None
 
 
-NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
-
-
-UuidId = Annotated[str, StringConstraints(pattern=_UUID_PATTERN)]
-
-
-AuthorityRevision = Annotated[str, StringConstraints(pattern=_REVISION_PATTERN)]
+AuthorityRevision = Annotated[str, StringConstraints(pattern=DIGEST_PATTERN)]
 
 
 _AUTHORITY_REVISION = "ffb039e4a059e137e67110b3f845ab477b048e97ae9383031feb9dcfcbcbba55"

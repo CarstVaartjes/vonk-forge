@@ -13,6 +13,8 @@ from pydantic import (
 from vonk_forge_contracts import EndpointAlias
 
 from vonk_agent_protocol.gpu_clock import GpuClockRange
+from vonk_agent_protocol.identifiers import Digest
+from vonk_control.identifiers import UuidId
 from vonk_control.preparation_contract import RolloutPreparation
 from vonk_control.run_switch_contract.evidence import (
     ArtifactStorageImpact,
@@ -27,14 +29,13 @@ from vonk_control.run_switch_contract.evidence import (
     SparkFit,
     StopImpact,
 )
-from vonk_control.run_switch_contract.identity import UuidId
 from vonk_control.run_switch_contract.requests import (
     InvocationMetadata,
     RunSwitchProfileStopScope,
     RunSwitchReconciliationAuthority,
     SparkGroup,
 )
-from vonk_control.run_switch_contract.vocabulary import Digest, RunSwitchAction
+from vonk_control.run_switch_contract.vocabulary import RunSwitchAction
 from vonk_control.strict_json import StrictModel
 
 

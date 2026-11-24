@@ -5,15 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Literal
 
-from pydantic import Field, StringConstraints, model_validator
+from pydantic import Field, model_validator
 
+from vonk_agent_protocol.identifiers import Digest, NodeId, OciDigest
 from vonk_control.strict_json import StrictModel
-
-Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
-ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
-NodeId = Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
 
 PreparationState = Literal[
     "unknown", "missing", "preparing", "verifying", "ready", "failed", "unsupported"
@@ -72,7 +69,7 @@ class TargetAssetState(StrictModel):
     present_bytes: int = Field(default=0, ge=0)
     missing_bytes: int | None = Field(default=None, ge=0)
     verified_sha256: Digest | None = None
-    imported_image_digest: ImageDigest | None = None
+    imported_image_digest: OciDigest | None = None
     verified_at: datetime | None = None
     reason: str | None = Field(default=None, min_length=1, max_length=256)
 
@@ -172,7 +169,7 @@ class ModelArtifactPreparation(ModelArtifactIdentity):
 class RuntimeImageIdentity(StrictModel):
     """Executable OCI identity, independent of its transfer observations."""
 
-    image_digest: ImageDigest
+    image_digest: OciDigest
     oci_layout_sha256: Digest
     image_bytes: int = Field(ge=0)
     architecture: Literal["linux-arm64"]
@@ -222,7 +219,7 @@ class CompatibilityIdentity(StrictModel):
 
     recipe_revision_sha256: Digest
     model_content_sha256: Digest
-    runtime_image_digest: ImageDigest
+    runtime_image_digest: OciDigest
     parameters_sha256: Digest
     hardware_profile_sha256: Digest | None = None
 

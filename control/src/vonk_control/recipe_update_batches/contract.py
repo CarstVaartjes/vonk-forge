@@ -13,6 +13,7 @@ from pydantic import (
     model_validator,
 )
 
+from vonk_agent_protocol.identifiers import Digest
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import OperationProgress
@@ -25,7 +26,6 @@ from vonk_control.wait_contract import QueueWait
 
 UPDATE_KIND = "recipe.cache.update.v2"
 Identifier = Annotated[str, Field(min_length=1, max_length=128)]
-Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 RequestKey = Annotated[
     str,
     Field(

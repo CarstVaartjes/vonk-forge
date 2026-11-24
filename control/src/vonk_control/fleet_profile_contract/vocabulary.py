@@ -40,20 +40,6 @@ def profile_switch_child_request_key(
 
 MAX_PROFILE_WARNINGS = 128
 
-_UUID_PATTERN = (
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-)
-
-_NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
-
-_DIGEST_PATTERN = r"^[0-9a-f]{64}$"
-
-UuidId = Annotated[str, StringConstraints(pattern=_UUID_PATTERN)]
-
-NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
-
-Digest = Annotated[str, StringConstraints(pattern=_DIGEST_PATTERN)]
 
 Name = Annotated[
     str, StringConstraints(min_length=1, max_length=120, strip_whitespace=True)

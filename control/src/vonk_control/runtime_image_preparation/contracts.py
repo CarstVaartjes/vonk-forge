@@ -11,10 +11,11 @@ from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager, suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import Field, ValidationError
 
+from vonk_agent_protocol.identifiers import Digest, OciDigest
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
@@ -27,7 +28,7 @@ from vonk_agent_protocol.outcome import (
     UnknownOutcomeError,
 )
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
-from vonk_agent_protocol.wire_model import Digest, WireModel, canonical_message
+from vonk_agent_protocol.wire_model import WireModel, canonical_message
 from vonk_control.categorized_faults import security_reason
 
 _IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -138,9 +139,6 @@ class OCIImageTransport(Protocol):
         ...
 
 
-ImageDigest = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
-
-
 RuntimeArchitecture = Literal["linux-arm64"]
 
 
@@ -172,10 +170,10 @@ class RuntimeImageReceipt(WireModel):
     distribution_publisher: str = Field(min_length=1, max_length=128)
     distribution_slug: str = Field(min_length=1, max_length=128)
     distribution_content_sha256: Digest
-    image_digest: ImageDigest
+    image_digest: OciDigest
     oci_archive_sha256: Digest
     image_bytes: int = Field(strict=True, ge=1, le=16 * 1024**4)
-    local_image_config_id: ImageDigest
+    local_image_config_id: OciDigest
     architecture: RuntimeArchitecture
     runtime_interface: RuntimeInterface
     archive_path: str = Field(min_length=1, max_length=4096)
@@ -211,7 +209,7 @@ class RuntimeImageReferenceIntent(WireModel):
     attempt: int = Field(le=MAX_DATABASE_INTEGER, strict=True, ge=1)
     claim_owner: str = Field(min_length=1, max_length=200)
     oci_archive_sha256: Digest
-    image_digest: ImageDigest
+    image_digest: OciDigest
     image_bytes: int = Field(strict=True, ge=1, le=16 * 1024**4)
 
     def belongs_to(

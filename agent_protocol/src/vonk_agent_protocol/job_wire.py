@@ -9,14 +9,12 @@ from pydantic import StringConstraints, ValidationError
 
 from vonk_agent_protocol.wire_model import AgentProtocolError, WireModel
 
-_DIGEST = r"^[0-9a-f]{64}$"
 _NAME = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 _SLOT = r"^[A-Za-z][A-Za-z0-9_-]{0,31}$"
 MEDIA_TYPE_PATTERN = (
     r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$"
 )
 
-Digest = Annotated[str, StringConstraints(pattern=_DIGEST)]
 ArtifactName = Annotated[str, StringConstraints(pattern=_NAME)]
 ArtifactSlot = Annotated[str, StringConstraints(pattern=_SLOT)]
 MediaType = Annotated[str, StringConstraints(pattern=MEDIA_TYPE_PATTERN)]
