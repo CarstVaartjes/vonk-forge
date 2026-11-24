@@ -185,3 +185,14 @@ real observations and an upgrade/restart callback in its owning lane.
 The data-contract registry, serde/TypeScript shape registries
 and generated-contract checks retain their existing role. Controller startup and
 exclude-unset registries describe semantic exceptions rather than debt counts.
+
+## Stored rows are not re-hashed
+
+A row records its digest when it is written; comparing a stored `*_digest` /
+`*_sha256` column with a fresh digest of the same row's own payload, plan or
+document (added-line mode `identity`, "stored row re-hashed") refuses the row
+whenever a newer Controller reads it back differently. Digests are verified at
+ingress only (`REHASH_INGRESS`). The guard also catches a `payload_digest`
+column compared with any `*_digest(...)` call, not only `sha256`. Change
+detection against another row or a new input (the live profile document versus
+the digest a review recorded) is not this class.
