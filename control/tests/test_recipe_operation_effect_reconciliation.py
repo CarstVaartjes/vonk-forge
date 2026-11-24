@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.state_machines import ReservationState
@@ -22,7 +23,7 @@ from vonk_control.models.execution import (
 )
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
-from vonk_control.models.operations import AgentOperation
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
 from .node_contacts import contact_row
 from .non_blocking import assert_ended_without_blocking
@@ -294,7 +295,6 @@ def test_retirement_owner_loss_retains_capacity_until_exact_cleanup_receipt(
     tmp_path: Path,
 ) -> None:
     """Catches owner deletion being treated as a host Stop and free memory."""
-    from vonk_control.models.operations import AgentOperationAttempt
 
     sessions, service, _queue, mapping, build, nodes = setup_services(tmp_path)
     installation = installed_recipe(
@@ -311,7 +311,8 @@ def test_retirement_owner_loss_retains_capacity_until_exact_cleanup_receipt(
     _reason, completed, advanced = service._retirement_cleanup(
         original, request, "recipe.stop", "run", run.owner_id, ordinal
     )
-    assert advanced and not completed
+    assert advanced
+    assert not completed
     with sessions.begin() as session:
         for node in session.scalars(
             select(RunNode).where(RunNode.run_id == run.owner_id)
@@ -321,7 +322,8 @@ def test_retirement_owner_loss_retains_capacity_until_exact_cleanup_receipt(
     _reason, completed, advanced = service._retirement_cleanup(
         original, request, "recipe.stop", "run", run.owner_id, ordinal
     )
-    assert not completed and not advanced
+    assert not completed
+    assert not advanced
     with sessions.begin() as session:
         assert (
             session.scalar(
@@ -376,7 +378,8 @@ def test_retirement_owner_loss_retains_capacity_until_exact_cleanup_receipt(
     _reason, completed, advanced = service._retirement_cleanup(
         original, request, "recipe.stop", "run", run.owner_id, ordinal
     )
-    assert completed and not advanced
+    assert completed
+    assert not advanced
     fresh = service.preview_run(installation.owner_id, "after-reconciled-stop")
     assert fresh.allowed
     admitted = service.start(

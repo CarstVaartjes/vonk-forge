@@ -24,9 +24,9 @@ from typing import Any, cast
 
 from sqlalchemy import CursorResult, update
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.state_machines import InstallationState
 
-from .models.execution import RecipeInstallation
+from vonk_agent_protocol.state_machines import InstallationState
+from vonk_control.models.execution import RecipeInstallation
 
 #: The states in which an installation is waiting on its owning operation.
 IN_FLIGHT: tuple[InstallationState, ...] = (

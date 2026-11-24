@@ -10,7 +10,9 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_forge_contracts import RecipeDefinition
+
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -19,54 +21,12 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode, RecipeImageCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
-from vonk_forge_contracts import RecipeDefinition
-
-from ..admission_locking import (
+from vonk_control.admission_locking import (
     AdmissionLockBusy,
     acquire_admission_keys,
     node_admission_key,
 )
-from ..bounded_json import require_mapping
-from ..catalog.revision_contract import read_catalog_document
-from ..categorized_errors import InvalidValue
-from ..inventory.items import runtime_value
-from ..jobs import states as job_states
-from ..jobs.documents import AvailabilityJobPayload, AvailabilityRuntime
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..operations.blockers import make_blocker
-from ..prebuilt_images import PrebuiltDecision
-from ..recipe_builds.cancellation import BuildConsumerError, lock_build_dependency
-from ..recipe_builds.common import (
-    RecipeBuildAdmissionBusy,
-    RecipeBuildResolution,
-    RecipeSourcePolicyError,
-)
-from ..recipe_image_availability.build_observation import (
-    accepted_build_request as _accepted_build_request,
-)
-from ..recipe_image_availability.build_observation import reconcile_abandoned_builds
-from ..recipe_image_availability.contracts import (
-    SOURCE_POLICY_REFUSED_CODE,
-    BuildUnsettled,
-    RecipeImageAvailabilityClaim,
-    RecipeImageAvailabilityError,
-    RecipeImageAvailabilityRefused,
-)
-from ..recipe_image_availability.service import RecipeImageAvailabilityService
-from ..recipe_operations.availability_intent import RecipeBuildDependency
-from ..recipe_operations.errors import RecipeOperationConflict
-from ..recipe_operations.runtime_specs import (
-    resolve_recipe_entities,
-)
-from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from ..runtime_image_preparation.transport import OciLayoutImageTransport
-from ..stored.states import CatalogRevisionState
-from ..strict_json import read_stored_model
-from .build_observation import (
+from vonk_control.availability_production.build_observation import (
     AvailabilityUnsettled,
     _cached_build_receipt,
     _capacity_wait,
@@ -75,7 +35,54 @@ from .build_observation import (
     _prebuilt_blocker,
     _recorded_decision,
 )
-from .scheduler import RecipeImageAvailabilityScheduler
+from vonk_control.availability_production.scheduler import (
+    RecipeImageAvailabilityScheduler,
+)
+from vonk_control.bounded_json import require_mapping
+from vonk_control.catalog.revision_contract import read_catalog_document
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.inventory.items import runtime_value
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import AvailabilityJobPayload, AvailabilityRuntime
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.operations.blockers import make_blocker
+from vonk_control.recipe_builds.cancellation import (
+    BuildConsumerError,
+    lock_build_dependency,
+)
+from vonk_control.recipe_builds.common import (
+    PrebuiltDecision,
+    RecipeBuildAdmissionBusy,
+    RecipeBuildResolution,
+    RecipeSourcePolicyError,
+)
+from vonk_control.recipe_image_availability.build_observation import (
+    accepted_build_request as _accepted_build_request,
+)
+from vonk_control.recipe_image_availability.build_observation import (
+    reconcile_abandoned_builds,
+)
+from vonk_control.recipe_image_availability.contracts import (
+    SOURCE_POLICY_REFUSED_CODE,
+    BuildUnsettled,
+    RecipeImageAvailabilityClaim,
+    RecipeImageAvailabilityError,
+    RecipeImageAvailabilityRefused,
+)
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
+)
+from vonk_control.recipe_operations.availability_intent import RecipeBuildDependency
+from vonk_control.recipe_operations.errors import RecipeOperationConflict
+from vonk_control.recipe_operations.runtime_specs import resolve_recipe_entities
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
+from vonk_control.runtime_image_preparation.transport import OciLayoutImageTransport
+from vonk_control.stored.states import CatalogRevisionState
+from vonk_control.strict_json import read_stored_model
 
 PREBUILT_PULL_KEY = "prebuilt_pull"
 
@@ -83,7 +90,7 @@ PREBUILT_PULL_KEY = "prebuilt_pull"
 def _pulls_prebuilt_image(job: Job) -> bool:
     """Whether a build job is a Controller pull of a prebuilt image."""
 
-    return isinstance(job.payload, Mapping) and isinstance(
+    return isinstance(job.payload, Mapping) and isinstance(  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
         job.payload.get("prebuilt_image"), str
     )
 
@@ -492,6 +499,71 @@ class _ImageAvailabilitySteps:
         # Why each Spark was passed over, so a wait names its causes.
         skipped: dict[str, tuple[str, str]] = {}
         prebuilt_unused: PrebuiltDecision | None = None
+
+        def _same_image(job: Job) -> bool:
+            # Exact same content is this request's own image, not other
+            # work: identical requests share it and never wait on each
+            # other's retry clock (content identity, request-led).
+            if job.id == parent.id:
+                return True
+            other = job.payload
+            if job.kind != "recipe.image.availability.v2" or not isinstance(  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
+                other, Mapping
+            ):
+                return False
+            mine = parent_payload
+            if other.get("recipe_content_sha256") != mine.get("recipe_content_sha256"):
+                return False
+            build = mine.get("build_input_sha256")
+            if build is not None and other.get("build_input_sha256") == build:
+                return True
+            intent = parent_runtime.get("input_intent_sha256")
+            other_runtime = other.get("runtime")
+            return (
+                intent is not None
+                and isinstance(other_runtime, Mapping)
+                and other_runtime.get("input_intent_sha256") == intent
+            )
+
+        def work_for(node_id: str, jobs: tuple[Job, ...]) -> int:
+            return sum(
+                1
+                for job in jobs
+                if not _same_image(job)
+                if (
+                    job.kind == "recipe.build.v1"
+                    and node_id in (job.targets or ())
+                    and not _pulls_prebuilt_image(job)
+                    and session.scalar(
+                        select(AgentOperation.id)
+                        .where(
+                            AgentOperation.parent_job_id == job.id,
+                            AgentOperation.state.in_(
+                                job_states.words(
+                                    LifecycleState.QUEUED,
+                                    LifecycleState.RUNNING,
+                                    LifecycleState.BACKOFF,
+                                    LifecycleState.OBSERVING,
+                                )
+                            ),
+                        )
+                        .limit(1)
+                    )
+                    is not None
+                )
+                or (
+                    job.kind == "recipe.image.availability.v2"
+                    and isinstance(job.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
+                    and job.payload.get(PREBUILT_PULL_KEY) is not True
+                    and not isinstance(job.payload.get("image_result"), Mapping)
+                    and isinstance(
+                        (job_runtime := job.payload.get("runtime")),
+                        Mapping,
+                    )
+                    and job_runtime.get("builder_node_id") == node_id
+                )
+            )
+
         if not isinstance(builder_node_id, str):
             # Read the parent and choose a candidate in a short transaction.
             # The candidate is locked again only for final persistence, after
@@ -500,9 +572,7 @@ class _ImageAvailabilitySteps:
                 parent = self.service._require_claim(session, claim)
                 parent_payload = parent.payload
                 parent_runtime = require_mapping(parent_payload["runtime"], "runtime")
-                if isinstance(parent_runtime, Mapping) and isinstance(
-                    parent_runtime.get("builder_node_id"), str
-                ):
+                if isinstance(parent_runtime.get("builder_node_id"), str):
                     builder_node_id = str(parent_runtime["builder_node_id"])
                 else:
                     candidates = tuple(
@@ -519,77 +589,6 @@ class _ImageAvailabilitySteps:
                     )
                     candidate_ids = tuple(candidate.node_id for candidate in candidates)
                     occupied: list[str] = []
-
-                    def _same_image(job: Job) -> bool:
-                        # Exact same content is this request's own image, not other
-                        # work: identical requests share it and never wait on each
-                        # other's retry clock (content identity, request-led).
-                        if job.id == parent.id:
-                            return True
-                        other = job.payload
-                        if job.kind != "recipe.image.availability.v2" or not isinstance(
-                            other, Mapping
-                        ):
-                            return False
-                        mine = parent_payload
-                        if other.get("recipe_content_sha256") != mine.get(
-                            "recipe_content_sha256"
-                        ):
-                            return False
-                        build = mine.get("build_input_sha256")
-                        if (
-                            build is not None
-                            and other.get("build_input_sha256") == build
-                        ):
-                            return True
-                        intent = parent_runtime.get("input_intent_sha256")
-                        other_runtime = other.get("runtime")
-                        return (
-                            intent is not None
-                            and isinstance(other_runtime, Mapping)
-                            and other_runtime.get("input_intent_sha256") == intent
-                        )
-
-                    def work_for(node_id: str, jobs: tuple[Job, ...]) -> int:
-                        return sum(
-                            1
-                            for job in jobs
-                            if not _same_image(job)
-                            if (
-                                job.kind == "recipe.build.v1"
-                                and node_id in (job.targets or ())
-                                and not _pulls_prebuilt_image(job)
-                                and session.scalar(
-                                    select(AgentOperation.id)
-                                    .where(
-                                        AgentOperation.parent_job_id == job.id,
-                                        AgentOperation.state.in_(
-                                            job_states.words(
-                                                LifecycleState.QUEUED,
-                                                LifecycleState.RUNNING,
-                                                LifecycleState.BACKOFF,
-                                                LifecycleState.OBSERVING,
-                                            )
-                                        ),
-                                    )
-                                    .limit(1)
-                                )
-                                is not None
-                            )
-                            or (
-                                job.kind == "recipe.image.availability.v2"
-                                and isinstance(job.payload, Mapping)
-                                and job.payload.get(PREBUILT_PULL_KEY) is not True
-                                and not isinstance(
-                                    job.payload.get("image_result"), Mapping
-                                )
-                                and isinstance(
-                                    (job_runtime := job.payload.get("runtime")),
-                                    Mapping,
-                                )
-                                and job_runtime.get("builder_node_id") == node_id
-                            )
-                        )
 
                     for candidate_id in candidate_ids:
                         try:
@@ -711,11 +710,7 @@ class _ImageAvailabilitySteps:
                 parent = self.service._require_claim(session, claim)
                 parent_payload = parent.payload
                 parent_runtime = require_mapping(parent_payload["runtime"], "runtime")
-                assigned = (
-                    parent_runtime.get("builder_node_id")
-                    if isinstance(parent_runtime, Mapping)
-                    else None
-                )
+                assigned = parent_runtime.get("builder_node_id")
                 if isinstance(assigned, str):
                     builder_node_id = assigned
                     selected_candidate = None

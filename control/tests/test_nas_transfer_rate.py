@@ -9,8 +9,12 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+
+from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import InventoryRequest, NetworkInterface
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+from vonk_control.fleet_projection.common import ProjectionReason
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
@@ -233,7 +237,7 @@ def test_agent_wifi_vector_reaches_the_warning_consumer() -> None:
 
 
 @pytest.mark.parametrize(
-    "frequency,band",
+    ("frequency", "band"),
     [(2412, "2.4 GHz"), (5180, "5 GHz"), (6115, "6 GHz"), (58320, "58320 MHz")],
 )
 def test_wifi_frequency_names_the_observed_band(frequency: int, band: str) -> None:
@@ -268,9 +272,6 @@ def test_unreadable_wired_and_unselected_links_leave_warning_unchanged() -> None
 def test_link_evidence_fits_the_warning_bound_without_cutting_it_off() -> None:
     # Wrong implementation: appending link data exceeds ProjectionReason's
     # bound and breaks the fleet view, or truncates away the link diagnosis.
-    from vonk_agent_protocol.agent_words import ProfileReasonSeverity
-    from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
-    from vonk_control.fleet_projection.common import ProjectionReason
 
     notice = NasTransferNotice(
         "Copies from the NAS at 3.6 MB/s vs 64.1 MB/s on "

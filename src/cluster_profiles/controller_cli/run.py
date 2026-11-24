@@ -4,32 +4,33 @@ from __future__ import annotations
 
 import argparse
 import copy
+import re
 import sys
 import time
 from collections.abc import Callable, Mapping
 from enum import StrEnum
 from typing import Final, cast
 
-from ..cli_outcome import (
-    operation_state,
+from cluster_profiles.cli_outcome import operation_state
+from cluster_profiles.cli_render.common import _text, _words, terminal_text
+from cluster_profiles.cli_select import SelectorError
+from cluster_profiles.cli_states_generated import PROFILE_NOTHING_TO_CHANGE, SUCCEEDED
+from cluster_profiles.control_client.errors import ControlMalformedResponse
+from cluster_profiles.control_client.schema import validate_control_document
+from cluster_profiles.controller_cli.common import (
+    ControllerClient,
+    _profile_number,
+    _request_key,
 )
-from ..cli_render.common import _text, _words, terminal_text
-from ..cli_select import SelectorError
-from ..cli_states_generated import PROFILE_NOTHING_TO_CHANGE, SUCCEEDED
-from ..control_client.errors import ControlMalformedResponse
-from ..control_client.schema import validate_control_document
-from ..generated_control.models.fleet_profile_effects import FleetProfileEffects
-from ..generated_control.models.fleet_profile_run_effect_action import (
-    FleetProfileRunEffectAction,
-    check_fleet_profile_run_effect_action,
+from cluster_profiles.controller_cli.confirmation import _require_confirmation
+from cluster_profiles.controller_cli.profile import _profile
+from cluster_profiles.controller_cli.profile_authoring import (
+    _profile_save,
+    _read_saved_definition,
+    _with_assignment,
 )
-from ..generated_control.types import Unset
-from .common import ControllerClient, _profile_number, _request_key
-from .confirmation import _require_confirmation
-from .profile import _profile
-from .profile_authoring import _profile_save, _read_saved_definition, _with_assignment
-from .profile_load import ReviewedDraft, _load_profile
-from .selection import (
+from cluster_profiles.controller_cli.profile_load import ReviewedDraft, _load_profile
+from cluster_profiles.controller_cli.selection import (
     _library_pages,
     _observe_selection,
     _read_concurrently,
@@ -39,6 +40,18 @@ from .selection import (
     _selection_remaining,
     _skipped_read,
 )
+from cluster_profiles.generated_control.models.fleet_profile_effects import (
+    FleetProfileEffects,
+)
+from cluster_profiles.generated_control.models.fleet_profile_run_effect_action import (
+    FleetProfileRunEffectAction,
+    check_fleet_profile_run_effect_action,
+)
+from cluster_profiles.generated_control.models.library_recipe_projection import (
+    LibraryRecipeProjection,
+)
+from cluster_profiles.generated_control.models.model_display import ModelDisplay
+from cluster_profiles.generated_control.types import Unset
 
 
 def _run(
@@ -124,7 +137,7 @@ def _run(
     # Option answers this run was given; they outlive a rebuilt draft.
     answered: dict[str, str] = {}
 
-    def own_choices(definition) -> dict:
+    def own_choices(definition) -> dict[str, str]:
         for assignment in definition["assignments"]:
             if (
                 assignment["recipe_selector"] == recipe_selector
@@ -133,13 +146,13 @@ def _run(
                 return assignment.get("option_choices") or {}
         return {}
 
-    def draft() -> ReviewedDraft | dict:
+    def draft() -> ReviewedDraft | dict:  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
         """This run's edit on the newest saved profile; nothing is written yet.
 
         A read that did not complete is returned as its observation instead.
         """
         current = (
-            cast(dict, prefetched.pop().get())
+            cast(dict, prefetched.pop().get())  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
             if prefetched
             else _read_saved_definition(client, args)
         )
@@ -235,8 +248,10 @@ def _review_lead(number: int, spark_names: list[str], preview: object) -> list[s
     )
     stops = [run.alias for run in effects.runs if run.action != _KEEP]
     for adopted in effects.adopted if not isinstance(effects.adopted, Unset) else ():
-        for stop in adopted.stops if not isinstance(adopted.stops, Unset) else ():
-            stops.append(stop.effect.alias)
+        stops.extend(
+            stop.effect.alias
+            for stop in (adopted.stops if not isinstance(adopted.stops, Unset) else ())
+        )
     stopping = sorted(set(stops))
     return [
         f"Profile edited: {number} ({_text(preview.get('profile_name'))})",
@@ -251,7 +266,6 @@ def _model_titles(client: ControllerClient, *, deadline: float) -> dict[str, str
 
     A model without a published display has no title to match and is omitted.
     """
-    from ..generated_control.models.model_display import ModelDisplay
 
     titles: dict[str, str] = {}
     for models in _library_pages(
@@ -281,7 +295,6 @@ def _resolve_run_recipe(
     needle = requested.strip().casefold()
     if not needle:
         raise SelectorError("model or recipe name cannot be empty")
-    import re
 
     if re.fullmatch(r"[0-9a-f]{64}|[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", requested):
         return _resolve_recipe_selector(client, requested, deadline=deadline)
@@ -301,9 +314,6 @@ def _resolve_run_recipe(
             )
         ):
             matches.add(selector)
-        from ..generated_control.models.library_recipe_projection import (
-            LibraryRecipeProjection,
-        )
 
         recipe = LibraryRecipeProjection.from_dict(row)
         for model_selector in recipe.model_selectors:

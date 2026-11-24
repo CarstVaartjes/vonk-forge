@@ -9,8 +9,8 @@ import shutil
 import stat
 import tempfile
 import time
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Generator
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 from vonk_agent_protocol.installer_setup import validate_secret_name
@@ -89,7 +89,7 @@ def staging_directory(parent: Path) -> Path:
 
 def preserve(path: Path) -> None:
     retained = staging_directory(path.parent)
-    os.replace(path, retained / "preserved")
+    path.replace(retained / "preserved")
     sync_directory(path.parent)
 
 
@@ -173,14 +173,13 @@ def atomic_replace(path: Path, content: bytes, mode: int = 0o600) -> None:
             with os.fdopen(descriptor, "wb") as stream:
                 os.fchmod(stream.fileno(), mode)
                 if original:
-                    try:
+                    # Non-root keeps its own ownership; never broaden access.
+                    with suppress(PermissionError):
                         os.fchown(stream.fileno(), original.st_uid, original.st_gid)
-                    except PermissionError:
-                        pass  # Non-root keeps its own ownership; never broaden access.
                 stream.write(content)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary, path)
+            temporary.replace(path)
             sync_directory(path.parent)
         finally:
             temporary.unlink(missing_ok=True)
@@ -194,7 +193,7 @@ def write_member(root: Path, relative: str, content: bytes) -> None:
 
 
 @contextmanager
-def acquire_owner(root: Path) -> Iterator[None]:
+def acquire_owner(root: Path) -> Generator[None]:
     path = root / ".vonk-setup.lock"
     entry = metadata(path)
     if entry and (not stat.S_ISREG(entry.st_mode) or entry.st_nlink != 1):
@@ -212,7 +211,5 @@ def acquire_owner(root: Path) -> Iterator[None]:
 
 def discard(path: Path) -> None:
     """Only disposable private staging is recursively removed."""
-    try:
+    with suppress(OSError):
         shutil.rmtree(path)
-    except OSError:
-        pass

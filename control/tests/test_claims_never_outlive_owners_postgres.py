@@ -26,11 +26,12 @@ from pathlib import Path
 import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol.contracts import canonical_message
+from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import ReservationState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import journal_models
 from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS
 from vonk_control.agent_jobs.service import AgentJobService
@@ -41,6 +42,7 @@ from vonk_control.artifact_jobs.lifecycle import (
     reserve_removal,
 )
 from vonk_control.attempt_residues import AttemptResidueReconciler
+from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.catalog.sync import CatalogSyncUnsettled
 from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
@@ -72,12 +74,21 @@ from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
 from vonk_control.pki import IssuedCertificate
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS
 from vonk_control.recipe_operations.errors import RecipeRequestInvalid
+from vonk_control.step_ca import StepCAIssuancePending
 
 from .agent_fences import fenced_operation
 from .claim_registry import CLAIMS, NOT_CLAIMS, claim_shaped_tables
 from .runtime_identity_support import claim_agent
 from .signed_recipe_release import signed_recipe_releases
+from .test_agent_jobs_postgres import COMMIT, NODE_A, NODE_B, STOP_PAYLOAD
+from .test_agent_jobs_postgres import Clock as AgentJobsClock
+from .test_agent_jobs_postgres import parent as parent_job
+from .test_build_cancellation_recovery import _services
+from .test_catalog_sync import _empty_result, _fixture, _sync
+from .test_enrollment import NODE_ID, RecordingAuthority, csr, enroll
+from .test_enrollment import Clock as EnrollmentClock
 from .test_profile_port_claims import _load, _ready_profile
+from .test_stopped_build_claims import stopped_build_releases_its_resources
 
 _HELD = (ReservationState.ACTIVE, ReservationState.PROMISED)
 _ENDED = tuple(
@@ -126,7 +137,7 @@ def test_every_claim_is_ended_by_an_owner_liveness_kind(postgres_engine) -> None
                 assert not owner(session, gone, now).live, (table, kind)
 
 
-def _sessions(engine: Engine) -> sessionmaker:
+def _sessions(engine: Engine) -> sessionmaker[Session]:
     Base.metadata.create_all(engine)
     return sessionmaker(engine, expire_on_commit=False)
 
@@ -220,8 +231,6 @@ def _port_promise(tmp_path: Path, engine: Engine, ending: str) -> None:
 def _build_resource_claim(tmp_path: Path, engine: Engine, ending: str) -> None:
     """A build's disk and memory claims after its cleanup failed."""
 
-    from .test_stopped_build_claims import stopped_build_releases_its_resources
-
     fresh = stopped_build_releases_its_resources(tmp_path, engine)
     assert fresh.state in {"queued", "running"}
 
@@ -280,8 +289,6 @@ def _removal_gate(tmp_path: Path, engine: Engine, ending: str) -> None:
 def _sync_slot(tmp_path: Path, engine: Engine, ending: str) -> None:
     """The managed-library sync slot, when the sync holding it crashed."""
 
-    from .test_catalog_sync import _empty_result, _fixture, _sync
-
     sessions, catalog, reader, _item = _fixture(tmp_path, engine=engine)
     sync = _sync(sessions, catalog, reader)
     started = sync._clock() - timedelta(hours=1)
@@ -311,17 +318,15 @@ def _sync_slot(tmp_path: Path, engine: Engine, ending: str) -> None:
     assert fresh.completed_at is not None
     with sessions() as session:
         row = session.get(RecipeLibrarySyncRun, crashed.id)
-        assert row is not None and row.active_slot is None
+        assert row is not None
+        assert row.active_slot is None
 
 
 def _agent_mutation_turn(tmp_path: Path, engine: Engine, ending: str) -> None:
     """A node's mutation turn, when the agent order holding it lost its attempt."""
 
-    from .test_agent_jobs_postgres import COMMIT, NODE_A, NODE_B, STOP_PAYLOAD, Clock
-    from .test_agent_jobs_postgres import parent as parent_job
-
     sessions = _sessions(engine)
-    clock = Clock()
+    clock = AgentJobsClock()
     with sessions.begin() as session:
         for node_id in (NODE_A, NODE_B):
             session.add(
@@ -358,7 +363,8 @@ def _agent_mutation_turn(tmp_path: Path, engine: Engine, ending: str) -> None:
     jobs.reconcile_orders()
 
     claimed = claim_agent(jobs, NODE_A, "serial-a")
-    assert claimed is not None and fenced_operation(sessions, claimed).id == fresh.id
+    assert claimed is not None
+    assert fenced_operation(sessions, claimed).id == fresh.id
 
 
 def _distribution_grant(tmp_path: Path, engine: Engine, ending: str) -> None:
@@ -417,10 +423,8 @@ def _distribution_grant(tmp_path: Path, engine: Engine, ending: str) -> None:
 def _certificate_rotation(tmp_path: Path, engine: Engine, ending: str) -> None:
     """A node's renewal slot, when the process renewing it died mid-issuance."""
 
-    from .test_enrollment import NODE_ID, Clock, RecordingAuthority, csr, enroll
-
     sessions = _sessions(engine)
-    clock = Clock()
+    clock = EnrollmentClock()
     authority = RecordingAuthority()
     source = enroll(EnrollmentService(sessions, authority, clock=clock))
     authority.renew_error = SystemExit("process death after the provider request")
@@ -442,8 +446,6 @@ def _certificate_rotation(tmp_path: Path, engine: Engine, ending: str) -> None:
 
 def _image_build(tmp_path: Path, engine: Engine, ending: str) -> None:
     """A builder's build of one exact input, when the build Job ended."""
-
-    from .test_build_cancellation_recovery import _services
 
     sessions, _builds, operations, _storage, _now, _node, _revision, plan = _services(
         tmp_path, engine
@@ -500,7 +502,8 @@ def _live_port_promise(tmp_path: Path, engine: Engine) -> None:
                 )
             )
         )
-    assert states and states <= set(_HELD)
+    assert states
+    assert states <= set(_HELD)
 
 
 def _live_removal_gate(tmp_path: Path, engine: Engine) -> None:
@@ -543,8 +546,6 @@ def _live_removal_gate(tmp_path: Path, engine: Engine) -> None:
 def _live_sync_slot(tmp_path: Path, engine: Engine) -> None:
     """A sync that is still heartbeating keeps the slot; a fresh sync waits."""
 
-    from .test_catalog_sync import _empty_result, _fixture, _sync
-
     sessions, catalog, reader, _item = _fixture(tmp_path, engine=engine)
     sync = _sync(sessions, catalog, reader)
     started = sync._clock() - timedelta(hours=1)
@@ -574,17 +575,15 @@ def _live_sync_slot(tmp_path: Path, engine: Engine) -> None:
 
     with sessions() as session:
         row = session.get(RecipeLibrarySyncRun, running.id)
-        assert row is not None and row.active_slot == "managed-recipes"
+        assert row is not None
+        assert row.active_slot == "managed-recipes"
 
 
 def _live_agent_mutation_turn(tmp_path: Path, engine: Engine) -> None:
     """A node's mutation turn stays with the order whose attempt is live."""
 
-    from .test_agent_jobs_postgres import COMMIT, NODE_A, NODE_B, STOP_PAYLOAD, Clock
-    from .test_agent_jobs_postgres import parent as parent_job
-
     sessions = _sessions(engine)
-    clock = Clock()
+    clock = AgentJobsClock()
     with sessions.begin() as session:
         for node_id in (NODE_A, NODE_B):
             session.add(
@@ -684,17 +683,6 @@ def _live_certificate_rotation(tmp_path: Path, engine: Engine) -> None:
     created, but while its renewal is still touching it.
     """
 
-    from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
-    from vonk_control.step_ca import StepCAIssuancePending
-
-    from .test_enrollment import (
-        NODE_ID,
-        Clock,
-        RecordingAuthority,
-        csr,
-        enroll,
-    )
-
     class BusyAuthority(RecordingAuthority):
         """The CA journal stays busy for the whole first request."""
 
@@ -706,7 +694,7 @@ def _live_certificate_rotation(tmp_path: Path, engine: Engine) -> None:
             return super().observe_node(csr_pem, now, request=request)
 
     sessions = _sessions(engine)
-    clock = Clock()
+    clock = EnrollmentClock()
     authority = BusyAuthority()
     service = EnrollmentService(sessions, authority, clock=clock)
     source = enroll(service)
@@ -731,8 +719,6 @@ def _live_certificate_rotation(tmp_path: Path, engine: Engine) -> None:
 
 def _live_image_build(tmp_path: Path, engine: Engine) -> None:
     """A fresh request for the same input adopts the live build Job."""
-
-    from .test_build_cancellation_recovery import _services
 
     *_rest, operations, _storage, _now, _node, _revision, plan = _services(
         tmp_path, engine

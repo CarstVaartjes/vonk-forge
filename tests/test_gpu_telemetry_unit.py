@@ -1,5 +1,6 @@
 """Prevent NVML sensor queries being denied by the monitor device cgroup."""
 
+from configparser import ConfigParser
 from pathlib import Path
 
 
@@ -26,7 +27,6 @@ def test_monitor_grants_nvml_read_write_device_open():
 
 def test_clock_helper_keeps_nvml_device_authority():
     """Catches a policy apply sandbox that denies NVML's O_RDWR device opens."""
-    from configparser import ConfigParser
 
     root = Path(__file__).resolve().parents[1] / "packaging/systemd"
     helper_text = (root / "vonk-forge-package-helper.service").read_text()

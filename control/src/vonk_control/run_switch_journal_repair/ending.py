@@ -7,39 +7,44 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import JournalRepairCode
 from vonk_agent_protocol.state_machines import ReservationState
-
-from .. import agent_operation_states
-from ..admission_locking import AdmissionRowLock, lock_admission_rows
-from ..jobs.documents import RecipeInstallParent
-from ..journal_models import RunSwitchJournalRepair
-from ..machine_states import reservation_live
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..run_switch_contract.journal import (
+from vonk_control import agent_operation_states
+from vonk_control.admission_locking import AdmissionRowLock, lock_admission_rows
+from vonk_control.agent_jobs.retirement import release_owned_reservations_in_session
+from vonk_control.jobs.documents import RecipeInstallParent
+from vonk_control.journal_models import RunSwitchJournalRepair
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.recipe_operation import RecipeOperationAdapter
+from vonk_control.lifecycle.run_switch import RunSwitchAdapter
+from vonk_control.lifecycle.types import Outcome
+from vonk_control.machine_states import reservation_live
+from vonk_control.models.execution import RecipeInstallation, ResourceReservation
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.run_switch_contract.journal import (
     JournalRepairDisposition,
     RunSwitchJournalRepairEndEvidence,
 )
-from ..run_switch_contract.phase_results import RunSwitchRuntimePlanResult
-from ..stored.json_values import read_row_column
-from .discovery import _candidate, _discover, _fingerprint, journal_document
-from .pending import _pending
+from vonk_control.run_switch_contract.phase_results import RunSwitchRuntimePlanResult
+from vonk_control.run_switch_journal_repair.discovery import (
+    _candidate,
+    _discover,
+    _fingerprint,
+    journal_document,
+)
+from vonk_control.run_switch_journal_repair.pending import _pending
+from vonk_control.run_switch_operations.planning_helpers import _run_switch_payload
+from vonk_control.stored.rows import read_row_column
 
 
 def _end_unproven_journal(
     sessions: sessionmaker[Session], operation_id: str, now: datetime
 ) -> JournalRepairDisposition:
     """End bookkeeping, fence only its exact install orders, preserve all bytes."""
-    from ..agent_jobs.retirement import release_owned_reservations_in_session
-    from ..lifecycle.agent_operation import AgentOperationAdapter
-    from ..lifecycle.recipe_operation import RecipeOperationAdapter
-    from ..lifecycle.run_switch import RunSwitchAdapter
-    from ..lifecycle.types import Outcome
-    from ..models.execution import RecipeInstallation, ResourceReservation
-    from ..run_switch_operations.planning_helpers import _run_switch_payload
 
     # Discover the complete write set without holding any row. Acquire it in
     # the shared order and NOWAIT; never take resource locks under a Job lock.

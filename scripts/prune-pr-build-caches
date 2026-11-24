@@ -16,6 +16,7 @@ import json
 import re
 import subprocess
 import sys
+from typing import NotRequired, TypedDict
 
 CACHE_TAG = re.compile(r"\Abuildcache-pr-(\d+)\Z")
 PACKAGE = "vonk-forge-api"
@@ -27,7 +28,22 @@ def gh(*args: str) -> str:
     ).stdout
 
 
-def versions(owner: str) -> list[dict]:
+class _Container(TypedDict, total=False):
+    tags: list[str]
+
+
+class _Metadata(TypedDict, total=False):
+    container: _Container
+
+
+class PackageVersion(TypedDict):
+    """The fields of a GHCR package version this script reads."""
+
+    id: int
+    metadata: NotRequired[_Metadata]
+
+
+def versions(owner: str) -> list[PackageVersion]:
     return json.loads(
         gh("--paginate", f"/users/{owner}/packages/container/{PACKAGE}/versions")
     )

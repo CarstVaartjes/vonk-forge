@@ -6,7 +6,8 @@ import uuid
 from typing import Any
 
 from sqlalchemy import select, text
-from vonk_agent_protocol.contracts import canonical_message
+
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.jobs.documents import RunSwitchJobPayload
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.jobs import Job
@@ -57,7 +58,7 @@ def test_old_shape_job_with_a_starting_run_continues_to_success(tmp_path) -> Non
         sessions,
         memory_floor_bytes=0,
         lifecycle=_ObservingLifecycle(lifecycle, healthy=True),
-        clock=lambda: lifecycle._clock(),
+        clock=lambda: lifecycle._clock(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
         artifact_phase_executor=RecordingArtifactExecutor(),
     )

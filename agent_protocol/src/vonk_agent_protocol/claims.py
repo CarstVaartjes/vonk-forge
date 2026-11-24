@@ -7,14 +7,14 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import Field, model_validator
 
-from .optional_evidence import (
+from vonk_agent_protocol.optional_evidence import (
     EvidenceGroup,
     OptionalEvidenceModel,
     fail_open_on_optional_evidence,
 )
-from .package_upgrade import PackageActivationReceipt
-from .reason_codes.evidence import AgentEvidenceCode
-from .wire_model import Digest, WireModel
+from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
+from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
+from vonk_agent_protocol.wire_model import Digest, WireModel
 
 
 class AgentRuntimeIdentity(WireModel):
@@ -66,7 +66,7 @@ class ClaimRequest(OptionalEvidenceModel, WireModel):
         # error instead of a list of unknown fields.
         if isinstance(value, Mapping):
             version = value.get("protocol_version")
-            if version != AGENT_PROTOCOL_VERSION or isinstance(version, bool):
+            if version != AGENT_PROTOCOL_VERSION or isinstance(version, bool):  # pyright: ignore[reportUnnecessaryIsInstance]  # a bool equals an int protocol version such as 1
                 raise ValueError(
                     f"agent protocol {version} is not supported by this "
                     "Controller; reinstall the Spark agent"

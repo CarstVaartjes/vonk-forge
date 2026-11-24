@@ -9,6 +9,7 @@ from typing import Any, cast
 import pytest
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.testclient import TestClient
+
 from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
 from vonk_control.agent_api import common
 from vonk_control.api import middleware
@@ -103,7 +104,8 @@ def test_storage_repairs_damage_and_keeps_permission_failures_temporary(
     else:
         assert response.status_code == 200
         repaired = destination if condition == "publication" else target
-        assert repaired.is_file() and not repaired.is_symlink()
+        assert repaired.is_file()
+        assert not repaired.is_symlink()
         if condition == "publication":
             assert destination.read_bytes() == b"x"
             target.write_bytes(b"x")
@@ -135,7 +137,7 @@ def test_unsafe_controller_path_is_a_miss_then_recovers(
 
 
 @pytest.mark.parametrize(
-    "condition, status", [("identity_missing", 401), ("identity_override", 403)]
+    ("condition", "status"), [("identity_missing", 401), ("identity_override", 403)]
 )
 def test_security_refusal(client: TestClient, condition: str, status: int) -> None:
     """Catch security refusals softened into temporary or retryable responses."""

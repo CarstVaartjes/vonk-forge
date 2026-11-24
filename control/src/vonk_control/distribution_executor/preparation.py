@@ -10,6 +10,7 @@ from threading import RLock
 from typing import Any, cast
 
 from sqlalchemy import select
+
 from vonk_agent_protocol.agent_words import (
     ProfileChildPhase,
     ProfileEffectState,
@@ -17,42 +18,51 @@ from vonk_agent_protocol.agent_words import (
 )
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import OperationProgress
-
-from ..content_identity import same_image
-from ..fleet_profiles.read_observation import profile_read
-from ..logging import redact_text
-from ..model_cache import states as model_cache_states
-from ..model_cache.contract import (
+from vonk_control.content_identity import same_image
+from vonk_control.distribution_executor.background import BackgroundPreparations
+from vonk_control.distribution_executor.durable import DurableDistributionPhaseExecutor
+from vonk_control.distribution_executor.receipts import _ChildView, _phase_receipt
+from vonk_control.execution_plan_service import _bind_runtime_artifacts
+from vonk_control.fleet_profiles.read_observation import profile_read
+from vonk_control.logging import redact_text
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.contract import (
     ModelCacheDownloadPreviewResponse,
     ModelCacheDownloadResult,
+    ModelCacheOperationProgress,
 )
-from ..model_cache.errors import ModelCacheNotFound
-from ..model_cache.views import CacheOperationView
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..run_switch_contract.evidence import RunSwitchPhase
-from ..run_switch_contract.observation import RuntimeImageBuildInput
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.phase_results import (
+from vonk_control.model_cache.errors import ModelCacheNotFound
+from vonk_control.model_cache.progress import project_cache_progress
+from vonk_control.model_cache.views import CacheOperationView
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.recipe_operations.runtime_specs import (
+    RecipeRuntimeSpecError,
+    compile_runtime_spec,
+    resolve_recipe_entities,
+    split_option_choices,
+)
+from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+from vonk_control.run_switch_contract.observation import RuntimeImageBuildInput
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import (
     RunSwitchModelDownloadPendingResult,
     RunSwitchModelDownloadResult,
     RunSwitchRuntimeImageResult,
 )
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.progress import RunSwitchChildProgress
-from ..run_switch_operations.interfaces import PhaseExecution
-from ..run_switch_operations.publish import _persist_run_switch_runtime_image_reference
-from ..runtime_image_preparation.contracts import RuntimeImageReceipt
-from ..stored.states import CatalogRevisionState, RecipeBuildState
-from ..strict_json import read_stored_model
-from ..worker.memory_contract import WorkerMemoryComponent
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.progress import RunSwitchChildProgress
+from vonk_control.run_switch_operations.interfaces import PhaseExecution
+from vonk_control.run_switch_operations.publish import (
+    _persist_run_switch_runtime_image_reference,
+)
+from vonk_control.runtime.spec_contract import RuntimeSpec
+from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
+from vonk_control.stored.states import CatalogRevisionState, RecipeBuildState
+from vonk_control.strict_json import read_stored_model
+from vonk_control.worker.memory_contract import WorkerMemoryComponent
 
 _LOGGER = logging.getLogger(__name__)
-
-
-from .background import BackgroundPreparations
-from .durable import DurableDistributionPhaseExecutor
-from .receipts import _ChildView, _phase_receipt
 
 
 class CompositeDistributionPhaseExecutor(
@@ -311,14 +321,6 @@ class CompositeDistributionPhaseExecutor(
             return None
         if plan.recipe_revision_id is None or not plan.spark_group.nodes:
             raise RuntimeError("runtime image preparation identity is unavailable")
-        from ..execution_plan_service import _bind_runtime_artifacts
-        from ..recipe_operations.runtime_specs import (
-            RecipeRuntimeSpecError,
-            compile_runtime_spec,
-            resolve_recipe_entities,
-            split_option_choices,
-        )
-        from ..runtime.spec_contract import RuntimeSpec
 
         with self._sessions() as session:
             revision = session.scalar(
@@ -470,8 +472,6 @@ class CompositeDistributionPhaseExecutor(
     def _cache_result(
         view: CacheOperationView,
     ) -> RunSwitchModelDownloadResult | RunSwitchModelDownloadPendingResult:
-        from ..model_cache.contract import ModelCacheOperationProgress
-        from ..model_cache.progress import project_cache_progress
 
         if view.artifact_set_sha256 is None:
             raise RuntimeError(

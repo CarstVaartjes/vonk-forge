@@ -9,6 +9,7 @@ from pathlib import Path
 import httpx2
 import pytest
 from sqlalchemy import create_engine
+
 from vonk_agent_protocol.capability_reply import (
     CapabilityReason,
     CapabilityUnavailableReply,
@@ -67,7 +68,8 @@ def test_a_sync_that_adds_a_display_field_is_served_without_another_step(
     world.sync_service.advance_automatic(60)  # the worker
     api.tick()
     (model,) = world.projection.models(limit=10).models
-    assert model.model_display is not None and model.model_display.lineage is None
+    assert model.model_display is not None
+    assert model.model_display.lineage is None
     # No new sync and no interval passed: nothing is read again.
     api.tick()
     assert library.refreshes == 1

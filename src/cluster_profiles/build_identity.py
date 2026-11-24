@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from importlib import metadata, resources
 
-from .runtime_identity import packaged_runtime_identity
+from cluster_profiles.runtime_identity import packaged_runtime_identity
 
 
 def current_build() -> dict[str, object]:

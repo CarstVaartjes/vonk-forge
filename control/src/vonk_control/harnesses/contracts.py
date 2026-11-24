@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..runtime.writable_paths import EngineTelemetryContract, RuntimeWritablePath
+from vonk_control.runtime.writable_paths import (
+    EngineTelemetryContract,
+    RuntimeWritablePath,
+)
 
 
 @dataclass(frozen=True, slots=True)

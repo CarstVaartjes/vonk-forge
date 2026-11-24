@@ -14,6 +14,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
 from vonk_control.auth import Actor
 from vonk_control.model_cache.errors import ModelCacheError
 from vonk_control.model_primitives import Base
@@ -42,7 +44,6 @@ from vonk_control.runtime_image_preparation.contracts import (
     PulledImageEvidence,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .display_fixtures import reworded
 from .recipe_image_availability_support import (

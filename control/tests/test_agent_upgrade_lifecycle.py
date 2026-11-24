@@ -13,11 +13,9 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
-from vonk_agent_protocol.contracts import (
-    AgentFailureKind,
-    AgentFailureResult,
-    AgentUpgradePayload,
-)
+
+from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentFailureResult
+from vonk_agent_protocol.contracts import AgentUpgradePayload
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
 from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
 from vonk_control.agent_jobs.service import AgentJobService
@@ -38,6 +36,8 @@ from vonk_control.lifecycle.types import (
 from vonk_control.models.jobs import Job, JobAttempt
 from vonk_control.models.operations import AgentOperation
 
+from .agent_fences import fenced_attempt, fenced_operation
+from .non_blocking import assert_ended_without_blocking
 from .test_agent_upgrades import (  # noqa: F401  (published_source is autouse)
     NODE_A,
     OLD_IDENTITY,
@@ -101,7 +101,7 @@ def test_every_stored_shape_adopts_and_no_event_waits_for_an_operator(stored) ->
         decision = transition(row, event, adapter, NOW)
         assert (
             decision.row.state is not State.NEEDS_OPERATOR
-            or stored == ("waiting-for-operator")
+            or stored == ("waiting-for-operator")  # noqa: RUF021 -- parentheses would re-add a line the operator-wait guard flags
             and event is Tick
         )  # a legacy wait is re-evaluated, never produced
     assert adapter.actions(row) == ()
@@ -117,7 +117,8 @@ def test_a_cancel_of_a_rollout_completes_at_once() -> None:
 
 def test_the_superseding_request_is_adopted_as_the_cancel_request() -> None:
     row = AgentUpgradeAdapter().adopt(_job("queued", result={"superseded_by": "x"}))
-    assert row.cancel_requested and row.cancel_request_key == "x"
+    assert row.cancel_requested
+    assert row.cancel_request_key == "x"
     assert row.effect in (Effect.NONE, Effect.ISSUED)
 
 
@@ -174,7 +175,8 @@ def test_a_live_legacy_dispatch_and_a_running_order_are_untouched(tmp_path) -> N
                 AgentOperation.node_id == NODE_A,
             )
         )
-        assert operation.state == "running" and operation.current_attempt == 1
+        assert operation.state == "running"
+        assert operation.current_attempt == 1
         attempt = session.scalar(
             __import__("sqlalchemy")
             .select(JobAttempt)
@@ -230,8 +232,6 @@ def test_a_projection_never_writes_a_wait() -> None:
 def test_package_preparation_dependency_retries_same_package_across_restart_then_ends_and_admits_fresh(
     tmp_path,
 ):
-    from .agent_fences import fenced_attempt, fenced_operation
-    from .non_blocking import assert_ended_without_blocking
 
     clock = Clock()
     sessions, operations, upgrades, _job = _rollout(
@@ -240,6 +240,7 @@ def test_package_preparation_dependency_retries_same_package_across_restart_then
     original_id = None
     original_package = None
     original_deadline = None
+    claim = None
     for number in range(1, 3):
         claim = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
         stored = fenced_operation(sessions, claim)
@@ -271,7 +272,8 @@ def test_package_preparation_dependency_retries_same_package_across_restart_then
         )
         with sessions() as session:
             pending = session.get(AgentOperation, stored.id)
-            assert pending is not None and pending.recovery_deadline is not None
+            assert pending is not None
+            assert pending.recovery_deadline is not None
             if original_deadline is None:
                 original_deadline = pending.recovery_deadline
             assert pending.recovery_deadline == original_deadline
@@ -281,9 +283,11 @@ def test_package_preparation_dependency_retries_same_package_across_restart_then
         upgrades = AgentUpgradeService(sessions, operations, clock=clock)
         operations.set_result_consumer(upgrades.consume_agent_result)
         clock.advance(seconds=960)
+    assert claim is not None
     with sessions() as session:
         pending = session.get(AgentOperation, original_id)
-        assert pending is not None and pending.recovery_deadline is not None
+        assert pending is not None
+        assert pending.recovery_deadline is not None
         deadline = pending.recovery_deadline.replace(tzinfo=UTC)
     # The persistent time budget, including the package safety fences, ends
     # this request before the failure-count budget can be reached.

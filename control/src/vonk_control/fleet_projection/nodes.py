@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Annotated
 
 from pydantic import Field, TypeAdapter
+
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.gpu_clock import (
     GpuClockApplyState,
@@ -18,18 +19,8 @@ from vonk_agent_protocol.reason_codes.evidence import NodeOfflineReason
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.swap import GIB, SwapIntent, swap_satisfied
-
-from ..agent_contacts import last_seen as last_seen_at
-from ..gpu.health import gpu_health_reason
-from ..inventory.items import inventory_items
-from ..models.fleet import AgentCertificate, AgentNode, AgentNodeProfile
-from ..models.telemetry import NodeInventorySnapshot
-from ..nas_route_notice import nas_route_notice
-from ..nas_transfer_rate import NasTransferNotice, nas_transfer_detail
-from ..recipe_update_batches.notice import RECIPE_UPDATE_AVAILABLE
-from ..strict_json import warn_unreadable_once
-from ..telemetry.samples import TelemetrySampleView, sustained_low_cpu_clock
-from .common import (
+from vonk_control.agent_contacts import last_seen as last_seen_at
+from vonk_control.fleet_projection.common import (
     _AGENT_STATE_ADAPTER,
     _CERTIFICATE_OFFLINE_REASONS,
     CapacityReservations,
@@ -47,13 +38,25 @@ from .common import (
     _utc,
     telemetry_point,
 )
-from .display_memory import display_memory_advice
-from .fabric_rails import fabric_rails_warning
-from .host_checks import host_checks, host_checks_note
-from .memory_fragmentation import memory_fragmentation_warning
+from vonk_control.fleet_projection.display_memory import display_memory_advice
+from vonk_control.fleet_projection.fabric_rails import fabric_rails_warning
+from vonk_control.fleet_projection.host_checks import host_checks, host_checks_note
+from vonk_control.fleet_projection.memory_fragmentation import (
+    memory_fragmentation_warning,
+)
+from vonk_control.gpu.health import gpu_health_reason
+from vonk_control.inventory.items import inventory_items
+from vonk_control.inventory.repository import _validated_inventory
+from vonk_control.models.fleet import AgentCertificate, AgentNode, AgentNodeProfile
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.nas_route_notice import nas_route_notice
+from vonk_control.nas_transfer_rate import NasTransferNotice, nas_transfer_detail
+from vonk_control.recipe_update_batches.notice import RECIPE_UPDATE_AVAILABLE
+from vonk_control.strict_json import warn_unreadable_once
+from vonk_control.telemetry.samples import TelemetrySampleView, sustained_low_cpu_clock
 
 if TYPE_CHECKING:
-    from .service import FleetProjection
+    from vonk_control.fleet_projection.service import FleetProjection
 
 
 def _node(
@@ -244,11 +247,8 @@ def _node(
             or clock.graphics_mhz is None
             or clock.sm_mhz is None
             or clock.throttle_reasons is None
-            or (
-                clock.graphics_mhz is not None
-                and clock.graphics_mhz > gpu_clock_desired.max_mhz
-            )
-            or (clock.sm_mhz is not None and clock.sm_mhz > gpu_clock_desired.max_mhz)
+            or clock.graphics_mhz > gpu_clock_desired.max_mhz
+            or clock.sm_mhz > gpu_clock_desired.max_mhz
         ):
             warnings.append(
                 ProjectionReason(
@@ -265,33 +265,33 @@ def _node(
                 )
             )
     warnings.extend(_install_partial_warnings(installed))
-    for detail in stalls:
-        warnings.append(
-            ProjectionReason(
-                code=ProjectionCode.PROFILE_RETRYING,
-                detail=f"A profile load keeps retrying: {detail}"[:256],
-                severity="warning",
-            )
+    warnings.extend(
+        ProjectionReason(
+            code=ProjectionCode.PROFILE_RETRYING,
+            detail=f"A profile load keeps retrying: {detail}"[:256],
+            severity="warning",
         )
-    for detail in repeating:
-        warnings.append(
-            ProjectionReason(
-                code=ProjectionCode.EVIDENCE_REPEATING,
-                detail=detail,
-                severity=ProfileReasonSeverity.WARNING.value,
-            )
+        for detail in stalls
+    )
+    warnings.extend(
+        ProjectionReason(
+            code=ProjectionCode.EVIDENCE_REPEATING,
+            detail=detail,
+            severity=ProfileReasonSeverity.WARNING.value,
         )
-    for value in loaded:
-        if value.projection_issue is not None:
-            warnings.append(
-                ProjectionReason(
-                    code=ProjectionCode.RUN_DEGRADED,
-                    detail=f"{value.title or value.installation_id}: {value.projection_issue}"[
-                        :256
-                    ],
-                    severity="warning",
-                )
-            )
+        for detail in repeating
+    )
+    warnings.extend(
+        ProjectionReason(
+            code=ProjectionCode.RUN_DEGRADED,
+            detail=f"{value.title or value.installation_id}: {value.projection_issue}"[
+                :256
+            ],
+            severity="warning",
+        )
+        for value in loaded
+        if value.projection_issue is not None
+    )
     if any(value.healthy is False for value in loaded):
         warnings.append(
             ProjectionReason(
@@ -300,15 +300,15 @@ def _node(
                 severity="warning",
             )
         )
-    for value in loaded:
-        if value.recipe_update is not None:
-            warnings.append(
-                ProjectionReason(
-                    code=RECIPE_UPDATE_AVAILABLE,
-                    detail=value.recipe_update.detail,
-                    severity="info",
-                )
-            )
+    warnings.extend(
+        ProjectionReason(
+            code=RECIPE_UPDATE_AVAILABLE,
+            detail=value.recipe_update.detail,
+            severity="info",
+        )
+        for value in loaded
+        if value.recipe_update is not None
+    )
     labels = {} if profile is None else profile.labels
     projection_issues: list[str] = []
     try:
@@ -417,7 +417,6 @@ def _inventory(
     observed = _utc(value.observed_at)
     received = _utc(value.received_at)
     age = max(0.0, (current - received).total_seconds())
-    from ..inventory.repository import _validated_inventory
 
     report = _validated_inventory(value, observed_at=observed)
     return InventoryState(

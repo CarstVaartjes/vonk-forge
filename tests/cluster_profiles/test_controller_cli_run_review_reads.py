@@ -32,7 +32,8 @@ from cluster_profiles.control_client.errors import (
 from cluster_profiles.controller_cli import common, profile_authoring, selection
 from cluster_profiles.controller_cli import observation as observation_module
 from cluster_profiles.controller_cli import run as run_module
-from cluster_profiles.controller_cli.selection import _read_concurrently
+from cluster_profiles.controller_cli.selection import _read_concurrently, _skipped_read
+from control.tests.insert_collision_support import Rendezvous
 
 
 def test_run_review_leads_with_profile_sparks_and_what_stops(monkeypatch) -> None:
@@ -190,11 +191,11 @@ def test_profile_list_traverses_the_server_continuation():
 # flight together, so concurrency is proven by ordering, not by elapsed time.
 
 
-def _barrier(parties: int) -> threading.Barrier:
-    return threading.Barrier(parties, timeout=30)  # wall-clock: hang guard
+def _barrier(parties: int) -> Rendezvous:
+    return Rendezvous(parties, timeout=30)  # wall-clock: hang guard
 
 
-def _meeting(barrier: threading.Barrier, value: object, *, fail: bool = False):
+def _meeting(barrier: Rendezvous, value: object, *, fail: bool = False):
     def read() -> object:
         barrier.wait()
         if fail:
@@ -276,7 +277,6 @@ def test_definition_read_past_its_deadline_reports_its_own_timed_out_observation
 
 
 def test_a_single_real_read_runs_inline_and_keeps_its_error() -> None:
-    from cluster_profiles.controller_cli.selection import _skipped_read
 
     seen: list[threading.Thread] = []
 
@@ -387,7 +387,7 @@ def test_profile_add_reads_definition_recipe_and_sparks_together() -> None:
     status, _ = _profile_add(client)
 
     assert status == 0
-    assert _ADD_PATHS <= client.completed
+    assert client.completed >= _ADD_PATHS
 
 
 def test_profile_add_failing_peer_leaves_the_other_reads_intact() -> None:
@@ -435,7 +435,7 @@ def test_run_reads_the_library_and_the_fleet_together() -> None:
     with pytest.raises(_StopAfterReads):
         _run_command(client)
 
-    assert _RUN_PATHS <= client.completed
+    assert client.completed >= _RUN_PATHS
 
 
 def test_run_failing_fleet_read_leaves_the_library_result_intact() -> None:
@@ -463,7 +463,8 @@ def test_profile_read_fetches_spark_names_for_people_but_not_for_json(capsys):
 
     client = FakeClient(dict(responses))
     status, document = run(("profile", "--json"), client)
-    assert status == 0 and "spark_names" not in document
+    assert status == 0
+    assert "spark_names" not in document
     assert ("GET", "/api/fleet") not in [call[:2] for call in client.calls]
 
     client = FakeClient(dict(responses))

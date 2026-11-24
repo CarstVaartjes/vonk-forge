@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
@@ -56,7 +57,8 @@ def test_installed_cli_reviews_real_whole_fleet_effects_before_prompt(
     idle_node = "spk_" + "3" * 32
     with sessions.begin() as session:
         run = session.get(RecipeRun, previous.owner_id)
-        assert run is not None and run.state == "running"
+        assert run is not None
+        assert run.state == "running"
         # A withdrawn route is not a healthy desired assignment. The Controller
         # must show the old run being stopped before its replacement is started.
         run.route_state = "withdrawn"

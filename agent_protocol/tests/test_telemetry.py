@@ -5,9 +5,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol.contracts import AgentProtocolError, canonical_message
+
 from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 from vonk_agent_protocol.telemetry import TelemetryRequest
+from vonk_agent_protocol.wire_model import AgentProtocolError, canonical_message
 
 BOOT_ID = "00000000-0000-4000-8000-000000000001"
 
@@ -204,5 +205,6 @@ def test_a_ninth_engine_is_kept_and_a_dropped_entry_is_counted() -> None:
     sample = TelemetryRequest.parse(
         {"samples": [{**VECTOR_V2["sample"], "engines": [bad, *engines, engines[0]]}]}
     ).samples[0]
-    assert sample.engines is not None and len(sample.engines) == 9
+    assert sample.engines is not None
+    assert len(sample.engines) == 9
     assert sample.dropped_engine_entries == 2

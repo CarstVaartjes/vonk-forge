@@ -12,20 +12,16 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed448, ed25519
 from cryptography.x509.oid import ExtendedKeyUsageOID, ExtensionOID, NameOID
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.admission import CertificateCode
-
-from .ca_issuance_contract import (
+from vonk_control.ca_issuance_contract import (
     CertificateIssuanceBinding,
     CertificateRefusalReason,
 )
-from .pki import (
-    CertificateAuthority,
-    _load_node_csr,
-    _utc_timestamp,
-)
+from vonk_control.pki import CertificateAuthority, _load_node_csr, _utc_timestamp
 
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}\Z")
 _KID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
@@ -292,10 +288,8 @@ def _verify_ca_chain(
         raise ValueError(
             "root certificate must contain CA constraints and key usage"
         ) from error
-    if (
-        not root_constraints.ca
-        or root_constraints.path_length is not None
-        and root_constraints.path_length < 1
+    if not root_constraints.ca or (
+        root_constraints.path_length is not None and root_constraints.path_length < 1
     ):
         raise ValueError("root certificate cannot issue the configured intermediate")
     if not root_usage.key_cert_sign or not root_usage.crl_sign:

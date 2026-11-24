@@ -3,9 +3,11 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import ipaddress
 import json
 import os
 import shutil
+import socket
 import ssl
 import subprocess
 import sys
@@ -17,16 +19,38 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
 from threading import Event, Thread
+from typing import Any
 
 import pytest
+import uvicorn
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import NameOID
+from jsonschema import Draft202012Validator
+from sqlalchemy import create_engine
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import sessionmaker
 
-from cluster_profiles import cli, cli_update
-from cluster_profiles.runtime_identity import contract_fingerprint
+from cluster_profiles import cli, cli_update, runtime_identity
+from cluster_profiles.control_client.transfers import ControlClient
+from cluster_profiles.runtime_identity import (
+    contract_fingerprint,
+    verified_wheel_identity,
+)
 from control.tests.consumer_outcomes import not_adopted
+from tools import cli_dependencies
+from vonk_control import api as api_module
+from vonk_control import build_identity
+from vonk_control.api.application import create_app
+from vonk_control.auth import Actor, TokenCodec
+from vonk_control.model_primitives import Base
+from vonk_control.observation import platform as platform_observation
+from vonk_control.observation.platform import PlatformObservation, PlatformObserver
+from vonk_control.observation.transfer import OBSERVATION_MEDIA_TYPE
+from vonk_control.operation_api.openapi import admin_openapi_schema
+from vonk_control.worker import loop as worker_module
+from vonk_control.worker.liveness import WorkerHeartbeatRecorder
 
 
 def _control_schema():
@@ -86,7 +110,7 @@ def test_update_download_identifies_product_without_following_redirects() -> Non
             self.end_headers()
             self.wfile.write(b"release")
 
-        def log_message(self, *_args) -> None:
+        def log_message(self, format: str, *args: object) -> None:
             pass
 
     with ThreadingHTTPServer(("127.0.0.1", 0), ReleaseHost) as server:
@@ -309,7 +333,10 @@ def test_update_installs_only_changed_signed_wheel(
         return subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(cli_update, "_install", install)
-    download = lambda url, maximum: objects[url]
+
+    def download(url, maximum):
+        return objects[url]
+
     checked = cli_update.run_update(
         channel="stable",
         public_key=key,
@@ -317,7 +344,8 @@ def test_update_installs_only_changed_signed_wheel(
         apply=False,
         download=download,
     )
-    assert checked["update_available"] is True and not seen
+    assert checked["update_available"] is True
+    assert not seen
     applied = cli_update.run_update(
         channel="stable",
         public_key=key,
@@ -326,7 +354,8 @@ def test_update_installs_only_changed_signed_wheel(
         download=download,
         compatibility_observation=_controller_observation,
     )
-    assert applied["updated"] is True and len(seen) == 1
+    assert applied["updated"] is True
+    assert len(seen) == 1
     assert applied["previous"] == checked["current"]
     assert applied["current"] == {"version": "1.2.3", "source_sha": source_sha}
     assert applied["update_available"] is False
@@ -350,7 +379,8 @@ def test_update_installs_only_changed_signed_wheel(
         download=download,
         compatibility_observation=_controller_observation,
     )
-    assert unchanged["updated"] is False and len(seen) == 1
+    assert unchanged["updated"] is False
+    assert len(seen) == 1
 
 
 def test_update_rejects_tampered_release_before_wheel_install(
@@ -582,7 +612,6 @@ def _install_cli_wheel(uv: str, venv: Path, wheel: Path) -> Path:
     """
 
     root = Path(__file__).resolve().parents[2]
-    from tools import cli_dependencies
 
     found, reason = cli_dependencies.site_packages(root)
     if found is None:
@@ -650,8 +679,10 @@ def test_signed_client_update_trusts_accepted_bytes_despite_projection_drift(
     assert result["updated"] is True
     current_result = result["current"]
     controller_result = result["controller"]
-    assert isinstance(current_result, dict) and current_result["source_sha"] == "b" * 40
-    assert isinstance(controller_result, dict) and controller_result["api"] == api
+    assert isinstance(current_result, dict)
+    assert current_result["source_sha"] == "b" * 40
+    assert isinstance(controller_result, dict)
+    assert controller_result["api"] == api
 
 
 @pytest.mark.parametrize(
@@ -701,7 +732,8 @@ def _prepare_signed_update_tool(
     """Build and install once; no test resolves dependencies over the network."""
     _require_signed_update_lane()
     cache = Path(os.environ["VONK_SIGNED_UPDATE_CACHE"])
-    assert cache.is_dir() and any(cache.iterdir()), "locked resolver cache is absent"
+    assert cache.is_dir(), "locked resolver cache is absent"
+    assert any(cache.iterdir()), "locked resolver cache is absent"
     interpreters = Path(os.environ["UV_PYTHON_INSTALL_DIR"])
     assert interpreters.is_dir(), "the hosted managed interpreter directory is absent"
     uv = shutil.which("uv")
@@ -817,7 +849,8 @@ def _prepare_signed_update_tool(
     assert installed.returncode == 0, installed.stderr
     executable = workspace / "bin" / "vonkctl"
     python = workspace / "tools" / "vonk-cluster-profiles" / "bin" / "python"
-    assert executable.is_file() and python.is_file()
+    assert executable.is_file()
+    assert python.is_file()
     return workspace, environment, executable, python, wheels[1]
 
 
@@ -830,7 +863,8 @@ def _source_revision(root: Path) -> str:
         else "VONK_TRANSITION_SOURCE_SHA"
     )
     revision = os.environ[name]
-    assert len(revision) == 40 and all(c in "0123456789abcdef" for c in revision)
+    assert len(revision) == 40
+    assert all(c in "0123456789abcdef" for c in revision)
     return revision
 
 
@@ -847,7 +881,6 @@ def transition_signed_update_tool(tmp_path_factory: pytest.TempPathFactory):
 
 
 def _proof_tls_files(workspace: Path) -> tuple[Path, Path]:
-    import ipaddress
 
     tls_key = rsa.generate_private_key(public_exponent=65537, key_size=3072)
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
@@ -939,7 +972,7 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
             self.end_headers()
             self.wfile.write(content or b"")
 
-        def log_message(self, *_args: object) -> None:
+        def log_message(self, format: str, *args: object) -> None:
             pass
 
     def invoke(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -953,7 +986,7 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
             check=False,
         )
 
-    def identity() -> dict:
+    def identity() -> dict[str, Any]:
         observed = invoke([str(executable), "--json", "--version"])
         assert observed.returncode == 0, observed.stderr
         return json.loads(observed.stdout)
@@ -1034,27 +1067,6 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
     transition_signed_update_tool, monkeypatch
 ) -> None:
     """Prove the trusted bootstrap when an old release schema refuses an epoch."""
-    import socket
-
-    import uvicorn
-    from sqlalchemy import create_engine
-    from sqlalchemy.exc import SQLAlchemyError
-    from sqlalchemy.orm import sessionmaker
-    from vonk_control import api as api_module
-    from vonk_control import build_identity
-    from vonk_control.api.application import create_app
-    from vonk_control.auth import Actor, TokenCodec
-    from vonk_control.model_primitives import Base
-    from vonk_control.observation import platform as platform_observation
-    from vonk_control.observation.platform import PlatformObservation, PlatformObserver
-    from vonk_control.observation.transfer import OBSERVATION_MEDIA_TYPE
-    from vonk_control.operation_api.openapi import admin_openapi_schema
-    from vonk_control.worker import loop as worker_module
-    from vonk_control.worker.liveness import WorkerHeartbeatRecorder
-
-    from cluster_profiles import runtime_identity
-    from cluster_profiles.control_client.transfers import ControlClient
-    from cluster_profiles.runtime_identity import verified_wheel_identity
 
     workspace, environment, executable, python, candidate_wheel = (
         transition_signed_update_tool
@@ -1203,7 +1215,7 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
             self.end_headers()
             self.wfile.write(content or b"")
 
-        def log_message(self, *_args):
+        def log_message(self, format: str, *args: object) -> None:
             pass
 
     environment = {
@@ -1250,7 +1262,8 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
             json.dumps(client.get("/api/platform"))
         )
         assert platform.api.source_sha == current_source
-        assert platform.workers is not None and len(platform.workers) == 1
+        assert platform.workers is not None
+        assert len(platform.workers) == 1
         assert platform.workers[0].source_sha == current_source
         assert api_responses[-1] == ("/api/platform", 200, OBSERVATION_MEDIA_TYPE)
         assert client.get("/api/cli/contract")["worker_compatibility"] == "compatible"
@@ -1396,7 +1409,6 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
 def test_update_installs_across_release_format_changes(
     tmp_path, monkeypatch, schema_version
 ):
-    from jsonschema import Draft202012Validator
 
     key, objects = _signed_publication(
         tmp_path,
@@ -1446,7 +1458,8 @@ def test_update_installs_across_release_format_changes(
         download=lambda url, maximum: objects[url],
         compatibility_observation=_controller_observation,
     )
-    assert result["updated"] is True and len(installed) == 1
+    assert result["updated"] is True
+    assert len(installed) == 1
     request_update = cli_update.run_update
     fresh = request_update(
         channel="stable",
@@ -1500,7 +1513,8 @@ def test_update_refuses_tampered_bytes_then_allows_fresh_update(
         update()
     assert not installed
     objects[url] = original
-    assert update()["updated"] is True and len(installed) == 1
+    assert update()["updated"] is True
+    assert len(installed) == 1
 
 
 def test_update_reobserves_malformed_peer_then_installs_and_admits_fresh_update(
@@ -1544,7 +1558,9 @@ def test_update_reobserves_malformed_peer_then_installs_and_admits_fresh_update(
         clock=lambda: ticks[0],
         sleeper=sleep,
     )
-    assert result["updated"] and len(installed) == 1 and ticks[0] == 1.0
+    assert result["updated"]
+    assert len(installed) == 1
+    assert ticks[0] == 1.0
     fresh = cli_update.run_update(
         channel="stable",
         origin="https://install.vonkforge.ai",
@@ -1553,7 +1569,8 @@ def test_update_reobserves_malformed_peer_then_installs_and_admits_fresh_update(
         download=lambda url, _: objects[url],
         compatibility_observation=_controller_observation,
     )
-    assert fresh["updated"] and len(installed) == 2
+    assert fresh["updated"]
+    assert len(installed) == 2
 
 
 def test_unknown_update_ends_without_install_then_fresh_request_works(
@@ -1592,7 +1609,8 @@ def test_unknown_update_ends_without_install_then_fresh_request_works(
             clock=lambda: ticks[0],
             sleeper=sleep,
         )
-    assert ticks[0] == 1 and installed == []
+    assert ticks[0] == 1
+    assert installed == []
     fresh = cli_update.run_update(
         channel="stable",
         origin="https://install.vonkforge.ai",
@@ -1601,7 +1619,8 @@ def test_unknown_update_ends_without_install_then_fresh_request_works(
         download=lambda url, _: objects[url],
         compatibility_observation=_controller_observation,
     )
-    assert fresh["updated"] and len(installed) == 1
+    assert fresh["updated"]
+    assert len(installed) == 1
 
 
 def test_notice_owner_cannot_unlink_replacement_lock(tmp_path):
@@ -1641,7 +1660,7 @@ def test_signed_download_total_deadline_ends_slow_drip_and_fresh_read_works():
                 except OSError:
                     return
 
-        def log_message(self, *_):
+        def log_message(self, format: str, *args: object) -> None:
             pass
 
     with ThreadingHTTPServer(("127.0.0.1", 0), Drip) as server:
@@ -1707,7 +1726,8 @@ def test_an_install_that_keeps_logging_outlives_its_quiet_window(tmp_path, monke
         tmp_path, "for i in 1 2 3 4 5 6; do echo resolving $i; sleep 0.5; done\n"
     )
     completed = cli_update._install([uv, "tool", "install", "wheel.whl"])
-    assert completed is not None and completed.returncode == 0
+    assert completed is not None
+    assert completed.returncode == 0
     assert "resolving 6" in completed.stdout
 
 

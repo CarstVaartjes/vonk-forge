@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
@@ -22,6 +24,7 @@ from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchQueueItem,
 )
+from vonk_control.fleet_profiles.continuing_effects import _adopted_application_scope
 from vonk_control.fleet_profiles.contracts import (
     FleetProfileAdmissionBusy,
     _FleetProfileSupersededIntentConflict,
@@ -43,17 +46,14 @@ from vonk_control.models.fleet import (
 )
 from vonk_control.models.jobs import Job
 from vonk_control.persisted_waits import read_wait
-from vonk_control.platform_ports import HOST_ENDPOINT_PORT
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .agent_jobs_support import canonical_start_payload
 from .fleet_profiles_support import (
     NOW,
-    _assessment,
-    _exact_preparation,
     _node_id,
     _seed,
-    _SwitchAdapter,
+    _seed_dual_solo_without_runtime_state,
     _uuid,
 )
 from .runtime_identity_support import (
@@ -62,23 +62,11 @@ from .runtime_identity_support import (
     inventory_items_fixture,
 )
 from .test_profile_adapter_continuity import _running_child
-from .test_profile_claim_restore import seed_idle_spark
-
-
-class _SQLCancellationAdapter(_SwitchAdapter):
-    def request_superseded_workload_cancellation_in_session(
-        self, session, targets, ordinal, now
-    ):
-        AgentJobService.request_superseded_workload_cancellation_in_session(
-            session, targets, ordinal, now
-        )
-
-
-def _assessment_with_promises(_session, _assignment, expected_nodes, **_kwargs):
-    assessment = _assessment(_exact_preparation(tuple(expected_nodes)))
-    assessment.fit_current.nodes[0].ports_required = [HOST_ENDPOINT_PORT]
-    assessment.fit_current.nodes[0].disk_required_bytes = 100
-    return assessment
+from .test_profile_claim_restore import (
+    _assessment_with_promises,
+    _SQLCancellationAdapter,
+    seed_idle_spark,
+)
 
 
 def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cleanup(
@@ -154,7 +142,8 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
         changed_claim_ids = {
             claim.id for claim in original_claims if claim.node_id == _node_id(2)
         }
-        assert kept_claim_ids and changed_claim_ids
+        assert kept_claim_ids
+        assert changed_claim_ids
     jobs = AgentJobService(sessions, clock=lambda: clock[0])
     job_id = str(uuid4())
     with sessions.begin() as session:
@@ -242,7 +231,7 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
     with sessions() as session:
         old = session.get(FleetProfileApplication, original.id)
         assert old is not None
-        assert restarted._adopted_application_scope(session, old) == (_node_id(1),)
+        assert _adopted_application_scope(session, old) == (_node_id(1),)
         assert {
             claim.id
             for claim in session.scalars(
@@ -321,7 +310,8 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
         assert stored is not None
         assert stored.pending_operation_ids == [issued.id]
         wait = read_wait(row)
-        assert wait is not None and wait.reason is WaitReason.STOP_UNCONFIRMED
+        assert wait is not None
+        assert wait.reason is WaitReason.STOP_UNCONFIRMED
         assert wait.resume_condition is WaitResumeCondition.EFFECT_OBSERVED
         assert wait.dependency_deadline == stored.observation_deadline_at
         assert [b.operation.id for b in wait.blockers if b.operation] == [issued.id]
@@ -363,7 +353,6 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
 
 def test_postgres_new_profile_never_adopts_half_of_a_dual_spark_effect(postgres_engine):
     """Catches preserving one rank of a replaced gang as independent work."""
-    from .fleet_profiles_support import _seed_dual_solo_without_runtime_state
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -433,10 +422,10 @@ class _WaitingContinuation:
     """A load waiting for admission that continues lane 1 of an older load
     (on Spark 1) and replaces its lane 2 (on Spark 2) with lane C."""
 
-    sessions: sessionmaker
+    sessions: sessionmaker[Session]
     profiles: FleetProfileService
     clock: list[datetime]
-    lanes: list[dict]
+    lanes: list[dict[str, Any]]
     original_id: str
     original_child: str
     waiting_id: str

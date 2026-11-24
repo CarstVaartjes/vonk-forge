@@ -6,24 +6,27 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Path, Query
-from vonk_agent_protocol.error_response import RequestValidationProblem
 from vonk_forge_contracts import CatalogVocabulary
 
+from vonk_control.api_availability import AVAILABILITY_ERRORS
+from vonk_control.auth import CursorError
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-
-from ..api_availability import AVAILABILITY_ERRORS
-from ..auth import CursorError
-from ..cursor_contract import MAX_CURSOR_LENGTH
-from ..library_projection.common import LibrarySelectorAmbiguous
-from ..model_cache.errors import ModelCacheError
-from ..operation_api.contracts import bounded_error_responses
-from ..request_fault import RequestFault
-from .contract import (
+from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
+from vonk_control.library.contract import (
     ModelDetailResponse,
     ModelLibraryResponse,
     RecipeDetailResponse,
     RecipeLibraryResponse,
 )
+from vonk_control.library_projection.common import (
+    LibrarySelectorAmbiguous,
+    SelectorAmbiguityHTTPError,
+)
+from vonk_control.model_cache.api import model_cache_http_error
+from vonk_control.model_cache.errors import ModelCacheError
+from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
+from vonk_control.operation_api.contracts import bounded_error_responses
+from vonk_control.request_fault import RequestFault
 
 # Friendly names may contain spaces.  Keep selectors bounded and reject control
 # characters; path routing remains safe because the projection resolves only an
@@ -39,32 +42,8 @@ LIBRARY_OPERATION_IDS = {
 }
 
 
-class SelectorAmbiguityHTTPError(HTTPException):
-    """Carry canonical choices separately from bounded, redacted error copy."""
-
-    def __init__(
-        self,
-        error: LibrarySelectorAmbiguous,
-        *,
-        status_code: int = 422,
-        code: str | None = None,
-    ) -> None:
-        self.problem = RequestValidationProblem(
-            detail="selector is ambiguous; choose an exact canonical candidate",
-            issues=[],
-            candidates=list(error.candidates),
-        )
-        super().__init__(
-            status_code=status_code,
-            detail=self.problem.detail,
-            headers={"x-vonk-error-code": code} if code is not None else None,
-        )
-
-
 def _error(error: Exception) -> HTTPException:
     if isinstance(error, ModelCacheError):
-        from ..model_cache.api import model_cache_http_error
-
         return model_cache_http_error(error)
     if isinstance(error, LibrarySelectorAmbiguous):
         return SelectorAmbiguityHTTPError(error)
@@ -86,8 +65,6 @@ def install_library_routes(
     projection: Any | None,
 ) -> None:
     """Install the singular read hierarchy; no legacy library aliases remain."""
-
-    from ..operation_api.constants import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS.update(LIBRARY_OPERATION_IDS)
     authenticated = actor_dependency
@@ -131,6 +108,7 @@ def install_library_routes(
         search: Annotated[str | None, Query(max_length=256)] = None,
         updated_since: Annotated[datetime | None, Query()] = None,
         sort: Annotated[Literal["updated", "name"], Query()] = "updated",
+        *,
         cached: Annotated[bool, Query()] = False,
         _actor: Any = authenticated,
     ) -> ModelLibraryResponse:
@@ -191,6 +169,7 @@ def install_library_routes(
         limit: Annotated[int, Query(ge=1, le=512)] = 100,
         cursor: Annotated[str | None, Query(max_length=MAX_CURSOR_LENGTH)] = None,
         model: Annotated[list[str] | None, Query(max_length=64)] = None,
+        *,
         cached: Annotated[bool, Query()] = False,
         ready: Annotated[bool | None, Query()] = None,
         fits_fleet: Annotated[bool | None, Query()] = None,

@@ -9,12 +9,17 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
+from vonk_control.model_cache.constants import (
+    _GITHUB_RELEASE_ASSET_HOST,
+    _HF_CANONICAL_HOST,
+)
+from vonk_control.model_cache.errors import (
+    ModelCacheConflictInvalid,
+    ModelCacheResolutionInvalid,
+)
 
-from .constants import _GITHUB_RELEASE_ASSET_HOST, _HF_CANONICAL_HOST
-from .errors import ModelCacheConflictInvalid, ModelCacheResolutionInvalid
 
-
-def _model_selector(value: str) -> str:
+def _model_selector(value: object) -> str:
     if not isinstance(value, str) or not 1 <= len(value.strip()) <= 256:
         raise ModelCacheResolutionInvalid(
             ModelCacheCode.SELECTOR_INVALID, "model selector is required"
@@ -127,3 +132,36 @@ def _fsync_directory(path: Path) -> None:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
+
+
+def _validate_source(source: str) -> None:
+    try:
+        parsed = urlsplit(source)
+        hostname = parsed.hostname
+        port = parsed.port
+    except (TypeError, ValueError) as error:
+        raise ModelCacheResolutionInvalid(
+            ModelCacheCode.SOURCE_INVALID, "cache source URL is invalid"
+        ) from error
+    if parsed.scheme in {"http", "https"}:
+        if (
+            not hostname
+            or parsed.username
+            or parsed.password
+            or parsed.fragment
+            or parsed.query
+            or port is not None
+        ):
+            raise ModelCacheResolutionInvalid(
+                ModelCacheCode.SOURCE_INVALID, "cache source URL is invalid"
+            )
+        return
+    if parsed.scheme == "file":
+        if parsed.netloc not in {"", "localhost"} or not parsed.path.startswith("/"):
+            raise ModelCacheResolutionInvalid(
+                ModelCacheCode.SOURCE_INVALID, "cache file source is invalid"
+            )
+        return
+    raise ModelCacheResolutionInvalid(
+        ModelCacheCode.SOURCE_INVALID, "cache source must use HTTPS, HTTP or file"
+    )

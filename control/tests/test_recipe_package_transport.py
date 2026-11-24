@@ -20,10 +20,25 @@ from hypothesis import strategies as st
 from sqlalchemy import create_engine, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_forge_contracts import (
+    CONTRACT_MAJOR,
+    PACKAGE_MEDIA_TYPE,
+    ChatApi,
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+    published_json,
+)
+from vonk_forge_contracts.qualification_status import (
+    PublishedQualificationStatusView,
+    QualificationStatus,
+)
+from vonk_forge_contracts.unrecognised import read_context
+
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode, RecipePackageCode
 from vonk_agent_protocol.state_machines import CatalogSyncState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping
 from vonk_control.catalog.service import CatalogService
@@ -53,20 +68,6 @@ from vonk_control.recipe_packages.contracts import (
 from vonk_control.recipe_packages.known_words import known_block
 from vonk_control.recipe_release import RecipeReleaseError
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
-from vonk_forge_contracts import (
-    CONTRACT_MAJOR,
-    PACKAGE_MEDIA_TYPE,
-    ChatApi,
-    ModelDefinition,
-    RecipeDefinition,
-    document_sha256,
-    published_json,
-)
-from vonk_forge_contracts.qualification_status import (
-    PublishedQualificationStatusView,
-    QualificationStatus,
-)
-from vonk_forge_contracts.unrecognised import read_context
 
 from .display_fixtures import display_of_model, display_of_recipe
 from .index_envelope import index_envelope
@@ -816,7 +817,8 @@ def test_one_entry_the_contract_cannot_read_never_rejects_the_envelope(
         [problem] = snapshot.problems
         assert problem.detail.startswith("index catalog_entities entry")
         assert "is skipped: document" in problem.detail
-        assert snapshot.items and not snapshot.catalog_entities
+        assert snapshot.items
+        assert not snapshot.catalog_entities
     finally:
         client.close()
 
@@ -890,7 +892,8 @@ def test_unreadable_parts_cost_only_their_entry_or_block(
     library.refresh_catalog(observe_storage=False)
     (recipe,) = library.recipe_library(limit=10).recipes
     assert recipe.identity.title == "tiny-recipe"
-    assert recipe.recipe_display is None and recipe.prebuilt_image is None
+    assert recipe.recipe_display is None
+    assert recipe.prebuilt_image is None
     assert recipe.projected.api is not None
     assert isinstance(recipe.projected.api.api, ChatApi)
     assert list(recipe.projected.api.api.endpoints) == endpoints
@@ -1041,8 +1044,10 @@ def test_bundle_member_names_are_bounded_and_safe() -> None:
     )
     assert list(kept) == ["vonk-forge/recipe-2"]
     details = [str(problem.detail) for problem in snapshot.problems]
-    assert "package.path" in details[0] and "vonk-forge/recipe-0" in details[0]
-    assert "\n" not in details[1] and all(len(item) <= 256 for item in details)
+    assert "package.path" in details[0]
+    assert "vonk-forge/recipe-0" in details[0]
+    assert "\n" not in details[1]
+    assert all(len(item) <= 256 for item in details)
 
 
 def test_restart_offline_reverifies_the_persisted_release(
@@ -1330,7 +1335,8 @@ def test_a_running_client_waits_visibly_for_its_major_and_adopts_it_on_the_next_
             assert f"contract v{MAJOR}" in waiting.value.detail
         older_only = False
         snapshot = client.list()
-        assert snapshot.version == f"{MAJOR}.1.0" and snapshot.items
+        assert snapshot.version == f"{MAJOR}.1.0"
+        assert snapshot.items
     finally:
         client.close()
 
@@ -1367,6 +1373,7 @@ def test_a_published_newer_major_is_noted_on_every_tick_and_the_catalog_still_ap
     )
     try:
         notes = []
+        snapshot = None
         for _tick in range(2):  # the second tick answers 304
             snapshot = client.list()
             assert snapshot.items
@@ -1376,6 +1383,7 @@ def test_a_published_newer_major_is_noted_on_every_tick_and_the_catalog_still_ap
             == [[f"contract v{MAJOR + 1} is published; this Controller reads v{MAJOR}"]]
             * 2
         )
+        assert snapshot is not None
         assert not snapshot.problems
 
         newer.clear()
@@ -1591,6 +1599,8 @@ def test_accepted_package_path_is_canonical_and_relative(raw: str) -> None:
     if not archive._safe_path(raw):
         return
     parts = raw.split("/")
-    assert raw and not raw.startswith("/")
-    assert "\x00" not in raw and "\\" not in raw
+    assert raw
+    assert not raw.startswith("/")
+    assert "\x00" not in raw
+    assert "\\" not in raw
     assert all(part not in {"", ".", ".."} for part in parts)

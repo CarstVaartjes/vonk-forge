@@ -8,10 +8,12 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol.contracts import AgentClaim, canonical_message
+
+from vonk_agent_protocol.contracts import AgentClaim
 from vonk_agent_protocol.distribution import DistributionAssignment
 from vonk_agent_protocol.inventory import InventoryRequest
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
+from vonk_agent_protocol.wire_model import canonical_message
 
 ROOT = Path(__file__).parents[2]
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import threading
 from typing import cast
 
@@ -77,7 +78,8 @@ def test_recipe_readiness_flags_are_forwarded_to_the_controller(vonkctl_json):
     )
     assert status == 0
     query = client.calls[0][3]["query"]
-    assert query["ready"] is True and query["fits_fleet"] is True
+    assert query["ready"] is True
+    assert query["fits_fleet"] is True
 
 
 def test_recipe_engine_and_creator_filters_are_forwarded():
@@ -213,10 +215,8 @@ def test_selection_budget_covers_every_page_and_discards_late_results(monkeypatc
         ]
     )
     resolved = None
-    try:
+    with contextlib.suppress(ControlClientError):
         resolved = selection_module._resolve_recipe_selector(client, "Coding")
-    except ControlClientError:
-        pass
     assert resolved is None
     assert [call[3]["timeout_seconds"] for call in client.calls] == [30, 10]
     clock[0] = 100
@@ -224,19 +224,25 @@ def test_selection_budget_covers_every_page_and_discards_late_results(monkeypatc
     assert selection_module._resolve_recipe_selector(client, "Coding") == "one/code"
 
 
-@pytest.mark.parametrize("noun,bad_row", [("recipe", None), ("spark", "invalid")])
+@pytest.mark.parametrize(("noun", "bad_row"), [("recipe", None), ("spark", "invalid")])
 def test_malformed_rows_restart_complete_read_before_resolving(noun, bad_row):
     if noun == "recipe":
         valid = {"recipes": [recipe("one/code", "Coding")]}
         client = Pages(
             [{"recipes": [recipe("one/code", "Coding"), bad_row]}, valid, valid]
         )
-        resolver = lambda: selection_module._resolve_recipe_selector(client, "Coding")
+
+        def resolver() -> object:
+            return selection_module._resolve_recipe_selector(client, "Coding")
+
         expected = "one/code"
     else:
         valid = {"nodes": [{"id": "spk_" + "a" * 32, "display_name": "Atlas"}]}
         client = Pages([{"nodes": [*valid["nodes"], bad_row]}, valid, valid])
-        resolver = lambda: selection_module._resolve_spark_selectors(client, ["Atlas"])
+
+        def resolver() -> object:
+            return selection_module._resolve_spark_selectors(client, ["Atlas"])
+
         expected = ["spk_" + "a" * 32]
     assert resolver() == expected
     assert len(client.calls) == 2

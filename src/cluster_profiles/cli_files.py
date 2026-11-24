@@ -114,7 +114,7 @@ def read_json_document(source: str) -> object:
             document[key] = value
         return document
 
-    def reject_constant(value: str) -> object:
+    def reject_constant(_value: str) -> object:
         raise ValueError("JSON input contains a non-finite number")
 
     return json.loads(

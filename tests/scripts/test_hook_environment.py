@@ -9,11 +9,10 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import check_environment as environment
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "scripts"))
-import check_environment as environment
 
 
 def clone(tmp_path: Path) -> Path:
@@ -228,7 +227,10 @@ def test_wire_lane_builds_catalog_before_checking_revision(tmp_path, monkeypatch
         (library / "catalog-index.json").write_text("{}")
 
     monkeypatch.setattr(environment, "run_preparation", build)
-    assert module.resolve_recipe_library(str(library), False) == (library, "pinned")
+    assert module.resolve_recipe_library(str(library), allow_any_revision=False) == (
+        library,
+        "pinned",
+    )
     assert calls == [[str(tmp_path / "scripts/build-recipe-library"), str(library)]]
 
 
@@ -276,9 +278,14 @@ def test_staged_files_outside_the_pyright_scope_are_not_type_checked() -> None:
     module = hook()
     assert module.type_checked(
         [
-            "agent_protocol/src/vonk_agent_protocol/telemetry.py",
+            "deploy/compose/image-janitor/janitor.py",
             "control/tests/test_api.py",
             "src/cluster_profiles/generated_control/client.py",
             "src/cluster_profiles/cli.py",
+            "scripts/check-python-types",
         ]
-    ) == ["control/tests/test_api.py", "src/cluster_profiles/cli.py"]
+    ) == [
+        "control/tests/test_api.py",
+        "src/cluster_profiles/cli.py",
+        "scripts/check-python-types",
+    ]

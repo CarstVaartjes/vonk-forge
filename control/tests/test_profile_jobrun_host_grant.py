@@ -5,7 +5,7 @@ import hashlib
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
@@ -13,6 +13,7 @@ from vonk_agent_protocol.host_helper import (
     host_helper_grant_signing_bytes,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.host_helper_authority import (
@@ -22,13 +23,14 @@ from vonk_control.host_helper_authority import (
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.stored.json_values import write_guard_mode
 
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )
 from .runtime_identity_support import claim_agent
-from .test_artifact_job_lifecycle import _issued_job
+from .test_artifact_job_recovery import _issued_job
 
 
 def _selected_profile_grant(tmp_path, reason="superseded by newer workload intent"):
@@ -72,11 +74,11 @@ def _selected_profile_grant(tmp_path, reason="superseded by newer workload inten
     assert stop is not None, profiles.application(accepted.id)
     assert stop.payload["profile_application_id"] == accepted.id
     # Human diagnostic wording is never part of exact cancellation authority.
-    from vonk_control.stored.json_values import write_guard_mode
 
     with write_guard_mode(strict=False), sessions.begin() as session:
         source = session.get(Job, artifact.operation_id)
-        assert source is not None and isinstance(source.result, dict)
+        assert source is not None
+        assert isinstance(source.result, dict)
         source.result = {**source.result, "reason": reason}
     node_id = stop.targets[0]
     claim = claim_agent(agent_jobs, node_id, "serial-0")

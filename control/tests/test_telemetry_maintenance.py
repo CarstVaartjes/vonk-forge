@@ -8,19 +8,26 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine, delete, select, update
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.telemetry import HostResourceSample
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.fleet_stream import FleetStream
 from vonk_control.fleet_stream_contract import FleetRefreshEvent
+from vonk_control.inventory.items import inventory_items
+from vonk_control.inventory.repository import (
+    InventoryRepository,
+    NodeInventoryReport,
+)
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.telemetry import (
     FleetEventCursor,
     FleetStreamEvent,
     NodeInventoryResourceSnapshot,
+    NodeInventorySnapshot,
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
@@ -29,6 +36,7 @@ from vonk_control.telemetry.samples import (
     TelemetryRepository,
 )
 
+from .runtime_identity_support import inventory_items_fixture
 from .telemetry_support import telemetry_with_resources
 
 NODE_A = "spk_" + "a" * 32
@@ -315,12 +323,7 @@ def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
             await generator.aclose()
 
     frame = asyncio.run(read_reset())
-    fields = {
-        key: value
-        for key, value in (
-            line.split(": ", 1) for line in frame.splitlines() if ": " in line
-        )
-    }
+    fields = dict(line.split(": ", 1) for line in frame.splitlines() if ": " in line)
     notice = FleetRefreshEvent.model_validate_json(fields["data"])
     assert fields["id"] == "1"
     assert fields["event"] == "fleet-refresh"
@@ -339,11 +342,6 @@ def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
 def test_inventory_history_keeps_a_day_and_always_each_nodes_newest_row(
     sessions,
 ) -> None:
-    from vonk_control.inventory.repository import (
-        InventoryRepository,
-        NodeInventoryReport,
-    )
-    from vonk_control.models.telemetry import NodeInventorySnapshot
 
     def record(node_id: str, observed_at: datetime) -> None:
         InventoryRepository(sessions, clock=lambda: observed_at).record(
@@ -372,10 +370,6 @@ def test_inventory_history_keeps_a_day_and_always_each_nodes_newest_row(
                 )
             )
         )
-
-    from vonk_control.inventory.items import inventory_items
-
-    from .runtime_identity_support import inventory_items_fixture
 
     node_b = "spk_" + "b" * 32
     with sessions.begin() as session:
@@ -406,5 +400,6 @@ def test_inventory_history_keeps_a_day_and_always_each_nodes_newest_row(
     assert kept == [(NODE_A, 2), (node_b, 50)]
     with sessions() as session:
         node = session.get(AgentNode, NODE_A)
-        assert node is not None and node.inventory_snapshot is not None
+        assert node is not None
+        assert node.inventory_snapshot is not None
         assert inventory_items(node).hostname == "retained.internal"

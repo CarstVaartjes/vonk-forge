@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+
 from vonk_control.interface_adapters import (
     InterfaceAdapterError,
     interface_adapter,

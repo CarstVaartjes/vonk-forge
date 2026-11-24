@@ -6,34 +6,60 @@ import hashlib
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import select
-from vonk_agent_protocol.contracts import (
+from sqlalchemy import delete, select, update
+
+from vonk_agent_protocol.agent_operations import (
     AgentFailureKind,
-    AgentResult,
+    AgentFailureResult,
     ArtifactDistributionResult,
-    canonical_message,
-    canonical_payload,
 )
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
+)
+from vonk_agent_protocol.contracts import AgentResult, canonical_payload
+from vonk_agent_protocol.inventory import GpuHealth
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     FailureCode,
     LifecycleState,
+    ObservationCause,
     OutcomeKind,
 )
+from vonk_agent_protocol.outcome import OutcomeFailed
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.agent_jobs.retirement import _release_retired_owner_in_session
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.agent_jobs.stored import column_message, column_value
+from vonk_control.agent_jobs.waits import record_queue_waits
+from vonk_control.inventory.repository import (
+    InventoryRepository,
+    NodeInventoryReport,
+)
+from vonk_control.jobs.documents import RecipeBuildParent, RecipeStartParent
 from vonk_control.lifecycle.agent_operation import (
     AgentOperationAdapter,
 )
+from vonk_control.lifecycle.evidence import Residue
 from vonk_control.lifecycle.types import Outcome
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
+from vonk_control.run_switch_operations.child_wake import ChildEndWake
+from vonk_control.runtime.preflight import (
+    admission_blockers,
+    latest_result,
+    request_digest,
+)
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .agent_jobs_support import (
@@ -52,10 +78,13 @@ from .agent_jobs_support import (
     superseded_order_payload,
 )
 from .node_contacts import contact_row
+from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import (
     claim_agent,
 )
+from .test_runtime_preflight import request as preflight_request
+from .test_runtime_preflight import result as passing_result
 
 
 @pytest.mark.parametrize(
@@ -73,12 +102,6 @@ from .runtime_identity_support import (
 )
 def test_terminal_request_is_not_revived_by_stale_recovery_evidence(service, condition):
     """A definite terminal result cannot be reopened by stale retry evidence."""
-    from vonk_agent_protocol.contracts import AgentFailureResult
-    from vonk_agent_protocol.lifecycle_vocabulary import (
-        LifecycleState,
-        ObservationCause,
-    )
-    from vonk_agent_protocol.outcome import OutcomeFailed
 
     jobs, sessions, clock = service
     kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
@@ -165,7 +188,8 @@ def test_terminal_request_is_not_revived_by_stale_recovery_evidence(service, con
         row = session.get(AgentOperation, operation.id)
         assert row is not None
         due = row.next_action_at
-        assert row.current_attempt == 1 and row.payload == original_payload
+        assert row.current_attempt == 1
+        assert row.payload == original_payload
         assert due is None
         assert row.state == LifecycleState.FAILED.value
     if condition in {"revoked", "superseded"}:
@@ -292,7 +316,8 @@ def test_wrong_fence_cannot_finish_work_and_current_fence_can(service) -> None:
         STOP_PAYLOAD,
     )
     fresh = claim_agent(jobs, NODE_A, "serial-a")
-    assert fresh is not None and fenced_operation(sessions, fresh).id == successor.id
+    assert fresh is not None
+    assert fenced_operation(sessions, fresh).id == successor.id
     jobs.succeed(fresh, STOP_RESULT)
     assert (
         job_state(sessions, successor.parent_job_id).state == LifecycleState.SUCCEEDED
@@ -301,10 +326,6 @@ def test_wrong_fence_cannot_finish_work_and_current_fence_can(service) -> None:
 
 def test_cancelled_build_waits_for_platform_cleanup_as_an_observation(service) -> None:
     """A rebuildable child cannot turn pending cleanup into a human gate."""
-    from vonk_control.jobs.documents import RecipeBuildParent
-    from vonk_control.recipe_operations.lifecycle_contract import (
-        RecipeOperationCancellationResult,
-    )
 
     jobs, sessions, clock = service
     job = parent(sessions, clock)
@@ -336,9 +357,6 @@ def test_cancelled_build_waits_for_platform_cleanup_as_an_observation(service) -
 @pytest.mark.parametrize("requested_at", [None, "expired"])
 def test_ended_superseded_authority_releases_the_queue(service, action, requested_at):
     """An exhausted cancellation must not raise repeatedly or retain a live claim."""
-    from types import SimpleNamespace
-
-    from .non_blocking import assert_ended_without_blocking
 
     jobs, sessions, clock = service
     owner = parent(sessions, clock)
@@ -396,9 +414,6 @@ def test_ended_superseded_authority_releases_the_queue(service, action, requeste
 @pytest.mark.parametrize("issued", [False, True])
 def test_gone_target_ends_without_retaining_queue_ownership(service, issued):
     """A revoked target never waits for its lease or a poll that cannot arrive."""
-    from types import SimpleNamespace
-
-    from .non_blocking import assert_ended_without_blocking
 
     jobs, sessions, clock = service
     owner = parent(sessions, clock)
@@ -440,7 +455,6 @@ def test_gone_target_ends_without_retaining_queue_ownership(service, issued):
 
 def test_retiring_bookkeeping_preserves_a_working_route(service):
     """An unobserved retired order is never evidence to withdraw a serving run."""
-    from vonk_control.agent_jobs.retirement import _release_retired_owner_in_session
 
     _jobs, sessions, clock = service
     owner = parent(sessions, clock)
@@ -463,9 +477,7 @@ def test_retiring_bookkeeping_preserves_a_working_route(service):
         session.add(run)
         stored_owner = session.get(Job, owner.id)
         stored_owner.payload = {"owner_kind": "run", "owner_id": run_id}
-        _release_retired_owner_in_session(
-            session, stored_owner, "unobserved", clock.now
-        )
+        _release_retired_owner_in_session(session, stored_owner, clock.now)
         assert run.state == "running"
         assert run.route_state == "published"
         assert run.route_error is None
@@ -473,7 +485,6 @@ def test_retiring_bookkeeping_preserves_a_working_route(service):
 
 def test_non_blocking_guard_still_rejects_a_live_unknown_claim(service):
     """A reported-unknown observation is distinct from a relinquished lease."""
-    from .non_blocking import assert_no_orphaned_holds
 
     jobs, sessions, clock = service
     owner = parent(sessions, clock)
@@ -498,8 +509,6 @@ def test_non_blocking_guard_still_rejects_a_live_unknown_claim(service):
 
 def test_stored_parent_identity_normalizes_full_state_and_rejects_damage(service):
     """Catch hashing full Controller state instead of its canonical typed identity."""
-    from vonk_control.agent_jobs.stored import column_message, column_value
-    from vonk_control.jobs.documents import RecipeStartParent
 
     _jobs, sessions, clock = service
     job = parent(sessions, clock)
@@ -523,8 +532,6 @@ def test_stored_parent_identity_normalizes_full_state_and_rejects_damage(service
         assert isinstance(typed, RecipeStartParent)
         assert canonical_message(typed) != accepted
         assert column_message(stored, "payload") == canonical_message(typed)
-    from sqlalchemy import update
-    from vonk_control.lifecycle.evidence import Residue
 
     with sessions.begin() as session:
         session.connection().execute(
@@ -634,12 +641,6 @@ def test_an_order_that_ended_keeps_its_outcome_unless_its_report_is_replaced(
 def test_gpu_fault_between_admission_and_claim_waits_then_recovers(service) -> None:
     # Catches dispatching a previously accepted launch after the GPU broke;
     # cleanup must remain claimable and a healthy observation must unblock it.
-    from vonk_agent_protocol.inventory import GpuHealth
-    from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
-    from vonk_control.inventory.repository import (
-        InventoryRepository,
-        NodeInventoryReport,
-    )
 
     jobs, sessions, clock = service
     repo = InventoryRepository(sessions)
@@ -677,7 +678,6 @@ def test_gpu_fault_between_admission_and_claim_waits_then_recovers(service) -> N
         assert ProjectionCode.NODE_GPU_REQUIRES_RESET in waiting.status_reason
         assert waiting.next_action_at is not None
         deadline = waiting.recovery_deadline
-    from vonk_control.agent_jobs.waits import record_queue_waits
 
     with sessions.begin() as session:
         waiting = session.get(AgentOperation, operation.id)
@@ -717,7 +717,6 @@ def test_ended_hold_clears_the_stamped_deadline_of_install_build_and_job_not_sta
     None
 ):
     # Catches an install or build that keeps what remained of a dispatch hold.
-    from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
 
     stamped = datetime(2026, 1, 1, tzinfo=UTC)
     for kind, cleared in (
@@ -742,15 +741,6 @@ def test_ended_hold_clears_the_stamped_deadline_of_install_build_and_job_not_sta
 
 def test_reusable_preflight_survives_operation_history_collection(service) -> None:
     """Catches treating a historical command receipt as current capability storage."""
-    from sqlalchemy import delete
-    from vonk_control.runtime.preflight import (
-        admission_blockers,
-        latest_result,
-        request_digest,
-    )
-
-    from .test_runtime_preflight import request as preflight_request
-    from .test_runtime_preflight import result as passing_result
 
     queue, sessions, clock = service
     request = preflight_request()
@@ -776,18 +766,14 @@ def test_reusable_preflight_survives_operation_history_collection(service) -> No
         session.execute(delete(AgentOperation).where(AgentOperation.id == operation.id))
     with sessions() as session:
         retained = latest_result(session, NODE_A, requirements_sha256=digest)
-        assert retained is not None and retained.result == result
+        assert retained is not None
+        assert retained.result == result
         assert not admission_blockers(request, retained, current_fingerprint="a" * 64)
         assert admission_blockers(request, retained, current_fingerprint="b" * 64)
 
 
 def test_failed_child_end_wake_preserves_committed_receipt(service):
     """A failed owner wake cannot turn an already committed report into loss."""
-    from vonk_control.run_switch_operations.child_wake import ChildEndWake
-    from vonk_control.runtime.preflight import latest_result, request_digest
-
-    from .test_runtime_preflight import request as preflight_request
-    from .test_runtime_preflight import result as passing_result
 
     queue, sessions, clock = service
     request = preflight_request()
@@ -813,12 +799,14 @@ def test_failed_child_end_wake_preserves_committed_receipt(service):
         receipt = latest_result(
             session, NODE_A, requirements_sha256=request_digest(request)
         )
-        assert receipt is not None and receipt.received_at == clock.now
+        assert receipt is not None
+        assert receipt.received_at == clock.now
         committed = session.get(Job, job.id)
-        assert committed is not None and committed.state == LifecycleState.SUCCEEDED
+        assert committed is not None
+        assert committed.state == LifecycleState.SUCCEEDED
 
 
-@pytest.mark.parametrize("contact_path", ("claim", "heartbeat"))
+@pytest.mark.parametrize("contact_path", ["claim", "heartbeat"])
 def test_controller_clock_rollback_replaces_pinned_contact(
     service, contact_path
 ) -> None:
@@ -848,4 +836,5 @@ def test_controller_clock_rollback_replaces_pinned_contact(
         node = session.get(AgentNode, NODE_A)
         assert node is not None
         seen = contact_row(node).last_seen_at
-        assert seen is not None and seen.replace(tzinfo=UTC) == clock()
+        assert seen is not None
+        assert seen.replace(tzinfo=UTC) == clock()

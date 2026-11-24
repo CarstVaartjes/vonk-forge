@@ -8,9 +8,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from ..generated_control.models.metric_spec import MetricSpec
-from ..generated_control.models.metrics_series_response import MetricsSeriesResponse
-from .common import _table
+from cluster_profiles.cli_render.common import _table
+from cluster_profiles.generated_control.models.metric_spec import MetricSpec
+from cluster_profiles.generated_control.models.metrics_series_response import (
+    MetricsSeriesResponse,
+)
 
 NO_DATA = "No data in this range"
 

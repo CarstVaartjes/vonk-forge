@@ -7,14 +7,12 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
+
+from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentFailureResult
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import (
-    AgentFailureKind,
-    AgentFailureResult,
-    canonical_message,
-)
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.availability_production import production as availability_production
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,
@@ -36,7 +34,7 @@ from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityError,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_control.stored.json_values import read_row_column
+from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import read_stored_model, serialize_json_value
 
 from .recipe_builds_support import _write_controller_build_receipt
@@ -395,14 +393,15 @@ def test_unbound_adoption_repairs_projection_and_reuses_accepted_content(
     fresh = production.service.start(
         revision.id, actor="operator", request_id=str(uuid.uuid4())
     )
-    assert fresh.state == LifecycleState.QUEUED.value and fresh.id != parent.id
+    assert fresh.state == LifecycleState.QUEUED.value
+    assert fresh.id != parent.id
     assert production.service.run_pending() == 1
     assert production.service.get(fresh.id).artifact is not None
     production.close()
 
 
 @pytest.mark.parametrize(
-    "code,kind",
+    ("code", "kind"),
     [
         (FailureCode.RECIPE_BUILD_FAILED, AgentFailureKind.INVALID_CONTRACT),
         (FailureCode.RECIPE_BUILD_PLATFORM_BLOCKED, None),
@@ -768,7 +767,9 @@ class _ConvertingStore(OciImageStore):
     def import_archive(self, archive):
         del archive
         place_test_image(self._storage, self._address, self._image_bytes)
-        return self.read(f"sha256:{self._address}")
+        image = self.read(f"sha256:{self._address}")
+        assert image is not None  # placed just above
+        return image
 
 
 def test_a_succeeded_build_is_adopted_after_its_preparation_retried(

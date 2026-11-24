@@ -7,10 +7,31 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Literal, Protocol, overload
 
+import httpx2
 import pytest
 
 from cluster_profiles.control_client.errors import ControlClientError
 from cluster_profiles.control_client.schema import validate_control_document
+from cluster_profiles.generated_control.api.default import (
+    enroll_fleet_node,
+    resume_job,
+)
+from cluster_profiles.generated_control.client import AuthenticatedClient, Client
+from cluster_profiles.generated_control.models.bounded_error_response import (
+    BoundedErrorResponse as GeneratedBoundedErrorResponse,
+)
+from cluster_profiles.generated_control.models.fleet_profile_assignment_input import (
+    FleetProfileAssignmentInput,
+)
+from cluster_profiles.generated_control.models.run_switch_operation import (
+    RunSwitchOperation,
+)
+from vonk_agent_protocol.error_response import BoundedErrorResponse
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.evidence import NodeOfflineReason
+from vonk_agent_protocol.telemetry import TelemetrySample
+from vonk_control.operator_projection_api.contracts import FleetActionResponse
+from vonk_control.strict_json import serialize_json_value
 
 ROOT = Path(__file__).resolve().parents[2]
 OPENAPI = ROOT / "control/openapi.json"
@@ -25,7 +46,7 @@ class _JSONObject(Protocol):
     """The decoded JSON object shape the operation walk reads."""
 
     @overload
-    def __getitem__(self, key: Literal["operationId"]) -> str: ...
+    def __getitem__(self, key: Literal["operationId"]) -> str: ...  # pyright: ignore[reportOverlappingOverload]  # operationId is the one string-valued key
     @overload
     def __getitem__(self, key: str) -> _JSONObject: ...
     def values(self) -> Iterable[_JSONObject]: ...
@@ -49,17 +70,6 @@ def test_cli_packages_the_generated_admin_openapi_contract() -> None:
 
 
 def test_enrollment_and_error_producers_reach_generated_http_consumer() -> None:
-    import httpx2
-    from vonk_agent_protocol.error_response import BoundedErrorResponse
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_control.operator_projection_api.contracts import FleetActionResponse
-    from vonk_control.strict_json import serialize_json_value
-
-    from cluster_profiles.generated_control.api.default import (
-        enroll_fleet_node,
-        resume_job,
-    )
-    from cluster_profiles.generated_control.client import Client
 
     client = Client(base_url="https://control.invalid")
     producer = FleetActionResponse(action="enroll", state=LifecycleState.SUCCEEDED)
@@ -84,9 +94,6 @@ def test_enrollment_and_error_producers_reach_generated_http_consumer() -> None:
 def test_generated_run_switch_clients_accept_auto_wait_and_preserve_manual_wait() -> (
     None
 ):
-    from cluster_profiles.generated_control.models.run_switch_operation import (
-        RunSwitchOperation,
-    )
 
     node_id = f"spk_{'1' * 32}"
     progress = {
@@ -196,9 +203,6 @@ def test_generated_profile_authoring_is_logical_and_transport_neutral() -> None:
         "invocation",
     }.isdisjoint(authored["properties"])
     assert "scope" not in components["FleetProfileInput"]["properties"]
-    from cluster_profiles.generated_control.models.fleet_profile_assignment_input import (
-        FleetProfileAssignmentInput,
-    )
 
     assignment = FleetProfileAssignmentInput(
         recipe_selector="publisher/recipe", spark_ids=["Spark One"]
@@ -463,7 +467,6 @@ def test_generated_library_contract_drops_legacy_visual_artifact_identity() -> N
 
 
 def test_generated_python_client_imports_in_the_root_locked_environment() -> None:
-    from cluster_profiles.generated_control.client import AuthenticatedClient
 
     assert AuthenticatedClient.__module__.startswith(
         "cluster_profiles.generated_control"
@@ -514,12 +517,10 @@ def test_generated_fleet_projection_vocabulary_is_finite() -> None:
     ]
     offline = schema["NodeConnection"]["properties"]["offline_reason"]
     assert offline["anyOf"][0] == {"$ref": "#/components/schemas/NodeOfflineReason"}
-    from vonk_agent_protocol.reason_codes.evidence import NodeOfflineReason
 
     assert schema["NodeOfflineReason"]["enum"] == [
         reason.value for reason in NodeOfflineReason
     ]
-    from vonk_agent_protocol.telemetry import TelemetrySample
 
     assert (
         schema["TelemetryPoint"]["properties"]["boot_id"]["pattern"]
@@ -547,12 +548,6 @@ def test_generated_telemetry_contract_is_concrete() -> None:
 
 
 def test_generated_python_client_parses_documented_operation_errors() -> None:
-    import httpx2
-
-    from cluster_profiles.generated_control.client import Client
-    from cluster_profiles.generated_control.models.bounded_error_response import (
-        BoundedErrorResponse,
-    )
 
     client = Client(base_url="https://control.invalid")
     expected = {
@@ -570,5 +565,5 @@ def test_generated_python_client_parses_documented_operation_errors() -> None:
                     json={"detail": f"bounded-{status_code}"},
                 ),
             )
-            assert isinstance(parsed, BoundedErrorResponse)
+            assert isinstance(parsed, GeneratedBoundedErrorResponse)
             assert parsed.detail == f"bounded-{status_code}"

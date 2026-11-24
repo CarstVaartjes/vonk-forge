@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, get_args
+from typing import get_args
 
-from pydantic import BaseModel, TypeAdapter, ValidationError
-from vonk_agent_protocol.contracts import canonical_message
+from pydantic import BaseModel
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     OperatorActionName,
@@ -16,22 +17,51 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitResumeCondition,
 )
 from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
-
-from .agent_operation_facts import aware
-from .models.waits import ScheduledWaitOwner
-from .operations.blockers import BlockingOperation, OperationBlocker, make_blocker
-from .strict_json import warn_unreadable_once
-from .wait_contract import QueueWait, WaitEvidence
-
-_REASON = TypeAdapter(OperationReason)
-
-
-def typed_wait_reason(value: str | None, fallback: OperationReason) -> OperationReason:
-    """Adopt a declared code, never classify the human-readable detail."""
-    try:
-        return _REASON.validate_json(canonical_message(value))
-    except ValidationError:
-        return fallback
+from vonk_control.agent_operation_facts import aware
+from vonk_control.agent_upgrades.contract import AgentUpgradeRolloutPayload
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import (
+    AvailabilityJobPayload,
+    RecipeBuildCleanupParent,
+    RecipeBuildParent,
+    RecipeInstallParent,
+    RecipeJobActivateParent,
+    RecipeJobRunParent,
+    RecipeReconcileParent,
+    RecipeStartParent,
+    RecipeStopParent,
+    RecipeUninstallParent,
+    RunSwitchJobPayload,
+)
+from vonk_control.models.cache import (
+    ArtifactLifecycleGate,
+    ModelCacheOperation,
+    RecipeLibrarySyncRun,
+)
+from vonk_control.models.coordinator import CoordinatorFailure
+from vonk_control.models.execution import ArtifactJob, RecipeInstallation, RecipeRun
+from vonk_control.models.fleet import (
+    AgentCertificate,
+    AgentIssuedCertificateRevocation,
+    FleetProfileApplication,
+    FleetProfileSelection,
+)
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.models.routes import RoutePublicationOwner
+from vonk_control.models.waits import ScheduledWaitOwner
+from vonk_control.operations.blockers import (
+    BlockingOperation,
+    OperationBlocker,
+    make_blocker,
+)
+from vonk_control.recipe_image_availability.removal_contract import (
+    RecipeCacheRemovalOwner,
+)
+from vonk_control.recipe_update_batches.contract import RecipeUpdateDocument
+from vonk_control.stored.json_values import binding_for
+from vonk_control.strict_json import warn_unreadable_once
+from vonk_control.wait_contract import QueueWait, WaitEvidence, typed_wait_reason
 
 
 def read_wait(owner: ScheduledWaitOwner) -> QueueWait | None:
@@ -202,13 +232,8 @@ def lifecycle_wait(
     )
 
 
-if TYPE_CHECKING:
-    from .models.jobs import Job
-
-
 def _job_owns_contract(owner: Job, contract: type[BaseModel]) -> bool:
     # Opaque engine content is never interpreted as Controller scheduling data.
-    from .stored.json_values import binding_for
 
     schema = binding_for("jobs", "payload").contract_for(owner.kind)
     return schema is contract or contract in get_args(schema)
@@ -236,16 +261,10 @@ def wait_due(owner: ScheduledWaitOwner) -> datetime | None:
         return aware(owner.next_action_at)
     if owner.wait_evidence is not None:
         return None
-    from .models.fleet import FleetProfileApplication
-    from .models.jobs import Job
 
     paths: tuple[tuple[str, ...], ...] = ()
     document: object = None
     if isinstance(owner, Job):
-        from .jobs.documents import AvailabilityJobPayload, RunSwitchJobPayload
-        from .recipe_image_availability.removal_contract import RecipeCacheRemovalOwner
-        from .recipe_update_batches.contract import RecipeUpdateDocument
-
         if _job_owns_contract(owner, RunSwitchJobPayload):
             document = owner.result
             paths = (("observation_due_at",),)
@@ -263,7 +282,7 @@ def wait_due(owner: ScheduledWaitOwner) -> datetime | None:
     elif isinstance(owner, FleetProfileApplication):
         document = owner.progress
         cancellation = (
-            document.get("cancellation") if isinstance(document, dict) else None
+            document.get("cancellation") if isinstance(document, dict) else None  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
         )
         if isinstance(cancellation, dict):
             due = _adopt_wait_instant(cancellation.get("observation_due_at"))
@@ -290,46 +309,11 @@ def owner_identity(
     owner: ScheduledWaitOwner,
 ) -> tuple[BlockingOperation, WaitOwnerKind]:
     """Identify the existing owner, never infer a wait reason from its prose."""
-    from .models.cache import (
-        ArtifactLifecycleGate,
-        ModelCacheOperation,
-        RecipeLibrarySyncRun,
-    )
-    from .models.coordinator import CoordinatorFailure
-    from .models.execution import ArtifactJob, RecipeInstallation, RecipeRun
-    from .models.fleet import (
-        AgentCertificate,
-        AgentIssuedCertificateRevocation,
-        FleetProfileApplication,
-        FleetProfileSelection,
-    )
-    from .models.jobs import Job
-    from .models.operations import AgentOperation
-    from .models.routes import RoutePublicationOwner
 
     if isinstance(owner, Job):
         previous = read_wait(owner)
         kind = previous.owner_kind if previous else WaitOwnerKind.JOB
         if previous is None:
-            from .agent_upgrades.contract import AgentUpgradeRolloutPayload
-            from .jobs.documents import (
-                AvailabilityJobPayload,
-                RecipeBuildCleanupParent,
-                RecipeBuildParent,
-                RecipeInstallParent,
-                RecipeJobActivateParent,
-                RecipeJobRunParent,
-                RecipeReconcileParent,
-                RecipeStartParent,
-                RecipeStopParent,
-                RecipeUninstallParent,
-                RunSwitchJobPayload,
-            )
-            from .recipe_image_availability.removal_contract import (
-                RecipeCacheRemovalOwner,
-            )
-            from .recipe_update_batches.contract import RecipeUpdateDocument
-
             for model, candidate in (
                 (AgentUpgradeRolloutPayload, WaitOwnerKind.AGENT_UPGRADE),
                 *(
@@ -433,17 +417,10 @@ def schedule_wait(
 
 def initialize_wait[T: ScheduledWaitOwner](owner: T, kind: WaitOwnerKind) -> T:
     """Give a new queued owner its initial wait, before it is flushed."""
-    from uuid import uuid4
-
-    from .jobs import states as job_states
-    from .models.cache import ModelCacheOperation
-    from .models.fleet import FleetProfileApplication
-    from .models.jobs import Job
-    from .models.operations import AgentOperation
 
     identity = getattr(owner, "id", None)
     if identity is None:
-        identity = str(uuid4())
+        identity = str(uuid.uuid4())
         if isinstance(
             owner, Job | AgentOperation | ModelCacheOperation | FleetProfileApplication
         ):

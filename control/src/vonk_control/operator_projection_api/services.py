@@ -7,19 +7,25 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol.state_machines import EnrollmentGrantState
 
-from ..agent_api.common import AgentApiServices, EnrollmentGrantResponse
-from ..agent_upgrades.contract import AgentUpgradePackage, AgentUpgradeRequestIntent
-from ..enrollment.bootstrap import accepted_installer_url
-from ..enrollment.contract import (
+from vonk_agent_protocol.state_machines import EnrollmentGrantState
+from vonk_control.agent_api.common import AgentApiServices, EnrollmentGrantResponse
+from vonk_control.agent_upgrades.contract import (
+    AgentUpgradePackage,
+    AgentUpgradeRequestIntent,
+)
+from vonk_control.enrollment.bootstrap import accepted_installer_url
+from vonk_control.enrollment.contract import (
     EnrollmentGrant,
     EnrollmentGrantStatus,
     EnrollmentObservationOutcome,
     EnrollmentRevocationStatus,
 )
-from ..enrollment.types import MAX_ENROLLMENT_GRANT_TTL_SECONDS
-from .contracts import FleetActionResponse, FleetLogResponse
+from vonk_control.enrollment.types import MAX_ENROLLMENT_GRANT_TTL_SECONDS
+from vonk_control.operator_projection_api.contracts import (
+    FleetActionResponse,
+    FleetLogResponse,
+)
 
 
 class FleetLogProvider(Protocol):

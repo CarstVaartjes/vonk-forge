@@ -55,7 +55,8 @@ def test_no_command_is_offline_orientation(monkeypatch, vonkctl_json) -> None:
     monkeypatch.setattr(cli, "begin_interactive_update_check", unexpected)
     status, document = vonkctl_json()
     assert status == 0
-    assert "fleet" in document["help"] and "profile" in document["help"]
+    assert "fleet" in document["help"]
+    assert "profile" in document["help"]
 
 
 def test_a_nested_group_without_a_command_shows_its_commands(vonkctl_json) -> None:
@@ -180,8 +181,10 @@ def test_completion_is_offline_and_contains_nested_commands(shell, monkeypatch):
     monkeypatch.setattr(cli, "begin_interactive_update_check", unexpected)
     assert cli.main(("completion", shell)) == 0
     script = completion_script(cli._parser(), shell)
-    assert "vonkctl" in script and "--interval-seconds" in script
-    assert "library" in script and "loginfo" in script
+    assert "vonkctl" in script
+    assert "--interval-seconds" in script
+    assert "library" in script
+    assert "loginfo" in script
 
 
 def test_human_terminal_text_cannot_inject_cursor_or_hyperlink_controls(capsys):
@@ -317,11 +320,13 @@ def test_real_entrypoint_is_offline_and_uses_clean_error_streams():
         )
         assert completed.returncode == expected_status, completed.stderr
         if expected_status == 0:
-            assert completed.stdout and not completed.stderr
+            assert completed.stdout
+            assert not completed.stderr
         elif "--json" in arguments:
             assert not completed.stderr
         else:
-            assert completed.stderr and not completed.stdout
+            assert completed.stderr
+            assert not completed.stdout
 
 
 def test_real_entrypoint_handles_closed_result_pipe_without_traceback():
@@ -347,7 +352,7 @@ def test_interrupted_follow_keeps_the_remote_identity_and_does_not_cancel(capsys
     identity = "33333333-3333-4333-8333-333333333333"
 
     class InterruptedObserver(Observations):
-        def request(self, method, path, payload=None, **kwargs):
+        def request(self, method, path, payload=None, **kwargs) -> dict[str, object]:
             self.calls.append((method, path))
             if len(self.calls) > 1:
                 raise KeyboardInterrupt

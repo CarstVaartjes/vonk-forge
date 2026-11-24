@@ -101,15 +101,15 @@ def identity_locks(tree: ast.Module) -> list[int]:
                 for _, field in columns
             ) or {"publisher", "slug"} <= {field for _, field in columns}
             if (
-                key_lookup
-                and (creates_job or bool(models & constructed))
-                or inserts
-                and models & constructed
-                or inserts
-                and call.func.attr == "get"
-                and any(
-                    isinstance(arg, ast.Name) and arg.id in constructed
-                    for arg in call.args
+                (key_lookup and (creates_job or bool(models & constructed)))
+                or (inserts and models & constructed)
+                or (
+                    inserts
+                    and call.func.attr == "get"
+                    and any(
+                        isinstance(arg, ast.Name) and arg.id in constructed
+                        for arg in call.args
+                    )
                 )
             ):
                 errors.append(call.lineno)

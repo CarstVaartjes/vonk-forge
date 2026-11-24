@@ -8,8 +8,8 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import ReconcileCode
@@ -20,41 +20,39 @@ from vonk_agent_protocol.state_machines import (
     RouteState,
     RunState,
 )
-
-from ..admission_locking import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
     admission_attempts,
     lock_admission_rows,
 )
-from ..categorized_errors import (
-    MissingRecord,
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.install_admission.contracts import InstallAdmissionBusy
+from vonk_control.jobs import states as job_states
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    RecipeRun,
 )
-from ..install_admission.contracts import InstallAdmissionBusy
-from ..jobs import states as job_states
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.mapping import ClusterMapping, ClusterMappingNode
-from ..models.operations import AgentOperation
-from ..owner_liveness import OwnerKind
-from ..run_switch_contract.requests import (
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.models.operations import AgentOperation
+from vonk_control.owner_liveness import OwnerKind
+from vonk_control.recipe_operations.constants import _MAX_ACTION_NODES
+from vonk_control.recipe_operations.errors import RecipeReconciliationBlocked
+from vonk_control.recipe_operations.impact_plans import UninstallPlan
+from vonk_control.recipe_operations.progress import _parent_reconciliation
+from vonk_control.recipe_operations.rank_authority import _uninstall_recipe
+from vonk_control.run_switch_contract.requests import (
     RunSwitchReconciliationAuthority,
     RunSwitchReconciliationTarget,
 )
-from .constants import _MAX_ACTION_NODES
-from .errors import RecipeReconciliationBlocked
-from .impact_plans import (
-    UninstallPlan,
-)
-from .progress import (
-    _parent_reconciliation,
-)
-from .rank_authority import _uninstall_recipe
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class ReconciliationAuthorityMixin:

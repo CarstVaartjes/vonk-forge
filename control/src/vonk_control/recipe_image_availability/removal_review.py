@@ -9,22 +9,26 @@ from typing import TYPE_CHECKING, cast
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
 from vonk_agent_protocol.state_machines import AssetAvailability
-
-from ..artifact_jobs.lifecycle import (
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     RemovalOwnerKind,
     retryable_artifact_database_error,
 )
-from ..artifact_reference_scan.image_references import runtime_image_reference_findings
-from ..artifact_reference_scan.model_references import model_set_reference_findings
-from ..artifact_reference_scan.types import ArtifactReferenceFinding
-from ..cache_removal_review import (
+from vonk_control.artifact_reference_scan.image_references import (
+    runtime_image_reference_findings,
+)
+from vonk_control.artifact_reference_scan.model_references import (
+    model_set_reference_findings,
+)
+from vonk_control.artifact_reference_scan.types import ArtifactReferenceFinding
+from vonk_control.cache_removal_review import (
     ArtifactKind,
     AssetDisposition,
     CacheAssetDisposition,
@@ -35,12 +39,11 @@ from ..cache_removal_review import (
     CacheRemovalReviewContent,
     seal_cache_removal_review,
 )
-from ..content_identity import ImageContent, same_image
-from ..model_cache.views import ModelCacheRemovalScope
-from ..models.cache import ArtifactLifecycleGate
-from ..operations.contract import AvailabilityRecoveryAction
-from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
-from .contracts import (
+from vonk_control.content_identity import ImageContent, same_image
+from vonk_control.model_cache.views import ModelCacheRemovalScope
+from vonk_control.models.cache import ArtifactLifecycleGate
+from vonk_control.operations.contract import AvailabilityRecoveryAction
+from vonk_control.recipe_image_availability.contracts import (
     SCHEMA_VERSION,
     ModelCacheRemovalCoordinator,
     RecipeImageAvailabilityError,
@@ -48,9 +51,14 @@ from .contracts import (
     _iso,
     _RecipeRemovalSelection,
 )
+from vonk_control.runtime_image_preparation.contracts import (
+    RuntimeImagePreparationError,
+)
 
 if TYPE_CHECKING:
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
 
 
 def _cache_removal_finding(
@@ -217,7 +225,7 @@ def _recipe_removal_impact_in_session(
         )
         for finding in model_owner_findings
     )
-    for kind, findings_by_asset, label, code in (
+    for _kind, findings_by_asset, label, code in (
         (
             "runtime-image",
             image_findings,
@@ -453,11 +461,11 @@ def _model_removal_assets(
         ).removal_asset_status(scope)
     except (TypeError, ValueError):
         return unknown()
-    if not isinstance(assets, Sequence) or isinstance(assets, (str, bytes)):
+    if not isinstance(assets, Sequence) or isinstance(assets, (str, bytes)):  # pyright: ignore[reportUnnecessaryIsInstance]  # an unexpected value is treated as unknown, not trusted
         return unknown()
     observed: dict[tuple[str, str], CacheRemovalAsset] = {}
     for asset in assets:
-        if not isinstance(asset, CacheRemovalAsset):
+        if not isinstance(asset, CacheRemovalAsset):  # pyright: ignore[reportUnnecessaryIsInstance]  # an unexpected value is treated as unknown, not trusted
             return unknown()
         identity = (asset.kind, asset.sha256)
         if identity in observed or expected.get(identity) != asset.disposition:
@@ -498,7 +506,13 @@ def _review_assets_for_selection(
     assets: list[CacheRemovalAsset] = []
     for identity, (expected_bytes, disposition) in sorted(expected.items()):
         observed = by_identity.get(identity)
-        if observed is None or observed.disposition != disposition:
+        if (
+            observed is None
+            or observed.disposition != disposition
+            or (
+                expected_bytes is not None and observed.expected_bytes != expected_bytes
+            )
+        ):
             assets.append(
                 CacheRemovalAsset(
                     kind=identity[0],
@@ -510,24 +524,11 @@ def _review_assets_for_selection(
                 )
             )
         else:
-            if expected_bytes is not None and observed.expected_bytes != expected_bytes:
-                assets.append(
-                    CacheRemovalAsset(
-                        kind=identity[0],
-                        sha256=identity[1],
-                        expected_bytes=expected_bytes,
-                        availability=AssetAvailability.UNKNOWN,
-                        available_bytes=None,
-                        disposition=disposition,
-                    )
-                )
-            else:
-                assets.append(observed)
+            assets.append(observed)
     return tuple(assets)
 
 
 def _sealed_recipe_removal_review(
-    self: RecipeImageAvailabilityService,
     *,
     selector: str,
     with_model: bool,
@@ -576,7 +577,7 @@ def _sealed_recipe_removal_review(
 
 
 def review_removal(
-    self: RecipeImageAvailabilityService, selector: str, *, with_model: bool
+    self: RecipeImageAvailabilityService, selector: object, *, with_model: bool
 ) -> CacheRemovalReview:
     """Return one complete read-only review of exact recipe cache effects."""
 

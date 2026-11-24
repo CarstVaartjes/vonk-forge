@@ -8,10 +8,16 @@ from importlib.resources import files
 from typing import TypedDict
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ed25519
 from pydantic import JsonValue, TypeAdapter, ValidationError
-from vonk_agent_protocol.contracts import canonical_message
+
+from cluster_profiles.cli_render.fleet import _swap
 from vonk_agent_protocol.host_helper import ApplySwapOperation, parse_host_operation
-from vonk_agent_protocol.inventory import HostSettings, InventoryRequest
+from vonk_agent_protocol.inventory import (
+    HostSettings,
+    InventoryRequest,
+    InventoryVerdict,
+)
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.swap import (
     GIB,
@@ -27,7 +33,12 @@ from vonk_agent_protocol.swap import (
     swap_satisfied,
     usable_swap_bytes,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_projection.nodes import _swap_warning
+from vonk_control.host_helper_authority import (
+    HostHelperGrantIssuer,
+    HostRuntimeAuthorityService,
+)
 
 from .agent_api_support import NODE_A, Clock, agent_headers
 from .agent_api_support import agent_system as _agent_system
@@ -147,12 +158,6 @@ def test_only_an_agent_that_reports_swap_gets_a_signed_swap_grant(
     agent_system,
 ) -> None:
     """An older agent's strict reader would refuse the field; a newer one needs it."""
-    from cryptography.hazmat.primitives.asymmetric import ed25519
-    from vonk_agent_protocol.inventory import InventoryVerdict
-    from vonk_control.host_helper_authority import (
-        HostHelperGrantIssuer,
-        HostRuntimeAuthorityService,
-    )
 
     client, services, _, clock = agent_system
     signer = HostHelperGrantIssuer(ed25519.Ed25519PrivateKey.generate(), clock=clock)
@@ -204,7 +209,8 @@ def test_less_swap_than_desired_is_a_typed_warning_with_the_helper_cause() -> No
     assert warning.code == ProjectionCode.HOST_SWAP_SHORT
     assert "16.0 GiB of 64 GiB desired" in warning.detail
     assert SwapWaitReason.INSUFFICIENT_DISK.value in warning.detail
-    assert warning.recommendation is not None and "1600" in warning.recommendation
+    assert warning.recommendation is not None
+    assert "1600" in warning.recommendation
     # Enough swap, or an agent that does not report swap: no warning.
     enough = host.model_copy(
         update={"swap": SwapObservation(total_bytes=64 * GIB, free_bytes=64 * GIB)}
@@ -217,7 +223,6 @@ def test_less_swap_than_desired_is_a_typed_warning_with_the_helper_cause() -> No
 def test_fleet_detail_shows_active_swap_beside_desired_and_the_receipt(
     capsys,
 ) -> None:
-    from cluster_profiles.cli_render.fleet import _swap
 
     host = {
         "swap": {

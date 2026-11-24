@@ -18,17 +18,19 @@ from vonk_agent_protocol.agent_words import (
     ProgressPhase,
     adopt_progress_phase,
 )
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-from vonk_agent_protocol.wire_model import OperationMemberProgress, OperationProgress
-
-from .. import agent_operation_states
-from ..jobs import states as job_states
-from ..lifecycle.evidence import Residue
-from ..stall_window import progress_advanced
-from ..stored.json_values import read_row_column
-from ..strict_json import read_stored_model
-from .contract import same_progress_attempt
+from vonk_agent_protocol.wire_model import (
+    OperationMemberProgress,
+    OperationProgress,
+    canonical_message,
+)
+from vonk_control import agent_operation_states
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.operations.contract import same_progress_attempt
+from vonk_control.stall_window import progress_advanced
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import read_stored_model
 
 #: Lifecycle words a stored phase can also be while the work waits for something
 #: other than bytes; the progress words that wait are ``WAITING_PHASES``.

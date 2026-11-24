@@ -8,47 +8,51 @@ import time
 from collections.abc import Callable, Mapping
 from typing import cast
 
-from cluster_profiles.cli_states_generated import NEEDS_OPERATOR
-
-from ..cli_files import PrivateOutput, _delivery_io
-from ..cli_json_contract import CliErrorType, failure_document
-from ..cli_outcome import (
-    EnrollmentDeliveryError,
-)
-from ..cli_select import SelectorError
-from ..cli_states_generated import (
+from cluster_profiles.cli_files import PrivateOutput, _delivery_io
+from cluster_profiles.cli_json_contract import CliErrorType, failure_document
+from cluster_profiles.cli_outcome import EnrollmentDeliveryError
+from cluster_profiles.cli_select import SelectorError
+from cluster_profiles.cli_states_generated import (
     ENDPOINT_UNAVAILABLE,
     ENROLLMENT_PENDING,
+    NEEDS_OPERATOR,
     PROFILE_NOT_ISSUED,
     STOP_UNCONFIRMED,
 )
-from ..control_client.errors import (
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlForbidden,
     ControlMalformedResponse,
     ControlNotFound,
     ControlUnauthorized,
 )
-from ..control_client.schema import validate_control_document
-from .common import (
+from cluster_profiles.control_client.schema import validate_control_document
+from cluster_profiles.controller_cli.common import (
     ControllerClient,
+    _known_http_refusal_status,
     _log_since,
     _profile_number,
     _query,
     _quoted,
     _request_key,
 )
-from .confirmation import _confirm_action
-from .observation import (
+from cluster_profiles.controller_cli.confirmation import _confirm_action
+from cluster_profiles.controller_cli.observation import (
     _TERMINAL_STATES,
     _bounded_timeout,
     _follow_loginfo,
     _poll_path,
     _state,
 )
-from .profile_load import _submit_fleet_upgrade
-from .selection import _resolve_spark_selectors, _selection_remaining
-from .submission import _known_http_refusal_status, _submit_idempotent_request
+from cluster_profiles.controller_cli.profile_load import _submit_fleet_upgrade
+from cluster_profiles.controller_cli.selection import (
+    _resolve_spark_selectors,
+    _selection_remaining,
+)
+from cluster_profiles.controller_cli.submission import _submit_idempotent_request
+from cluster_profiles.generated_control.models.job_resume_request import (
+    JobResumeRequest,
+)
 
 
 def _overview(
@@ -387,8 +391,6 @@ def _fleet(
             "output": str(args.output.absolute()),
         }
     if action == "resume":
-        from ..generated_control.models.job_resume_request import JobResumeRequest
-
         job_id = args.operation_id
         path = f"/api/jobs/{_quoted(job_id)}"
         deadline = time.monotonic() + _bounded_timeout(args)

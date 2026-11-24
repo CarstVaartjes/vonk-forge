@@ -6,22 +6,68 @@ from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
+
 from vonk_agent_protocol.capability_reply import ControllerCapability
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import WaitOwnerKind, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
-from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
-
-from ..capabilities import CapabilityRegistry
-from ..coordinator_failures import CoordinatorFailures
-from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
+from vonk_control.agent_jobs.persistence import _OrderStore
+from vonk_control.agent_jobs.retirement import operator_resume_candidates_in_session
+from vonk_control.agent_upgrades.service import AgentUpgradeService
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
+from vonk_control.artifact_jobs.maintenance import ArtifactMaintenanceCadence
+from vonk_control.artifact_jobs.service import ArtifactJobService
+from vonk_control.attempt_residues import AttemptResidueReconciler
+from vonk_control.capabilities import CapabilityRegistry
+from vonk_control.catalog.revision_collection import CatalogRevisionCollector
+from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.coordinator_failures import CoordinatorFailures
+from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.wiring import build_distribution_service_from_components
+from vonk_control.distribution_executor.preparation import (
+    CompositeDistributionPhaseExecutor,
+)
+from vonk_control.due_waits import AdvanceWait, DueWaitBackstop, RowKey
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.gateway.route_grants import require_existing_recipe_routes
+from vonk_control.install_admission.service import InstallAdmissionService
+from vonk_control.inventory.repository import INVENTORY_MAX_AGE_SECONDS
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
+from vonk_control.recipe_builds.service import RecipeBuildService
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
+from vonk_control.recipe_routes.service import RecipeRouteService
+from vonk_control.run_admission import RunAdmissionService
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
+from vonk_control.source_bundles import DatabaseSourceBundleStore
+from vonk_control.storage_demands import StorageDemands
+from vonk_control.telemetry.maintenance import (
+    TelemetryMaintenance,
+    TelemetryMaintenanceCadence,
+)
+from vonk_control.terminal_history_collection import TerminalHistoryCollector
+from vonk_control.unused_storage_collection.service import UnusedStorageCollector
+from vonk_control.wait_redrive import wait_sources
 
 if TYPE_CHECKING:
-    from ..catalog.sync import ManagedRecipeCatalogSyncService
-    from ..enrollment.service import EnrollmentService
-from .loop import Worker
+    from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
+    from vonk_control.enrollment.service import EnrollmentService
+from vonk_control.availability_production.production import (
+    build_recipe_image_availability,
+)
+from vonk_control.catalog.sync import AutomaticCatalogSync
+from vonk_control.image_store_collection import ImageStoreCollector
+from vonk_control.model_cache.partials_collection import ModelPartialsCollector
+from vonk_control.prebuilt_images import PrebuiltImageImporter
+from vonk_control.settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
+from vonk_control.worker.loop import Worker
 
 
 @cache
@@ -70,42 +116,6 @@ def assemble_production_worker(
 ) -> Worker:
     """Compose the worker-owned recipe and maintenance runtime."""
 
-    from ..agent_jobs.persistence import _OrderStore
-    from ..agent_jobs.retirement import operator_resume_candidates_in_session
-    from ..agent_upgrades.service import AgentUpgradeService
-    from ..artifact_jobs.blob_store import ArtifactBlobStore
-    from ..artifact_jobs.maintenance import ArtifactMaintenanceCadence
-    from ..artifact_jobs.service import ArtifactJobService
-    from ..attempt_residues import AttemptResidueReconciler
-    from ..catalog.revision_collection import CatalogRevisionCollector
-    from ..cluster_mappings import ClusterMappingService
-    from ..distributed_recovery.coordinator import DistributedRecoveryCoordinator
-    from ..distribution.service import DistributionService
-    from ..distribution.wiring import build_distribution_service_from_components
-    from ..distribution_executor.preparation import CompositeDistributionPhaseExecutor
-    from ..due_waits import AdvanceWait, DueWaitBackstop, RowKey
-    from ..fleet_profiles.factory import build_production_fleet_profile_service
-    from ..install_admission.service import InstallAdmissionService
-    from ..lifecycle.agent_operation import AgentOperationAdapter
-    from ..lifecycle.artifact_job import ArtifactJobAdapter
-    from ..recipe_builds.service import RecipeBuildService
-    from ..recipe_operations.operation_worker import RecipeOperationWorker
-    from ..recipe_operations.service import RecipeOperationService
-    from ..recipe_routes.publisher import AtomicRecipeRoutePublisher
-    from ..recipe_routes.service import RecipeRouteService
-    from ..run_admission import RunAdmissionService
-    from ..run_switch_operations.service import RunSwitchOperationService
-    from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-    from ..source_bundles import DatabaseSourceBundleStore
-    from ..storage_demands import StorageDemands
-    from ..telemetry.maintenance import (
-        TelemetryMaintenance,
-        TelemetryMaintenanceCadence,
-    )
-    from ..terminal_history_collection import TerminalHistoryCollector
-    from ..unused_storage_collection.service import UnusedStorageCollector
-    from ..wait_redrive import wait_sources
-
     registry = capabilities or CapabilityRegistry(clock=clock)
     if model_cache is not None:
         if agent_artifact_root is None:
@@ -131,8 +141,6 @@ def assemble_production_worker(
         )
     else:
         artifact_phase_executor = None
-
-    from ..gateway.route_grants import require_existing_recipe_routes
 
     recipe_routes = RecipeRouteService(
         sessions,
@@ -243,9 +251,6 @@ def assemble_production_worker(
     worker_background_services = tuple(background_services)
     automatic_catalog = None
     if catalog_sync is not None:
-        from ..catalog.sync import AutomaticCatalogSync
-        from ..settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
-
         # The one automatic catalog sync; the API only reads what it applied.
         automatic_catalog = AutomaticCatalogSync(
             catalog_sync, interval_seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
@@ -262,9 +267,6 @@ def assemble_production_worker(
     image_production = None
     image_store_collector = None
     if image_cache_root is not None:
-        from ..image_store_collection import ImageStoreCollector
-        from ..prebuilt_images import PrebuiltImageImporter
-
         # Builds planned from a catalog prebuilt image are executed here, by
         # pulling the pinned digest into the same image cache.
         prebuilt_importer = PrebuiltImageImporter(
@@ -282,8 +284,6 @@ def assemble_production_worker(
         )
         worker_background_closers += (prebuilt_importer.close,)
     if recipe_image_artifact_root is not None:
-        from ..availability_production.production import build_recipe_image_availability
-
         assert runtime_archive_storage is not None  # the root implies the cache
 
         image_production = build_recipe_image_availability(
@@ -340,8 +340,6 @@ def assemble_production_worker(
         ).tick,
     )
     if model_cache is not None:
-        from ..model_cache.partials_collection import ModelPartialsCollector
-
         # An unfinished download is not a model file: its partials go a day
         # after the last live operation stopped writing them.
         worker_background_services += (
@@ -394,7 +392,7 @@ def assemble_production_worker(
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
 
-    def agent_order(key: RowKey, kind: WaitOwnerKind) -> object:
+    def agent_order(key: RowKey, _kind: WaitOwnerKind) -> object:
         adapter = AgentOperationAdapter(
             sessions=sessions,
             clock=clock,
@@ -413,7 +411,7 @@ def assemble_production_worker(
         progressed = lifecycle.reconcile_cancelled_builds(str(key[0]))
         return prebuilt_importer.tick(str(key[0])) or progressed
 
-    def recipe(key: RowKey, kind: WaitOwnerKind) -> object:
+    def recipe(key: RowKey, _kind: WaitOwnerKind) -> object:
         progressed = lifecycle.redrive(str(key[0]))
         progressed = lifecycle.redrive_parent(str(key[0]), agent_jobs) or progressed
         # A persisted recipe build may itself own a Controller prebuilt pull.
@@ -427,7 +425,7 @@ def assemble_production_worker(
             return unavailable(kind)
         return model_cache.redrive(str(key[0]))
 
-    def cleanup(key: RowKey, kind: WaitOwnerKind) -> object:
+    def cleanup(key: RowKey, _kind: WaitOwnerKind) -> object:
         progressed = residues.tick(str(key[0]))
         return storage_collector.redrive_installation(str(key[0])) or progressed
 
@@ -436,40 +434,42 @@ def assemble_production_worker(
             return unavailable(kind)
         return enrollment.reconcile_revocations(str(key[0]))
 
-    def catalog(key: RowKey, kind: WaitOwnerKind) -> object:
+    def catalog(_key: RowKey, kind: WaitOwnerKind) -> object:
         if automatic_catalog is None:
             return unavailable(kind)
         return automatic_catalog.tick()
 
     advancers: dict[WaitOwnerKind, AdvanceWait] = {
-        WaitOwnerKind.COORDINATOR: lambda key, wait: worker.redrive_coordinator(
+        WaitOwnerKind.COORDINATOR: lambda key, _wait: worker.redrive_coordinator(
             str(key[0])
         ),
         WaitOwnerKind.AGENT_OPERATION: agent_order,
-        WaitOwnerKind.AGENT_UPGRADE: lambda key, wait: upgrades.heal_rollouts(
+        WaitOwnerKind.AGENT_UPGRADE: lambda key, _wait: upgrades.heal_rollouts(
             1, str(key[0])
         ),
-        WaitOwnerKind.ARTIFACT_JOB: lambda key, wait: ArtifactJobAdapter(
+        WaitOwnerKind.ARTIFACT_JOB: lambda key, _wait: ArtifactJobAdapter(
             sessions=sessions, clock=clock
         ).redrive(str(key[0])),
-        WaitOwnerKind.FLEET_PROFILE: lambda key, wait: fleet_profiles.tick(str(key[0])),
+        WaitOwnerKind.FLEET_PROFILE: lambda key, _wait: fleet_profiles.tick(
+            str(key[0])
+        ),
         WaitOwnerKind.IMAGE_AVAILABILITY: images,
         WaitOwnerKind.PREBUILT_IMAGE: prebuilt,
-        WaitOwnerKind.JOB: lambda key, wait: worker._run_generic(str(key[0])),
+        WaitOwnerKind.JOB: lambda key, _wait: worker._run_generic(str(key[0])),
         WaitOwnerKind.MODEL_CACHE: cache,
         WaitOwnerKind.RECIPE_OPERATION: recipe,
         WaitOwnerKind.RECIPE_UPDATE_BATCH: images,
-        WaitOwnerKind.RUN_SWITCH: lambda key, wait: run_switch_operations.redrive(
+        WaitOwnerKind.RUN_SWITCH: lambda key, _wait: run_switch_operations.redrive(
             str(key[0])
         ),
-        WaitOwnerKind.SELECTED_PROFILE: lambda key, wait: (
+        WaitOwnerKind.SELECTED_PROFILE: lambda _key, _wait: (
             fleet_profiles._reconcile_selected_roster(clock())
         ),
-        WaitOwnerKind.ROUTE_PUBLICATION: lambda key, wait: recipe_routes.maintain(),
-        WaitOwnerKind.ROUTE_RECOVERY: lambda key, wait: recipe_operations.redrive_run(
+        WaitOwnerKind.ROUTE_PUBLICATION: lambda _key, _wait: recipe_routes.maintain(),
+        WaitOwnerKind.ROUTE_RECOVERY: lambda key, _wait: recipe_operations.redrive_run(
             str(key[0])
         ),
-        WaitOwnerKind.STORAGE_RELIEF: lambda key, wait: (
+        WaitOwnerKind.STORAGE_RELIEF: lambda key, _wait: (
             storage_collector.redrive_artifact(str(key[0]), str(key[1]))
         ),
         WaitOwnerKind.CLEANUP: cleanup,

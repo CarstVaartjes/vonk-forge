@@ -1,6 +1,7 @@
 """Opt-in acceptance gate: selected tests must execute without skips or xfails."""
 
 import pytest
+from _pytest.terminal import TerminalReporter
 
 
 class RequiredExecution:
@@ -24,7 +25,6 @@ class RequiredExecution:
 
     def pytest_terminal_summary(self, terminalreporter: object) -> None:
         # The public reporter type is defined in pytest's implementation module.
-        from _pytest.terminal import TerminalReporter
 
         assert isinstance(terminalreporter, TerminalReporter)
         if self.unproven or self.completed == 0:

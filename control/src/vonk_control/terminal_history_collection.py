@@ -46,6 +46,7 @@ from sqlalchemy.orm import (
     sessionmaker,
 )
 from sqlalchemy.sql.elements import ColumnElement
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 from vonk_agent_protocol.state_machines import (
@@ -57,19 +58,24 @@ from vonk_agent_protocol.state_machines import (
     RoutePublicationState,
     RunState,
 )
-
-from .catalog.revision_collection import GRACE, INTERVAL, tokens
-from .lifecycle.evidence import Residue
-from .logging import log_event
-from .model_cache.contract import ModelCacheSetState
-from .models.cache import (
+from vonk_control.catalog.revision_collection import GRACE, INTERVAL, tokens
+from vonk_control.evidence_repeats import command_evidence_needed
+from vonk_control.journal_models import (
+    RunSwitchJournalRepair,
+    RunSwitchJournalRepairPending,
+)
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.logging import log_event
+from vonk_control.model_cache.contract import ModelCacheSetState
+from vonk_control.model_cache.inventory import holds_unique_objects
+from vonk_control.models.cache import (
     ArtifactLifecycleGate,
     ModelCacheOperation,
     ModelCacheSet,
     RecipeBuild,
     RecipeLibrarySyncRun,
 )
-from .models.execution import (
+from vonk_control.models.execution import (
     ArtifactJob,
     InstallationNode,
     RecipeInstallation,
@@ -77,7 +83,7 @@ from .models.execution import (
     ResourceReservation,
     RunNode,
 )
-from .models.fleet import (
+from vonk_control.models.fleet import (
     AgentCertificate,
     AgentCertificateRotation,
     AgentEnrollment,
@@ -89,20 +95,32 @@ from .models.fleet import (
     FleetProfileApplication,
     FleetProfileSelection,
 )
-from .models.jobs import ControlProcessHeartbeat, Job, JobAttempt
-from .models.mapping import ClusterMapping, ClusterMappingNode
-from .models.operations import (
+from vonk_control.models.jobs import ControlProcessHeartbeat, Job, JobAttempt
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.models.operations import (
     AgentOperation,
     AgentOperationAttempt,
     ArtifactDistributionAssignment,
 )
-from .models.routes import RecipeRouteAuthority, RoutePublication, RoutePublicationOwner
-from .models.telemetry import NodeSnapshot, NodeTelemetryLatest, NodeTelemetrySample
-from .owner_liveness import builds_in_flight, installations_named_by_live_jobs
-from .run_states import ENDED_RUN_STATES
-from .step_ca import CERTIFICATE_LIFETIME
-from .stored.json_values import binding_for, read_row_column
-from .stored.states import LibrarySyncRunState
+from vonk_control.models.routes import (
+    RecipeRouteAuthority,
+    RoutePublication,
+    RoutePublicationOwner,
+)
+from vonk_control.models.telemetry import (
+    NodeSnapshot,
+    NodeTelemetryLatest,
+    NodeTelemetrySample,
+)
+from vonk_control.owner_liveness import (
+    builds_in_flight,
+    installations_named_by_live_jobs,
+)
+from vonk_control.run_states import ENDED_RUN_STATES
+from vonk_control.step_ca import CERTIFICATE_LIFETIME
+from vonk_control.stored.json_values import binding_for
+from vonk_control.stored.rows import read_row_column
+from vonk_control.stored.states import LibrarySyncRunState
 
 PASS_BUDGET_SECONDS = 2.0
 
@@ -288,7 +306,6 @@ def _reserved(owner: InstrumentedAttribute[str]) -> ColumnElement[bool]:
 
 
 def _command_evidence(session: Session, row: Any, _protected: frozenset[str]) -> bool:
-    from .evidence_repeats import command_evidence_needed
 
     return command_evidence_needed(session, row)
 
@@ -361,9 +378,6 @@ def _stop_unproven() -> ColumnElement[bool]:
 
 def retention_rules(*, current_worker: str | None = None) -> tuple[RetentionRule, ...]:
     """The single rule table. Children precede parents; the order is the pass's."""
-
-    from .journal_models import RunSwitchJournalRepair, RunSwitchJournalRepairPending
-    from .model_cache.inventory import holds_unique_objects
 
     return (
         RetentionRule(
@@ -796,7 +810,7 @@ class TerminalHistoryCollector:
         self._pending = tuple(
             (identity, observed_at)
             for identity, observed_at in candidates
-            if observed_at is not None
+            if observed_at is not None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
         )
         if not candidates:
             self._after.pop(rule.table, None)

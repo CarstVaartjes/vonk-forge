@@ -20,12 +20,14 @@ import hashlib
 import io
 import json
 import tarfile
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from pathlib import Path, PurePosixPath
 
 import httpx2
 import pytest
+from vonk_forge_contracts import CONTRACT_MAJOR
+
 from vonk_control.recipe_packages import client as recipe_packages
 from vonk_control.recipe_packages.client import PACKAGE_REPOSITORY, RecipePackageClient
 from vonk_control.recipe_release import (
@@ -35,7 +37,6 @@ from vonk_control.recipe_release import (
     RELEASE_LIBRARY,
     RecipeReleaseError,
 )
-from vonk_forge_contracts import CONTRACT_MAJOR
 
 # The release of the contract major this Controller reads.
 RELEASE_TAG = f"v{CONTRACT_MAJOR}.0.0"
@@ -55,10 +56,9 @@ def _verify(checksums: bytes, bundle: bytes) -> str:
 
 
 @pytest.fixture
-def signed_recipe_releases(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def signed_recipe_releases(monkeypatch: pytest.MonkeyPatch) -> None:
     """Accept only releases signed by :class:`SignedRecipeRelease`."""
     monkeypatch.setattr(recipe_packages, "verify_release_checksums", _verify)
-    yield
 
 
 def _canonical(value: object) -> bytes:

@@ -26,6 +26,7 @@ from sqlalchemy import (
     literal_column,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from vonk_agent_protocol.gpu_clock import GpuClockObservation
 from vonk_agent_protocol.inventory import (
     GpuHealth,
@@ -39,11 +40,13 @@ from vonk_agent_protocol.inventory import (
     RunScopeId,
 )
 from vonk_agent_protocol.telemetry import HostResourceSample
-
-from ..inventory.items_contract import AgentInventoryItems, InventorySnapshotKind
-from ..lifecycle.evidence import Residue
-from ..model_primitives import Base, _lower_hex, _Utf8ByteLength, _uuid_shape
-from ..stored.json_values import ContractJSON
+from vonk_control.inventory.items_contract import (
+    AgentInventoryItems,
+    InventorySnapshotKind,
+)
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.model_primitives import Base, _lower_hex, _Utf8ByteLength, _uuid_shape
+from vonk_control.stored.json_values import ContractJSON
 
 
 class NodeSnapshot(Base):

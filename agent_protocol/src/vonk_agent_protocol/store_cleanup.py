@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import Field
 
-from .wire_model import WireEnum, WireModel
+from vonk_agent_protocol.wire_model import WireEnum, WireModel
 
 
 class StoragePolicy(WireModel):

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
-from .constants import _ALREADY_CURRENT
+from vonk_control.agent_upgrades.constants import _ALREADY_CURRENT
 
 
 def _summary(skipped: Mapping[str, str]) -> str | None:

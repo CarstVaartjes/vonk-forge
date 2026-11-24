@@ -2,6 +2,7 @@
 
 import pytest
 from sqlalchemy import text
+
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_control.local_ca import LocalCertificateAuthority
 from vonk_control.pki import IssuedCertificate

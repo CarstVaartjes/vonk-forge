@@ -21,9 +21,8 @@ def assert_upgrade_keeps_serving(
 ) -> None:
     before = observe()
     assert before.state == "running", "fixture must begin with a running workload"
-    assert before.run_id and before.route_target, (
-        "fixture must begin with a serving route"
-    )
+    assert before.run_id, "fixture must begin with a serving route"
+    assert before.route_target, "fixture must begin with a serving route"
     upgrade()
     after = observe()
     assert after.run_id == before.run_id, "upgrade replaced the accepted workload"

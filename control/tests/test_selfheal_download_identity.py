@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.cache import ModelCacheOperation
 
 from .model_cache_support import _artifact
 from .model_cache_support import cache as cache  # noqa: PLC0414 -- pytest fixture
@@ -69,7 +70,6 @@ def test_cancelled_selector_replays_only_original_key_after_restart(
 
 
 def _assert_no_claim(sessions, operation_id):
-    from vonk_control.models.cache import ModelCacheOperation
 
     with sessions() as session:
         operation = session.get(ModelCacheOperation, operation_id)

@@ -12,15 +12,24 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import RecipeDefinition
+
+from tests.recipe_builds_support import RecordingQueue
+from tests.recipe_library_source import recipe_library_root
+from tests.runtime_image_fixtures import place_test_image
+from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.images import ImageStoreCode, PrebuiltImageCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control import prebuilt_images
 from vonk_control.auth import TokenCodec
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,
@@ -51,6 +60,7 @@ from vonk_control.prebuilt_images import (
     PrebuiltImageImporter,
     write_library_image_plan,
 )
+from vonk_control.recipe_builds.cancellation import request_build_cancellation
 from vonk_control.recipe_builds.common import RecipeBuildUnknown
 from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot
@@ -62,12 +72,10 @@ from vonk_control.run_switch_operations.interfaces import ArtifactInspection
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import RecipeDefinition
-
-from tests.recipe_builds_support import RecordingQueue
-from tests.recipe_library_source import recipe_library_root
-from tests.runtime_image_fixtures import place_test_image
-from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
+from vonk_control.source_policy import (
+    SourcePolicyFinding,
+    SourcePolicyReport,
+)
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .stored_documents_support import valid_policy_report
@@ -97,7 +105,7 @@ class _Reader:
 
 def _published_library(
     tmp_path: Path, *, build_key: str | None = None
-) -> tuple[sessionmaker, str]:
+) -> tuple[sessionmaker[Session], str]:
     """Sync a one-recipe signed library whose index pins a prebuilt image.
 
     The key comes from the CI planner run over the real package, exactly as
@@ -188,7 +196,7 @@ def _published_library(
         return sessions, revision.id
 
 
-def _services(sessions: sessionmaker, tmp_path: Path):
+def _services(sessions: sessionmaker[Session], tmp_path: Path):
     builds = RecipeBuildService(
         sessions,
         bundles=SourceBundleStore(tmp_path / "bundles"),
@@ -270,11 +278,6 @@ def _start(
 def test_a_recipe_the_controller_refuses_gets_no_image_and_says_why(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from vonk_control.recipe_builds import common as recipe_builds
-    from vonk_control.source_policy import (
-        SourcePolicyFinding,
-        SourcePolicyReport,
-    )
 
     def refuse(document, bundle, *, source_sha256=None):
         finding = SourcePolicyFinding(
@@ -282,7 +285,7 @@ def test_a_recipe_the_controller_refuses_gets_no_image_and_says_why(
         )
         return SourcePolicyReport(False, bundle.sha256, "Dockerfile", (finding,))
 
-    monkeypatch.setattr(recipe_builds, "inspect_package_source_policy", refuse)
+    monkeypatch.setattr(prebuilt_images, "inspect_package_source_policy", refuse)
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     index["recipes"] = index["recipes"][:1]
     library = tmp_path / "library"
@@ -323,7 +326,8 @@ def test_catalog_prebuilt_image_is_pulled_instead_of_built_on_a_spark(
     with sessions() as session:
         build = session.get(RecipeBuild, plan.build_id)
         stored = session.get(Job, job.id)
-        assert build is not None and stored is not None
+        assert build is not None
+        assert stored is not None
         # The build is the stored image: addressed by its manifest digest,
         # sized by its layers.
         assert (
@@ -333,11 +337,13 @@ def test_catalog_prebuilt_image_is_pulled_instead_of_built_on_a_spark(
             build.image_bytes,
         ) == ("succeeded", REFERENCE.rsplit("@", 1)[1], ADDRESS, IMAGE_BYTES)
         assert stored.state == "succeeded"
-        assert stored.result["node_evidence"][NODE]["oci_layout_sha256"] == ADDRESS
+        result = cast(dict[str, Any], stored.result)
+        assert result["node_evidence"][NODE]["oci_layout_sha256"] == ADDRESS
 
     # The pulled image is the reusable receipt for these build inputs.
     resolution = builds.resolve(revision_id)
-    assert resolution.cached and resolution.build_id == plan.build_id
+    assert resolution.cached
+    assert resolution.build_id == plan.build_id
 
 
 def test_prebuilt_image_for_old_build_inputs_is_never_reused(tmp_path: Path) -> None:
@@ -376,9 +382,11 @@ def test_failed_pull_ends_and_a_fresh_request_recovers_the_pinned_image(
     with sessions() as session:
         build = session.get(RecipeBuild, plan.build_id)
         stored = session.get(Job, job.id)
-        assert build is not None and stored is not None
+        assert build is not None
+        assert stored is not None
         assert build.state == "failed"
-        assert build.image_digest is None and build.oci_layout_sha256 is None
+        assert build.image_digest is None
+        assert build.oci_layout_sha256 is None
         assert stored.state == "failed"
 
     # A new request retries the authority-pinned image immediately. A failed
@@ -422,9 +430,11 @@ def test_cancelled_prebuilt_build_discards_a_late_pull(tmp_path: Path) -> None:
     with sessions() as session:
         build = session.get(RecipeBuild, plan.build_id)
         stored = session.get(Job, job.id)
-        assert build is not None and stored is not None
+        assert build is not None
+        assert stored is not None
         assert stored.state == "cancelled"
-        assert build.state == "failed" and build.image_digest is None
+        assert build.state == "failed"
+        assert build.image_digest is None
 
     # Cancelling is not a failed pull: the next plan uses the image again.
     again = builds.prepare_plan(revision_id, NODE, now=NOW)
@@ -578,7 +588,7 @@ def test_prebuilt_key_mismatch_builds_fresh_instead_of_reusing_old_image(
         (build,) = session.scalars(select(RecipeBuild)).all()
         assert build.policy_report.get("prebuilt_image") is None
         assert (
-            build.policy_report["prebuilt_decision"]["code"]
+            cast(dict[str, Any], build.policy_report)["prebuilt_decision"]["code"]
             == PrebuiltImageCode.BUILD_KEY_MISMATCH
         )
         assert tuple(session.scalars(select(AgentOperation)))
@@ -639,10 +649,13 @@ def test_failed_prebuilt_pull_retries_the_same_pinned_content(
     )
     assert recovered.run_pending() == 1
     with sessions() as session:
-        assert any(
-            session.get(Job, job.id).state == LifecycleState.SUCCEEDED
-            for job in prebuilt_jobs
-        )
+
+        def state(job_id: str) -> str:
+            row = session.get(Job, job_id)
+            assert row is not None
+            return row.state
+
+        assert any(state(job.id) == LifecycleState.SUCCEEDED for job in prebuilt_jobs)
 
     production.close()
 
@@ -666,8 +679,10 @@ def test_a_busy_store_hands_the_pull_back_instead_of_failing_it(
     with sessions() as session:
         build = session.get(RecipeBuild, plan.build_id)
         stored = session.get(Job, job.id)
-        assert build is not None and stored is not None
-        assert build.state != "failed" and stored.state == "running"
+        assert build is not None
+        assert stored is not None
+        assert build.state != "failed"
+        assert stored.state == "running"
 
     # The next tick, on any Controller process, takes the pull up at once.
     importer = PrebuiltImageImporter(
@@ -676,7 +691,8 @@ def test_a_busy_store_hands_the_pull_back_instead_of_failing_it(
     assert importer.run_pending() == 1
     with sessions() as session:
         build = session.get(RecipeBuild, plan.build_id)
-        assert build is not None and build.state == "succeeded"
+        assert build is not None
+        assert build.state == "succeeded"
 
 
 def test_a_spark_build_upload_is_converted_into_the_store_after_success(
@@ -898,9 +914,6 @@ def test_prebuilt_import_observes_cancellation_between_claim_and_io(
     tmp_path: Path,
 ) -> None:
     """Catches a restarted importer pulling after a newer durable cancel won."""
-    from uuid import uuid4
-
-    from vonk_control.recipe_builds.cancellation import request_build_cancellation
 
     sessions, revision_id = _published_library(tmp_path)
     builds, operations = _services(sessions, tmp_path)

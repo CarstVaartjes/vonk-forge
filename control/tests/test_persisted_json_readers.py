@@ -3,10 +3,11 @@
 import json
 
 import pytest
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import canonical_message
+
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_agent_protocol.state_machines import GatewayRouteState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.stored import (
     column_field,
     column_is_document,

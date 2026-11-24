@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import event, func, select, update
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.state_machines import InstallationState
 from vonk_control.catalog.revision_contract import (
     read_recipe_projection,
@@ -52,7 +54,6 @@ from vonk_control.run_switch_operations.interfaces import (
 )
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .display_fixtures import reword
 from .recipe_operations_support import NOW, installed_recipe, setup_services
@@ -823,7 +824,9 @@ def _accepted_identity(sessions, build_id: str) -> RuntimeImageIdentity:
     with sessions() as session:
         build = session.get(RecipeBuild, build_id)
         assert build is not None
-        assert build.image_digest and build.oci_layout_sha256 and build.image_bytes
+        assert build.image_digest
+        assert build.oci_layout_sha256
+        assert build.image_bytes
         return RuntimeImageIdentity(
             image_digest=build.image_digest,
             oci_layout_sha256=build.oci_layout_sha256,
@@ -1023,7 +1026,7 @@ def test_model_cache_manifest_failure_is_a_typed_blocker(tmp_path: Path) -> None
     service = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,
-        clock=lambda: lifecycle._clock(),
+        clock=lambda: lifecycle._clock(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         artifact_phase_executor=RecordingArtifactExecutor(),
         model_cache=ModelCacheManifestProvider(fail=True),
         memory_floor_bytes=50,
@@ -1051,7 +1054,7 @@ def test_a_spark_whose_agent_cannot_pull_images_asks_for_an_upgrade(
     service = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,
-        clock=lambda: lifecycle._clock(),
+        clock=lambda: lifecycle._clock(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         artifacts=CompleteArtifactInspector(),
         artifact_phase_executor=RecordingArtifactExecutor(),
         memory_floor_bytes=50,

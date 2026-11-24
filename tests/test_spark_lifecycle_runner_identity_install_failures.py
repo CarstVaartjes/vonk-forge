@@ -7,11 +7,32 @@ import json
 import subprocess
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
+from uuid import UUID
 
 import pytest
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
+from cluster_profiles.generated_control.models.fleet_enroll_request import (
+    FleetEnrollRequest,
+)
 from tests.spark_lifecycle_runner_support import _module
+from vonk_agent_protocol.agent_state import (
+    NativeRenewalClock,
+    NativeRenewalEvidence,
+)
+from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
+from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_control.operations.contract import (
+    AvailabilityOperationFailure,
+    AvailabilityRecoveryAction,
+)
+from vonk_control.recipe_image_availability.response_contract import (
+    RecipeImageAvailabilityAction,
+    RecipeImageAvailabilityResponse,
+    RecipeImageAvailabilityResult,
+)
+from vonk_control.recipe_operations.availability_intent import RecipeSelectorIntent
 
 
 def _failed_profile_application(reason: str) -> dict[str, object]:
@@ -54,11 +75,6 @@ def test_spark_project_identity_is_arm64_only() -> None:
 
 
 def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
-    from uuid import UUID
-
-    from cluster_profiles.generated_control.models.fleet_enroll_request import (
-        FleetEnrollRequest,
-    )
 
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
@@ -455,10 +471,6 @@ def test_direct_health_and_protected_identity_hash_are_observed_from_native_bina
 
 
 def test_renewal_requires_new_active_serial_and_real_old_identity_rejection() -> None:
-    from vonk_agent_protocol.agent_state import (
-        NativeRenewalClock,
-        NativeRenewalEvidence,
-    )
 
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
@@ -539,7 +551,7 @@ def test_openssl_ed25519_probe_key_conversion_is_strict() -> None:
         )
 
 
-@pytest.mark.parametrize("observed", ("sha256:expected", "sha256:different"))
+@pytest.mark.parametrize("observed", ["sha256:expected", "sha256:different"])
 def test_running_channel_alias_must_match_the_candidate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, observed: str
 ) -> None:
@@ -633,12 +645,6 @@ def test_recipe_download_consumes_typed_terminal_receipt() -> None:
         "fastapi", reason="Controller contract tests run in the control suite"
     )
     lifecycle = _module()
-    from vonk_agent_protocol.wire_model import OperationProgress
-    from vonk_control.recipe_image_availability.api import (
-        RecipeImageAvailabilityResponse,
-        RecipeImageAvailabilityResult,
-    )
-    from vonk_control.recipe_operations.availability_intent import RecipeSelectorIntent
 
     recipe_digest = "a" * 64
     model_digest = "b" * 64
@@ -701,18 +707,6 @@ def test_recipe_download_timeout_preserves_durable_progress(monkeypatch, state) 
         "fastapi", reason="Controller contract tests run in the control suite"
     )
     lifecycle = _module()
-    from vonk_agent_protocol.agent_words import ProgressPhase
-    from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
-    from vonk_agent_protocol.wire_model import OperationProgress
-    from vonk_control.operations.contract import (
-        AvailabilityOperationFailure,
-        AvailabilityRecoveryAction,
-    )
-    from vonk_control.recipe_image_availability.api import (
-        RecipeImageAvailabilityAction,
-        RecipeImageAvailabilityResponse,
-    )
-    from vonk_control.recipe_operations.availability_intent import RecipeSelectorIntent
 
     recipe_digest = "a" * 64
     pending = RecipeImageAvailabilityResponse(

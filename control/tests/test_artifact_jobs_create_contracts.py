@@ -11,8 +11,10 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import event, select
-from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
+
+from vonk_agent_protocol.agent_operations import AgentOperation as AgentOperationKind
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
@@ -24,14 +26,16 @@ from vonk_agent_protocol.recipe_jobs import (
 from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
-from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_control.agent_jobs.contracts import (
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
+from vonk_control.agent_operation_facts import (
     _WORKLOAD_INTENT_OPERATIONS,
     fencing_intent,
 )
 from vonk_control.artifact_jobs import states as ajs
+from vonk_control.artifact_jobs.api import _view
 from vonk_control.artifact_jobs.contracts import (
     ArtifactJobError,
+    ArtifactJobResponse,
     _effective_parameters,
 )
 from vonk_control.bounded_json import require_mapping
@@ -55,8 +59,6 @@ from vonk_control.recipe_operations.errors import (
 )
 from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
 from vonk_control.workload_intent import allocate_workload_intent
-from vonk_forge_contracts import RecipeDefinition, document_sha256
-from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
 from .artifact_jobs_support import (
     _agent_queue,
@@ -133,7 +135,8 @@ def test_replacing_a_run_never_cancels_another_runs_job_on_its_spark(
                     AgentOperation.parent_job_id == job_b.operation_id
                 )
             )
-            assert node is not None and order is not None
+            assert node is not None
+            assert order is not None
             order.workload_intent_ordinal = node.workload_intent_ordinal
     claim = claim_agent(agent_jobs, node_id, "serial-0")
     assert claim is not None
@@ -162,7 +165,8 @@ def test_replacing_a_run_never_cancels_another_runs_job_on_its_spark(
         actor="operator",
         request_id="00000000-0000-4000-8000-000000000174",
     )
-    assert later.operation_id is not None and later.state == LifecycleState.QUEUED
+    assert later.operation_id is not None
+    assert later.state == LifecycleState.QUEUED
 
 
 def test_a_run_stop_cancels_exactly_its_own_jobs(tmp_path) -> None:
@@ -315,7 +319,8 @@ def test_activation_parent_carries_the_saved_runs_plan_digest_when_admission_rep
     with sessions() as session:
         run = session.get(RecipeRun, activated.owner_id)
         job = session.get(Job, activated.id)
-        assert run is not None and job is not None
+        assert run is not None
+        assert job is not None
         assert run.plan_digest == "d" * 64
         assert job.payload["plan_digest"] == run.plan_digest
 
@@ -489,7 +494,8 @@ def test_artifact_job_contract_drift_ends_preparation_and_admits_fresh_intent(
         installation.recipe_revision_id = replacement.id
 
     ended = create_artifact_job(service, **request)
-    assert ended.id == original.id and ended.state in ajs.ENDED
+    assert ended.id == original.id
+    assert ended.state in ajs.ENDED
     assert ended.operation_id is None
     # A changed local revision pointer does not authorize different content on
     # the running installation. Restore its accepted recipe evidence before
@@ -499,7 +505,8 @@ def test_artifact_job_contract_drift_ends_preparation_and_admits_fresh_intent(
         assert installation is not None
         installation.recipe_revision_id = revision.id
     fresh = submitted_artifact_job(service, run_id, request_suffix=160)
-    assert fresh.id != original.id and fresh.operation_id is not None
+    assert fresh.id != original.id
+    assert fresh.operation_id is not None
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -554,7 +561,8 @@ def test_artifact_job_persisted_parameters_are_validated_before_compilation(
         actor="operator",
         request_id="00000000-0000-4000-8000-000000000120",
     )
-    assert ended.state in ajs.ENDED and ended.operation_id is None
+    assert ended.state in ajs.ENDED
+    assert ended.operation_id is None
     with sessions() as session:
         row = session.get(ArtifactJob, created.id)
         assert row is not None
@@ -790,16 +798,15 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
     completed = service.get(job.id)
     assert completed.state == "succeeded"
     assert completed.output_manifest_sha256 == recipe_job_manifest_sha256(outputs)
-    from vonk_control.artifact_jobs.api import _view
 
     response = _view(completed)
     assert response.result_evidence is not None
-    from vonk_control.artifact_jobs.contracts import ArtifactJobResponse
 
     degraded = ArtifactJobResponse.model_validate(
         response.model_dump() | {"output_manifest_sha256": None}
     )
-    assert degraded.id == response.id and degraded.output_files == response.output_files
+    assert degraded.id == response.id
+    assert degraded.output_files == response.output_files
     image_path, image_media_type, image_name, image_size = service.result_blob(
         job.id, "output.png", output_digest
     )
@@ -832,7 +839,8 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         assert row is not None
         row.output_manifest_sha256 = None
     recovered = service.get(job.id)
-    assert recovered.id == job.id and recovered.output_files == completed.output_files
+    assert recovered.id == job.id
+    assert recovered.output_files == completed.output_files
     fresh = submitted_artifact_job(
         service,
         run_id,

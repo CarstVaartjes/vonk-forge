@@ -10,10 +10,14 @@ from datetime import UTC, timedelta
 
 import pytest
 from sqlalchemy import select
+
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
+)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.retirement import authorize_operator_resume_in_session
 from vonk_control.agent_operation_facts import START_STALL_WINDOW, job_start_deadline
@@ -75,7 +79,8 @@ def test_lease_expiry_records_reason_and_last_contact_facts(service) -> None:
     assert first is not None
     with sessions() as session:
         running = session.get(AgentOperation, operation.id)
-        assert running is not None and running.status_reason is None
+        assert running is not None
+        assert running.status_reason is None
 
     clock.advance(seconds=31)
     assert claim_agent(jobs, NODE_A, "serial-a") is None
@@ -93,7 +98,8 @@ def test_lease_expiry_records_reason_and_last_contact_facts(service) -> None:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
 
-    assert stored is not None and stored.state in aos.PARKED
+    assert stored is not None
+    assert stored.state in aos.PARKED
     reason = stored.status_reason
     assert reason is not None
 
@@ -120,8 +126,10 @@ def test_replayed_result_stays_fenced_and_records_no_second_outcome(service) -> 
                 AgentOperationAttempt.operation_id == operation.id
             )
         )
-    assert stored is not None and stored.state == "succeeded"
-    assert attempt is not None and attempt.state == "succeeded"
+    assert stored is not None
+    assert stored.state == "succeeded"
+    assert attempt is not None
+    assert attempt.state == "succeeded"
 
     clock.advance(seconds=31)
     with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
@@ -129,7 +137,8 @@ def test_replayed_result_stays_fenced_and_records_no_second_outcome(service) -> 
 
     with sessions() as session:
         unchanged = session.get(AgentOperation, operation.id)
-    assert unchanged is not None and unchanged.state == "succeeded"
+    assert unchanged is not None
+    assert unchanged.state == "succeeded"
 
 
 def test_revoked_expired_or_node_mismatched_certificate_cannot_claim(service) -> None:
@@ -138,7 +147,7 @@ def test_revoked_expired_or_node_mismatched_certificate_cannot_claim(service) ->
         parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
     with sessions.begin() as session:
-        session.get(AgentCertificate, "serial-a").revoked_at = clock.now  # type: ignore[union-attr]
+        session.get(AgentCertificate, "serial-a").revoked_at = clock.now
 
     assert claim_agent(jobs, NODE_A, "serial-a") is None
     assert claim_agent(jobs, NODE_A, "serial-b") is None
@@ -174,13 +183,13 @@ def test_enqueue_rejects_noncanonical_protocol_payload(service) -> None:
 
 
 @pytest.mark.parametrize(
-    "terminal_state", ("succeeded", "failed", "needs-operator", "cancelled")
+    "terminal_state", ["succeeded", "failed", "needs-operator", "cancelled"]
 )
 def test_sqlite_enqueue_rejects_terminal_parent(service, terminal_state: str) -> None:
     jobs, sessions, clock = service
     parent_job = parent(sessions, clock)
     with sessions.begin() as session:
-        session.get(Job, parent_job.id).state = terminal_state  # type: ignore[union-attr]
+        session.get(Job, parent_job.id).state = terminal_state
 
     with pytest.raises(ValueError):
         jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
@@ -464,7 +473,8 @@ def test_a_silent_start_inside_its_launch_budget_is_not_parked_and_completes(
     assert claim_agent(jobs, NODE_A, "serial-a") is None
     with sessions() as session:
         running = session.get(AgentOperation, operation.id)
-    assert running is not None and running.state == "running"
+    assert running is not None
+    assert running.state == "running"
 
     # The launch finally succeeds and the still-current attempt publishes it.
     jobs.succeed(claim, canonical_start_result(payload))
@@ -476,8 +486,10 @@ def test_a_silent_start_inside_its_launch_budget_is_not_parked_and_completes(
                 AgentOperationAttempt.fence == claim.fence
             )
         )
-    assert stored is not None and stored.state == "succeeded"
-    assert attempt is not None and attempt.state == "succeeded"
+    assert stored is not None
+    assert stored.state == "succeeded"
+    assert attempt is not None
+    assert attempt.state == "succeeded"
     assert job_state(sessions, operation.parent_job_id).state == "succeeded"
 
 
@@ -501,7 +513,8 @@ def test_a_start_that_stops_reporting_past_its_budget_fails_with_the_reason(
 
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-    assert stored is not None and stored.state == "failed"
+    assert stored is not None
+    assert stored.state == "failed"
     reason = stored.status_reason
     assert reason is not None
 
@@ -524,7 +537,8 @@ def test_a_superseded_attempts_late_result_cannot_overwrite_a_newer_attempt(
     jobs.succeed(first, canonical_start_result(payload))
     with sessions() as session:
         accepted_row = session.get(AgentOperation, accepted.id)
-    assert accepted_row is not None and accepted_row.state == "succeeded"
+    assert accepted_row is not None
+    assert accepted_row.state == "succeeded"
 
     # The same shape of late receipt cannot cross a newer attempt's ownership.
     superseded = jobs.enqueue(
@@ -571,7 +585,8 @@ def test_a_superseded_attempts_late_result_cannot_overwrite_a_newer_attempt(
         NODE_B,
         "serial-b",
     )
-    assert current is not None and fenced_attempt(sessions, current).attempt == 2
+    assert current is not None
+    assert fenced_attempt(sessions, current).attempt == 2
     late = AgentResult.model_validate_json(
         canonical_message(
             {
@@ -591,12 +606,14 @@ def test_a_superseded_attempts_late_result_cannot_overwrite_a_newer_attempt(
             )
         )
     assert stored is not None
-    assert stored.state == "running" and stored.current_attempt == 2
+    assert stored.state == "running"
+    assert stored.current_attempt == 2
     assert current_attempt is not None
-    assert current_attempt.state == "running" and current_attempt.result is None
+    assert current_attempt.state == "running"
+    assert current_attempt.result is None
 
 
-@pytest.mark.parametrize("restriction", (None, "expired", "cancelled", "stale"))
+@pytest.mark.parametrize("restriction", [None, "expired", "cancelled", "stale"])
 def test_distribution_heartbeat_renews_only_live_authorized_transfer(
     service, restriction
 ) -> None:
@@ -759,7 +776,7 @@ def test_claim_persists_authenticated_running_release_identity(service) -> None:
         assert re.fullmatch(r"[0-9a-f]{64}", digest)
 
 
-@pytest.mark.parametrize("architecture", ("linux-riscv64", True, 7))
+@pytest.mark.parametrize("architecture", ["linux-riscv64", True, 7])
 def test_claim_rejects_malformed_runtime_architecture_without_persisting_it(
     service, architecture: object
 ) -> None:
@@ -798,7 +815,7 @@ def test_claim_rejects_malformed_runtime_architecture_without_persisting_it(
         assert runtime_value(node, lambda identity: identity.binary_digest) == "f" * 64
 
 
-@pytest.mark.parametrize("agent_action", ("heartbeat", "result"))
+@pytest.mark.parametrize("agent_action", ["heartbeat", "result"])
 def test_retired_identity_cannot_mutate_active_attempt_or_record_contact(
     service, agent_action: str
 ) -> None:
@@ -811,18 +828,22 @@ def test_retired_identity_cannot_mutate_active_attempt_or_record_contact(
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         certificate = session.get(AgentCertificate, "serial-a")
-        assert node is not None and certificate is not None
+        assert node is not None
+        assert certificate is not None
         node.state = "retired"
         node.revoked_at = clock.now
         contact_row(node).last_seen_at = None
         certificate.state = "revoked"
         certificate.revoked_at = clock.now
 
-    with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
+    def expected_failure():
         if agent_action == "heartbeat":
             jobs.heartbeat(claim, {"phase": "checking"}, 60)
         else:
             jobs.succeed(claim, {"healthy": True})
+
+    with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
+        expected_failure()
 
     with sessions() as session:
         node = session.get(AgentNode, NODE_A)
@@ -834,11 +855,15 @@ def test_retired_identity_cannot_mutate_active_attempt_or_record_contact(
                 == fenced_attempt(sessions, claim).attempt,
             )
         )
-        assert node is not None and contact_row(node).last_seen_at is None
+        assert node is not None
+        assert contact_row(node).last_seen_at is None
         assert contact_row(node).protocol_version == 4
-        assert stored_operation is not None and stored_operation.state == "running"
-        assert attempt is not None and attempt.state == "running"
-        assert attempt.progress is None and attempt.result is None
+        assert stored_operation is not None
+        assert stored_operation.state == "running"
+        assert attempt is not None
+        assert attempt.state == "running"
+        assert attempt.progress is None
+        assert attempt.result is None
 
 
 def test_public_fence_string_interface_renews_and_completes(service) -> None:
@@ -871,7 +896,8 @@ def test_attempt_expiring_exactly_at_claim_time_requires_operator_retry(
     assert second is None
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state in aos.PARKED
+        assert stored is not None
+        assert stored.state in aos.PARKED
 
 
 def test_parent_job_becomes_succeeded_only_after_every_operation_succeeds(
@@ -944,7 +970,8 @@ def test_parent_job_retries_uncertain_failure_then_succeeds(
     retried = _claim_until_due(
         jobs, sessions, clock, fenced_operation(sessions, failed).id
     )
-    assert retried is not None and retried.fence != failed.fence
+    assert retried is not None
+    assert retried.fence != failed.fence
     jobs.succeed(retried, STOP_RESULT)
     assert job_state(sessions, parent_job.id).state == LifecycleState.SUCCEEDED
     _assert_parent_ending_admit_fresh_request(jobs, sessions, clock, parent_job)
@@ -1013,8 +1040,6 @@ def test_transient_start_failure_retries_automatically_without_operator(
     code and parked every other transient start failure for an operator.
     """
 
-    from vonk_agent_protocol.contracts import AgentResult
-
     jobs, sessions, clock = service
     payload = canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30))
     operation = jobs.enqueue(
@@ -1041,7 +1066,8 @@ def test_transient_start_failure_retries_automatically_without_operator(
     )
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state in aos.PARKED
+        assert stored is not None
+        assert stored.state in aos.PARKED
         assert stored.next_action_at is not None
         assert stored.next_action_at is not None
         due = stored.next_action_at.replace(tzinfo=UTC)
@@ -1052,4 +1078,5 @@ def test_transient_start_failure_retries_automatically_without_operator(
         NODE_A,
         "serial-a",
     )
-    assert retry is not None and fenced_attempt(sessions, retry).attempt == 2
+    assert retry is not None
+    assert fenced_attempt(sessions, retry).attempt == 2

@@ -6,6 +6,7 @@ import hashlib
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
+
 from vonk_agent_protocol.http_failure import TransientReason
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
@@ -15,41 +16,37 @@ from vonk_agent_protocol.reason_codes.model_cache import (
     ModelAccessReason,
     ModelCacheCode,
 )
-
-from ..admission_locking import admitting
-from ..lifecycle.types import Effect, Outcome, Reported
-from ..models.cache import ModelCacheOperation
-from ..strict_json import serialize_json_value
-from . import states as model_cache_states
-from .artifacts import (
-    ArtifactSetManifest,
-    _optional_digest,
-)
-from .constants import _TRANSFER_CLAIM_SECONDS
-from .contract import (
+from vonk_control.admission_locking import admitting
+from vonk_control.lifecycle.types import Effect, Outcome, Reported
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, _optional_digest
+from vonk_control.model_cache.constants import _TRANSFER_CLAIM_SECONDS
+from vonk_control.model_cache.contract import (
     ModelCacheAccessRecheck,
     ModelCacheDownloadResult,
     ModelCacheOperationPhase,
     ModelCacheTransfer,
 )
-from .errors import (
+from vonk_control.model_cache.errors import (
     ModelCacheConflictInvalid,
     ModelCacheNotFoundInvalid,
 )
-from .persistence import (
+from vonk_control.model_cache.persistence import (
     _manifest_of,
     _operation_progress,
     _store_operation_payload,
     _updated,
     _write_operation_payload,
 )
-from .progress import cache_phase, progress_document
-from .source_helpers import _request_key
-from .transfer_admission import admit_transfer, refreshes
-from .views import CacheOperationView
+from vonk_control.model_cache.progress import cache_phase, progress_document
+from vonk_control.model_cache.source_helpers import _request_key
+from vonk_control.model_cache.transfer_admission import admit_transfer, refreshes
+from vonk_control.model_cache.views import CacheOperationView
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class RetryMixin:
@@ -185,7 +182,8 @@ class RetryMixin:
         request_key = _request_key(request_key)
         requested_set = _optional_digest(artifact_set_sha256)
         requested_plan = _optional_digest(plan_digest)
-        assert requested_set is not None and requested_plan is not None
+        assert requested_set is not None
+        assert requested_plan is not None
         auth_codes = set(ModelAccessReason)
         with cache._lock, cache._session(write=True) as session:
             previous = session.get(
@@ -326,10 +324,10 @@ class RetryMixin:
                 ModelCacheOperation, operation_id, with_for_update=True
             )
             if operation is None or operation.state == LifecycleState.CANCELLED:
-                return  # gone or cancelled: nothing left to record (rule 5)
+                return None  # gone or cancelled: nothing left to record (rule 5)
             payload = cache._payload_or_none(operation)
             if payload is None or payload.cancellation is not None:
-                return  # unreadable: the claim loop reconciles it
+                return None  # unreadable: the claim loop reconciles it
             if cache._lifecycle.renew(
                 operation, cache._claim_owner, _TRANSFER_CLAIM_SECONDS, now
             ):

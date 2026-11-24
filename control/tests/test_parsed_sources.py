@@ -39,7 +39,6 @@ def test_a_whole_tree_scan_runs_once_per_tree_version(tmp_path: Path) -> None:
 
 
 def test_one_shot_parse_does_not_retain_an_unshared_test_tree(tmp_path):
-    from .parsed_sources import parse_file
 
     path = tmp_path / "test_once.py"
     path.write_text("assert result.state == 'succeeded'\n")

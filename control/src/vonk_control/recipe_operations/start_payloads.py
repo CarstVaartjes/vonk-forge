@@ -10,12 +10,11 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.outcome import InvalidRequestError
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
-
-from ..failure_classification import error_detail
-from ..harnesses.canonical import places_from_environment
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.failure_classification import error_detail
+from vonk_control.harnesses.canonical import places_from_environment
 
 
 class RecipeStartPayloadError(InvalidRequestError, ValueError):

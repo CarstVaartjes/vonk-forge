@@ -10,9 +10,13 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import canonical_message
+
+from vonk_agent_protocol.agent_operations import AgentOperation as AgentOperationKind
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.jobs.documents import RunSwitchRunIntent
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import (
@@ -31,6 +35,7 @@ from vonk_control.run_switch_contract.requests import (
     RunSwitchApplyRequest,
 )
 from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
+from vonk_control.run_switch_operations.planning_helpers import _run_switch_payload
 from vonk_control.run_switch_operations.provider import RunSwitchOperationProvider
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime.preflight import latest_result
@@ -38,12 +43,14 @@ from vonk_control.runtime_image_preparation.contracts import PulledImageEvidence
 from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
+from .non_blocking import assert_ended_without_blocking
 from .preflight_fixtures import record_passing_preflight
 from .recipe_operations_support import NOW, _CanonicalModelCache, setup_services
 from .run_switch_operations_support import (
     ColdStartPhaseExecutor,
     CompleteArtifactInspector,
     _cold_compile_switch,
+    _finish,
     _fixture_execution,
     _host_changes_during_compile,
     _request,
@@ -54,7 +61,7 @@ from .runtime_identity_support import (
     set_inventory_identity,
 )
 from .runtime_image_fixtures import place_test_image
-from .test_lifecycle_preflight import _clear, _finish
+from .test_lifecycle_preflight import _clear
 
 
 def test_cold_model_and_image_plan_defers_compile_until_both_preparations(
@@ -253,7 +260,8 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
                 with sessions() as session:
                     revision = session.get(CatalogDocumentRevision, revision_id)
                     build = session.get(RecipeBuild, build_id)
-                    assert revision is not None and build is not None
+                    assert revision is not None
+                    assert build is not None
                     entities = resolve_recipe_entities(session, revision)
                     option_choices, settings = split_option_choices(
                         plan.mapping.parameters if plan.mapping is not None else None
@@ -435,7 +443,6 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
 
 
 def _runtime_probes(sessions) -> int:
-    from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
 
     with sessions() as session:
         return len(
@@ -491,7 +498,8 @@ def test_a_switch_longer_than_five_minutes_runs_one_preflight_round(
     assert len(installations) == 1
     assert installations[0].plan_digest == switch.admitted.plan_digest
     completed = switch.service.get(switch.operation.operation_id)
-    assert completed.result is not None and completed.result.retry_attempt is None
+    assert completed.result is not None
+    assert completed.result.retry_attempt is None
     assert completed.progress.operation.phase != "install-preflight-refresh"
     assert _runtime_probes(switch.sessions) == probes
 
@@ -506,8 +514,6 @@ def test_agent_upgrade_during_runtime_install_preflight_completes_the_switch(
     The probe is the newest host sample, so the gate admits it with no extra
     round and the switch still creates exactly one installation.
     """
-
-    from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
 
     switch = _cold_compile_switch(tmp_path, seconds=1, slow_compiles=0)
     sessions, clock, service = switch.sessions, switch.clock, switch.service
@@ -579,7 +585,8 @@ def test_agent_upgrade_during_runtime_install_preflight_completes_the_switch(
         switch.drive()
     completed = service.get(operation_id)
     assert completed.state != "failed", completed.status_reason
-    assert completed.result is not None and completed.result.retry_attempt is None
+    assert completed.result is not None
+    assert completed.result.retry_attempt is None
     assert completed.progress.operation.phase != "install-preflight-refresh"
     with sessions() as session:
         assert len(list(session.scalars(select(RecipeInstallation)))) == 1
@@ -614,7 +621,8 @@ def test_runtime_install_capacity_busy_parks_and_retries_the_switch(
     assert switch.executor.events.count("runtime-install") == 2
     recovered = switch.service.get(switch.operation.operation_id)
     assert recovered.state != "failed"
-    assert recovered.result is not None and recovered.result.retry_attempt is None
+    assert recovered.result is not None
+    assert recovered.result.retry_attempt is None
 
 
 def test_run_switch_retry_reports_its_wait_and_is_not_failed(
@@ -649,7 +657,8 @@ def test_run_switch_retry_reports_its_wait_and_is_not_failed(
         if switch.executor.events.count("runtime-install") >= 2:
             break
     recovered = switch.service.get(switch.operation.operation_id)
-    assert recovered.blockers == [] and recovered.next_attempt_at is None
+    assert recovered.blockers == []
+    assert recovered.next_attempt_at is None
 
 
 def test_runtime_install_capacity_wait_backs_off_and_resets_after_progress(
@@ -670,7 +679,8 @@ def test_runtime_install_capacity_wait_backs_off_and_resets_after_progress(
         )
         view = switch.service.get(switch.operation.operation_id)
         assert view.state == "running"
-        assert view.result is not None and view.next_attempt_at is not None
+        assert view.result is not None
+        assert view.next_attempt_at is not None
         due = view.next_attempt_at
         observed_delays.append(int((due - switch.clock.now).total_seconds()))
         assert max(1, cap * 3 // 4) <= observed_delays[-1] <= min(60, cap * 5 // 4)
@@ -682,18 +692,14 @@ def test_preflight_refresh_after_repeated_cold_compiles_ends_and_admits_fresh(
     tmp_path: Path,
 ) -> None:
     """A host that changes during every compile ends the refresh; fresh intent runs."""
-    from vonk_control.run_switch_operations.planning_helpers import _run_switch_payload
-
-    from .non_blocking import assert_ended_without_blocking
 
     switch = _cold_compile_switch(tmp_path, slow_compiles=99)
     _host_changes_during_compile(switch)
     service, operation = switch.service, switch.operation
     with switch.sessions() as session:
-        from vonk_control.jobs.documents import RunSwitchRunIntent
-
         payload = _run_switch_payload(session.get(Job, operation.operation_id))
-        assert payload is not None and isinstance(payload.intent, RunSwitchRunIntent)
+        assert payload is not None
+        assert isinstance(payload.intent, RunSwitchRunIntent)
         request = payload.intent.request
 
     def end(_operation):
@@ -783,7 +789,6 @@ def test_cancellation_during_expiring_compile_prevents_a_subsequent_attempt(
 
 def test_preflight_reuse_ignores_operation_history_ordering(tmp_path: Path) -> None:
     """Catches an old operation timestamp poisoning fresh inventory evidence."""
-    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 
     switch = _cold_compile_switch(tmp_path, seconds=1, slow_compiles=0)
     # One second earlier only tells the old receipts from the fresh ones.

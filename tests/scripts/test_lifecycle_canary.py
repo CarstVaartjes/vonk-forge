@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
 ROOT = Path(__file__).resolve().parents[2]

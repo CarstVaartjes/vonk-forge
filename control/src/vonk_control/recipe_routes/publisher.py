@@ -6,18 +6,18 @@ import hashlib
 import ipaddress
 import json
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime
 
+from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN
+
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownError
 from vonk_agent_protocol.route_activation import SupervisorPhase
 from vonk_agent_protocol.state_machines import GatewayRouteState
-from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN
-
-from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
-from ..gateway.litellm import (
+from vonk_control.bounded_retry import REQUEST_PAUSES, bounded_attempts
+from vonk_control.gateway.litellm import (
     LiteLlmConfig,
     LiteLlmGeneration,
     LiteLlmPolicy,
@@ -26,11 +26,11 @@ from ..gateway.litellm import (
     render_config,
     render_empty_config,
 )
-from ..gateway.route_bundle_contract import (
+from vonk_control.gateway.route_bundle_contract import (
     RouteAcceptedModelPolicy,
     RouteBundleDocument,
 )
-from ..gateway.route_runtime import (
+from vonk_control.gateway.route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     AtomicRouteBundlePublisher,
     RouteRuntimeError,
@@ -38,8 +38,8 @@ from ..gateway.route_runtime import (
     recipe_route_run_id,
     verify_active_route_bundle,
 )
-from ..presence import ManagementAddressPolicy, PresenceError
-from .shared import (
+from vonk_control.presence import ManagementAddressPolicy, PresenceError
+from vonk_control.recipe_routes.shared import (
     _NODE_ID,
     _UPSTREAM_MODEL,
     RecipeRouteNotReady,
@@ -63,7 +63,7 @@ class AtomicRecipeRoutePublisher:
     )
 
     @contextmanager
-    def fenced(self, check: Callable[[], bool]) -> Iterator[None]:
+    def fenced(self, check: Callable[[], bool]) -> Generator[None]:
         token = self._ownership.set(check)
         try:
             yield

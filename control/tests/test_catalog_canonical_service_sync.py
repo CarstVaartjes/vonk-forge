@@ -7,6 +7,9 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+
+from tests.recipe_library_source import recipe_library_root
+from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
@@ -19,9 +22,6 @@ from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.recipe_library_types import RecipeLibraryItem, RecipeLibrarySnapshot
 from vonk_control.source_bundles import SourceBundleStore
-
-from tests.recipe_library_source import recipe_library_root
-from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
 ROOT = recipe_library_root()
 pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)

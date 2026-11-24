@@ -4,19 +4,28 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import canonical_message
+
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.state_machines import ReservationState, RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )
+from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
 from vonk_control.models.fleet import AgentNode, FleetProfileApplication
 from vonk_control.models.jobs import Job
 from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.recipe_operations.errors import RecipeRequestInvalid
 from vonk_control.resource_planning.types import UnknownRunMemoryResidual
 from vonk_control.run_admission import RunAdmissionBusy
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_operations.observation_helpers import (
+    _phase_request_key,
+    _stop_child_request_key,
+)
 
 from .recipe_operations_support import installed_recipe, setup_services, started_recipe
 from .test_profile_installed_execution import _drive_to_job
@@ -129,7 +138,8 @@ def test_replacement_owns_memory_before_and_after_old_claim_is_released(
                 ResourceReservation.kind == "unified-memory",
             )
         )
-        assert pending is not None and pending.state == "promised"
+        assert pending is not None
+        assert pending.state == "promised"
         totals = memory_reservations(session, nodes[0], memory_pool="shared")
         assert totals.committed_bytes_by_kind == {
             "unified-memory": max(demand, pending.amount_bytes)
@@ -141,7 +151,8 @@ def test_replacement_owns_memory_before_and_after_old_claim_is_released(
     lifecycle.record_node_result(stop_id, nodes[0], succeeded=True, evidence={})
     with sessions() as session:
         released = session.get(ResourceReservation, old_claim_id)
-        assert released is not None and released.state == "released"
+        assert released is not None
+        assert released.state == "released"
         totals = memory_reservations(session, nodes[0], memory_pool="shared")
         assert totals.committed_bytes_by_kind == {"unified-memory": demand}
         assert totals.unmaterialized_bytes_by_kind == {"unified-memory": demand}
@@ -192,7 +203,8 @@ def test_starting_and_running_claims_keep_the_full_unknown_residual_range(
                     RunNode.node_id == nodes[0],
                 )
             )
-            assert run is not None and run_node is not None
+            assert run is not None
+            assert run_node is not None
             run.state = state
             run_node.state = state
 
@@ -306,7 +318,8 @@ def test_changed_memory_authority_repairs_without_replacing_accepted_effects(
     child = start()
     with sessions() as session:
         run = session.get(RecipeRun, child.owner_id)
-        assert run is not None and run.state == RunState.STARTING
+        assert run is not None
+        assert run.state == RunState.STARTING
         claims = tuple(
             session.scalars(
                 select(ResourceReservation).where(
@@ -315,9 +328,8 @@ def test_changed_memory_authority_repairs_without_replacing_accepted_effects(
                 )
             )
         )
-        assert claims and all(
-            claim.state == ReservationState.ACTIVE for claim in claims
-        )
+        assert claims
+        assert all(claim.state == ReservationState.ACTIVE for claim in claims)
 
 
 @pytest.mark.parametrize("change", ["claim-digest", "run-digest", "owner", "intent"])
@@ -374,14 +386,6 @@ def test_stale_or_unrelated_work_cannot_supply_replacement_overlap(
 def test_replacement_stop_retains_current_root_after_withdrawal_response_loss(
     tmp_path, postgres_engine, changed_field: str | None
 ):
-    from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
-    from vonk_control.jobs.documents import RecipeStopParent
-    from vonk_control.recipe_operations.errors import RecipeRequestInvalid
-    from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
-    from vonk_control.run_switch_operations.observation_helpers import (
-        _phase_request_key,
-        _stop_child_request_key,
-    )
 
     sessions, profiles, planner, profile, api, headers, nodes, installation = (
         _ready_profile(tmp_path, postgres_engine)
@@ -405,21 +409,25 @@ def test_replacement_stop_retains_current_root_after_withdrawal_response_loss(
     stop_id = _drive_to_job(profiles, planner, sessions, "recipe.stop")
     with sessions() as session:
         stop = session.get(Job, stop_id)
-        assert stop is not None and stop.state == "running"
+        assert stop is not None
+        assert stop.state == "running"
         document = RecipeStopParent.model_validate_json(
             canonical_message(stop.payload), strict=True
         )
         review = document.service_stop_review
-        assert review is not None and review.profile_stop_owner is not None
+        assert review is not None
+        assert review.profile_stop_owner is not None
         owner = review.profile_stop_owner
         assert owner.profile_application_id == application_id
-        assert owner.run_id == old.owner_id and owner.run_node_ids == list(nodes)
+        assert owner.run_id == old.owner_id
+        assert owner.run_node_ids == list(nodes)
         assert stop.payload.get("phases") is None
         request_id = stop.request_id
         ordinal = document.workload_intent_ordinal
         assert ordinal is not None
         root = session.get(Job, owner.profile_operation_id)
-        assert root is not None and root.kind == "recipe.run-switch.v2"
+        assert root is not None
+        assert root.kind == "recipe.run-switch.v2"
         current = RunSwitchOperationResult.model_validate_json(
             canonical_message(root.result), strict=True
         )
@@ -436,7 +444,8 @@ def test_replacement_stop_retains_current_root_after_withdrawal_response_loss(
     if changed_field is not None:
         with sessions.begin() as session:
             root = session.get(Job, owner.profile_operation_id)
-            assert root is not None and root.result is not None
+            assert root is not None
+            assert root.result is not None
             damaged = dict(root.result)
             if changed_field == "request_id":
                 root.request_id = str(uuid4())
@@ -509,7 +518,8 @@ def test_replacement_stop_retains_current_root_after_withdrawal_response_loss(
         assert stored.payload["workload_intent_ordinal"] == ordinal
         assert stored.payload.get("phases")
         root = session.get(Job, owner.profile_operation_id)
-        assert root is not None and root.result is not None
+        assert root is not None
+        assert root.result is not None
         assert root.result["child_operation_id"] == stop_id
         retained = RunSwitchOperationResult.model_validate_json(
             canonical_message(root.result), strict=True

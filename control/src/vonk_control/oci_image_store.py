@@ -38,16 +38,15 @@ import shutil
 import stat
 import subprocess
 import time
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 
 from vonk_agent_protocol.reason_codes.images import ImageStoreCode
-
-from .logging import log_event
-from .stalled_process import run_until_stalled, tree_bytes
+from vonk_control.logging import log_event
+from vonk_control.stalled_process import run_until_stalled, tree_bytes
 
 IMAGE_CACHE_DIRECTORY = "image-cache"
 LAYOUT_DIRECTORY = "oci"
@@ -409,9 +408,8 @@ class OciImageStore:
         except FileNotFoundError:
             return set()
         except (ValueError, OciImageStoreError, OSError) as error:
-            damaged = (
-                isinstance(error, ValueError)
-                or isinstance(error, OciImageStoreError)
+            damaged = isinstance(error, ValueError) or (
+                isinstance(error, OciImageStoreError)
                 and error.code in DAMAGED_MANIFEST_CODES
             )
             return StoreUnknown(
@@ -423,7 +421,7 @@ class OciImageStore:
         return {item.removeprefix("sha256:") for item in image.blob_digests}
 
     @contextmanager
-    def _lock(self) -> Iterator[bool]:
+    def _lock(self) -> Generator[bool]:
         """One writer at a time: skopeo rewrites the layout's index.
 
         Never waits: it yields ``False`` for a busy store, and the caller

@@ -9,9 +9,8 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_control.models.fleet import FleetProfileApplication
 
-pytest_plugins = ("tests.test_profile_load_installed_cli",)
+from vonk_control.models.fleet import FleetProfileApplication
 
 from .test_profile_load_installed_cli import (
     KEY,
@@ -19,6 +18,8 @@ from .test_profile_load_installed_cli import (
     _process_environment,
 )
 from .test_profile_load_submission import _profile_api
+
+pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
 
 @pytest.mark.lane

@@ -18,6 +18,9 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 import pytest
+from vonk_forge_contracts import read_recipe
+from vonk_forge_contracts.recipe import RecipeOpenAIInterface
+
 from vonk_control.artifact_jobs.contracts import slot_input_media_type
 from vonk_control.compiled_artifact_contract import compile_artifact_contract
 from vonk_control.gateway.litellm import LiteLlmPolicy, RouteState, render_config
@@ -29,8 +32,6 @@ from vonk_control.prebuilt_images import (
     package_build_intent,
 )
 from vonk_control.revision_images import revision_source_bundle
-from vonk_forge_contracts import read_recipe
-from vonk_forge_contracts.recipe import RecipeOpenAIInterface
 
 from .catalog_dry_run import (
     CatalogDryRun,

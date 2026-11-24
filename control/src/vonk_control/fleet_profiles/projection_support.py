@@ -8,8 +8,13 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import RecipeDefinition
+from vonk_forge_contracts.recipe import RecipeTopology
+
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileChildPhase,
@@ -17,48 +22,52 @@ from vonk_agent_protocol.agent_words import (
     ProfileProjectionKind,
     ProfileSwitchChildKind,
 )
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
 )
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
-from vonk_forge_contracts import RecipeDefinition
-from vonk_forge_contracts.recipe import RecipeTopology
-
-from ..catalog.revision_contract import RecipeRevisionProjection
-from ..fleet_profile_contract.applications import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.catalog.revision_contract import RecipeRevisionProjection
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationCancellationView,
     FleetProfileApplicationEffect,
     FleetProfileApplicationProgress,
 )
-from ..fleet_profile_contract.definitions import (
+from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignment,
     FleetProfileAssignmentInput,
     FleetProfileDefinition,
     FleetProfileView,
 )
-from ..fleet_profile_contract.effects import FleetProfileEffects, FleetProfileRunEffect
-from ..fleet_profile_contract.review import (
+from vonk_control.fleet_profile_contract.effects import (
+    FleetProfileEffects,
+    FleetProfileRunEffect,
+)
+from vonk_control.fleet_profile_contract.review import (
     FleetProfilePreview,
     FleetProfileReviewedDecision,
 )
-from ..fleet_profile_contract.switch_state import (
+from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileChildResult,
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchQueueItem,
 )
-from ..fleet_profile_contract.vocabulary import MAX_PROFILE_WARNINGS
-from ..lifecycle.evidence import Residue
-from ..models.execution import InstallationNode
-from ..models.fleet import FleetProfile, FleetProfileApplication, FleetProfileSelection
-from ..stored.json_values import read_row_column
-from .contracts import (
+from vonk_control.fleet_profile_contract.vocabulary import MAX_PROFILE_WARNINGS
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileReviewStale,
     FleetProfileStalePlanConflict,
     FleetProfileUnsupportedStore,
     SavedProfileDocument,
 )
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.execution import InstallationNode
+from vonk_control.models.fleet import (
+    FleetProfile,
+    FleetProfileApplication,
+    FleetProfileSelection,
+)
+from vonk_control.stored.rows import read_row_column
 
 
 def _state_receipt(
@@ -95,15 +104,15 @@ def _application_cancellation_view(
                     outcome=LifecycleState.SUCCEEDED.value,
                 )
             )
-        for step in plan.steps[application.current_step :]:
-            cancelled.append(
-                FleetProfileApplicationEffect(
-                    effect_id=f"step:{step.index}",
-                    kind=ProfileProjectionKind.STEP.value,
-                    label=f"Not issued profile step {step.index + 1}: {step.label}",
-                    outcome=ProfileEffectState.NOT_ISSUED.value,
-                )
+        cancelled.extend(
+            FleetProfileApplicationEffect(
+                effect_id=f"step:{step.index}",
+                kind=ProfileProjectionKind.STEP.value,
+                label=f"Not issued profile step {step.index + 1}: {step.label}",
+                outcome=ProfileEffectState.NOT_ISSUED.value,
             )
+            for step in plan.steps[application.current_step :]
+        )
         pending_ids = intent.pending_operation_ids
     else:
         for child in adapter.children:
@@ -126,16 +135,16 @@ def _application_cancellation_view(
                 else completed
             ).append(effect)
         active_ids = {child.operation_id for child in adapter.pending_children}
-        for child in adapter.pending_children:
-            pending.append(
-                FleetProfileApplicationEffect(
-                    effect_id=child.operation_id,
-                    kind=child.kind,
-                    label="Pending Run/Switch child",
-                    operation_id=child.operation_id,
-                    outcome=ProfileEffectState.PENDING.value,
-                )
+        pending.extend(
+            FleetProfileApplicationEffect(
+                effect_id=child.operation_id,
+                kind=child.kind,
+                label="Pending Run/Switch child",
+                operation_id=child.operation_id,
+                outcome=ProfileEffectState.PENDING.value,
             )
+            for child in adapter.pending_children
+        )
         pending_ids = sorted(
             set(adapter.pending_operation_ids) | set(intent.pending_operation_ids)
         )
@@ -168,15 +177,15 @@ def _application_cancellation_view(
             )
         # A later whole-profile step can remain after the adapter's current
         # switch queue; expose that reviewed work as not issued too.
-        for step in plan.steps[application.current_step + 1 :]:
-            cancelled.append(
-                FleetProfileApplicationEffect(
-                    effect_id=f"step:{step.index}",
-                    kind=ProfileProjectionKind.STEP.value,
-                    label=f"Not issued profile step {step.index + 1}: {step.label}",
-                    outcome=ProfileEffectState.NOT_ISSUED.value,
-                )
+        cancelled.extend(
+            FleetProfileApplicationEffect(
+                effect_id=f"step:{step.index}",
+                kind=ProfileProjectionKind.STEP.value,
+                label=f"Not issued profile step {step.index + 1}: {step.label}",
+                outcome=ProfileEffectState.NOT_ISSUED.value,
             )
+            for step in plan.steps[application.current_step + 1 :]
+        )
 
     pending.extend(
         FleetProfileApplicationEffect(
@@ -318,9 +327,9 @@ def _set_selected_profile(
     table = FleetProfileSelection.__table__
     dialect = session.get_bind().dialect.name
     if dialect == "postgresql":
-        from sqlalchemy.dialects.postgresql import insert
+        insert = postgresql_insert
     elif dialect == "sqlite":
-        from sqlalchemy.dialects.sqlite import insert
+        insert = sqlite_insert
     else:
         raise FleetProfileUnsupportedStore(
             "Fleet profile selection requires PostgreSQL or SQLite",

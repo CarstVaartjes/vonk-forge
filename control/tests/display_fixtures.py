@@ -6,12 +6,8 @@ import json
 import zlib
 from collections.abc import Mapping
 from importlib import resources
-from typing import cast
+from typing import Any, cast
 
-from vonk_control.catalog.entities import CatalogEntityService
-from vonk_control.catalog.revision_contract import PublishedDocument
-from vonk_control.models.catalog import CatalogDocumentRevision
-from vonk_control.recipe_library_types import CatalogModel
 from vonk_forge_contracts import (
     CatalogModelEntry,
     ModelDisplay,
@@ -22,6 +18,11 @@ from vonk_forge_contracts import (
     read_model_display,
     read_recipe_display,
 )
+
+from vonk_control.catalog.entities import CatalogEntityService
+from vonk_control.catalog.revision_contract import PublishedDocument
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.recipe_library_types import CatalogModel
 
 _EXAMPLES = resources.files("vonk_forge_contracts") / "examples"
 
@@ -93,7 +94,7 @@ def model_entry(document: Mapping[str, object]) -> CatalogModel:
     )
 
 
-def publish_displays(index: dict) -> dict:
+def publish_displays(index: dict[str, Any]) -> dict[str, Any]:
     """Give each entry of a fixture index the display a release carries."""
     for entry in index["catalog_entities"]:
         entry["display"] = published_json(display_of_model(entry["document"]))
@@ -107,7 +108,7 @@ def _next_patch(version: str, text: str) -> str:
     return f"{version[:100]} r{zlib.crc32(text.encode()) % 1_000_000}"
 
 
-def reword(document: dict, text: str) -> None:
+def reword(document: dict[str, Any], text: str) -> None:
     """Change a stored document's bytes without changing what it is.
 
     Display (and a Model's license) is not part of a document, so a test that

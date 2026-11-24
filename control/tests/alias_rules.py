@@ -226,11 +226,8 @@ def scan_run_alias_write(source: str, path: str) -> list[int]:
                 hits.add(node.lineno)
             elif not _names_alias(node):
                 continue
-            elif (
-                _name(node.func) == "RecipeRun"
-                and not creates
-                or _name(node.func) == "values"
-                and _writes_run(node.func)
+            elif (_name(node.func) == "RecipeRun" and not creates) or (
+                _name(node.func) == "values" and _writes_run(node.func)
             ):
                 hits.add(node.lineno)
     return sorted(hits)

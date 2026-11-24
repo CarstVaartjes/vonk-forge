@@ -18,13 +18,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from vonk_agent_protocol.contracts import (
-    AgentFailureResult,
-    AgentProtocolError,
-    AgentResult,
-)
+
+from vonk_agent_protocol.agent_operations import AgentFailureResult
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.optional_evidence import HOST_PATH_MARKER, redact_host_paths
 from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
+from vonk_agent_protocol.wire_model import AgentProtocolError
 
 VECTORS = Path(__file__).parents[1] / "src/vonk_agent_protocol/vectors"
 
@@ -45,8 +44,10 @@ def test_a_start_failure_naming_host_paths_is_accepted_with_its_core() -> None:
     # The sentence keeps what it says; only the path is gone.
     for text in (stored.reason, stored.diagnostic):
         assert text is not None
-        assert "FileNotFoundError" in text and HOST_PATH_MARKER in text
-        assert "/" not in text and "\\" not in text
+        assert "FileNotFoundError" in text
+        assert HOST_PATH_MARKER in text
+        assert "/" not in text
+        assert "\\" not in text
     # The captured streams are bounded evidence and stay as the agent sent them.
     assert stored.diagnostics is not None
     assert "/opt/vonk/prewarm" in stored.diagnostics.stderr.text
@@ -100,7 +101,8 @@ def test_redaction_follows_the_shared_rule() -> None:
     assert vector["marker"] == HOST_PATH_MARKER
     for case in vector["cases"]:
         assert redact_host_paths(case["text"]) == case["redacted"], case["text"]
-        assert "/" not in case["redacted"] and "\\" not in case["redacted"]
+        assert "/" not in case["redacted"]
+        assert "\\" not in case["redacted"]
         assert len(case["redacted"]) <= max(
             len(case["text"]), vector["shortest_prose_bound"]
         )

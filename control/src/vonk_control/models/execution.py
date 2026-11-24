@@ -20,7 +20,9 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.orm import Mapped, MappedColumn, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
+from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
+
 from vonk_agent_protocol.job_limits import MAX_TIMEOUT_SECONDS
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
 from vonk_agent_protocol.state_machines import (
@@ -31,13 +33,15 @@ from vonk_agent_protocol.state_machines import (
     RunState,
     machine_check,
 )
-from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
-
 from vonk_control.lifecycle.evidence import Residue
+from vonk_control.model_primitives import (
+    Base,
+    _lower_hex,
+    _nullable_lower_hex,
+    _state_in,
+)
+from vonk_control.models.waits import wait_due_column, wait_evidence_column
 from vonk_control.wait_contract import WaitEvidence
-
-from ..model_primitives import Base, _lower_hex, _nullable_lower_hex, _state_in
-from .waits import wait_due_column, wait_evidence_column
 
 
 class RecipeInstallation(Base):
@@ -196,9 +200,7 @@ STOPPABLE_RUN_STATES = ACTIVE_RUN_STATES | {RunState.LOST}
 class RecipeRun(Base):
     __tablename__ = "recipe_runs"
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    __mapper_args__: ClassVar[dict[str, MappedColumn[int]]] = {
-        "version_id_col": version
-    }
+    __mapper_args__: ClassVar = {"version_id_col": version}
     wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
         __tablename__
     )

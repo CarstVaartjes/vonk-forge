@@ -7,22 +7,23 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
-
-from ..artifact_jobs.lifecycle import (
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     clear_removal,
     lock_removal_fences,
     retryable_artifact_database_error,
 )
-from ..artifact_reference_scan.image_references import runtime_image_reference_reasons
-from ..jobs import states as job_states
-from ..models.jobs import Job
-from ..strict_json import serialize_json_value
-from .contracts import (
+from vonk_control.artifact_reference_scan.image_references import (
+    runtime_image_reference_reasons,
+)
+from vonk_control.jobs import states as job_states
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability.contracts import (
     REMOVE_OPERATION_KIND,
     SCHEMA_VERSION,
     RecipeImageAvailabilityError,
@@ -30,13 +31,16 @@ from .contracts import (
     _removal_retry_is_due,
     availability_disposition,
 )
-from .removal_contract import (
+from vonk_control.recipe_image_availability.removal_contract import (
     RecipeCacheRemovalOwner,
     RecipeCacheRemovalResult,
 )
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
 
 
 def _finish_recipe_removal(

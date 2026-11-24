@@ -24,6 +24,8 @@ from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
+
+from cluster_profiles import cli
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileDefinition,
@@ -38,9 +40,8 @@ from vonk_control.observation.transfer import (
     observation_response,
 )
 
-from cluster_profiles import cli
-
 from .observation_transfer_peer import observation_document
+from .test_fleet_profiles_canonical import _seed, _sessions
 
 ROOT = Path(__file__).resolve().parents[2]
 schema_path = Path(
@@ -111,7 +112,7 @@ def _model_operation(state: str = "succeeded") -> dict[str, Any]:
 
 
 def _library(kind: str) -> dict[str, Any]:
-    value = {
+    return {
         "generated_at": NOW,
         kind: [],
         "facets": {
@@ -125,7 +126,6 @@ def _library(kind: str) -> dict[str, Any]:
         "filters": {},
         "freshness_policy": {},
     }
-    return value
 
 
 def _fleet() -> FleetSnapshot:
@@ -289,7 +289,6 @@ def _profile_preview(profile: dict[str, Any]) -> dict[str, Any]:
 
 
 def _app() -> FastAPI:
-    from .test_fleet_profiles_canonical import _seed, _sessions
 
     app = FastAPI()
     profile = _profile()

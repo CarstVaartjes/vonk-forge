@@ -12,6 +12,9 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+from vonk_forge_contracts.model import ModelReference
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
 from vonk_control.model_cache.contract import (
@@ -31,8 +34,6 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.run_switch_operations.artifact_inspection import (
     DatabaseRunSwitchArtifactInspector,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
-from vonk_forge_contracts.model import ModelReference
 
 from .display_fixtures import reword
 from .model_cache_support import (
@@ -400,7 +401,8 @@ def test_canonical_dependency_closure_reaches_run_switch(
     primary_digest = document_sha256(primary.model_dump(mode="json"))
     recipe_document = _canonical_recipe(primary_digest)
     models = recipe_document["models"]
-    assert isinstance(models, list) and models
+    assert isinstance(models, list)
+    assert models
     selection = models[0]
     assert isinstance(selection, dict)
     model_reference = selection["model"]

@@ -54,33 +54,30 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitOwnerKind
-
-from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
-from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
-from ..fleet_profile_contract.switch_state import (
+from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
+from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchChildState,
 )
-from ..fleet_profile_contract.vocabulary import (
+from vonk_control.fleet_profile_contract.vocabulary import (
     FleetProfileCancellationState,
     FleetProfileOperationState,
 )
-from ..fleet_profiles import states as fleet_profile_states
-from ..jobs import states as job_states
-from ..models.fleet import FleetProfileApplication
-from ..models.jobs import Job
-from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait, wait_due
-from ..recovery_policy import RECOVERY
-from ..strict_json import read_stored_model
-from .adapter import Dispatch
-from .composite import aggregate
-from .core import STOP_BUDGET, transition
-from .reconciler import Settled
-from .reconciler import settle as settle_event
-from .run_switch import RunSwitchAdapter
-from .types import (
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.adapter import Dispatch
+from vonk_control.lifecycle.composite import aggregate
+from vonk_control.lifecycle.core import STOP_BUDGET, transition
+from vonk_control.lifecycle.reconciler import Settled
+from vonk_control.lifecycle.reconciler import settle as settle_event
+from vonk_control.lifecycle.run_switch import RunSwitchAdapter
+from vonk_control.lifecycle.types import (
     TERMINAL_STATES,
     CancelRequested,
     Decision,
@@ -94,6 +91,16 @@ from .types import (
     StopResult,
     Tick,
 )
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.persisted_waits import (
+    initialize_wait,
+    lifecycle_wait,
+    schedule_wait,
+    wait_due,
+)
+from vonk_control.recovery_policy import RECOVERY
+from vonk_control.strict_json import read_stored_model
 
 KIND = "fleet-profile"
 SUPERSEDED = LifecycleState.SUPERSEDED.value
@@ -309,20 +316,20 @@ class FleetProfileAdapter:
 
     # ----------------------------------------------------- the kind's facts
 
-    def irreversible(self, row: Lifecycle) -> bool:
+    def irreversible(self, _row: Lifecycle) -> bool:
         """A composite has no effect of its own: its children own theirs."""
 
         return False
 
-    def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
+    def retry_not_before(self, _row: Lifecycle, _now: datetime) -> datetime | None:
         return None
 
-    def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
+    def execute(self, _row: Lifecycle, _attempt: int) -> Dispatch:
         """The step queue is driven by the application's own tick, not here."""
 
         return Dispatch(issued=False)
 
-    def actions(self, row: Lifecycle) -> tuple[str, ...]:
+    def actions(self, _row: Lifecycle) -> tuple[str, ...]:
         """None: a load waits for no person.  (``retry`` is offered on a failed
         load, which is an ended state, not a wait.)"""
 
@@ -423,7 +430,6 @@ class FleetProfileAdapter:
     def apply(
         self,
         application: FleetProfileApplication,
-        before: Lifecycle,
         after: Lifecycle,
         now: datetime,
         *,
@@ -547,8 +553,8 @@ class FleetProfileAdapter:
             # monotonic flag from the event.
             row = replace(row, cancel_requested_at=None, cancel_request_key=None)
 
-        def save(before: Lifecycle, after: Lifecycle) -> bool:
-            self.apply(application, before, after, now, session=session, **write)
+        def save(_before: Lifecycle, after: Lifecycle) -> bool:
+            self.apply(application, after, now, session=session, **write)
             return True
 
         pending = (
@@ -603,7 +609,7 @@ class FleetProfileAdapter:
 
         before = self.lifecycle(application, _progress(application), now)
         after = replace(before, state=State.QUEUED if steps else State.SUCCEEDED)
-        self.apply(application, before, after, now, reason=None, session=session)
+        self.apply(application, after, now, reason=None, session=session)
 
     def reopen(
         self,
@@ -623,7 +629,7 @@ class FleetProfileAdapter:
         now = aware(now)
         before = self.lifecycle(application, _progress(application), now)
         after = replace(before, state=State.RUNNING, effect=Effect.ISSUED)
-        self.apply(application, before, after, now, reason=reason, session=session)
+        self.apply(application, after, now, reason=reason, session=session)
         return after
 
     def project(
@@ -642,7 +648,7 @@ class FleetProfileAdapter:
         if before.terminal:
             return before
         after = replace(before, state=state)
-        self.apply(application, before, after, now, reason=reason, session=session)
+        self.apply(application, after, now, reason=reason, session=session)
         return after
 
     def succeed(
@@ -691,7 +697,6 @@ class FleetProfileAdapter:
                 after = replace(before, state=State.BACKOFF, next_action_at=due)
                 self.apply(
                     application,
-                    before,
                     after,
                     now,
                     reason=reason,
@@ -798,7 +803,7 @@ class FleetProfileAdapter:
             # The first stop belongs to the worker's next pass, which is due now
             # (no stored clock: an instant spelled two ways compares as later).
             row = replace(row, next_action_at=None)
-        self.apply(application, before, row, now, reason=reason, session=session)
+        self.apply(application, row, now, reason=reason, session=session)
         return row
 
     def tick_cancel(

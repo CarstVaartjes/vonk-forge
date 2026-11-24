@@ -9,35 +9,32 @@ from typing import Any
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol.agent_words import ProfileEffectState
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.distribution import DistributionObject
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
-from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
-from ..agent_jobs.service import AgentJobService
-from ..content_identity import ImageContent, same_image
-from ..distribution.service import DistributionService
-from ..distribution.types import content_objects, plan_objects
-from ..distribution_assignment import NodeDistributionAssignment
-from ..models.execution import RecipeInstallation
-from ..oci_image_store import StoreUnknown
-from ..recipe_operations.execution_contract import (
+from vonk_agent_protocol.distribution import DistributionObject
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.content_identity import ImageContent, same_image
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.types import content_objects, plan_objects
+from vonk_control.distribution_assignment import NodeDistributionAssignment
+from vonk_control.distribution_executor.receipts import RuntimeImagePull
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.oci_image_store import StoreUnknown
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.phase_results import (
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import (
     RunSwitchRuntimeImageResult,
     RunSwitchRuntimePlanResult,
 )
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.vocabulary import RunSwitchMemberState
-from ..run_switch_operations.constants import _MEMBER_STATE_ADAPTER
-from ..run_switch_operations.errors import RunSwitchRetryLater
-from ..run_switch_operations.image_receipts import effective_build_receipt
-from ..runtime_image_preparation.contracts import RuntimeImageStorage
-from .receipts import RuntimeImagePull
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
+from vonk_control.run_switch_operations.image_receipts import effective_build_receipt
+from vonk_control.runtime_image_preparation.contracts import RuntimeImageStorage
 
 
 class DistributionIdentity:
@@ -173,7 +170,7 @@ class DistributionIdentity:
                 build_id = build_id or receipt.build_id
                 break
         if (
-            (build_id is not None and not isinstance(build_id, str))
+            (build_id is not None and not isinstance(build_id, str))  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             or not isinstance(image_digest, str)
             or not isinstance(layout_digest, str)
             or type(image_bytes) is not int
@@ -194,7 +191,6 @@ class DistributionIdentity:
     def _archive(
         self,
         *,
-        build_id: str | None,
         image_digest: str,
         layout_digest: str,
         image_bytes: int,
@@ -290,24 +286,13 @@ class DistributionIdentity:
         )
 
     @staticmethod
-    def _target_bytes(plan: RunSwitchPlan, node_id: str) -> int:
+    def _target_bytes(plan: RunSwitchPlan) -> int:
         preparation = plan.preparation
         if preparation is None:
             return 0
         model_bytes = getattr(preparation.model, "artifact_set_bytes", 0)
         image_bytes = getattr(preparation.runtime_image, "image_bytes", 0)
         return model_bytes + image_bytes
-
-    @staticmethod
-    def _member_state(value: str) -> RunSwitchMemberState:
-        return _MEMBER_STATE_ADAPTER.validate_python(
-            {
-                LifecycleState.QUEUED.value: ProfileEffectState.PENDING.value,
-                LifecycleState.RUNNING.value: LifecycleState.RUNNING.value,
-                LifecycleState.SUCCEEDED.value: LifecycleState.SUCCEEDED.value,
-                LifecycleState.FAILED.value: LifecycleState.FAILED.value,
-            }.get(value, ProfileEffectState.UNKNOWN.value)
-        )
 
     @staticmethod
     def _int(value: object) -> int | None:

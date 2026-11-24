@@ -5,17 +5,15 @@ workflow that wraps another command fails at run time, after merge. The
 allowlist is read from the script itself.
 """
 
-import os
 import re
 import shlex
-import sys
 from pathlib import Path
+from typing import Any
 
 import yaml
+from retry_dependency_fetch import acquisition_prefix, locked_pip_shape
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
-from retry_dependency_fetch import acquisition_prefix, locked_pip_shape
 
 WRAPPER = "scripts/retry-dependency-fetch"
 
@@ -27,7 +25,7 @@ def wrapped_commands(script: str) -> list[tuple[str, ...]]:
             # Cut at a shell separator so a later command is not part of this one.
             words = shlex.split(re.split(r"&&|\|\||;|\|", call)[0], comments=True)
             if words:
-                found.append((os.path.basename(words[0]), *words[1:]))
+                found.append((Path(words[0]).name, *words[1:]))
     return found
 
 
@@ -39,7 +37,7 @@ def refused(script: str) -> list[tuple[str, ...]]:
     ]
 
 
-def run_scripts(document: dict) -> list[str]:
+def run_scripts(document: dict[str, Any]) -> list[str]:
     steps = [*document.get("runs", {}).get("steps", [])]
     for job in document.get("jobs", {}).values():
         steps += job.get("steps", [])

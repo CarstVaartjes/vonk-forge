@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 from sqlalchemy import event, insert, select
 from sqlalchemy.engine import Engine
+
 from vonk_control.model_cache.artifacts import ArtifactSetManifest
 from vonk_control.models.cache import ModelCacheSet, ModelCacheSetArtifact
 from vonk_control.storage_demands import NAS_MODELS, StorageDemands

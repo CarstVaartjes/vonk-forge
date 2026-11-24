@@ -18,10 +18,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_control.auth import Actor
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import User
 from vonk_control.models.jobs import Job
+from vonk_control.operator_acceptance import ControllerAPIRoute
 from vonk_control.recipe_image_availability.api import (
     install_recipe_operator_routes,
 )
@@ -31,8 +34,6 @@ from vonk_control.recipe_image_availability.service import (
 from vonk_control.recipe_update_batches.contract import RecipeUpdateResponse
 from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_control.strict_json import ControllerAPIRoute
-from vonk_forge_contracts import RecipeDefinition
 
 from .recipe_image_availability_support import (
     ARCHIVE,
@@ -78,7 +79,7 @@ def _prepared_build(
         recipe.model_dump(mode="json"),
         runtime=_runtime(),
         storage=storage,
-        transport=Transport(),  # type: ignore[arg-type]
+        transport=Transport(),
         build_receipt={
             "state": "succeeded",
             "build_id": _build_id(revision_id),
@@ -221,7 +222,8 @@ def test_installed_update_survives_cli_and_worker_death_with_frozen_cache_scope(
         ) not in peer.dropped_responses and time.monotonic() < deadline:
             time.sleep(0.01)
         assert peer.dropped_responses == [("POST", "/api/recipe/update")]
-        assert process.returncode is not None and process.returncode < 0
+        assert process.returncode is not None
+        assert process.returncode < 0
 
     parent = _assert_parent(service.get_operator_request(request_key, actor="operator"))
     parent_id = parent.id

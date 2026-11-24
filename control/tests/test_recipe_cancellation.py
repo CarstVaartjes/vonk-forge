@@ -4,11 +4,15 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_control.agent_jobs.persistence import _OrderStore
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 
-from .recipe_operations_support import setup_services
+from .recipe_operations_support import NOW, setup_services
 
 
 def test_invalid_cancel_has_no_effect_and_valid_cancel_admits_fresh(tmp_path) -> None:
@@ -55,11 +59,6 @@ def test_cancel_waits_for_a_live_order_and_the_order_ends_it(tmp_path) -> None:
     An order backing off for its retry is live: the cancel is recorded on the
     parent, the order's own lifecycle ends it, and the parent then ends.
     """
-    from vonk_control.agent_jobs.persistence import _OrderStore
-    from vonk_control.agent_jobs.service import AgentJobService
-    from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
-
-    from .recipe_operations_support import NOW
 
     sessions, service, _queue, mapping, build, _nodes = setup_services(tmp_path)
     plan = service.preview_install(mapping, build)

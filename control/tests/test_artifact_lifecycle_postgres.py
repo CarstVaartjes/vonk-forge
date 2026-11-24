@@ -7,20 +7,24 @@ from threading import Event
 import pytest
 from sqlalchemy import Engine, event, select, text
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactReferenceUnsettled,
     check_removal_fence_nowait,
     clear_removal,
+    dead_removal_identities,
     lock_reference_gates,
     reference_gate_is_open_nowait,
+    release_dead_removal_nowait,
     require_reference_open,
     reserve_removal,
 )
 from vonk_control.artifact_reference_scan.model_sets import require_model_sets_open
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheSet
+from vonk_control.models.jobs import Job
 
 
 @pytest.fixture
@@ -93,7 +97,7 @@ def test_concurrent_reference_snapshots_still_exclude_deletion(
 
 
 def test_reference_admission_cannot_cross_uncommitted_deletion_reservation(
-    artifact_sessions: sessionmaker,
+    artifact_sessions: sessionmaker[Session],
 ) -> None:
     identity = ArtifactIdentity("runtime-image", "a" * 64)
     reserved = Event()
@@ -159,7 +163,8 @@ def test_reused_session_refreshes_committed_deletion_fence(
                     "artifact_sha256": identity.sha256,
                 },
             )
-            assert preloaded is not None and preloaded.removal_owner_id is None
+            assert preloaded is not None
+            assert preloaded.removal_owner_id is None
 
         with artifact_sessions.begin() as other:
             reserve_removal(
@@ -335,11 +340,6 @@ def test_dead_removal_gate_reconciles_before_fresh_reference_admission(
     artifact_sessions: sessionmaker[Session],
     owner_state: str | None,
 ) -> None:
-    from vonk_control.artifact_jobs.lifecycle import (
-        dead_removal_identities,
-        release_dead_removal_nowait,
-    )
-    from vonk_control.models.jobs import Job
 
     now = datetime.now(UTC)
     identity = ArtifactIdentity("runtime-image", "b" * 64)
@@ -393,11 +393,6 @@ def test_dead_removal_gate_reconciles_before_fresh_reference_admission(
 def test_reaper_rechecks_owner_and_does_not_clear_a_restarted_removal(
     artifact_sessions: sessionmaker[Session],
 ) -> None:
-    from vonk_control.artifact_jobs.lifecycle import (
-        dead_removal_identities,
-        release_dead_removal_nowait,
-    )
-    from vonk_control.models.jobs import Job
 
     now = datetime.now(UTC)
     identity = ArtifactIdentity("runtime-image", "c" * 64)

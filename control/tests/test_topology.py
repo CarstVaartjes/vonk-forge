@@ -1,7 +1,7 @@
 import pytest
-from vonk_control.topology import Placement, TopologyError, validate_topology
 
 from tests.canonical_recipe_fixtures import topology_document
+from vonk_control.topology import Placement, TopologyError, validate_topology
 
 
 def multinode():

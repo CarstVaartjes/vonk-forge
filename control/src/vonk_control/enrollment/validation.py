@@ -13,14 +13,15 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
 from pydantic import ValidationError
+
 from vonk_agent_protocol.enrollment import (
     EnrollmentEvidence,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
+from vonk_control.enrollment.types import _NODE_ID, _TOKEN, EnrollmentDenied
 
 
 def _load_csr(node_id: str | None, csr: bytes) -> tuple[bytes, bytes, str, str]:
-    from .types import _NODE_ID, EnrollmentDenied
 
     try:
         request = x509.load_pem_x509_csr(csr)
@@ -103,8 +104,7 @@ def _validate_evidence(
     return values, None
 
 
-def _decode_token(token: str) -> bytes:
-    from .types import _TOKEN, EnrollmentDenied
+def _decode_token(token: object) -> bytes:
 
     if not isinstance(token, str) or _TOKEN.fullmatch(token) is None:
         raise EnrollmentDenied("invalid enrollment grant")
@@ -124,7 +124,6 @@ def _digest(value: bytes) -> str:
 
 
 def _validate_node_id(node_id: str) -> None:
-    from .types import _NODE_ID
 
     if _NODE_ID.fullmatch(node_id) is None:
         raise ValueError(

@@ -7,13 +7,10 @@ from dataclasses import dataclass
 from typing import Literal
 
 from vonk_agent_protocol.state_machines import RunState
-
-from ..artifact_jobs.lifecycle import (
-    ArtifactIdentity,
-)
-from ..fleet_profiles import states as fleet_profile_states
-from ..jobs import states as job_states
-from ..machine_states import INSTALLATION_ACTIVE
+from vonk_control.artifact_jobs.lifecycle import ArtifactIdentity
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.jobs import states as job_states
+from vonk_control.machine_states import INSTALLATION_ACTIVE
 
 _ACTIVE_PROFILE_APPLICATIONS = fleet_profile_states.LIVE
 

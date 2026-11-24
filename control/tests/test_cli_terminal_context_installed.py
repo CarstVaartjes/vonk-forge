@@ -136,7 +136,8 @@ def test_installed_cli_profile_read_respects_terminal_and_redirected_contexts(
     assert redirected.stderr == ""
     document = json.loads(redirected.stdout)
     profiles = document.get("profiles")
-    assert isinstance(profiles, list) and profiles
+    assert isinstance(profiles, list)
+    assert profiles
     assert profiles[0]["name"] == PROFILE_NAME
     assert "\x1b" not in redirected.stdout
     assert [(method, path) for method, path, _ in state.calls] == [

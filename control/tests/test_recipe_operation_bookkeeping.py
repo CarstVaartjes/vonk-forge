@@ -14,23 +14,29 @@ import ast
 import hashlib
 import uuid
 from collections.abc import Mapping
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
+
+from vonk_agent_protocol.agent_operations import RecipeStartResult
 from vonk_agent_protocol.build_import import RecipeBuildCleanupEvidence
-from vonk_agent_protocol.contracts import RecipeStartResult, canonical_message
+from vonk_agent_protocol.host_helper import ContainerRuntimeAction
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
-from vonk_agent_protocol.recipe_operations import RecipeStopResult
+from vonk_agent_protocol.recipe_operations import RecipeStopPayload, RecipeStopResult
 from vonk_agent_protocol.state_machines import ReservationState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import recipe_operations
 from vonk_control.bounded_json import require_mapping
+from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
 from vonk_control.install_admission.contracts import InstallEvidenceChanged
 from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.jobs.documents import DistributedRecoveryMarker
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import (
     InstallationNode,
     RecipeInstallation,
@@ -58,7 +64,10 @@ from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationProgressResult,
     RecipeOperationResult,
 )
-from vonk_control.recipe_operations.observation_helpers import record_build_evidence
+from vonk_control.recipe_operations.observation_helpers import (
+    _run_is_one_shot,
+    record_build_evidence,
+)
 from vonk_control.recipe_operations.progress import (
     _primary_model_identity,
     _recipe_model_identities,
@@ -68,7 +77,6 @@ from vonk_control.recipe_operations.progress import (
 )
 from vonk_control.recipe_operations.rank_authority import (
     _run_accepted_ranks,
-    _run_is_one_shot,
     _run_observes_per_generation,
 )
 from vonk_control.recipe_operations.results import _recorded_result
@@ -1153,8 +1161,6 @@ def test_no_bookkeeping_class_is_raised_from_a_stored_read() -> None:
 
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_stop_works_without_start_jobs_and_with_unreadable_launch_plan(tmp_path):
-    from vonk_agent_protocol.host_helper import ContainerRuntimeAction
-    from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
 
     sessions, service, _queue, _installation, started, _nodes = _running_recipe(
         tmp_path, nodes=2
@@ -1233,8 +1239,6 @@ def test_installation_cleanup_names_the_recorded_digest_after_its_revision_is_go
     """The revision row is provenance: retention may remove it while the
     installation's bytes remain, and their cleanup names the digest the
     installation's accepted plan recorded instead of blocking for ever."""
-    from sqlalchemy import delete
-    from vonk_control.models.catalog import CatalogDocumentRevision
 
     sessions, service, _queue, mapping, build, nodes = setup_services(tmp_path, nodes=2)
     installed = installed_recipe(
@@ -1259,7 +1263,6 @@ def test_installation_cleanup_names_the_recorded_digest_after_its_revision_is_go
 
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_failed_exact_cleanup_reissues_once_then_frees_a_fresh_run(tmp_path):
-    from datetime import timedelta
 
     sessions, service, _queue, installation, started, nodes = _running_recipe(tmp_path)
     with sessions() as session:
@@ -1269,7 +1272,8 @@ def test_failed_exact_cleanup_reissues_once_then_frees_a_fresh_run(tmp_path):
     reason, completed, advanced = service._retirement_cleanup(
         original, request_id, "recipe.stop", "run", started.owner_id, ordinal
     )
-    assert advanced and not completed, reason
+    assert advanced, reason
+    assert not completed, reason
     with sessions.begin() as session:
         first = _required(
             session.scalar(select(Job).where(Job.request_id == request_id))
@@ -1284,7 +1288,8 @@ def test_failed_exact_cleanup_reissues_once_then_frees_a_fresh_run(tmp_path):
     reason, completed, advanced = service._retirement_cleanup(
         original, request_id, "recipe.stop", "run", started.owner_id, ordinal
     )
-    assert advanced and not completed, reason
+    assert advanced, reason
+    assert not completed, reason
     with sessions() as session:
         stops = tuple(session.scalars(select(Job).where(Job.kind == "recipe.stop")))
         assert len(stops) == 2
@@ -1313,10 +1318,6 @@ def test_failed_exact_cleanup_reissues_once_then_frees_a_fresh_run(tmp_path):
 
 
 def test_lost_install_history_completes_exact_cleanup_and_fresh_admission(tmp_path):
-    from vonk_agent_protocol.host_helper import ContainerRuntimeAction
-    from vonk_agent_protocol.recipe_operations import RecipeStopPayload
-    from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
-    from vonk_control.models.execution import ResourceReservation
 
     sessions, service, _queue, installed, started, nodes = _running_recipe(
         tmp_path, nodes=2
@@ -1479,7 +1480,9 @@ def test_install_submission_retries_local_receipt_failure_without_poisoning_fres
             )
         except Exception:  # noqa: BLE001 - effects and fresh completion are the oracle
             ended = True
-        assert ended and returned is None and len(calls) == 3
+        assert ended
+        assert returned is None
+        assert len(calls) == 3
         with sessions() as session:
             assert session.scalar(select(RecipeInstallation)) is None
             assert (
@@ -1544,7 +1547,7 @@ def test_submission_recompiles_through_the_owner_and_releases_failed_attempts(
     def compile_again(**kwargs):
         calls.append(True)
         if len(calls) <= (3 if exhaust else 1):
-            raise UnknownOutcomeError()
+            raise UnknownOutcomeError
         return compile_owner(**kwargs)
 
     monkeypatch.setattr(admission, "_compiled_plan_provider", compile_again)
@@ -1565,7 +1568,8 @@ def test_submission_recompiles_through_the_owner_and_releases_failed_attempts(
             submit()
         except Exception:  # noqa: BLE001 - bounded effects, not error taxonomy
             ended = True
-        assert ended and len(calls) == 3
+        assert ended
+        assert len(calls) == 3
         with sessions() as session:
             assert session.scalar(select(RecipeInstallation)) is None
             assert session.scalar(select(ResourceReservation)) is None

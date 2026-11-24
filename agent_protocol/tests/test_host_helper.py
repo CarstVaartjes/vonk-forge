@@ -2,15 +2,29 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol.contracts import canonical_message
+
+from vonk_agent_protocol.document_limits import (
+    HOST_RUNTIME_REQUEST_ENVELOPE_BYTES,
+    MAX_ARGV_BYTES,
+    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
+    MAX_HELPER_FRAME_BYTES,
+    MAX_HOST_RUNTIME_ARGUMENT_BYTES,
+    MAX_HOST_RUNTIME_REQUEST_BYTES,
+)
 from vonk_agent_protocol.host_helper import (
     ExecuteContainerRuntimeRequestOperation,
     HostRuntimeRequest,
 )
-from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
+from vonk_agent_protocol.recipe_operations import (
+    RecipeReconciliationIdentity,
+    RecipeStartPayload,
+    RecipeStopPayload,
+)
+from vonk_agent_protocol.wire_model import canonical_message
 
 
 def start_plan(*, large_environment: bool = False) -> RecipeStartPayload:
@@ -67,14 +81,6 @@ def test_runtime_request_arguments_are_bounded_by_bytes_not_a_count() -> None:
     and the item pattern refused the empty element the plan's opaque-argv
     contract permits.
     """
-    from vonk_agent_protocol.contracts import MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES
-    from vonk_agent_protocol.host_helper import (
-        HOST_RUNTIME_REQUEST_ENVELOPE_BYTES,
-        MAX_ARGV_BYTES,
-        MAX_HELPER_FRAME_BYTES,
-        MAX_HOST_RUNTIME_ARGUMENT_BYTES,
-        MAX_HOST_RUNTIME_REQUEST_BYTES,
-    )
 
     assert MAX_HOST_RUNTIME_REQUEST_BYTES == (
         MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES + MAX_HELPER_FRAME_BYTES
@@ -135,7 +141,7 @@ RUN_INSPECT_VECTORS = json.loads(
 @pytest.mark.parametrize(
     "vector", RUN_INSPECT_VECTORS["valid"], ids=lambda vector: vector["name"]
 )
-def test_every_run_inspect_target_is_one_typed_variant(vector: dict) -> None:
+def test_every_run_inspect_target_is_one_typed_variant(vector: dict[str, Any]) -> None:
     """The Rust reader consumes these same vectors byte for byte."""
     request = HostRuntimeRequest.model_validate(vector["request"])
     assert canonical_message(request) == canonical_message(vector["request"])
@@ -149,7 +155,7 @@ def test_every_run_inspect_target_is_one_typed_variant(vector: dict) -> None:
 @pytest.mark.parametrize(
     "vector", RUN_INSPECT_VECTORS["invalid"], ids=lambda vector: vector["name"]
 )
-def test_every_refused_run_inspect_shape_is_refused(vector: dict) -> None:
+def test_every_refused_run_inspect_shape_is_refused(vector: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
         HostRuntimeRequest.model_validate(vector["request"])
 
@@ -284,7 +290,7 @@ def test_runtime_authority_grant_binds_plan_generation_and_both_run_ids(
     "model", [HostRuntimeRequest, ExecuteContainerRuntimeRequestOperation]
 )
 def test_runtime_cleanup_identity_is_required_only_for_cleanup(model) -> None:
-    document = {
+    document: dict[str, Any] = {
         "action": "installation-cleanup",
         "fence": "40000000-0000-4000-8000-000000000004",
     }
@@ -317,7 +323,6 @@ def test_runtime_cleanup_identity_is_required_only_for_cleanup(model) -> None:
 def test_runtime_reconciliation_identity_is_bound_to_cleanup_request_and_grant() -> (
     None
 ):
-    from vonk_agent_protocol.host_helper import RecipeReconciliationIdentity
 
     identity = {
         "installation_id": "70000000-0000-4000-8000-000000000007",

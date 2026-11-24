@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections import namedtuple
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import NamedTuple
 from uuid import uuid4
 
 import pytest
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.model_cache.persistence import _store_operation_payload
@@ -20,7 +21,12 @@ from vonk_control.storage_demands import NAS_MODELS, StorageDemands
 from .model_cache_support import _artifact, _download
 
 SIZE = 4096
-_Usage = namedtuple("_Usage", "total used free")
+
+
+class _Usage(NamedTuple):
+    total: int
+    used: int
+    free: int
 
 
 def _service(postgres_engine, tmp_path: Path, monkeypatch, free: list[int]):
@@ -93,7 +99,8 @@ def test_parallel_downloads_never_overcommit_the_same_free_space(
         with sessions() as session:
             for operation_id in waiting:
                 row = session.get(ModelCacheOperation, operation_id)
-                assert row is not None and row.progress_advanced_at is not None
+                assert row is not None
+                assert row.progress_advanced_at is not None
         (demand,) = demands.active()
         assert demand.scope == NAS_MODELS
         assert demand.required_free_bytes == (fitting + 1) * SIZE

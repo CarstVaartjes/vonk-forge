@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 
@@ -71,7 +71,7 @@ class StreamGovernor:
             return StreamStatus(self._limit, self._active, self._rate, self._reason)
 
     @contextmanager
-    def stream(self, should_stop: Callable[[], bool]) -> Iterator[None]:
+    def stream(self, should_stop: Callable[[], bool]) -> Generator[None]:
         """Hold one stream permit; raises InterruptedError if stopped while waiting."""
         with self._cond:
             while True:

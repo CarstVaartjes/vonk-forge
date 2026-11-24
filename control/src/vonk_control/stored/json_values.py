@@ -20,6 +20,9 @@ one authoritative Pydantic contract.  This module owns the mechanism:
 The bindings themselves live in :mod:`vonk_control.stored.columns`, which
 imports the contract modules; this module imports none of them, so a contract
 module can use :class:`ExternalPassthrough` without a cycle.
+:mod:`vonk_control.stored.rows` imports the columns and every mapped table, and
+holds the row reader and the write-guard installation, so the registry is
+complete wherever rows are read or an engine is built.
 """
 
 from __future__ import annotations
@@ -28,7 +31,7 @@ import collections.abc as cabc
 import json
 import logging
 import types
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import (
@@ -41,16 +44,21 @@ from typing import (
     cast,
     get_args,
     get_origin,
+    override,
 )
 
 from pydantic import BaseModel, JsonValue, RootModel, TypeAdapter
-from sqlalchemy import JSON
+from sqlalchemy import JSON, inspect
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.types import TypeDecorator
 
-from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..strict_json import read_stored_document, stored_document_detail
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
+)
+from vonk_control.strict_json import read_stored_document, stored_document_detail
 
 _LOG = logging.getLogger(__name__)
 
@@ -161,7 +169,7 @@ def bind(
     if isinstance(contract, Mapping):
         if discriminator is None:
             raise ValueError(f"{key} binds one contract per kind and names no kind")
-        contracts = {kind: item for kind, item in contract.items()}
+        contracts = dict(contract.items())
     else:
         contracts = {None: contract}
     binding = JsonColumn(
@@ -176,16 +184,8 @@ def bind(
     return binding
 
 
-def bindings() -> Mapping[str, JsonColumn]:
-    """Every bound column, keyed ``table.column``."""
-
-    from . import columns as stored_columns  # noqa: F401  (binds on import)
-
-    return dict(_REGISTRY)
-
-
 def binding_for(table: str, column: str) -> JsonColumn:
-    found = bindings().get(f"{table}.{column}")
+    found = _REGISTRY.get(f"{table}.{column}")
     if found is None:
         raise KeyError(f"{table}.{column} has no contract binding")
     return found
@@ -207,6 +207,7 @@ class ContractJSON[T](TypeDecorator[T | Residue]):
         self.table = table
         self.column = column
 
+    @override
     def process_bind_param(self, value: object, dialect: Dialect) -> object:
         binding = binding_for(self.table, self.column)
         outcome = _check(binding, value, None)
@@ -222,6 +223,7 @@ class ContractJSON[T](TypeDecorator[T | Residue]):
             )
         return dump_column(binding, value)
 
+    @override
     def process_result_value(self, value: object, dialect: Dialect) -> T | Residue:
         return cast(
             T | Residue, read_column(binding_for(self.table, self.column), value)
@@ -237,9 +239,11 @@ def json_columns(base: type[DeclarativeBase]) -> list[tuple[str, str]]:
 
     found: list[tuple[str, str]] = []
     for table in base.metadata.sorted_tables:
-        for column in table.columns:
-            if _is_json_type(column.type):
-                found.append((table.name, column.name))
+        found.extend(
+            (table.name, column.name)
+            for column in table.columns
+            if _is_json_type(column.type)
+        )
     return sorted(found)
 
 
@@ -317,36 +321,6 @@ def read_column(
     )
 
 
-def read_row_column(row: object, column: str) -> Any | Residue | None:
-    """:func:`read_column` for ``row.column``, with the row's own kind and id."""
-
-    from ..models.catalog import CatalogDocumentRevision
-
-    if isinstance(row, CatalogDocumentRevision) and column == "document":
-        from ..catalog.revision_contract import cached_catalog_document
-
-        try:
-            return cached_catalog_document(
-                row.kind,
-                row.content_digest,
-                getattr(row, column),
-            )
-        except (TypeError, ValueError) as error:
-            return retire_as_unknown(
-                "catalog_document_revisions.document",
-                _row_subject(row),
-                BookkeepingReason.PERSISTED_STATE_DAMAGED,
-                stored_document_detail(error) or type(error).__name__,
-            )
-    binding = binding_for(_row_table(row), column)
-    return read_column(
-        binding,
-        getattr(row, column),
-        kind=_discriminator(row, binding),
-        subject=_row_subject(row),
-    )
-
-
 def dump_column(binding: JsonColumn, value: object, *, kind: str | None = None) -> Any:
     """The JSON document to store for ``value``: contract-checked, then dumped.
 
@@ -377,46 +351,16 @@ def dump_column(binding: JsonColumn, value: object, *, kind: str | None = None) 
 
 
 _GUARD_MODE: Literal["warn", "strict"] = "warn"
-_GUARD_INSTALLED = False
 _REPORTED: set[tuple[str, str]] = set()
 
 
-def install_write_guard(*, strict: bool | None = None) -> None:
-    """Check every ORM write of a JSON column against its contract.
-
-    The Controller runs ``strict=False``: a document its contract refuses is
-    reported once per column and shape and stored unchanged, because
-    bookkeeping never blocks work (the reader returns a typed unknown for it).
-    The test suite runs ``strict=True``, so a producer that writes a shape no
-    contract describes fails where it writes. Without ``strict`` the mode is
-    left as it is: every engine installs the guard, and a later engine must
-    not relax a mode chosen once for the process.
-    """
-
-    global _GUARD_INSTALLED
-    from sqlalchemy import event
-
-    from .. import (
-        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
-    )
-    from ..model_primitives import Base
-
-    if strict is not None:
-        set_write_guard_mode(strict=strict)
-    if _GUARD_INSTALLED:
-        return
-    _GUARD_INSTALLED = True
-    event.listen(Base, "before_insert", _guard_row, propagate=True)
-    event.listen(Base, "before_update", _guard_row, propagate=True)
-
-
 def set_write_guard_mode(*, strict: bool) -> None:
-    global _GUARD_MODE
+    global _GUARD_MODE  # noqa: PLW0603 -- module state that tests reset by name
     _GUARD_MODE = "strict" if strict else "warn"
 
 
 @contextmanager
-def write_guard_mode(*, strict: bool) -> Iterator[None]:
+def write_guard_mode(*, strict: bool) -> Generator[None]:
     """Run a block under one guard mode (a test that writes damaged rows on purpose)."""
 
     previous = _GUARD_MODE
@@ -433,13 +377,12 @@ def _guard_row(_mapper: Any, _connection: Any, row: object) -> None:
 
 def validate_row_write(row: object) -> None:
     """Apply the canonical write contract to ORM and insert/replay producers."""
-    from sqlalchemy import inspect
 
     state = inspect(row)
     assert state is not None
     mapper = state.mapper
     table = mapper.local_table.name
-    registry = bindings()
+    registry = dict(_REGISTRY)
     for column in mapper.columns:
         if not _is_json_type(column.type):
             continue
@@ -569,7 +512,7 @@ def _walk(tp: Any, path: str, seen: set[Any], out: list[_Violation]) -> None:
         out.append((path, f"bare {tp.__name__}"))
         return
     if isinstance(tp, TypeAdapter):
-        _walk(tp._type, path, seen, out)  # type: ignore[attr-defined]
+        _walk(tp._type, path, seen, out)
         return
     if isinstance(tp, type) and issubclass(tp, BaseModel):
         if tp.__module__.split(".")[0] == "vonk_forge_contracts":
@@ -629,14 +572,11 @@ __all__ = [
     "JsonColumn",
     "bind",
     "binding_for",
-    "bindings",
     "column_violations",
     "contract_models",
     "dump_column",
-    "install_write_guard",
     "json_columns",
     "read_column",
-    "read_row_column",
     "set_write_guard_mode",
     "untyped_leaves",
     "validate_row_write",

@@ -61,14 +61,10 @@ def scan_source(
         types: set[str] = set()
         for binding in ast.walk(scope):
             value: ast.AST | None = None
-            if (
-                isinstance(binding, ast.arg)
-                and binding.arg == target.id
-                or (
-                    isinstance(binding, ast.AnnAssign)
-                    and isinstance(binding.target, ast.Name)
-                    and binding.target.id == target.id
-                )
+            if (isinstance(binding, ast.arg) and binding.arg == target.id) or (
+                isinstance(binding, ast.AnnAssign)
+                and isinstance(binding.target, ast.Name)
+                and binding.target.id == target.id
             ):
                 value = binding.annotation
             elif isinstance(binding, ast.Assign) and any(
@@ -359,8 +355,7 @@ def scan_unwrapped_recipe_run_writes(source: str) -> list[int]:
                 and isinstance(node.ctx, ast.Store)
                 and (
                     references_run(node.value)
-                    or node.attr == "version"
-                    and "RecipeRun" in aliases.values()
+                    or (node.attr == "version" and "RecipeRun" in aliases.values())
                 )
             ) or (
                 isinstance(node, ast.Call)

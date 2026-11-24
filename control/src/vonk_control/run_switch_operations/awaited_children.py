@@ -13,10 +13,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..models.jobs import Job
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.plans import RunSwitchPlan
-from .observation_helpers import _start_child_request_key
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.observation_helpers import (
+    _start_child_request_key,
+)
 
 
 @dataclass(frozen=True, slots=True)

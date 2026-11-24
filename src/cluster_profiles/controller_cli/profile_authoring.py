@@ -8,21 +8,31 @@ import time
 from collections.abc import Callable, Mapping
 from typing import cast
 
-from ..cli_files import read_json_document, write_private_document
-from ..cli_outcome import ObservationStatus
-from ..cli_select import SelectorError
-from ..control_client.errors import ControlClientError, ControlMalformedResponse
-from ..control_client.schema import validate_control_document
-from .common import ControllerClient, _profile_number
-from .profile_options import _apply_option_choices, _configure_option_target
-from .selection import (
+from cluster_profiles.cli_files import read_json_document, write_private_document
+from cluster_profiles.cli_outcome import ObservationStatus
+from cluster_profiles.cli_select import SelectorError
+from cluster_profiles.control_client.errors import (
+    ControlClientError,
+    ControlMalformedResponse,
+)
+from cluster_profiles.control_client.schema import validate_control_document
+from cluster_profiles.controller_cli.common import (
+    ControllerClient,
+    _known_http_refusal_status,
+    _profile_number,
+)
+from cluster_profiles.controller_cli.observation import _bounded_timeout, _poll_path
+from cluster_profiles.controller_cli.profile_options import (
+    _apply_option_choices,
+    _configure_option_target,
+)
+from cluster_profiles.controller_cli.selection import (
     _read_concurrently,
     _resolve_recipe_selector,
     _resolve_spark_selectors,
     _selection_remaining,
     _skipped_read,
 )
-from .submission import _known_http_refusal_status
 
 
 def _spark_id_list(value: object) -> list[str]:
@@ -78,7 +88,6 @@ def _read_saved_definition(
     check: Callable[..., None] | None = None,
 ):
     """The saved definition view (revision and definition), readable or retried."""
-    from .observation import _poll_path
 
     def readable_definition(observed: object) -> None:
         try:
@@ -120,7 +129,6 @@ def _profile_save(
     body = validate_control_document(
         "FleetProfileInput", {**definition, "expected_revision": expected}
     )
-    from .observation import _bounded_timeout, _poll_path
 
     deadline = time.monotonic() + _bounded_timeout(args)
     try:
@@ -176,14 +184,14 @@ def _profile_authoring(
         return _profile_save(
             args, client, definition, current_revision=args.expected_revision
         )
-    from .observation import _bounded_timeout
 
     deadline = selection_deadline or (time.monotonic() + _bounded_timeout(args))
 
     def check(definition) -> None:
         if action == "configure" and args.option:
             _configure_option_target(
-                cast(list, definition["assignments"]), args.assignment
+                cast(list, definition["assignments"]),  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
+                args.assignment,
             )
 
     def read_definition():
@@ -214,7 +222,7 @@ def _profile_authoring(
             else _skipped_read
         ),
     )
-    current = cast(dict, definition_outcome.get())
+    current = cast(dict, definition_outcome.get())  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
     if args.observation.status != "complete":
         return current
     current_revision = cast(int, current["revision"])

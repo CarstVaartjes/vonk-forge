@@ -7,17 +7,35 @@ stale size lets admission and storage relief count space that is not free.
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 from pathlib import Path
 
 from sqlalchemy import create_engine, select
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.inventory import InstallationBytes
-from vonk_agent_protocol.state_machines import InstallationNodeState
-from vonk_control.installed_bytes import refresh_installed_bytes
-from vonk_control.model_primitives import Base
-from vonk_control.models.execution import InstallationNode
 
-from .test_catalog_revision_collection import NODE, Catalog
+from vonk_agent_protocol.inventory import (
+    MAX_REPORTED_INSTALLATIONS,
+    InstallationBytes,
+    InventoryRequest,
+)
+from vonk_agent_protocol.state_machines import (
+    InstallationNodeState,
+    InstallationState,
+    RunState,
+)
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.installed_bytes import refresh_installed_bytes
+from vonk_control.inventory.repository import (
+    InventoryRepository,
+    NodeInventoryReport,
+)
+from vonk_control.model_primitives import Base
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    RecipeRun,
+)
+
+from .test_catalog_revision_collection import NODE, NOW, Catalog
 
 
 def _sizes(world: Catalog) -> dict[str, int]:
@@ -74,20 +92,6 @@ def test_postgres_missing_installation_inventory_allows_reinstall_without_releas
 ):
     # Wrong implementation: successful directory listings only refresh sizes,
     # so deleted installations stay installed forever and are reused on apply.
-    from datetime import timedelta
-
-    from vonk_agent_protocol.inventory import (
-        MAX_REPORTED_INSTALLATIONS,
-        InventoryRequest,
-    )
-    from vonk_agent_protocol.state_machines import InstallationState, RunState
-    from vonk_control.inventory.repository import (
-        InventoryRepository,
-        NodeInventoryReport,
-    )
-    from vonk_control.models.execution import RecipeInstallation, RecipeRun
-
-    from .test_catalog_revision_collection import NOW
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)
@@ -143,12 +147,16 @@ def test_postgres_missing_installation_inventory_allows_reinstall_without_releas
         )
         installation = session.get(RecipeInstallation, missing)
         run = session.get(RecipeRun, run_id)
-        assert rank is not None and installation is not None and run is not None
-        assert rank.state == InstallationNodeState.PLANNED and rank.installed_bytes == 0
+        assert rank is not None
+        assert installation is not None
+        assert run is not None
+        assert rank.state == InstallationNodeState.PLANNED
+        assert rank.installed_bytes == 0
         assert installation.state == InstallationState.PARTIAL
         assert run.state == RunState.RUNNING
         kept_row = session.get(RecipeInstallation, kept)
-        assert kept_row is not None and kept_row.state == InstallationState.INSTALLED
+        assert kept_row is not None
+        assert kept_row.state == InstallationState.INSTALLED
     # An out-of-order listing cannot reverse the reconciled absence.
     record(NOW + timedelta(seconds=61.5), [kept, missing])
     assert _sizes(world) == {missing: 0, kept: 1}

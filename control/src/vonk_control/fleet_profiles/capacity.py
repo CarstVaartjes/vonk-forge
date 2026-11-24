@@ -20,43 +20,50 @@ from uuid import UUID, uuid5
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
+
 from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.inventory import MemoryPool
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import DesiredAssignmentState, ReservationState
-
-from ..content_identity import same_image
-from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
-from ..fleet_profile_contract.assessment import FleetProfileResourceRequirement
-from ..fleet_profile_contract.definitions import FleetProfileAssignment
-from ..fleet_profile_contract.effects import FleetProfileEffects
-from ..fleet_profile_contract.review import FleetProfilePreview
-from ..fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
-from ..jobs import states as job_states
-from ..models.cache import RecipeBuild
-from ..models.execution import RecipeRun, ResourceReservation
-from ..models.fleet import AgentNode, FleetProfileApplication
-from ..models.jobs import Job
-from ..owner_liveness import OwnerKind
-from ..preparation_contract import RuntimeImageIdentity
-from ..resource_planning.memory_kinds import memory_reservation_kind
-from ..run_switch_contract.evidence import StopImpact
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.plans import RunSwitchPlan
-from . import states as fleet_profile_states
-from .capacity_repair import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.content_identity import same_image
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
+from vonk_control.fleet_profile_contract.assessment import (
+    FleetProfileResourceRequirement,
+)
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profile_contract.effects import FleetProfileEffects
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.fleet_profiles.assignment_assessment import _assignment_state
+from vonk_control.fleet_profiles.capacity_repair import (
     capacity_document as _capacity_document,
 )
-from .capacity_repair import (
-    memory_claim as _memory_claim,
-)
-from .capacity_repair import (
+from vonk_control.fleet_profiles.capacity_repair import memory_claim as _memory_claim
+from vonk_control.fleet_profiles.capacity_repair import (
     memory_claim_id as _memory_claim_id,
 )
-from .port_promises import clear_port_promises
+from vonk_control.fleet_profiles.contracts import FleetProfileConflict
+from vonk_control.fleet_profiles.persistence import _intended_profile
+from vonk_control.fleet_profiles.port_promises import clear_port_promises
+from vonk_control.fleet_profiles.switch_children import _assignment_intent
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import RecipeRun, ResourceReservation
+from vonk_control.models.fleet import AgentNode, FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.owner_liveness import OwnerKind
+from vonk_control.preparation_contract import RuntimeImageIdentity
+from vonk_control.resource_planning.memory_kinds import memory_reservation_kind
+from vonk_control.run_switch_contract.evidence import StopImpact
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
 
 
 def reservation_visible(
@@ -672,8 +679,6 @@ def sibling_profile_runs(
     A plan that cannot be read is a wait, never an empty set: an empty set would
     plan to stop the siblings.
     """
-    from .run_switch_adapter import RunSwitchFleetProfileAdapter
-    from .service import FleetProfileService
 
     application = session.get(FleetProfileApplication, application_id)
     if application is None:
@@ -698,7 +703,7 @@ def sibling_profile_runs(
         (
             assignment
             for assignment in review.resolved_assignments
-            if RunSwitchFleetProfileAdapter._assignment_intent(assignment)[1] == alias
+            if _assignment_intent(assignment)[1] == alias
             and sorted(node.node_id for node in assignment.nodes) == placement
         ),
         None,
@@ -707,7 +712,7 @@ def sibling_profile_runs(
         review.resolved_assignments,
         own,
         lambda assignment: (
-            FleetProfileService._assignment_state(
+            _assignment_state(
                 session, assignment, expected_image=images.get(assignment.id)
             ).run
         ),
@@ -739,17 +744,6 @@ def profile_replaced_runs(session: Session, application_id: str) -> frozenset[st
         if effect.action == ProfileChildPhase.STOP.value
         and effect.profile_stop_scope is None
     )
-
-
-def serving_run(runs: Sequence[RecipeRun], installation_id: str) -> RecipeRun | None:
-    """The run serving this assignment: the run of its installation.
-
-    The one predicate for "this assignment's workload already runs". The planner,
-    the endpoint projection and the plan's keep decision all read it. The route
-    name is not part of it: a run of the same installation under another name
-    is kept, and the profile admission renames it to the assignment's name.
-    """
-    return next((run for run in runs if run.installation_id == installation_id), None)
 
 
 def sibling_runs(
@@ -897,12 +891,6 @@ def accepted_profile_runtime_image(
     Missing managed bytes may require repair; they never erase the accepted
     image identity or authorize replacement with a different build result.
     """
-    # Keep intent/reference validation with its existing owner. Import at the
-    # call boundary because profile orchestration also consumes capacity helpers.
-    from ..lifecycle.evidence import Residue
-    from .contracts import FleetProfileConflict
-    from .service import FleetProfileService
-
     application = session.get(FleetProfileApplication, application_id)
     if application is None:
         raise UnknownOutcomeError(
@@ -922,7 +910,7 @@ def accepted_profile_runtime_image(
         workload_intent_ordinal=progress.workload_intent_ordinal,
     )
     try:
-        intended = FleetProfileService._intended_profile(application, session=session)
+        intended = _intended_profile(application, session=session)
     except FleetProfileConflict as error:
         raise UnknownOutcomeError(
             str(error), reason=WaitReason.SCOPE_CHANGED

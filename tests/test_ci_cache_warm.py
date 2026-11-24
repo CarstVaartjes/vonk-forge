@@ -9,6 +9,7 @@ drifts from the job it warms would save entries nothing restores.
 """
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -20,11 +21,11 @@ RUST_CACHE = "Swatinem/rust-cache@"
 ENV_PREFIXES = ("CARGO", "CC", "CFLAGS", "CXX", "CMAKE", "RUST")
 
 
-def _steps(job: dict, prefix: str) -> list[dict]:
+def _steps(job: dict[str, Any], prefix: str) -> list[dict[str, Any]]:
     return [s for s in job["steps"] if s.get("uses", "").startswith(prefix)]
 
 
-def _toolchain_runs(job: dict) -> set[str]:
+def _toolchain_runs(job: dict[str, Any]) -> set[str]:
     return {
         s["run"].strip()
         for s in job["steps"]
@@ -32,7 +33,7 @@ def _toolchain_runs(job: dict) -> set[str]:
     }
 
 
-def _cache_env(workflow: dict, job: dict) -> dict:
+def _cache_env(workflow: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]:
     """Workflow env merged with job env, limited to what rust-cache hashes."""
     merged = {**workflow.get("env", {}), **job.get("env", {})}
     return {k: str(v) for k, v in merged.items() if k.startswith(ENV_PREFIXES)}

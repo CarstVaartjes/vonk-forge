@@ -11,6 +11,7 @@ from typing import cast as _typing_cast
 from pydantic import ValidationError
 from sqlalchemy import or_, select, true
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileProjectionKind,
@@ -18,46 +19,48 @@ from vonk_agent_protocol.agent_words import (
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
-
-from ..evidence_repeats import load_subject, note_repeat
-from ..fleet_profile_contract.applications import (
+from vonk_control.evidence_repeats import load_subject, note_repeat
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileChildOperation,
 )
-from ..fleet_profile_contract.assessment import FleetProfilePlanStep
-from ..fleet_profile_contract.vocabulary import FleetProfileOperationState
-from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..lifecycle.fleet_profile import FleetProfileAdapter
-from ..models.fleet import AgentNode, FleetProfileApplication, FleetProfileSelection
-from ..operations.blockers import OperationBlocker, make_blocker
-from ..persisted_waits import wait_due
-from . import states as fleet_profile_states
-from .assessment_support import (
-    _progress_with_blockers,
+from vonk_control.fleet_profile_contract.assessment import FleetProfilePlanStep
+from vonk_control.fleet_profile_contract.vocabulary import FleetProfileOperationState
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.fleet_profiles.assessment_support import _progress_with_blockers
+from vonk_control.fleet_profiles.continuing_effects import (
+    _application_is_current_selection,
+    _superseding_intent,
 )
-from .contracts import (
-    FleetProfileConflict,
-)
-from .dependencies import (
+from vonk_control.fleet_profiles.contracts import FleetProfileConflict
+from vonk_control.fleet_profiles.dependencies import (
     _LOGGER,
     _MAX_PARKED_APPLICATION_OBSERVATIONS,
     _OPERATION_STATE_ADAPTER,
     ENDING_BLOCKER_CODES,
     PROFILE_REPEATED_FAILURE_CODE,
 )
-from .error_summary import _normalized_failure_text
-from .persistence import (
-    _persisted_profile_plan,
+from vonk_control.fleet_profiles.error_summary import _normalized_failure_text
+from vonk_control.fleet_profiles.persistence import (
     _persisted_profile_progress,
     _unreadable_revisions,
 )
-from .projection_support import (
-    _aware,
+from vonk_control.fleet_profiles.projection_support import _aware
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
 )
+from vonk_control.lifecycle.fleet_profile import FleetProfileAdapter
+from vonk_control.models.fleet import AgentNode, FleetProfileApplication
+from vonk_control.operations.blockers import OperationBlocker, make_blocker
+from vonk_control.persisted_waits import wait_due
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 class FleetProfileService:
@@ -100,7 +103,7 @@ class FleetProfileService:
         if _unreadable_revisions(session, progress.intended_profile.assignments):
             # A replay can never plan it again; the selected, current load waits
             # for the selected profile to follow the newest readable revision.
-            if self._application_is_current_selection(
+            if _application_is_current_selection(
                 session, row, progress
             ) and self._current_intent(session, row):
                 return None
@@ -239,7 +242,7 @@ class FleetProfileService:
         failed (the failure hook records the typed reason)."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
-        if self._superseding_intent(session, row, progress):
+        if _superseding_intent(session, row, progress):
             self._lifecycle.supersede(
                 row,
                 row.status_reason or SupersedeCode.SUPERSEDED_BY_INTENT,
@@ -360,47 +363,6 @@ class FleetProfileService:
             self._settle_retry_candidates(ended, now)
         return None
 
-    @staticmethod
-    def _superseding_intent(
-        session: Session,
-        row: FleetProfileApplication,
-        progress: FleetProfileApplicationProgress,
-    ) -> bool:
-        """Fence unissued profile effects after a newer authorized intent."""
-        from .service import FleetProfileService
-
-        intended = progress.intended_profile
-        if intended is None:
-            return False
-        selection = session.get(FleetProfileSelection, 1)
-        if (
-            row.selection_generation is not None
-            and selection is not None
-            and selection.generation > row.selection_generation
-            and not FleetProfileService._application_is_current_selection(
-                session, row, progress
-            )
-        ):
-            return True
-        plan = _persisted_profile_plan(row)
-        if isinstance(plan, Residue):
-            return False
-        adopted_scope = FleetProfileService._adopted_application_scope(session, row)
-        scope = (
-            set(adopted_scope)
-            if adopted_scope is not None
-            else {node_id for step in plan.steps for node_id in step.node_ids}
-        )
-        if not scope:
-            return False
-        ordinal = progress.workload_intent_ordinal
-        if ordinal is None:
-            return False
-        nodes = list(
-            session.scalars(select(AgentNode).where(AgentNode.node_id.in_(scope)))
-        )
-        return any(node.workload_intent_ordinal > ordinal for node in nodes)
-
     def _start_step(
         self,
         application_id: str,
@@ -450,7 +412,7 @@ class FleetProfileService:
             )
             if isinstance(child, Residue):
                 return child
-            if not isinstance(child, FleetProfileChildOperation):
+            if not isinstance(child, FleetProfileChildOperation):  # pyright: ignore[reportUnnecessaryIsInstance]  # an unexpected value is treated as unknown, not trusted
                 return retire_as_unknown(
                     ProfileProjectionKind.STEP.value,
                     application_id,

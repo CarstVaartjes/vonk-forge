@@ -8,11 +8,11 @@ re-submits whatever it stored on every edit.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 from typing import cast
 
 import pytest
-from vonk_control.fleet_profiles.projection_support import _effective_option_choices
 from vonk_forge_contracts import RecipeDefinition
 
 from cluster_profiles.control_client.errors import ControlClientError
@@ -21,6 +21,7 @@ from cluster_profiles.controller_cli.profile_authoring import _profile_save
 from cluster_profiles.generated_control.models.fleet_profile_input import (
     FleetProfileInput,
 )
+from vonk_control.fleet_profiles.projection_support import _effective_option_choices
 
 from .recipe_library_source import recipe_library_root
 
@@ -45,7 +46,7 @@ def test_every_library_recipe_replaces_stale_choices_with_its_defaults() -> None
         assert notes == []
         assert set(defaults) == set(declared)
 
-        stale = {name: "value-the-recipe-never-offered" for name in declared}
+        stale = dict.fromkeys(declared, "value-the-recipe-never-offered")
         stale["option-the-recipe-never-declared"] = "x"
         effective, notes = _effective_option_choices(recipe, stale)
 
@@ -106,12 +107,10 @@ def test_the_reviewed_service_alias_is_refused_naming_its_field(slug: str) -> No
     definition = {
         key: value for key, value in document.items() if key != "expected_revision"
     }
-    try:
+    with contextlib.suppress(ControlClientError):
         _profile_save(
             args, cast(ControllerClient, owner), definition, current_revision=3
         )
-    except ControlClientError:
-        pass
     assert owner.calls == []
     definition["assignments"][0]["assignment_name"] = alias.lower().replace(".", "-")
     accepted = _profile_save(

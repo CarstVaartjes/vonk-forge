@@ -18,15 +18,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.host_helper import ContainerRuntimeAction
 from vonk_agent_protocol.lifecycle_vocabulary import WaitOwnerKind
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
-
-from .lifecycle.agent_operation import OWNER_KIND as ARTIFACT_JOB_OWNER
-from .models.jobs import Job
-from .owner_liveness import OwnerKind
+from vonk_control.lifecycle.agent_operation import OWNER_KIND as ARTIFACT_JOB_OWNER
+from vonk_control.models.jobs import Job
+from vonk_control.owner_liveness import OwnerKind
 
 #: Agent orders that remove their owner's own effect. A newer workload intent
 #: on their Sparks never supersedes, cancels or ends one, and no deadline does:

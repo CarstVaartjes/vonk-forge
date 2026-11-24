@@ -12,11 +12,11 @@ import threading
 from collections.abc import Callable
 from datetime import datetime, timedelta
 
-from ..inventory.items import runtime_value
-from ..models.fleet import AgentNode
-from .contract import AgentUpgradePackage
-from .eligibility import EligibilityMixin
-from .errors import AgentUpgradeConflict
+from vonk_control.agent_upgrades.contract import AgentUpgradePackage
+from vonk_control.agent_upgrades.eligibility import EligibilityMixin
+from vonk_control.agent_upgrades.errors import AgentUpgradeConflict
+from vonk_control.inventory.items import runtime_value
+from vonk_control.models.fleet import AgentNode
 
 REFRESH_AFTER = timedelta(seconds=60)
 

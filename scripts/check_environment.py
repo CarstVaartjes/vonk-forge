@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import hashlib
 import os
@@ -24,10 +25,8 @@ def run_preparation(command: list[str], root: Path, deadline: float) -> None:
             status = process.wait(timeout=remaining)
         except BaseException:
             # Stop descendants too; an orphaned installer must not race a new check.
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
             process.wait(timeout=30)
             raise
     if status:
@@ -53,12 +52,12 @@ def prepare(
             try:
                 fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
-            except BlockingIOError:
+            except BlockingIOError as error:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError(
                         f"Timed out waiting for {label} preparation lock"
-                    )
+                    ) from error
                 time.sleep(min(0.1, remaining))
         if ready():
             return
@@ -164,7 +163,7 @@ def ensure_catalog(root: Path, library: Path) -> None:
         root,
         library / ".state/check-catalog.lock",
         "recipe catalog",
-        lambda: (library / "catalog-index.json").is_file(),
+        (library / "catalog-index.json").is_file,
         [[str(root / "scripts/build-recipe-library"), str(library)]],
     )
 
@@ -222,7 +221,7 @@ def _reexec_in(environment: Path) -> None:
         # Like ``uv run``: the environment's console scripts (code generators)
         # resolve before any system copy.
         binaries = str(environment / "bin")
-        os.execve(
+        os.execve(  # noqa: S606 -- the exec or pty spawn is intended
             str(environment / "bin/python"),
             [
                 str(environment / "bin/python"),

@@ -9,42 +9,42 @@ from typing import (
 from typing import cast as typing_cast
 
 from sqlalchemy import select
+
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.admission import UninstallPlanCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.reason_codes.vocabulary import run_switch_code
-
-from ..categorized_errors import (
-    MissingRecord,
-)
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import RecipeInstallation, RecipeRun
-from ..models.mapping import ClusterMapping, ClusterMappingNode
-from ..recipe_operations.errors import RecipeOperationConflict
-from ..run_switch_contract.evidence import RunSwitchReason
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.requests import (
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation, RecipeRun
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.recipe_operations.errors import RecipeOperationConflict
+from vonk_control.run_switch_contract.evidence import RunSwitchReason
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.requests import (
     InvocationMetadata,
     RunSwitchCleanupPreviewRequest,
     RunSwitchReconciliationAuthority,
     SparkGroup,
     SparkGroupNode,
 )
-from ..strict_json import read_stored_model
-from .constants import _active_recipe_revision
-from .planning_helpers import PlanInventory, _as_reason, _now
+from vonk_control.run_switch_operations.constants import _active_recipe_revision
+from vonk_control.run_switch_operations.planning_helpers import (
+    PlanInventory,
+    _as_reason,
+    _now,
+)
+from vonk_control.strict_json import read_stored_model
 
 if TYPE_CHECKING:
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 class CleanupPlanningMixin:
     def _preview_cleanup_once(
         self,
         request: RunSwitchCleanupPreviewRequest | str,
-        *,
-        actor: str,
     ) -> RunSwitchPlan:
         """Plan one scoped removal without consulting launch readiness.
 
@@ -297,16 +297,16 @@ class CleanupPlanningMixin:
                     # a removal or an abandonment; the phase executor reads the
                     # same disposition rather than re-deriving it.
                     cleanup_disposition = assessment.disposition
-                    for warning in assessment.warnings:
-                        warnings.append(
-                            _as_reason(
-                                run_switch_code(warning.code),
-                                warning.detail,
-                                scope="operation",
-                                node_ids=node_ids,
-                                severity="warning",
-                            )
+                    warnings.extend(
+                        _as_reason(
+                            run_switch_code(warning.code),
+                            warning.detail,
+                            scope="operation",
+                            node_ids=node_ids,
+                            severity="warning",
                         )
+                        for warning in assessment.warnings
+                    )
             phases = service._phases(
                 action="cleanup",
                 group=group,

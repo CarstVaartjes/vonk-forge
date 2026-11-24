@@ -8,8 +8,10 @@ from dataclasses import dataclass
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.outcome import InvalidRequestError
 from vonk_agent_protocol.reason_codes.fleet import TopologyCode
-
-from .recipe_operations.runtime_specs import RecipeRuntimeSpecError, recipe_topology
+from vonk_control.recipe_operations.runtime_specs import (
+    RecipeRuntimeSpecError,
+    recipe_topology,
+)
 
 
 class TopologyError(InvalidRequestError, ValueError):

@@ -7,22 +7,23 @@ from collections.abc import Callable
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS, InventoryRepository
-from ..models.cache import RecipeBuild
-from ..source_bundles import SourceBundleStoreProtocol
-from ..storage_demands import StorageDemands
-from .common import (
+from vonk_control.inventory.repository import (
+    INVENTORY_MAX_AGE_SECONDS,
+    InventoryRepository,
+)
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.recipe_builds.common import (
     SourceBundleRederiver,
     _valid_succeeded_receipt,
     rederive_source_bundle_from_closure,
 )
-from .persistence import (
+from vonk_control.recipe_builds.persistence import (
     _reserve_in_session,
     persist_plan_in_session,
     record_success,
     reserve_in_session,
 )
-from .planning import (
+from vonk_control.recipe_builds.planning import (
     _admit_spark_build,
     _prepare_plan_once,
     _usable_prebuilt,
@@ -30,8 +31,8 @@ from .planning import (
     prepare_plan,
     reusable_build_id,
 )
-from .receipts import PreparedBuildLookup
-from .source import (
+from vonk_control.recipe_builds.receipts import PreparedBuildLookup
+from vonk_control.recipe_builds.source import (
     _check_source_once,
     _heal_source_bundle,
     _resolve_once,
@@ -40,6 +41,8 @@ from .source import (
     reconcile_source_bundles,
     resolve,
 )
+from vonk_control.source_bundles import SourceBundleStoreProtocol
+from vonk_control.storage_demands import StorageDemands
 
 
 class RecipeBuildService:
@@ -92,7 +95,7 @@ class RecipeBuildService:
     resolve = resolve
     _resolve_once = _resolve_once
     _admit_spark_build = _admit_spark_build
-    _usable_prebuilt = _usable_prebuilt
+    _usable_prebuilt = staticmethod(_usable_prebuilt)
     prepare_plan = prepare_plan
     _prepare_plan_once = _prepare_plan_once
     plan = plan

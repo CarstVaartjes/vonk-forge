@@ -214,7 +214,7 @@ def test_real_suite_runner_applies_reviewed_selection(
     if suite == "guards":
         assert arguments[-len(GUARDS) :] == list(GUARDS)
     else:
-        assert "tests" == arguments[-1]
+        assert arguments[-1] == "tests"
         assert all(
             f"{'--deselect' if '::' in guard else '--ignore'}={guard}" in arguments
             for guard in GUARDS

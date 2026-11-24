@@ -4,14 +4,15 @@ import json
 from pathlib import Path
 
 import pytest
+
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.display_memory import (
     DisplayMemoryObservation,
     DisplayMemorySignal,
 )
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_projection.display_memory import display_memory_advice
 
 VECTORS = (
@@ -35,7 +36,7 @@ def test_agent_vectors_roundtrip_and_unknown_never_claims_two_gb():
 
 
 @pytest.mark.parametrize(
-    "firmware,update",
+    ("firmware", "update"),
     [(0x02009B0B, True), (0x02009E0F, False), (0x02009E10, False), (None, False)],
 )
 def test_firmware_changes_only_the_advice_not_admission(firmware, update):

@@ -8,6 +8,7 @@ from typing import cast as _typing_cast
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -19,29 +20,38 @@ from vonk_agent_protocol.state_machines import (
     RouteState,
     RunState,
 )
-
-from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract.endpoints import (
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.fleet_profile_contract.endpoints import (
     FleetProfileEndpointAssignmentIntent,
     FleetProfileEndpointIntent,
     FleetProfileEndpointProjectionIssue,
 )
-from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..models.fleet import FleetProfile, FleetProfileApplication, FleetProfileSelection
-from ..recipe_operations.rank_authority import _run_is_one_shot
-from ..run_route_name import carries_alias
-from ..strict_json import stored_document_detail
-from .contracts import (
-    FleetProfileConflict,
-)
-from .persistence import (
+from vonk_control.fleet_profiles.assignment_assessment import _assignment_state
+from vonk_control.fleet_profiles.contracts import FleetProfileConflict
+from vonk_control.fleet_profiles.persistence import (
+    _intended_profile,
     _persisted_profile_progress,
     _residue_detail,
 )
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
+)
+from vonk_control.models.fleet import (
+    FleetProfile,
+    FleetProfileApplication,
+    FleetProfileSelection,
+)
+from vonk_control.recipe_operations.observation_helpers import _run_is_one_shot
+from vonk_control.run_route_name import carries_alias
+from vonk_control.strict_json import stored_document_detail
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 class FleetProfileService:
@@ -119,7 +129,7 @@ class FleetProfileService:
             )
         issue_detail: str | None = None
         try:
-            intended = self._intended_profile(application, session=session)
+            intended = _intended_profile(application, session=session)
         except (FleetProfileConflict, ValidationError) as error:
             cause = error.__cause__
             issue_detail = stored_document_detail(error)
@@ -166,7 +176,7 @@ class FleetProfileService:
                 state = EndpointState.UNAVAILABLE
                 run_id = None
             else:
-                current = self._assignment_state(session, assignment)
+                current = _assignment_state(session, assignment)
                 run = current.run
                 if run is not None and _run_is_one_shot(session, run):
                     # A job member never has an endpoint: it serves by holding

@@ -25,12 +25,12 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
-from vonk_control.recipe_packages import client as recipe_packages
-from vonk_control.recipe_packages.contracts import RecipePackageError
 
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
+from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
+from vonk_control.recipe_packages import client as recipe_packages
+from vonk_control.recipe_packages.contracts import RecipePackageError
 
 Member = tuple[tarfile.TarInfo, bytes | None]
 pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)
@@ -98,9 +98,9 @@ def _rewrite_manifest(
             manifest: dict[str, Any] = json.loads(body)
             mutate(manifest)
             encoded = _canonical(manifest)
-            member = copy.deepcopy(member)
-            member.size = len(encoded)
-            result.append((member, encoded))
+            resized = copy.deepcopy(member)
+            resized.size = len(encoded)
+            result.append((resized, encoded))
         else:
             result.append((member, body))
     return result
@@ -198,7 +198,7 @@ def test_truncated_gzip_package_raises_only_the_typed_error() -> None:
 
 @pytest.mark.parametrize(
     "name",
-    (
+    [
         "../recipe.json",
         "nested/../../recipe.json",
         "/recipe.json",
@@ -206,7 +206,7 @@ def test_truncated_gzip_package_raises_only_the_typed_error() -> None:
         "recipes//recipe.json",
         "./recipe.json",
         ".",
-    ),
+    ],
 )
 def test_rejects_member_paths_that_escape_the_archive_root(
     tmp_path: Any,
@@ -227,7 +227,7 @@ def test_rejects_member_paths_that_escape_the_archive_root(
 
 @pytest.mark.parametrize(
     "member_type",
-    (tarfile.SYMTYPE, tarfile.LNKTYPE, tarfile.FIFOTYPE, tarfile.CHRTYPE),
+    [tarfile.SYMTYPE, tarfile.LNKTYPE, tarfile.FIFOTYPE, tarfile.CHRTYPE],
 )
 def test_rejects_non_regular_members(
     tmp_path: Any,

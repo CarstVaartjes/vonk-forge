@@ -13,17 +13,17 @@ from vonk_agent_protocol.outcome import (
 )
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.reason_codes.vocabulary import run_switch_code
-
-from ..categorized_faults import security_reason
-from ..failure_classification import is_definite
-from ..recipe_operations.runtime_specs import (
-    RecipeRuntimeSpecError,
+from vonk_control.categorized_faults import security_reason
+from vonk_control.failure_classification import is_definite
+from vonk_control.recipe_operations.runtime_specs import RecipeRuntimeSpecError
+from vonk_control.run_switch_operations.constants import (
+    _RUNTIME_IMAGE_IDENTITY_MISMATCH,
+    _RUNTIME_IMAGE_OWNER_CHANGED,
 )
-from ..runtime_image_preparation.contracts import (
+from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImagePreparationRefused,
     RuntimeImagePreparationUnknown,
 )
-from .constants import _RUNTIME_IMAGE_IDENTITY_MISMATCH, _RUNTIME_IMAGE_OWNER_CHANGED
 
 
 class RunSwitchOperationConflict(RuntimeError):

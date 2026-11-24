@@ -11,7 +11,8 @@ import time
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol.installer_setup import NasInstallTemplate
+
+from vonk_agent_protocol.installer_setup import NasInstallTemplate, NasSecretPrompt
 from vonk_nas_setup import publication
 from vonk_nas_setup.environment import parse_environment
 from vonk_nas_setup.filesystem import ObservationUnavailable, atomic_replace
@@ -175,14 +176,14 @@ def test_verified_snapshot_survives_failed_generation_swap(
 ) -> None:
     """Catch deleting the last verified group in a failed publication's cleanup."""
     before = publication.load_members(installed / publication.VERIFIED, template)
-    replace = publication.os.replace
+    replace = os.replace
 
     def fail_new_generation(source: Path, target: Path) -> None:
         if target == installed / publication.VERIFIED and source.name == "secrets":
             raise OSError("injected NAS rename fault")
         replace(source, target)
 
-    monkeypatch.setattr(publication.os, "replace", fail_new_generation)
+    monkeypatch.setattr(os, "replace", fail_new_generation)
     with pytest.raises(OSError, match="injected NAS rename fault"):
         publication.remember_verified(template, installed)
     assert (
@@ -223,7 +224,6 @@ def test_interrupted_older_intent_replays_before_new_template_inputs(
     installed: Path, template: NasInstallTemplate
 ) -> None:
     """Catch applying a newer kit's secret inventory to an older complete journal."""
-    from vonk_agent_protocol.installer_setup import NasSecretPrompt
 
     members = publication.load_members(installed / "secrets", template)
     environment = parse_environment(installed / ".env")
@@ -264,7 +264,6 @@ def test_large_template_lineage_permits_new_inputs(
     installed: Path, template: NasInstallTemplate
 ) -> None:
     """Catch reusing a 256KiB secret-read cap for allowed 16MiB template lineage."""
-    from vonk_agent_protocol.installer_setup import NasSecretPrompt
 
     large = template.model_copy(
         update={"docker_compose_yaml": "#" + "a" * (300 * 1024) + "\nservices: {}\n"}

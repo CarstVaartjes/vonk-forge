@@ -9,6 +9,7 @@ CI gate, and no workflow re-derives the rule from the branch name.
 """
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -51,7 +52,7 @@ def _conjuncts(condition: str) -> list[str]:
     return [*parts, text[start:].strip()]
 
 
-def _gated(jobs: dict) -> set[str]:
+def _gated(jobs: dict[str, Any]) -> set[str]:
     """Jobs that never run on a member pull request.
 
     A job is gated by a top-level `full` or push-only conjunct, by requiring a

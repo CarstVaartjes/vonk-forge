@@ -22,9 +22,9 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-from .agent_words import Disposition
-from .contracts import AgentFailureKind
-from .lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.agent_operations import AgentFailureKind
+from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 
 _FAIL = Disposition.FAIL
 _WAIT = Disposition.WAIT

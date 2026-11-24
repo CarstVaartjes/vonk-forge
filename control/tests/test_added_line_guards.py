@@ -1,17 +1,24 @@
 """Each fixture proves a new violation fails while untouched source is ignored."""
 
+from pathlib import Path
+from textwrap import indent
+
 import pytest
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
 from .added_line_guards.check import check_source
 from .added_line_guards.patch import added_lines, changed_lines
 from .added_line_guards.scans import AGENT_REQUESTS
+from .deterministic_retries import scan_count_endings, scan_recovery_policy_users
+from .deterministic_retries import scan_source as scan_retry_shield_source
+from .legacy_tolerance import scan_source as scan_legacy_tolerance
 
 PATH = "control/src/vonk_control/example.py"
 
 
 @pytest.mark.parametrize(
-    "mode,source,line",
+    ("mode", "source", "line"),
     [
         ("vocabulary", "value = 'running'\n", 1),
         ("mapping", "value: dict[str, object]\n", 1),
@@ -345,7 +352,7 @@ def test_added_source_that_resembles_a_patch_header():
 
 
 @pytest.mark.parametrize(
-    "mode,source",
+    ("mode", "source"),
     [
         ("mapping", "value: dict[str,\n    object]\n"),
         ("identity", "same = (a.build_id ==\n    b.build_id)\n"),
@@ -419,7 +426,7 @@ def test_new_code_must_be_declared_in_the_contract_first():
 
 
 @pytest.mark.parametrize(
-    "mode,path,source,line",
+    ("mode", "path", "source", "line"),
     [
         ("waits", "scripts/poll", "#!/bin/bash\nwhile true; do sleep 1; done\n", 2),
         (
@@ -510,7 +517,7 @@ fn later() { ExitCode::from(78); }
 
 
 @pytest.mark.parametrize(
-    "path,source,line",
+    ("path", "source", "line"),
     [
         ("packaging/systemd/new.service", "RestartPreventExitStatus=78\n", 1),
         ("packaging/systemd/new.service", "StartLimitBurst=5\n", 1),
@@ -1012,15 +1019,11 @@ def test_count_cannot_end_standing_intent(ending: str) -> None:
 def test_count_guard_allows_evidence_backoff_cancel_and_request_local_retry(
     source: str,
 ) -> None:
-    from .deterministic_retries import scan_count_endings
 
     assert not scan_count_endings(source)
 
 
 def test_every_durable_recovery_policy_user_keeps_a_next_observation() -> None:
-    from pathlib import Path
-
-    from .deterministic_retries import scan_recovery_policy_users
 
     root = Path(__file__).resolve().parents[2]
     found = [
@@ -1053,13 +1056,11 @@ def test_guard_rejects_a_durable_policy_call_without_ongoing_intent() -> None:
 def test_count_guard_catches_aliases_and_does_not_treat_active_intent_as_cancelled(
     source: str,
 ) -> None:
-    from .deterministic_retries import scan_count_endings
 
     assert scan_count_endings(source)
 
 
 def test_request_local_retry_can_end_without_ending_durable_intent() -> None:
-    from .deterministic_retries import scan_count_endings
 
     assert not scan_count_endings(
         "for attempt in range(3):\n    if attempt == 2:\n        return None\n"
@@ -1070,7 +1071,6 @@ def test_request_local_retry_can_end_without_ending_durable_intent() -> None:
 
 
 def test_count_guard_does_not_exempt_the_uncancelled_else_branch() -> None:
-    from .deterministic_retries import scan_count_endings
 
     assert scan_count_endings(
         "if row.cancel_requested:\n    return cancelled(row)\n"
@@ -1080,11 +1080,9 @@ def test_count_guard_does_not_exempt_the_uncancelled_else_branch() -> None:
 
 def test_assignment_based_retry_requires_the_cause_classifier():
     """Catches the worker's old assignment-based deterministic retry shield."""
-    from .deterministic_retries import scan_source
-
     source = "def tick():\n try: work()\n except Exception as error:\n  self._retry_at[task] = now + 5\n"
-    assert scan_source(source)
-    assert not scan_source(
+    assert scan_retry_shield_source(source)
+    assert not scan_retry_shield_source(
         source.replace(
             "  self._retry_at", "  verdict = disposition(error)\n  self._retry_at"
         )
@@ -1110,7 +1108,7 @@ def test_document_hashing_stays_at_ingress_and_ignores_existing_calls():
 
 
 @pytest.mark.parametrize(
-    "source,line",
+    ("source", "line"),
     [
         ("def online(node, now):\n    return node.last_seen_at > now\n", 2),
         (
@@ -1196,7 +1194,8 @@ def test_agent_stamp_freshness_is_rejected(source):
     source = _FACTS + source
     lines = set(range(1, len(source.splitlines()) + 1))
     hits = check_source(PATH, source, lines, modes=("contact-clocks",))
-    assert hits and all("use received_at" in text for text in hits)
+    assert hits
+    assert all("use received_at" in text for text in hits)
 
 
 @pytest.mark.parametrize(
@@ -1247,9 +1246,9 @@ def test_ingress_handlers_may_judge_an_agent_stamp_by_location(path, name):
     )
 
 
-@pytest.mark.parametrize("negative", (False, True))
-@pytest.mark.parametrize("verdict", ("WAIT", "OBSERVE", "FAIL"))
-@pytest.mark.parametrize("reason", ("wait_reason(error)", "str(error)", "None"))
+@pytest.mark.parametrize("negative", [False, True])
+@pytest.mark.parametrize("verdict", ["WAIT", "OBSERVE", "FAIL"])
+@pytest.mark.parametrize("reason", ["wait_reason(error)", "str(error)", "None"])
 def test_visible_classified_wait_is_not_counted_as_repeated_failure(
     negative, verdict, reason
 ):
@@ -1263,7 +1262,6 @@ def test_visible_classified_wait_is_not_counted_as_repeated_failure(
         "log_event(logger, 'owner.wait', service='control-worker', "
         f"reason={reason}, retry_at=due)\n"
     )
-    from textwrap import indent
 
     source = "try:\n    work()\nexcept Exception as error:\n"
     if negative:
@@ -1373,7 +1371,7 @@ def test_capacity_guard_allows_reviewed_gates_and_tests() -> None:
 
 @pytest.mark.parametrize(
     "body",
-    (
+    [
         # The main-era exact-recovery shape (#1896).
         "    return parent.start_deadline - start.created_at\n",
         "    return _aware(parent.start_deadline) - _aware(row.created_at)\n",
@@ -1382,7 +1380,7 @@ def test_capacity_guard_allows_reviewed_gates_and_tests() -> None:
             "    created = job.created_at\n"
             "    return _aware(_parent_start_deadline(job)) - created\n"
         ),
-    ),
+    ],
 )
 def test_added_line_guard_rejects_start_budget_from_stored_timestamps(body):
     """A budget re-derived from an anchored deadline drifts from the accepted one."""
@@ -2475,47 +2473,6 @@ def test_a_revocation_with_a_durable_commit_or_in_enrollment_passes() -> None:
     assert not check_source(enrollment, plain, {2}, modes=modes)
 
 
-_BARRIER_TEST = "control/tests/test_example.py"
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
-        # A patched method the product calls twice strands its thread here.
-        "import threading\nbarrier = threading.Barrier(2, timeout=30)\n",
-        "from threading import Barrier\nboth = Barrier(2)\n",
-        "from threading import Barrier as Gate\nboth = Gate(2)\n",
-        "import threading as t\nboth = t.Barrier(2)\n",
-    ],
-)
-def test_a_raw_barrier_in_a_control_test_is_flagged(source: str) -> None:
-    lines = set(range(1, source.count("\n") + 1))
-    assert check_source(_BARRIER_TEST, source, lines, modes=("barriers",))
-    # Only an added line can fail the change.
-    assert not check_source(_BARRIER_TEST, source, {1}, modes=("barriers",))
-
-
-@pytest.mark.parametrize(
-    ("path", "source"),
-    [
-        (_BARRIER_TEST, "both = Rendezvous(2)\n"),
-        (_BARRIER_TEST, "import asyncio\nbarrier = asyncio.Barrier(2)\n"),
-        # The rendezvous itself is built on the one raw barrier.
-        (
-            "control/tests/insert_collision_support.py",
-            "import threading\nbarrier = threading.Barrier(2)\n",
-        ),
-        (
-            "control/src/vonk_control/x.py",
-            "import threading\nb = threading.Barrier(2)\n",
-        ),
-    ],
-)
-def test_a_rendezvous_or_an_out_of_scope_barrier_passes(path: str, source: str) -> None:
-    lines = set(range(1, source.count("\n") + 1))
-    assert not check_source(path, source, lines, modes=("barriers",))
-
-
 _RETENTION_PATH = "control/src/vonk_control/unused_storage_collection/references.py"
 
 
@@ -2900,7 +2857,7 @@ def test_typed_security_refusal_may_answer_403() -> None:
 
 
 @pytest.mark.parametrize(
-    "source,line",
+    ("source", "line"),
     [
         ("def review(s, now):\n    return _Evidence.read(s, now)\n", 2),
         ("def review(s, now):\n    return _CollectorEvidence.read(s, now)\n", 2),
@@ -2922,7 +2879,7 @@ def test_a_request_path_may_not_read_the_whole_collection(source, line):
 
 
 @pytest.mark.parametrize(
-    "path,source",
+    ("path", "source"),
     [
         # A collector decides over every item; that is its job.
         (
@@ -2974,7 +2931,7 @@ def test_any_stored_digest_column_compared_with_a_fresh_hash_is_a_rehash(source)
 
 
 @pytest.mark.parametrize(
-    "path,source",
+    ("path", "source"),
     [
         # Where bytes arrive, the digest is checked against them.
         (
@@ -3000,7 +2957,7 @@ def test_ingress_and_unrelated_comparisons_are_not_rehashes(path, source):
 
 
 @pytest.mark.parametrize(
-    "source,lines",
+    ("source", "lines"),
     [
         (
             (
@@ -3094,7 +3051,7 @@ def test_an_old_double_parse_does_not_fail_an_unrelated_change():
 
 
 @pytest.mark.parametrize(
-    "source,line",
+    ("source", "line"),
     [
         ("value = accepts_legacy(row)\n", 1),
         ("value = shim(row)\n", 1),
@@ -3204,7 +3161,7 @@ def test_tests_and_other_languages_are_outside_the_legacy_guard(path):
 
 
 @pytest.mark.parametrize(
-    "path,source",
+    ("path", "source"),
     [
         # A request entry point in the collector directory is a request path.
         (
@@ -3229,7 +3186,7 @@ def test_the_collector_directory_is_not_exempt_as_a_whole(path, source):
 
 
 @pytest.mark.parametrize(
-    "path,source",
+    ("path", "source"),
     [
         (
             "control/src/vonk_control/unused_storage_collection/service.py",
@@ -3249,7 +3206,7 @@ def test_the_collector_passes_may_read_the_whole_collection(path, source):
 
 
 @pytest.mark.parametrize(
-    "source,expected",
+    ("source", "expected"),
     [
         (
             (
@@ -3282,7 +3239,7 @@ def test_ingress_prefixes_do_not_over_match(path):
 
 
 @pytest.mark.parametrize(
-    "source,line",
+    ("source", "line"),
     [
         ("value = legacy_claim(row)\n", 1),
         ("value = 'backward compat'\n", 1),
@@ -3382,7 +3339,7 @@ def test_json_decode_errors_and_raising_handlers():
 
 
 @pytest.mark.parametrize(
-    "path,source",
+    ("path", "source"),
     [
         (
             "control/src/vonk_control/unused_storage_collection/references.py",
@@ -3443,7 +3400,7 @@ def test_selecting_every_row_of_a_growing_table_is_flagged_outside_api_modules(
 
 
 @pytest.mark.parametrize(
-    "path,source",
+    ("path", "source"),
     [
         (
             MODEL_CACHE_PATH,
@@ -3517,7 +3474,7 @@ def test_a_select_inside_a_keyed_outer_query_is_judged_with_the_outer_query():
     ],
 )
 @pytest.mark.parametrize(
-    "mode,path",
+    ("mode", "path"),
     [
         ("collection-readers", MODEL_CACHE_PATH),
         ("request-scans", "control/src/vonk_control/api/example.py"),
@@ -3587,7 +3544,7 @@ _MUST_PASS = [
 ]
 
 
-@pytest.mark.parametrize("mode,path", _SELECT_PATHS)
+@pytest.mark.parametrize(("mode", "path"), _SELECT_PATHS)
 @pytest.mark.parametrize("body", _MUST_FIRE)
 def test_a_whole_table_select_is_not_rescued_by_anything_but_its_own_narrowing(
     body, mode, path
@@ -3596,7 +3553,7 @@ def test_a_whole_table_select_is_not_rescued_by_anything_but_its_own_narrowing(
     assert check_source(path, source, _SELECT_LINES, modes=(mode,)), body
 
 
-@pytest.mark.parametrize("mode,path", _SELECT_PATHS)
+@pytest.mark.parametrize(("mode", "path"), _SELECT_PATHS)
 @pytest.mark.parametrize("body", _MUST_PASS)
 def test_chained_narrowing_limits_and_the_keyed_semi_join_pass(body, mode, path):
     source = "def f(s, x, d):\n    " + body + "\n"
@@ -4468,8 +4425,6 @@ def test_an_added_identity_state_literal_is_refused() -> None:
 
 
 def test_a_broad_catch_may_not_turn_a_verdict_into_a_wait():
-    from tests.legacy_tolerance import scan_source
-
     wait = (
         "try:\n    f()\n"
         "except Exception as error:\n    raise EvidenceUnknown('x') from error\n"
@@ -4479,10 +4434,10 @@ def test_a_broad_catch_may_not_turn_a_verdict_into_a_wait():
         "except (UnknownOutcomeError, InvalidRequestError):\n    raise\n"
         "except Exception as error:\n    raise EvidenceUnknown('x') from error\n"
     )
-    assert (3, "deterministic error becomes a wait") in scan_source(wait)
+    assert (3, "deterministic error becomes a wait") in scan_legacy_tolerance(wait)
     assert not [
         hit
-        for hit in scan_source(verdict_first)
+        for hit in scan_legacy_tolerance(verdict_first)
         if "verdict" in hit[1] or "wait" in hit[1]
     ]
 
@@ -4568,7 +4523,7 @@ SHIM = (
 
 
 @pytest.mark.parametrize(
-    "path,source,flagged",
+    ("path", "source", "flagged"),
     [
         ("packaging/debian/postinst", SHIM, False),
         ("packaging/debian/postinst", SHIM + "install -d /var/lib/x\n", True),

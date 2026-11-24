@@ -6,9 +6,9 @@ import json
 from collections.abc import Mapping
 from dataclasses import replace
 
-from ..generated_control.media_types import canonical_media_types
-from .assertions import _parse_assertion
-from .contracts import (
+from cluster_profiles.generated_control.media_types import canonical_media_types
+from cluster_profiles.qualification_fixtures.assertions import _parse_assertion
+from cluster_profiles.qualification_fixtures.contracts import (
     _CASE_ID,
     _DIGEST,
     _INTERFACES,
@@ -20,7 +20,7 @@ from .contracts import (
     RecipeFixture,
     _OutputLimits,
 )
-from .values import _integer, _object
+from cluster_profiles.qualification_fixtures.values import _integer, _object
 
 
 def _blocker(code: str, detail: str) -> dict[str, str]:
@@ -178,8 +178,7 @@ def _parse_recipe_case(
             assertion["kind"] in required_kinds
             and (
                 assertion.get("media_type") == media_type
-                or len(allowed) == 1
-                and assertion.get("media_type") is None
+                or (len(allowed) == 1 and assertion.get("media_type") is None)
             )
             for assertion in parsed_assertions
         ):

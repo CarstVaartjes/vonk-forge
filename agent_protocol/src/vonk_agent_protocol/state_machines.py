@@ -24,7 +24,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
-from .wire_model import WireEnum
+from vonk_agent_protocol.wire_model import WireEnum
 
 
 class InstallationState(WireEnum):

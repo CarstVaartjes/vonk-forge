@@ -11,18 +11,19 @@ import copy
 import json
 from datetime import UTC, datetime
 from importlib import resources
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import document_sha256, read_model, read_recipe
+
 from vonk_agent_protocol.reason_codes.catalog import CatalogCode
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.entities import (
     CatalogEntityService,
     CatalogValidationError,
     _parse,
-    recipe_document_projection,
 )
 from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
@@ -30,6 +31,7 @@ from vonk_control.catalog.revision_contract import (
     RecipeRevisionProjection,
     read_catalog_document,
     read_catalog_projection,
+    recipe_document_projection,
 )
 from vonk_control.catalog.service import CatalogService
 from vonk_control.model_primitives import Base
@@ -42,7 +44,6 @@ from vonk_control.recipe_update_batches.notice import (
     newest_active_revisions,
     recipe_update_notice,
 )
-from vonk_forge_contracts import document_sha256, read_model, read_recipe
 
 from .display_fixtures import create_draft, display_of
 
@@ -66,11 +67,11 @@ _PREBUILT = {
 }
 
 
-def _example(name: str) -> dict:
+def _example(name: str) -> dict[str, Any]:
     return json.loads((_EXAMPLES / name).read_text(encoding="utf-8"))
 
 
-def _legacy_model() -> dict:
+def _legacy_model() -> dict[str, Any]:
     """The Model document as contracts 2.x published it, display inside."""
     document = _example("model-definition.json")
     identity = document["identity"]
@@ -91,7 +92,7 @@ def _legacy_model() -> dict:
     return document
 
 
-def _legacy_recipe() -> dict:
+def _legacy_recipe() -> dict[str, Any]:
     document = _example("recipe-source-build.json")
     document["metadata"] = {
         "title": "Synthetic Tiny build",
@@ -101,7 +102,7 @@ def _legacy_recipe() -> dict:
     return document
 
 
-def _legacy_projection(document: dict, kind: str) -> dict:
+def _legacy_projection(document: dict[str, Any], kind: str) -> dict[str, Any]:
     """The projection a 2.x Controller stored, with what its sync recorded."""
     if kind == "model":
         model = read_model(document)
@@ -139,7 +140,9 @@ def sessions():
     return sessionmaker(engine, expire_on_commit=False)
 
 
-def _store(sessions, document: dict, kind: str, *, projected: dict) -> str:
+def _store(
+    sessions, document: dict[str, Any], kind: str, *, projected: dict[str, Any]
+) -> str:
     """Insert a revision exactly as a 2.x Controller wrote it."""
     with sessions.begin() as session:
         root = CatalogDocument(
@@ -287,7 +290,8 @@ def test_no_write_path_stores_a_2x_shape(sessions, legacy) -> None:
     with pytest.raises(CatalogValidationError) as revised:
         entities.revise(seed.document_id, document, actor="test")
     assert revised.value.code == CatalogCode.DOCUMENT_INVALID
-    with pytest.raises(CatalogValidationError) as imported:
+
+    def expected_failure():
         if document["kind"] == "model":
             service.import_catalog_models("test", [document])
         else:
@@ -298,6 +302,9 @@ def test_no_write_path_stores_a_2x_shape(sessions, legacy) -> None:
                 document=document,
                 expected_content_sha256=document_sha256(document),
             )
+
+    with pytest.raises(CatalogValidationError) as imported:
+        expected_failure()
     assert imported.value.code in {
         CatalogCode.DOCUMENT_INVALID,
         CatalogCode.MODEL_DOCUMENT_INVALID,
@@ -311,7 +318,8 @@ def test_a_3_0_document_with_a_newer_minor_field_is_accepted() -> None:
     document = _example("recipe-job.json")
     document["a_field_a_newer_minor_added"] = {"x": 1}
     parsed, clean, *_ = _parse(document)
-    assert clean == document and parsed.identity.slug == document["identity"]["slug"]
+    assert clean == document
+    assert parsed.identity.slug == document["identity"]["slug"]
 
 
 def test_a_display_must_describe_its_own_document(sessions) -> None:
@@ -373,7 +381,8 @@ def test_a_row_the_3_0_controller_wrote_is_already_current(sessions) -> None:
                 CatalogDocumentRevision.kind == "recipe"
             )
         )
-        assert stored is not None and stored.projected["artifact_inputs"]
+        assert stored is not None
+        assert stored.projected["artifact_inputs"]
     with sessions() as session:
         before = {
             row.id: row.projected
@@ -445,4 +454,5 @@ def test_a_3_0_sync_over_a_stored_2x_row_adds_one_head_and_one_update_notice(
         newest = newest_active_revisions(session, {new.document_id})[new.document_id]
         assert newest.id == new.id
         notice = recipe_update_notice("Synthetic Tiny build", old, newest)
-        assert notice is not None and notice.newest_revision_id == new.id
+        assert notice is not None
+        assert notice.newest_revision_id == new.id

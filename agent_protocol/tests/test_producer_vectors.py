@@ -14,7 +14,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from vonk_agent_protocol.contracts import AgentFailureResult, AgentResult
+
+from vonk_agent_protocol.agent_operations import AgentFailureResult
+from vonk_agent_protocol.contracts import AgentResult
+from vonk_agent_protocol.inventory import GpuHealth, InventoryRequest
 from vonk_agent_protocol.outcome import OutcomeUnknown
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 from vonk_agent_protocol.wire_model import OperationProgress
@@ -45,7 +48,8 @@ def test_a_refused_upgrade_package_is_accepted_with_its_detail() -> None:
     assert stored.error_code == "agent_upgrade_failed"
     assert stored.helper_error_code == "package_verification_failed"
     # The reason is the typed refusal; the helper's words are the detail.
-    assert stored.reason is not None and "/" not in stored.reason
+    assert stored.reason is not None
+    assert "/" not in stored.reason
     assert stored.diagnostics is not None
     assert "/var/lib/vonk/incoming" in stored.diagnostics.stderr.text
 
@@ -65,7 +69,6 @@ def test_an_inspected_exited_workload_observation_is_accepted() -> None:
 
 def test_inventory_health_shared_vectors_survive_ingress() -> None:
     # Catches dropping health while retaining otherwise valid GB10 inventory.
-    from vonk_agent_protocol.inventory import GpuHealth, InventoryRequest
 
     for health in GpuHealth:
         document = _vector("inventory-wifi-link-v1.json")

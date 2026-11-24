@@ -9,12 +9,19 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import Table, select, update
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
 from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
     FleetProfileView,
+    UnavailableFleetProfileView,
+)
+from vonk_control.fleet_profile_contract.vocabulary import (
+    FLEET_PROFILE_ENDED_STATES,
 )
 from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
 from vonk_control.fleet_profiles.service import FleetProfileService
@@ -33,10 +40,11 @@ from vonk_control.models.fleet import (
     FleetProfileApplication,
 )
 from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.operations.blockers import make_blocker
 from vonk_control.preparation_contract import (
     RolloutPreparation,
 )
-from vonk_forge_contracts import RecipeDefinition, document_sha256
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .fleet_profiles_support import (
     NOW,
@@ -52,6 +60,15 @@ from .fleet_profiles_support import (
     _SwitchAdapter,
     _uuid,
 )
+from .recipe_operations_support import (
+    installed_recipe,
+    setup_services,
+    started_recipe,
+)
+from .run_switch_operations_support import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
+)
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 
 
@@ -59,18 +76,6 @@ def test_production_profile_adapter_routes_all_idle_to_one_complete_stop_child(
     tmp_path: Path,
 ) -> None:
     """An empty desired set still stops a complete in-scope run through RunSwitch."""
-
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
-
-    from .recipe_operations_support import (
-        installed_recipe,
-        setup_services,
-        started_recipe,
-    )
-    from .run_switch_operations_support import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
-    )
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     installation = installed_recipe(
@@ -131,7 +136,8 @@ def test_production_profile_adapter_routes_all_idle_to_one_complete_stop_child(
     assert child.node_ids == list(nodes)
     with sessions() as session:
         stored_run = session.get(RecipeRun, run.owner_id)
-        assert stored_run is not None and stored_run.state == "running"
+        assert stored_run is not None
+        assert stored_run.state == "running"
         assert (
             session.scalar(select(RecipeRun.id).where(RecipeRun.id != run.owner_id))
             is None
@@ -147,18 +153,6 @@ def test_all_idle_profile_stops_a_lost_run_that_still_has_residue(
     which excludes ``lost``, so the profile saw nothing to stop and the residue
     stayed on the Spark forever.
     """
-
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
-
-    from .recipe_operations_support import (
-        installed_recipe,
-        setup_services,
-        started_recipe,
-    )
-    from .run_switch_operations_support import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
-    )
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     installation = installed_recipe(
@@ -856,9 +850,6 @@ def test_profile_round_trip_rejects_corrupt_stored_assignment(damage):
             .where(FleetProfile.id == created.id)
             .values(assignments=assignments)
         )
-    from vonk_control.fleet_profile_contract.definitions import (
-        UnavailableFleetProfileView,
-    )
 
     # Keep the exact saved identity observable. Dropping a malformed choice
     # would let an ordinary edit silently delete accepted authoring intent.
@@ -870,14 +861,17 @@ def test_profile_round_trip_rejects_corrupt_stored_assignment(damage):
         assert observed.definition == created.definition
         with sessions() as session:
             row = session.get(FleetProfile, created.id)
-            assert row is not None and row.assignments == assignments
+            assert row is not None
+            assert row.assignments == assignments
         return
     assert isinstance(observed, UnavailableFleetProfileView)
-    assert observed.id == created.id and observed.revision == created.revision
+    assert observed.id == created.id
+    assert observed.revision == created.revision
     assert observed.definition is None
     with sessions() as session:
         row = session.get(FleetProfile, created.id)
-        assert row is not None and row.assignments == assignments
+        assert row is not None
+        assert row.assignments == assignments
 
 
 def test_profile_preview_blocks_when_required_preparation_cannot_be_attested() -> None:
@@ -923,8 +917,6 @@ def test_profile_preview_blocks_when_required_preparation_cannot_be_attested() -
 def test_profile_load_with_missing_preparation_enqueues_it_and_waits() -> None:
     """A load asks for the model and image it lacks instead of stopping there."""
 
-    from vonk_control.operations.blockers import make_blocker
-
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
 
@@ -967,14 +959,6 @@ def test_load_waiting_on_a_working_preparation_outlives_its_wait_window() -> Non
     """Catches the 30-minute acceptance budget ending a load whose model and
     image are still being prepared; it ends only when its preparation stalls,
     with that evidence."""
-
-    from datetime import timedelta
-
-    from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-    from vonk_control.fleet_profile_contract.vocabulary import (
-        FLEET_PROFILE_ENDED_STATES,
-    )
-    from vonk_control.operations.blockers import make_blocker
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)

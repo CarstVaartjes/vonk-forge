@@ -11,6 +11,7 @@ from typing import cast
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
@@ -28,6 +29,9 @@ from vonk_control.models.fleet import (
 from vonk_control.models.jobs import Job
 from vonk_control.recipe_operations.observation_helpers import record_build_evidence
 from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.constants import (
+    _FINAL_VERIFICATION_MAX_SECONDS,
+)
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .fleet_profiles_support import (
@@ -119,9 +123,6 @@ def test_rebuilt_image_cannot_replace_persisted_profile_identity(
     # A stale content observation does not certify changed accepted bytes.
     # Let the existing child observer consume its immutable budget, across a
     # reconstructed parent service, before asserting its ending.
-    from vonk_control.run_switch_operations.constants import (
-        _FINAL_VERIFICATION_MAX_SECONDS,
-    )
 
     end_time = first.created_at + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
     adapter._run_switch._clock = lambda: end_time
@@ -147,7 +148,8 @@ def test_rebuilt_image_cannot_replace_persisted_profile_identity(
             == 1
         )
         original = session.get(FleetProfileApplication, first.id)
-        assert original is not None and original.plan == accepted_json
+        assert original is not None
+        assert original.plan == accepted_json
         for node_id in nodes:
             node = session.get(AgentNode, node_id)
             assert node is not None
@@ -185,7 +187,8 @@ def test_restored_exact_bytes_recover_only_current_profile_intent(
         application.progress = {**application.progress, "attempt": 5}
     with sessions() as session:
         build = session.scalar(select(RecipeBuild))
-        assert build is not None and build.oci_layout_sha256 is not None
+        assert build is not None
+        assert build.oci_layout_sha256 is not None
         image_digest = build.image_digest
         assert image_digest is not None
         storage = FilesystemRuntimeImageStorage(tmp_path / "runtime-images")
@@ -299,7 +302,8 @@ def test_retry_requires_preparation_only_when_an_assignment_needs_work(
         actor="admin",
     )
     preview = service.preview(profile.id)
-    assert preview.allowed and len(preview.preparations) == 1
+    assert preview.allowed
+    assert len(preview.preparations) == 1
     kept = next(item for item in preview.assignments if tuple(item.node_ids) == nodes)
     assert kept.actions == ["keep"]
     first = service.apply(

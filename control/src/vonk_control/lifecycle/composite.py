@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from .types import TERMINAL_STATES, Lifecycle, State
+from vonk_control.lifecycle.types import TERMINAL_STATES, Lifecycle, State
 
 _ACTIVITY = (State.RUNNING, State.QUEUED, State.OBSERVING, State.BACKOFF)
 

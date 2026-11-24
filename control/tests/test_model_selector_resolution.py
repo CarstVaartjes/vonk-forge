@@ -2,6 +2,7 @@
 
 import hashlib
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock
@@ -10,8 +11,11 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import sessionmaker
+
+from cluster_profiles import cli
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
@@ -152,9 +156,6 @@ def test_invalid_dependency_pin_is_not_observed_again(world):
 
 def test_changed_removal_scope_requires_a_new_plan_and_can_then_be_accepted(world):
     """A known scope mismatch ends; repeating observations cannot repair its plan."""
-    from dataclasses import replace
-
-    from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 
     catalog, cache, sessions, _client = world
     row = _activate(catalog, publisher="test", weight="a")
@@ -191,14 +192,13 @@ def test_changed_removal_scope_requires_a_new_plan_and_can_then_be_accepted(worl
 
 
 @pytest.mark.parametrize(
-    "action,options,suffix",
+    ("action", "options", "suffix"),
     [("detail", (), ""), ("remove", ("--review",), "/remove-review")],
 )
 def test_model_cli_passes_exact_digest_to_the_real_api(
     world, action, options, suffix, capsys
 ):
     """A digest reaches the Controller verbatim and its typed response reaches CLI output."""
-    from cluster_profiles import cli
 
     catalog, _cache, _sessions, api = world
     row = _activate(catalog, publisher="test", weight="a")

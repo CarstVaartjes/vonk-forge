@@ -11,9 +11,9 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 import yaml
-from vonk_agent_protocol.reason_codes.sources import SourceBundleCode, SourcePolicyCode
 
-from .source_bundles import GeneratedSourceBundle
+from vonk_agent_protocol.reason_codes.sources import SourceBundleCode, SourcePolicyCode
+from vonk_control.source_bundles import GeneratedSourceBundle
 
 _PINNED_IMAGE = re.compile(r"^[^\s$]+@sha256:([0-9a-f]{64})$")
 _NON_ROOT_USER = re.compile(r"^[1-9][0-9]*(?::[1-9][0-9]*)?$")
@@ -479,16 +479,16 @@ def _inspect_compose(path: str, payload: bytes) -> list[SourcePolicyFinding]:
                     "privileged Compose services are forbidden",
                 )
             )
-        for key in ("network_mode", "pid", "ipc", "uts", "userns_mode"):
-            if raw_service.get(key) == "host":
-                findings.append(
-                    _finding(
-                        SourcePolicyCode.HOST_NAMESPACE,
-                        service_path,
-                        None,
-                        f"host {key} is forbidden",
-                    )
-                )
+        findings.extend(
+            _finding(
+                SourcePolicyCode.HOST_NAMESPACE,
+                service_path,
+                None,
+                f"host {key} is forbidden",
+            )
+            for key in ("network_mode", "pid", "ipc", "uts", "userns_mode")
+            if raw_service.get(key) == "host"
+        )
         if raw_service.get("cap_add"):
             findings.append(
                 _finding(

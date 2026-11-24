@@ -8,17 +8,22 @@ import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
+)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult, ArtifactDistributionPayload
 from vonk_agent_protocol.recipe_operations import (
     RecipeOperationRequest,
     RecipeStopResult,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentCertificate, AgentNode
@@ -30,6 +35,8 @@ from vonk_control.recipe_operations.start_payloads import (
 )
 
 from .agent_fences import fenced_attempt, fenced_operation
+from .non_blocking import assert_ended_without_blocking
+from .package_upgrade_fixtures import activation_receipt, source_transport
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
@@ -53,7 +60,6 @@ STOP_RESULT = RecipeStopResult()
 
 
 def distribution_payload(plan_digest: str = COMMIT):
-    from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 
     payload = ArtifactDistributionPayload.model_validate_json(
         (
@@ -240,7 +246,6 @@ def job_state(sessions, job_id: str) -> Job:
 
 def exercise_upgrade_reconnect(service, older_work) -> None:
     jobs, sessions, clock = service
-    from .package_upgrade_fixtures import activation_receipt, source_transport
 
     target = {
         "architecture": "linux-arm64",
@@ -273,7 +278,8 @@ def exercise_upgrade_reconnect(service, older_work) -> None:
             "serial-a",
             runtime_identity=old_identity,
         )
-        assert first is not None and fenced_operation(sessions, first).id == older.id
+        assert first is not None
+        assert fenced_operation(sessions, first).id == older.id
         clock.advance(seconds=1)
 
     job = parent(sessions, clock)
@@ -309,7 +315,8 @@ def exercise_upgrade_reconnect(service, older_work) -> None:
         )
         with sessions() as session:
             stored = session.get(AgentOperation, fenced_operation(sessions, first).id)
-            assert stored is not None and stored.next_action_at is not None
+            assert stored is not None
+            assert stored.next_action_at is not None
             clock.now = stored.next_action_at.replace(tzinfo=UTC)
         # Retry and upgrade ordering must survive a Controller restart.
         jobs = AgentJobService(sessions, clock=clock)
@@ -321,9 +328,8 @@ def exercise_upgrade_reconnect(service, older_work) -> None:
             runtime_identity=old_identity,
         )
         assert older is not None
-        assert resumed is not None and fenced_operation(sessions, resumed).id == (
-            older.id
-        )
+        assert resumed is not None
+        assert fenced_operation(sessions, resumed).id == (older.id)
         assert (
             fenced_attempt(sessions, resumed).attempt
             == fenced_attempt(sessions, first).attempt + 1
@@ -370,8 +376,10 @@ def exercise_upgrade_reconnect(service, older_work) -> None:
                 AgentOperationAttempt.operation_id == operation.id
             )
         )
-        assert stored is not None and stored.state == "succeeded"
-        assert attempt is not None and attempt.state == "succeeded"
+        assert stored is not None
+        assert stored.state == "succeeded"
+        assert attempt is not None
+        assert attempt.state == "succeeded"
         assert attempt.result == {
             "architecture": "linux-arm64",
             "binary_digest": "a" * 64,
@@ -392,7 +400,6 @@ _RESTART_INTERRUPTED = {
 
 
 def _restart_interrupted_result(claim, operation_kind: str):
-    from vonk_agent_protocol.contracts import AgentResult
 
     return AgentResult.model_validate_json(
         json.dumps(
@@ -435,9 +442,6 @@ def _enqueue_successor_mutation(jobs, sessions, clock):
 
 
 def _assert_parent_ending_admit_fresh_request(jobs, sessions, clock, owner):
-    from types import SimpleNamespace
-
-    from .non_blocking import assert_ended_without_blocking
 
     def fresh(_):
         successor = parent(sessions, clock)

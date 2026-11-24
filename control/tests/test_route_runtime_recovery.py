@@ -6,7 +6,8 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
-from vonk_agent_protocol.contracts import AgentOperation
+
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.route_activation import ActivationMarker, SupervisorPhase
@@ -93,7 +94,8 @@ def test_activation_uncertainty_releases_lock_and_admits_fresh_publication(
         )
 
     def assert_reason(_operation):
-        assert observed and not isinstance(observed[0], ActivationMarker)
+        assert observed
+        assert not isinstance(observed[0], ActivationMarker)
 
     assert_ended_without_blocking(
         publisher,
@@ -113,7 +115,7 @@ def test_missing_bundle_is_observed_and_request_led_publication_recovers(tmp_pat
     publisher = AtomicRouteBundlePublisher(tmp_path)
     marker = _activate(publisher)
     assert isinstance(marker, ActivationMarker)
-    assert publisher.inspect(expected=marker) == marker
+    assert publisher.inspect() == marker
 
 
 def test_absent_ack_ends_at_deadline_without_changing_working_activation(tmp_path):
@@ -137,5 +139,5 @@ def test_absent_ack_ends_at_deadline_without_changing_working_activation(tmp_pat
     observed = acknowledge(marker, SupervisorPhase.READY)
     assert isinstance(observed, UnknownError)
     assert elapsed[0] == 1
-    assert publisher.inspect(expected=marker) == marker
+    assert publisher.inspect() == marker
     assert isinstance(_activate(publisher, generation=2), ActivationMarker)

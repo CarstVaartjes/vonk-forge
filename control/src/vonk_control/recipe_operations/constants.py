@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 
 _BLOCKER_REASON_CHARS = 200
 

@@ -10,7 +10,9 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_forge_contracts.model import ModelReference
+
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_control.catalog.revision_collection import GRACE
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.cache import (
@@ -30,7 +32,10 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import (
     ArtifactDistributionAssignment,
 )
-from vonk_control.recipe_operations.errors import RecipeOperationConflict
+from vonk_control.recipe_operations.errors import (
+    RecipeOperationConflict,
+    RecipeRetryLater,
+)
 from vonk_control.storage_demands import (
     NAS_MODELS,
     STORAGE_EVICTING,
@@ -38,8 +43,8 @@ from vonk_control.storage_demands import (
     StorageDemands,
     spark_scope,
 )
-from vonk_control.unused_storage_collection.common import ACTOR, spark_eviction_capacity
-from vonk_forge_contracts.model import ModelReference
+from vonk_control.unused_storage_collection.common import ACTOR
+from vonk_control.unused_storage_collection.service import spark_eviction_capacity
 
 from .model_cache_support import _artifact, _download
 from .test_catalog_revision_collection import NODE, NOW, Catalog
@@ -200,12 +205,14 @@ def test_receipt_a_live_operation_names_is_kept_and_a_recent_transfer_only_goes_
         reserve_fraction=0.0,
     ).collect()
 
-    assert named.exists() and pulled.exists()
+    assert named.exists()
+    assert pulled.exists()
     assert not idle.exists()
     assert _kept(result, "live operation") == 1
 
     result = _collector(world, image_cache_root=tmp_path).collect()
-    assert named.exists() and not pulled.exists()
+    assert named.exists()
+    assert not pulled.exists()
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -306,7 +313,8 @@ def test_model_no_recipe_needs_is_removed_when_disk_is_short_through_the_fenced_
         removal = session.scalar(
             select(ModelCacheOperation).where(ModelCacheOperation.kind == "remove")
         )
-        assert removal is not None and removal.actor == ACTOR
+        assert removal is not None
+        assert removal.actor == ACTOR
     # Until the cache has deleted the files, free space says nothing new: a
     # queued removal is not yet settling, but the round that freed nothing
     # pauses eviction.
@@ -389,7 +397,8 @@ def test_model_items_under_pressure_read_no_model_object(
         removal = session.scalar(
             select(ModelCacheOperation).where(ModelCacheOperation.kind == "remove")
         )
-        assert removal is not None and removal.actor == ACTOR
+        assert removal is not None
+        assert removal.actor == ACTOR
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -582,7 +591,7 @@ def test_model_a_load_reaches_after_the_sweep_looked_is_not_fenced(
         )
         return real(digest, **kwargs)
 
-    service.accept_unused_removal = load_arrives_first  # type: ignore[method-assign]
+    service.accept_unused_removal = load_arrives_first
 
     result = _models(world, service).collect()
 
@@ -724,8 +733,6 @@ def test_a_waiting_load_is_told_evicting_only_while_the_removal_can_happen(
     waits for is refused: the space it was promised never comes. A deferred
     removal (outcome unknown, retried next pass) is still under way; a refused
     one is not, until a later pass removes it after all."""
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_control.recipe_operations.errors import RecipeRetryLater
 
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")

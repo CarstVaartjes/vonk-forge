@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 try:
-    from .route_activation_words import ActivationState
+    from vonk_agent_protocol.route_activation_words import ActivationState
 except ImportError:  # loaded standalone by the LiteLLM supervisor, beside its words
     from route_activation_words import ActivationState  # type: ignore[no-redef]
 

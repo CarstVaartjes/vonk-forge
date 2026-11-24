@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from vonk_control.recipe_packages.client import PACKAGE_REPOSITORY
 from vonk_forge_contracts import (
     CONTRACT_MAJOR,
     INDEX_KIND,
@@ -14,6 +13,8 @@ from vonk_forge_contracts import (
     PackageContract,
     catalog_vocabulary,
 )
+
+from vonk_control.recipe_packages.client import PACKAGE_REPOSITORY
 
 
 def index_envelope(

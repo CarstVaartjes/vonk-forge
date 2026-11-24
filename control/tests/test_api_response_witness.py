@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.routing import Route
+
 from vonk_control.contract_graph import schema_application
 
 from .api_response_witness import ResponseWitnesses, install_observer

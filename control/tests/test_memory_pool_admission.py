@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.lifecycle_vocabulary import RunAdmissionCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import ReservationState
@@ -65,7 +66,9 @@ def test_host_builder_claim_is_visible_to_unified_review_and_runtime(
         mapping = session.scalar(select(ClusterMapping.id))
         build = session.scalar(select(RecipeBuild.id))
         snapshot = session.scalar(select(NodeInventorySnapshot))
-        assert mapping is not None and build is not None and snapshot is not None
+        assert mapping is not None
+        assert build is not None
+        assert snapshot is not None
         free = min(snapshot.host_memory_free_bytes, snapshot.gpu_memory_free_bytes)
     installed = installed_recipe(
         lifecycle, mapping, build, nodes, request_id=str(uuid4())
@@ -276,7 +279,8 @@ def test_changed_physical_pool_loads_against_the_current_plan(
         assert snapshot is not None
         snapshot.memory_pool = "separate"
     current = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
-    assert current.status_code == 200 and current.json()["allowed"], current.text
+    assert current.status_code == 200, current.text
+    assert current.json()["allowed"], current.text
     assert current.json()["plan_digest"] != reviewed["plan_digest"]
     loaded = api.post(
         f"/api/profile/{profile.number}/load",
@@ -308,7 +312,9 @@ def test_profile_review_and_run_admission_share_the_observed_peak(
         mapping = session.scalar(select(ClusterMapping.id))
         build = session.scalar(select(RecipeBuild.id))
         snapshot = session.scalar(select(NodeInventorySnapshot))
-        assert mapping is not None and build is not None and snapshot is not None
+        assert mapping is not None
+        assert build is not None
+        assert snapshot is not None
         snapshot.memory_pool = "shared"
     installed = installed_recipe(
         lifecycle, mapping, build, nodes, request_id=str(uuid4())

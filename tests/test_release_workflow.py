@@ -10,7 +10,9 @@ import os
 import re
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
@@ -33,7 +35,7 @@ R2_WRITERS = ("apt", "candidate", "promote")
 LEVEL = {"none": 0, "read": 1, "write": 2}
 
 
-def load(path: Path) -> dict:
+def load(path: Path) -> dict[str, Any]:
     document = yaml.safe_load(path.read_text())
     # PyYAML reads the bare `on:` key as the boolean True.
     document["on"] = document.pop(True, document.get("on"))
@@ -129,7 +131,7 @@ def test_release_accepts_only_successful_or_proven_reused_ci(
     expression = re.sub(r"!(?!=)", "not ", expression)
     expression = expression.replace("&&", "and").replace("||", "or")
     assert (
-        eval(
+        eval(  # noqa: S307 -- evaluates a GitHub expression with no builtins
             " ".join(expression.split()),
             {"__builtins__": {}},
             {
@@ -163,7 +165,7 @@ def test_promote_waits_for_apt_and_producers_and_needs_them_not_failed(
         expression = expression.replace(f"needs.{name}.result", repr(results[name]))
     expression = re.sub(r"!(?!=)", "not ", expression)
     expression = expression.replace("&&", "and")
-    promoted = eval(
+    promoted = eval(  # noqa: S307 -- evaluates a GitHub expression with no builtins
         expression,
         {"__builtins__": {}},
         {"cancelled": lambda: False, "contains": lambda v, i: i in v},
@@ -373,7 +375,7 @@ def test_pr_image_references_pass_the_publication_ingress_check(
         )
         publication._validate_image(reference, role)
         with pytest.raises(publication.PublicationError):
-            publication._validate_image(reference.split("@")[0], role)
+            publication._validate_image(reference.split("@", maxsplit=1)[0], role)
         # An invalid ingress reference leaves no state blocking a fresh one.
         publication._validate_image(reference, role)
 
@@ -586,7 +588,7 @@ def test_main_reuses_the_images_of_the_pull_request_that_tested_its_tree() -> No
         )
 
 
-def _image_steps() -> list[dict]:
+def _image_steps() -> list[dict[str, Any]]:
     return load(WORKFLOWS / "dev-images.yml")["jobs"]["publish-development-images"][
         "steps"
     ]
@@ -616,7 +618,8 @@ def test_main_reruns_no_image_proof_the_pull_request_holds(pr_proof, tmp_path) -
     for prefix in reproofs:
         assert count(prefix) == (0 if pr_proof else 3), prefix
     assert count("Accept the pull request images") == (1 if pr_proof else 0)
-    assert count("Scan the") == 2 and count("Smoke the litellm") == 1
+    assert count("Scan the") == 2
+    assert count("Smoke the litellm") == 1
     for prefix in (
         "Publish immutable",
         "Verify immutable",
@@ -627,7 +630,9 @@ def test_main_reruns_no_image_proof_the_pull_request_holds(pr_proof, tmp_path) -
         return
     (step,) = (step for step in _image_steps() if step.get("id") == "pr_acceptance")
     roles = ("api", "worker", "litellm")
-    digests = {role: "sha256:" + digit * 64 for role, digit in zip(roles, "abd")}
+    digests = {
+        role: "sha256:" + digit * 64 for role, digit in zip(roles, "abd", strict=False)
+    }
     outputs = {
         f"steps.pr_images.outputs.{role}_digest": digest
         for role, digest in digests.items()
@@ -702,7 +707,7 @@ def evaluate(expression: str, context: dict[str, str]) -> object:
     )
     expression = re.sub(r"!(?!=)", "not ", expression)
     expression = expression.replace("&&", "and").replace("||", "or")
-    return eval(" ".join(expression.split()), {"__builtins__": {}})
+    return eval(" ".join(expression.split()), {"__builtins__": {}})  # noqa: S307 -- evaluates a GitHub expression with no builtins
 
 
 def render(template: str, context: dict[str, str]) -> str:
@@ -1196,10 +1201,11 @@ def test_a_failed_payload_match_says_why_the_lanes_run_here(
 def test_main_reuses_only_fresh_digest_bound_pr_security(fault, tmp_path):
     """Catches skipping scans for another digest/attempt or stale PR evidence,
     and treating denied evidence access as permission."""
-    from datetime import UTC, datetime, timedelta
 
     roles = ("api", "worker", "litellm")
-    digests = {role: "sha256:" + digit * 64 for role, digit in zip(roles, "abc")}
+    digests = {
+        role: "sha256:" + digit * 64 for role, digit in zip(roles, "abc", strict=False)
+    }
     pr = load(WORKFLOWS / "release-acceptance.yml")["jobs"]["image-security"]
     assert pr["needs"] == ["source", "images"]
     # The scan runs beside acceptance, with no candidate consumer waiting on it.

@@ -1,22 +1,32 @@
 """Startup and reporting use the inventory owner without losing old samples."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import event, inspect, select
+from sqlalchemy import event, inspect, select, update
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.telemetry import HostResourceSample, TelemetrySample
 from vonk_agent_protocol.wire_model import MAX_TELEMETRY_CAPACITY_BYTES
 from vonk_control.db import node_facts
 from vonk_control.db.startup import initialize_database
 from vonk_control.model_primitives import Base
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.models.fleet import AgentNode
 from vonk_control.models.telemetry import (
     NodeInventoryResourceSnapshot,
+    NodeTelemetryLatest,
     NodeTelemetrySample,
 )
+from vonk_control.observed_run_memory import recent_best_available
+from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
+from vonk_control.telemetry.maintenance import TelemetryMaintenance
 from vonk_control.telemetry.samples import TelemetryRepository
+
+from .recipe_operations_support import NOW as OPERATIONS_NOW
+from .recipe_operations_support import setup_services
 
 NODE = "spk_" + "c" * 32
 NOW = datetime(2026, 10, 22, 12, tzinfo=UTC)
@@ -126,11 +136,6 @@ def test_resource_reporting_rolls_back_partial_sample_and_retries(
     postgres_engine: Engine,
 ) -> None:
     """Catches a telemetry commit whose resource owner was not committed with it."""
-    from datetime import timedelta
-
-    from vonk_control.models.fleet import AgentNode
-    from vonk_control.models.telemetry import NodeTelemetryLatest
-    from vonk_control.telemetry.maintenance import TelemetryMaintenance
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -179,21 +184,17 @@ def test_archived_measurement_lock_does_not_block_install_admission(
     postgres_engine: Engine, tmp_path
 ) -> None:
     """Catches locking telemetry history as if it were current admission evidence."""
-    from vonk_control.models.execution import RecipeInstallation
-
-    from .recipe_operations_support import NOW as now
-    from .recipe_operations_support import setup_services
 
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine
     )
     node_id = nodes[0]
     service = lifecycle._install_admission
-    plan = service.plan_install(mapping_id, build_id, now=now)
+    plan = service.plan_install(mapping_id, build_id, now=OPERATIONS_NOW)
     assert plan.allowed
     sample = TelemetrySample(
         boot_id="00000000-0000-4000-8000-000000000001",
-        observed_at=now,
+        observed_at=OPERATIONS_NOW,
         memory_total_bytes=None,
         memory_available_bytes=None,
         disk_total_bytes=None,
@@ -202,7 +203,9 @@ def test_archived_measurement_lock_does_not_block_install_admission(
         gpu_memory_total_bytes=None,
         gpu_memory_free_bytes=None,
     )
-    TelemetryRepository(sessions, clock=lambda: now).record_batch(node_id, [sample])
+    TelemetryRepository(sessions, clock=lambda: OPERATIONS_NOW).record_batch(
+        node_id, [sample]
+    )
     with sessions.begin() as history:
         locked = history.scalar(
             select(NodeInventoryResourceSnapshot)
@@ -210,7 +213,7 @@ def test_archived_measurement_lock_does_not_block_install_admission(
             .with_for_update(of=NodeInventoryResourceSnapshot)
         )
         assert locked is not None
-        identifier = service.accept_install(plan, actor="admin", now=now)
+        identifier = service.accept_install(plan, actor="admin", now=OPERATIONS_NOW)
     with sessions() as session:
         assert session.get(RecipeInstallation, identifier) is not None
 
@@ -224,12 +227,6 @@ def test_recent_memory_reads_the_validated_byte_contract(
     postgres_engine: Engine, available: int | None, damaged: bool
 ) -> None:
     """Catches 32-bit JSON casts, poisoned history and cross-node/window leaks."""
-    from datetime import timedelta
-
-    from sqlalchemy import update
-    from vonk_control.models.fleet import AgentNode
-    from vonk_control.observed_run_memory import recent_best_available
-    from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)

@@ -13,11 +13,10 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
-
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-
-from .fleet_event_contract import (
+from vonk_control.fleet_event_contract import (
     AgentOperationPayload,
     InstallationNodePayload,
     JobPayload,
@@ -26,8 +25,8 @@ from .fleet_event_contract import (
     RecipeRunPayload,
     RunNodePayload,
 )
-from .fleet_projection.common import TelemetryPoint
-from .strict_json import StrictJSONModel
+from vonk_control.fleet_projection.common import TelemetryPoint
+from vonk_control.strict_json import StrictJSONModel
 
 
 class _FleetStreamModel(StrictJSONModel):
@@ -132,15 +131,13 @@ class FleetTelemetryEvent(_FleetStreamModel):
         return self
 
 
-class _FleetChangeBase(StrictJSONModel):
+class _FleetChangeBase[NodeIdT: str | None](StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
     entity_id: Annotated[str, Field(min_length=1, max_length=256)]
-    # Required on the abstract base: every concrete change states whether it is
-    # node-scoped or explicitly node-less. A base default that a subclass
-    # removes is a legal Pydantic override but not something a dataclass-based
-    # checker accepts, and inlining a default here would change the changes'
-    # schemas.
-    node_id: Annotated[str, Field(min_length=1, max_length=128)] | None
+    # Declared here so it keeps its place in every change's field order, and
+    # generic so each concrete change states node-scoped (str) or explicitly
+    # node-less (None) without narrowing a mutable base field.
+    node_id: NodeIdT
     occurred_at: datetime
 
     @field_validator("occurred_at")
@@ -151,43 +148,43 @@ class _FleetChangeBase(StrictJSONModel):
         return value.astimezone(UTC)
 
 
-class NodeProfileChange(_FleetChangeBase):
+class NodeProfileChange(_FleetChangeBase[str]):
     entity_kind: Literal["node-profile"]
     node_id: Annotated[str, Field(min_length=1, max_length=128)]
     fields: NodeProfilePayload
 
 
-class RecipeInstallationChange(_FleetChangeBase):
+class RecipeInstallationChange(_FleetChangeBase[None]):
     entity_kind: Literal["recipe-installation"]
     node_id: None = None
     fields: RecipeInstallationPayload
 
 
-class InstallationNodeChange(_FleetChangeBase):
+class InstallationNodeChange(_FleetChangeBase[str]):
     entity_kind: Literal["installation-node"]
     node_id: Annotated[str, Field(min_length=1, max_length=128)]
     fields: InstallationNodePayload
 
 
-class RecipeRunChange(_FleetChangeBase):
+class RecipeRunChange(_FleetChangeBase[None]):
     entity_kind: Literal["recipe-run"]
     node_id: None = None
     fields: RecipeRunPayload
 
 
-class RunNodeChange(_FleetChangeBase):
+class RunNodeChange(_FleetChangeBase[str]):
     entity_kind: Literal["run-node"]
     node_id: Annotated[str, Field(min_length=1, max_length=128)]
     fields: RunNodePayload
 
 
-class JobChange(_FleetChangeBase):
+class JobChange(_FleetChangeBase[None]):
     entity_kind: Literal["job"]
     node_id: None = None
     fields: JobPayload
 
 
-class AgentOperationChange(_FleetChangeBase):
+class AgentOperationChange(_FleetChangeBase[str]):
     entity_kind: Literal["agent-operation"]
     node_id: Annotated[str, Field(min_length=1, max_length=128)]
     fields: AgentOperationPayload

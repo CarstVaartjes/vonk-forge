@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 
 from pydantic import ConfigDict, Field
+
 from vonk_agent_protocol.wire_model import WireModel
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from ..distribution_assignment import NodeDistributionAssignment
+from vonk_control.distribution_assignment import NodeDistributionAssignment
 
 
 def _may_replace(

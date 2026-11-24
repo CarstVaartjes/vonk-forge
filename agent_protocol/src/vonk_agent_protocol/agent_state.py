@@ -14,18 +14,24 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, field_validator
 
-from .agent_words import HostHelperResponseStatus
-from .claims import AgentRuntimeIdentity
-from .compiled_execution_plan import CompiledPlacement
-from .contracts import AgentClaim
-from .helper_response import HostHelperProcessLogs
-from .host_helper import RecipeReconciliationIdentity, Uuid4Text
-from .package_upgrade import (
+from vonk_agent_protocol.agent_words import HostHelperResponseStatus
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.compiled_execution_plan import CompiledPlacement
+from vonk_agent_protocol.contracts import AgentClaim
+from vonk_agent_protocol.helper_response import HostHelperProcessLogs
+from vonk_agent_protocol.package_upgrade import (
     PackageActivationOutcome,
     PackageActivationPhase,
     PackageRollbackAuthority,
 )
-from .wire_model import MAX_RUN_GENERATION, Digest, WireModel, strict_json_datetime
+from vonk_agent_protocol.recipe_operations import RecipeReconciliationIdentity
+from vonk_agent_protocol.wire_model import (
+    MAX_RUN_GENERATION,
+    Digest,
+    Uuid4Text,
+    WireModel,
+    strict_json_datetime,
+)
 
 U32 = Annotated[int, Field(ge=0, le=2**32 - 1)]
 U64 = Annotated[int, Field(ge=0, le=2**64 - 1)]

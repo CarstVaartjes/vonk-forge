@@ -18,7 +18,6 @@ import hashlib
 import json
 from pathlib import Path
 
-from vonk_control.execution_plan_service import _bind_runtime_artifacts
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from control.tests.test_catalog_entities import _model
@@ -30,6 +29,7 @@ from control.tests.test_compiled_execution_plan import (
     compile_verified_execution_plan,
     execution_identity_sha256,
 )
+from vonk_control.execution_plan_service import _bind_runtime_artifacts
 
 
 def _json_object(value: object) -> dict[str, object]:

@@ -14,21 +14,25 @@ from typing import Literal, overload
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol.contracts import canonical_message
+
+from tests.wire_probes import prebuilt_probe
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_observations import (
     RecipeRunObservationsWire,
     RecipeRunObservationWire,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
-from vonk_control.agent_api.common import AgentApiServices
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.agent_api.common import RANK_UNREADY_GRACE, AgentApiServices
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence
+from vonk_control.distributed_recovery.common import _proves_fresh_absence
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
@@ -36,7 +40,12 @@ from vonk_control.host_helper_authority import (
 )
 from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.jobs.documents import RecipeStartParent, RecipeStopParent
-from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.models.execution import (
+    RecipeInstallation,
+    RecipeRun,
+    ResourceReservation,
+    RunNode,
+)
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
@@ -46,8 +55,6 @@ from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recipe_routes.service import RecipeRouteService
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.source_bundles import SourceBundleStore
-
-from tests.wire_probes import prebuilt_probe
 
 from .agent_fences import fenced_operation
 from .node_contacts import contact_row
@@ -88,8 +95,6 @@ class _UnusedJobs:
 
 def _singleton_recovery_process_tick(database_url: str, now_value: str) -> None:
     """Reconstruct the Controller worker in a new process against PostgreSQL."""
-
-    from vonk_control.agent_jobs.service import AgentJobService
 
     now = datetime.fromisoformat(now_value)
     engine = create_engine(database_url)
@@ -283,7 +288,8 @@ def _production_controller_app(
     assert set(captured) == set(node_ids)
     with sessions() as session:
         run = session.get(RecipeRun, started.owner_id)
-        assert run is not None and isinstance(run.plan, dict)
+        assert run is not None
+        assert isinstance(run.plan, dict)
         run_plan_document = require_mapping(run.plan, "run plan")
         plan_nodes = {
             item["node_id"]: item
@@ -320,7 +326,6 @@ def _submit_observation(
     endpoint_ready: bool | None = None,
     unassigned_run_ids: tuple[str, ...] = (),
 ):
-    from fastapi.testclient import TestClient
 
     headers = {
         "x-vonk-agent-node": identity["node_id"],
@@ -481,7 +486,6 @@ def test_production_start_rust_observation_and_controller_consume(
     nodes: int,
 ) -> None:
     """Connect the Controller start evidence, the Rust report and the consume route."""
-    from fastapi.testclient import TestClient
 
     app, sessions, run_id, start_job_id, node_id, _grant_public_key, produced = (
         _production_controller_app(
@@ -492,7 +496,8 @@ def test_production_start_rust_observation_and_controller_consume(
     identity = {"node_id": node_id, **binding}
     with sessions() as session:
         job = session.get(Job, start_job_id)
-        assert job is not None and isinstance(job.result, dict)
+        assert job is not None
+        assert isinstance(job.result, dict)
         launch = require_mapping(
             require_mapping(job.result["launch_evidence"], "launch evidence")[node_id],
             "node launch evidence",
@@ -557,9 +562,6 @@ def test_singleton_absence_reboots_through_new_controller_processes(
 ) -> None:
     """A stored exact absence drives one Stop then an exact next-generation Start."""
 
-    from vonk_control.distributed_recovery.common import _proves_fresh_absence
-    from vonk_control.models.execution import ResourceReservation
-
     (
         now,
         app,
@@ -594,7 +596,8 @@ def test_singleton_absence_reboots_through_new_controller_processes(
         accepted_plan_digest = stored_run.plan_digest
         accepted_installation_id = stored_run.installation_id
         original_start = session.get(Job, original_start_id)
-        assert original_start is not None and original_start.state == "succeeded"
+        assert original_start is not None
+        assert original_start.state == "succeeded"
         original_start_operation = session.scalar(
             select(AgentOperation).where(
                 AgentOperation.parent_job_id == original_start_id,
@@ -651,7 +654,8 @@ def test_singleton_absence_reboots_through_new_controller_processes(
         stop = recovery_stops[0]
         assert stop.actor == "system:singleton-recovery"
         assert stop.payload["workload_intent_ordinal"] == 2
-        assert run is not None and run.state == "stopping"
+        assert run is not None
+        assert run.state == "stopping"
         assert run.run_generation == 2
         assert node.observed_run_generation is None
         assert node.observation_process_running is None
@@ -663,12 +667,14 @@ def test_singleton_absence_reboots_through_new_controller_processes(
                 )
             )
         )
-        assert claims and all(claim.state == "active" for claim in claims)
+        assert claims
+        assert all(claim.state == "active" for claim in claims)
 
     bound_service.record_node_result(stop.id, node_ids[0], succeeded=True, evidence={})
     with sessions() as session:
         completed_stop = session.get(Job, stop.id)
-        assert completed_stop is not None and completed_stop.state == "succeeded"
+        assert completed_stop is not None
+        assert completed_stop.state == "succeeded"
         recovery_context = require_mapping(
             completed_stop.payload["recovery"], "singleton Stop continuation"
         )
@@ -732,7 +738,8 @@ def test_singleton_absence_reboots_through_new_controller_processes(
     )
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "running"
+        assert run is not None
+        assert run.state == "running"
         assert run.run_generation == 2
         assert run.route_state == "pending"
         assert run.installation_id == accepted_installation_id
@@ -745,7 +752,8 @@ def test_singleton_absence_reboots_through_new_controller_processes(
                 )
             )
         )
-        assert claims and all(claim.state == "active" for claim in claims)
+        assert claims
+        assert all(claim.state == "active" for claim in claims)
 
     # A current-generation running observation allows the route to
     # publish again after the exact accepted image and plan restart.
@@ -766,8 +774,10 @@ def test_singleton_absence_reboots_through_new_controller_processes(
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
         node = session.query(RunNode).filter_by(run_id=run_id).one()
-        assert run is not None and run.route_state == "published"
-        assert run.state == "running" and run.run_generation == 2
+        assert run is not None
+        assert run.route_state == "published"
+        assert run.state == "running"
+        assert run.run_generation == 2
         assert node.observation_process_running is True
 
     now[0] = NOW + timedelta(seconds=7)
@@ -812,11 +822,13 @@ def test_singleton_absence_reboots_through_new_controller_processes(
         )
         assert len(recovery_stops) == 2
         assert sum(stop.state == "running" for stop in recovery_stops) == 1
-        assert run is not None and run.state == "stopping"
+        assert run is not None
+        assert run.state == "stopping"
         assert run.run_generation == 3
         assert node.observed_run_generation is None
         assert node.observation_process_running is None
-    assert claims and all(claim.state == "active" for claim in claims)
+    assert claims
+    assert all(claim.state == "active" for claim in claims)
 
 
 def test_singleton_recovery_stop_grant_survives_start_deadline(
@@ -884,7 +896,8 @@ def test_singleton_recovery_stop_grant_survives_start_deadline(
     with sessions() as session:
         parent = session.get(Job, stop.id)
         run = session.get(RecipeRun, run_id)
-        assert parent is not None and run is not None
+        assert parent is not None
+        assert run is not None
         assert fenced_operation(sessions, claim).parent_job_id == parent.id
         assert payload.run_generation + 1 == run.run_generation
         assert parent.actor == "system:singleton-recovery"
@@ -897,11 +910,6 @@ def test_newer_workload_intent_wins_over_singleton_reboot_recovery(
     recipe_observation_wire_probe: Path,
     postgres_engine,
 ) -> None:
-    from vonk_control.distributed_recovery.coordinator import (
-        DistributedRecoveryCoordinator,
-    )
-    from vonk_control.models.execution import ResourceReservation
-    from vonk_control.models.fleet import AgentNode
 
     (
         now,
@@ -957,8 +965,10 @@ def test_newer_workload_intent_wins_over_singleton_reboot_recovery(
         assert run.route_state == "withdrawn"
         assert "newer workload intent" in (run.route_error or "")
         assert run.run_generation == 1
-        assert node is not None and node.workload_intent_ordinal == 3
-        assert claims and all(claim.state == "released" for claim in claims)
+        assert node is not None
+        assert node.workload_intent_ordinal == 3
+        assert claims
+        assert all(claim.state == "released" for claim in claims)
         assert not session.scalar(
             select(Job.id).where(
                 Job.kind == "recipe.stop",
@@ -973,10 +983,6 @@ def test_uncertain_singleton_recovery_stop_retains_run_claims(
     recipe_observation_wire_probe: Path,
     postgres_engine,
 ) -> None:
-    from vonk_control.distributed_recovery.coordinator import (
-        DistributedRecoveryCoordinator,
-    )
-    from vonk_control.models.execution import ResourceReservation
 
     (
         now,
@@ -1039,9 +1045,11 @@ def test_uncertain_singleton_recovery_stop_retains_run_claims(
         )
         # An uncertain Stop proves nothing gone: the run is lost, not failed,
         # and keeps its claims until absence is observed.
-        assert run is not None and run.state == "lost"
+        assert run is not None
+        assert run.state == "lost"
         assert run.route_state == "withdrawn"
-        assert claims and all(claim.state == "active" for claim in claims)
+        assert claims
+        assert all(claim.state == "active" for claim in claims)
 
 
 def test_singleton_recovery_enters_cooldown_then_resumes_automatically(
@@ -1096,7 +1104,8 @@ def test_singleton_recovery_enters_cooldown_then_resumes_automatically(
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
         # Waiting for fresh absence evidence spends no attempt.
-        assert run is not None and run.recovery_attempts == 0
+        assert run is not None
+        assert run.recovery_attempts == 0
         assert run.next_action_at is not None
         assert now[0] < run.next_action_at <= now[0] + timedelta(seconds=15)
         assert "fresh exact absence" in (run.route_error or "")
@@ -1114,9 +1123,6 @@ def test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered(
     recipe_observation_wire_probe: Path,
     postgres_engine,
 ) -> None:
-    from vonk_control.distributed_recovery.coordinator import (
-        DistributedRecoveryCoordinator,
-    )
 
     (
         now,
@@ -1155,7 +1161,8 @@ def test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered(
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
         node = session.query(RunNode).filter_by(run_id=run_id).one()
-        assert run is not None and run.state == "running"
+        assert run is not None
+        assert run.state == "running"
         assert run.route_state == "withdrawn"
         assert "fresh exact absence" in (run.route_error or "")
         # A wait is re-checked on the bounded wait cadence (it spends no attempt).
@@ -1190,8 +1197,10 @@ def test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered(
                 Job.payload["recovery"].as_string().is_not(None),
             )
         )
-        assert stop is not None and stop.state == "running"
-        assert run is not None and run.state == "stopping"
+        assert stop is not None
+        assert stop.state == "running"
+        assert run is not None
+        assert run.state == "stopping"
         assert run.run_generation == 2
 
 
@@ -1200,9 +1209,6 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
     recipe_observation_wire_probe: Path,
     postgres_engine,
 ) -> None:
-    from vonk_control.distributed_recovery.coordinator import (
-        DistributedRecoveryCoordinator,
-    )
 
     (
         now,
@@ -1242,7 +1248,8 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
 
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "running"
+        assert run is not None
+        assert run.state == "running"
         assert run.route_state == "withdrawn"
         assert "fresh Controller-observed Spark presence" in (run.route_error or "")
         # A wait is re-checked on the bounded wait cadence (it spends no attempt).
@@ -1258,7 +1265,8 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
 
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.next_action_at is not None
+        assert run is not None
+        assert run.next_action_at is not None
         now[0] = max(NOW + timedelta(seconds=10), run.next_action_at)
     with sessions.begin() as session:
         presence = session.get(AgentNode, node_id)
@@ -1276,8 +1284,10 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
                 Job.payload["recovery"].as_string().is_not(None),
             )
         )
-        assert run is not None and run.state == "stopping"
-        assert stop is not None and stop.state == "running"
+        assert run is not None
+        assert run.state == "stopping"
+        assert stop is not None
+        assert stop.state == "running"
 
 
 def test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop(
@@ -1285,9 +1295,6 @@ def test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop(
     recipe_observation_wire_probe: Path,
     postgres_engine,
 ) -> None:
-    from vonk_control.distributed_recovery.coordinator import (
-        DistributedRecoveryCoordinator,
-    )
 
     (
         now,
@@ -1382,8 +1389,10 @@ def test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop(
         # A wait is re-checked on the bounded wait cadence (it spends no attempt).
         assert stale.next_action_at is not None
         assert now[0] < stale.next_action_at <= now[0] + timedelta(seconds=15)
-        assert later is not None and later.state == "stopping"
-        assert stop is not None and stop.state == "running"
+        assert later is not None
+        assert later.state == "stopping"
+        assert stop is not None
+        assert stop.state == "running"
         first_wait_updated_at = stale.updated_at
         first_wait_due_at = stale.next_action_at
 
@@ -1403,10 +1412,6 @@ def test_singleton_recovery_checks_compiled_lifecycle_authority(
     postgres_engine,
     authority_copy: Literal["installed", "accepted-start"],
 ) -> None:
-    from vonk_control.distributed_recovery.coordinator import (
-        DistributedRecoveryCoordinator,
-    )
-    from vonk_control.models.execution import ResourceReservation
 
     (
         now,
@@ -1495,7 +1500,8 @@ def test_singleton_recovery_checks_compiled_lifecycle_authority(
         assert run.route_state == "withdrawn"
         assert "lifecycle" in (run.route_error or "")
         # A failed run can no longer be stopped by a plan, so it holds nothing.
-        assert claims and all(claim.state == "released" for claim in claims)
+        assert claims
+        assert all(claim.state == "released" for claim in claims)
         assert not session.scalar(
             select(Job.id).where(
                 Job.kind.in_({"recipe.stop", "recipe.start"}),
@@ -1511,10 +1517,6 @@ def test_singleton_recovery_refuses_per_node_start_for_another_plan(
     postgres_engine,
 ) -> None:
     """The Job binds the run plan; the replayed per-node payload must too."""
-
-    from vonk_control.distributed_recovery.coordinator import (
-        DistributedRecoveryCoordinator,
-    )
 
     (
         now,
@@ -1638,7 +1640,8 @@ def test_observation_deadline_applies_to_first_observation_not_renewal(
         assert worker._expire_initial_observation_deadline() is False
         with sessions() as session:
             run = session.get(RecipeRun, run_id)
-            assert run is not None and run.route_state == "pending"
+            assert run is not None
+            assert run.route_state == "pending"
 
 
 @pytest.mark.parametrize("endpoint_ready", [None, True])
@@ -1695,8 +1698,6 @@ def test_a_failing_readiness_probe_fails_the_rank_only_after_its_grace_period(
     recipe_observation_wire_probe: Path,
 ) -> None:
     """One missed readiness probe never takes a serving workload down."""
-
-    from vonk_control.agent_api.common import RANK_UNREADY_GRACE
 
     now = [NOW]
     app, sessions, run_id, _start_id, node_id, _key, produced = (

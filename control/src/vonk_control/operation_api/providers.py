@@ -11,24 +11,15 @@ from pydantic import ConfigDict, StrictStr, TypeAdapter, ValidationError
 from sqlalchemy import String, and_, cast, false, func, or_, select, true
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement, SQLColumnExpression
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
 from vonk_agent_protocol.outcome import SecurityRefusalError
-
-from ..auth import CursorCodec, CursorError, cursor_key
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..operations.blockers import read_blockers
-from ..operations.item_contract import (
-    OperationItem,
-    OperationOwnerReference,
-    operation_item,
-)
-from ..persisted_waits import read_wait
-from ..state_filters import state_filter
-from ..strict_json import warn_unreadable_once
-from .constants import NODE_PATTERN
-from .contracts import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.auth import CursorCodec, CursorError, cursor_key
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.operation_api.constants import NODE_PATTERN
+from vonk_control.operation_api.contracts import (
     OperationApiServices,
     OperationListPage,
     OperationProjectionError,
@@ -36,7 +27,16 @@ from .contracts import (
     OperationProviderProtocol,
     OperationQuery,
 )
-from .diagnostics import _aware
+from vonk_control.operation_api.diagnostics import _aware
+from vonk_control.operations.blockers import read_blockers
+from vonk_control.operations.item_contract import (
+    OperationItem,
+    OperationOwnerReference,
+    operation_item,
+)
+from vonk_control.persisted_waits import read_wait
+from vonk_control.state_filters import state_filter
+from vonk_control.strict_json import warn_unreadable_once
 
 # Observation cursors confer no mutation authority. An otherwise standalone
 # provider still needs authenticated pagination when no application codec was
@@ -438,23 +438,23 @@ class _StandaloneJobActivityProjection:
         request_id = _activity_owner_request_id(job.request_id)
         try:
             if (
-                not isinstance(job.id, str)
+                not isinstance(job.id, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                 or not 1 <= len(activity_id) <= 128
                 or request_id is None
-                or not isinstance(job.kind, str)
+                or not isinstance(job.kind, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                 or not 1 <= len(job.kind) <= 80
-                or not isinstance(job.state, str)
+                or not isinstance(job.state, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                 or not 1 <= len(job.state) <= 80
                 or type(job.current_attempt) is not int
                 or job.current_attempt < 0
-                or not isinstance(job.created_at, datetime)
-                or not isinstance(job.updated_at, datetime)
+                or not isinstance(job.created_at, datetime)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+                or not isinstance(job.updated_at, datetime)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             ):
                 raise ValueError("stored job activity is malformed")
             node_ids = _activity_node_ids(job.targets, limit=100)
             status_reason = job.status_reason
             if status_reason is not None and (
-                not isinstance(status_reason, str) or len(status_reason) > 1024
+                not isinstance(status_reason, str) or len(status_reason) > 1024  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             ):
                 raise ValueError("stored job status reason is malformed")
         except (AttributeError, TypeError, ValueError, ValidationError):
@@ -477,7 +477,7 @@ class _StandaloneJobActivityProjection:
                 wait.blockers
                 if (wait := read_wait(job)) is not None
                 else read_blockers(job.payload.get("blockers"))
-                if isinstance(job.payload, Mapping)
+                if isinstance(job.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
                 else None
             ),
             next_attempt_at=(

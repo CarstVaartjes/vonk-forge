@@ -8,6 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
+
+import vonk_control.model_cache as package
 from vonk_control.model_cache.input_contracts import FixtureArtifact
 from vonk_control.operations.contract import AvailabilityOperationFailure
 
@@ -23,7 +25,6 @@ from .non_blocking import assert_ended_without_blocking
 
 def test_model_cache_has_one_package_owner():
     """A monolithic sibling cannot shadow the managed-cache package."""
-    import vonk_control.model_cache as package
 
     root = Path(package.__file__).parent
     assert root.joinpath("__init__.py").is_file()

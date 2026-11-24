@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import io
 import json
 import re
 import stat
@@ -11,6 +12,11 @@ from pathlib import Path
 
 import pytest
 import yaml
+
+from vonk_agent_protocol.installer_setup import NasInstallTemplate
+from vonk_nas_setup.environment import parse_environment
+from vonk_nas_setup.prompts import PromptIo
+from vonk_nas_setup.setup import prepare
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/build-nas-compose-bundle"
@@ -182,7 +188,7 @@ def test_payload_build_is_deterministic_and_refuses_to_overwrite(
 
 
 @pytest.mark.parametrize(
-    "mutation", ("service", "image", "include", "bind", "config", "digest")
+    "mutation", ["service", "image", "include", "bind", "config", "digest"]
 )
 def test_payload_build_rejects_noncanonical_compose(
     tmp_path: Path, mutation: str
@@ -226,7 +232,7 @@ def test_payload_build_rejects_symlink_input(tmp_path: Path) -> None:
     assert not (tmp_path / "payload.json").exists()
 
 
-@pytest.mark.parametrize("channel", ("dev", "stable"))
+@pytest.mark.parametrize("channel", ["dev", "stable"])
 def test_installer_compose_follows_the_channel_and_keeps_third_party_pins(
     tmp_path: Path, channel: str
 ) -> None:
@@ -335,12 +341,6 @@ def test_installer_writes_the_selected_services_without_profiles(
     tmp_path: Path, mode: str, selection: str, expected: set[str]
 ) -> None:
     """Catch a profiled service the NAS Docker UI (no profile flags) never deploys."""
-    import io
-
-    from vonk_agent_protocol.installer_setup import NasInstallTemplate
-    from vonk_nas_setup.environment import parse_environment
-    from vonk_nas_setup.prompts import PromptIo
-    from vonk_nas_setup.setup import prepare
 
     payload = tmp_path / "payload.json"
     assert _build(_render(tmp_path), payload).returncode == 0
@@ -397,12 +397,6 @@ def test_upgrade_rewrites_the_selected_services_without_profiles(
     absent: set[str],
 ) -> None:
     """Catch an upgrade that rewrites the profiled payload or loses the selection."""
-    import io
-
-    from vonk_agent_protocol.installer_setup import NasInstallTemplate
-    from vonk_nas_setup.environment import parse_environment
-    from vonk_nas_setup.prompts import PromptIo
-    from vonk_nas_setup.setup import prepare
 
     payload = tmp_path / "payload.json"
     assert _build(_render(tmp_path), payload).returncode == 0
@@ -422,12 +416,6 @@ def test_upgrade_rewrites_the_selected_services_without_profiles(
 
 def test_upgrade_of_a_hermes_enabled_install_asks_nothing(tmp_path: Path) -> None:
     """Catch an install from before Hermes was removed needing answers to upgrade."""
-    import io
-
-    from vonk_agent_protocol.installer_setup import NasInstallTemplate
-    from vonk_nas_setup.environment import parse_environment
-    from vonk_nas_setup.prompts import PromptIo
-    from vonk_nas_setup.setup import prepare
 
     payload = tmp_path / "payload.json"
     assert _build(_render(tmp_path), payload).returncode == 0

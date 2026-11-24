@@ -19,6 +19,7 @@ import time
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -320,7 +321,7 @@ def configure_tailnet_service_names(
         yaml.safe_dump(document, sort_keys=False, default_flow_style=False),
         encoding="utf-8",
     )
-    os.chmod(compose_path, metadata.st_mode & 0o777)
+    compose_path.chmod(metadata.st_mode & 0o777)
 
 
 def local_installer_command(root: Path, answers: Path) -> list[str] | None:
@@ -1228,7 +1229,7 @@ def _json_object_without_duplicate_keys(
 ) -> dict[str, object]:
     document: dict[str, object] = {}
     for key, value in pairs:
-        if not isinstance(key, str) or key in document:
+        if not isinstance(key, str) or key in document:  # pyright: ignore[reportUnnecessaryIsInstance]  # JSON keys are re-checked as strings
             raise ValueError("JSON object has duplicate or invalid keys")
         document[key] = value
     return document
@@ -1250,7 +1251,8 @@ def _same_json_shape(actual: object, expected: object) -> bool:
             isinstance(actual, list)
             and len(actual) == len(expected)
             and all(
-                _same_json_shape(left, right) for left, right in zip(actual, expected)
+                _same_json_shape(left, right)
+                for left, right in zip(actual, expected, strict=False)
             )
         )
     return actual == expected
@@ -1396,7 +1398,9 @@ def _tailnet_service_mapping_addresses(
     document: object,
     *,
     expected_services: set[str],
-) -> tuple[dict[str, set[ipaddress.IPv4Address | ipaddress.IPv6Address]], dict]:
+) -> tuple[
+    dict[str, set[ipaddress.IPv4Address | ipaddress.IPv6Address]], dict[str, Any]
+]:
     if (
         not isinstance(document, dict)
         or not expected_services
@@ -1644,7 +1648,9 @@ def verify_tailscale_services(
         )
 
 
-def assert_candidate_image_graph(services: dict, expected: dict) -> None:
+def assert_candidate_image_graph(
+    services: dict[str, Any], expected: dict[str, Any]
+) -> None:
     """Match each effective Vonk service to the verified candidate overlay."""
     for name, service in services.items():
         image = service.get("image") if isinstance(service, dict) else None
@@ -1869,7 +1875,7 @@ def assert_tailscale_services_absent(raw: str) -> None:
     observed = {
         str(row.get("Service", ""))
         for row in _compose_rows(raw)
-        if isinstance(row, dict)
+        if isinstance(row, dict)  # pyright: ignore[reportUnnecessaryIsInstance]  # Compose rows are re-checked as objects
     }
     if observed & TAILSCALE_SERVICES:
         raise AcceptanceError(

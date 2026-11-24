@@ -9,6 +9,9 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+
+from vonk_agent_protocol.agent_operations import AgentInstallResult
+from vonk_agent_protocol.agent_operations import AgentOperation as Kind
 from vonk_agent_protocol.build_import import (
     RecipeBuildCleanupEvidence,
     RecipeBuildCleanupRequest,
@@ -18,13 +21,10 @@ from vonk_agent_protocol.build_import import (
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 from vonk_agent_protocol.contracts import (
     AgentClaim,
-    AgentInstallResult,
     AgentPayload,
     AgentResult,
     AgentResultPayload,
-    canonical_message,
 )
-from vonk_agent_protocol.contracts import AgentOperation as Kind
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     LifecycleState,
@@ -41,6 +41,7 @@ from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
     RuntimePreflightResult,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.contracts import StaleAgentFence
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
@@ -128,7 +129,8 @@ def _accepted(service, kind: Kind = Kind.RECIPE_INSTALL):
         with sessions.begin() as session:
             row = session.get(AgentOperation, operation.id)
             job = session.get(Job, owner.id)
-            assert row is not None and job is not None
+            assert row is not None
+            assert job is not None
             attempt = AgentOperationAdapter(session).start_attempt(
                 row,
                 job,
@@ -191,11 +193,13 @@ def test_lost_content_report_adopts_after_lease_without_reexecution_or_renewal(
                 AgentOperationAttempt.fence == claim.fence
             )
         )
-        assert row is not None and row.state == LifecycleState.SUCCEEDED
+        assert row is not None
+        assert row.state == LifecycleState.SUCCEEDED
         assert attempt is not None
         assert attempt.lease_deadline == deadline
         node = session.get(AgentNode, NODE_A)
-        assert node is not None and contact_row(node).last_seen_at == contact
+        assert node is not None
+        assert contact_row(node).last_seen_at == contact
     assert claim_agent(queue, NODE_A, "serial-a") is None
 
 
@@ -210,7 +214,9 @@ def test_late_install_receipt_rejects_changed_authority(service, change):
         row = session.get(AgentOperation, operation.id)
         node = session.get(AgentNode, NODE_A)
         job = session.get(Job, owner.id)
-        assert row is not None and node is not None and job is not None
+        assert row is not None
+        assert node is not None
+        assert job is not None
         if change == "identity":
             row.authority_revision = "f" * 64
         elif change == "revoked":
@@ -221,13 +227,16 @@ def test_late_install_receipt_rejects_changed_authority(service, change):
             job.state = LifecycleState.CANCELLED
         else:
             node.workload_intent_ordinal += 1
+    refusal: StaleAgentFence | None = None
     try:
         queue.record_late_result(receipt)
     except StaleAgentFence as error:
-        assert str(error)
+        refusal = error
+    assert refusal is None or str(refusal)
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
-        assert row is not None and row.state != LifecycleState.SUCCEEDED
+        assert row is not None
+        assert row.state != LifecycleState.SUCCEEDED
 
 
 @pytest.mark.parametrize("parked", [False, True])
@@ -253,4 +262,5 @@ def test_worker_adopts_retained_install_receipt_without_contact(service, parked)
     assert queue.reconcile_orders()
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
-        assert row is not None and row.state == LifecycleState.SUCCEEDED
+        assert row is not None
+        assert row.state == LifecycleState.SUCCEEDED

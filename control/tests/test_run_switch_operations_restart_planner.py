@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import timedelta
@@ -16,12 +17,23 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
+
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import RunState
+from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.fleet_profile_contract.definitions import (
+    FleetProfileAssignmentInput,
+    FleetProfileInput,
+)
+from vonk_control.fleet_profiles.factory import (
+    build_production_fleet_profile_service,
+)
 from vonk_control.models.cache import RecipeBuild
-from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.models.execution import (
     InstallationNode,
     RecipeInstallation,
@@ -35,7 +47,9 @@ from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.operation_api.contracts import OperationQuery
 from vonk_control.operations.item_contract import operation_item
 from vonk_control.preparation_contract import RuntimeImageIdentity
+from vonk_control.recipe_builds.common import _reopen_build_attempt
 from vonk_control.recipe_operations.errors import RecipeOperationConflict
+from vonk_control.recipe_operations.impact_plans import StopPlan
 from vonk_control.run_switch_contract.evidence import RunSwitchPhase, RunSwitchReason
 from vonk_control.run_switch_contract.operations import (
     RunSwitchOperationResult,
@@ -50,6 +64,11 @@ from vonk_control.run_switch_contract.requests import (
     SparkGroup,
     SparkGroupNode,
 )
+from vonk_control.run_switch_operations import (
+    build_selection,
+    planning_helpers,
+    resource_fit,
+)
 from vonk_control.run_switch_operations.errors import (
     RunSwitchIssuedWorkloadPending,
 )
@@ -59,7 +78,6 @@ from vonk_control.run_switch_operations.image_receipts import (
     _planned_transfer_bytes,
 )
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .recipe_operations_support import (
     NOW,
@@ -160,7 +178,8 @@ def test_temporary_phase_failure_preserves_exact_intent_across_restart(
         assert service.tick()
         waiting = service.get(operation.operation_id)
         assert waiting.state == "running", waiting.status_reason
-        assert waiting.result is not None and waiting.next_attempt_at is not None
+        assert waiting.result is not None
+        assert waiting.next_attempt_at is not None
         due = waiting.next_attempt_at
         assert now[0] < due <= now[0] + timedelta(seconds=60)
         service = restarted()
@@ -187,7 +206,8 @@ def test_temporary_phase_failure_preserves_exact_intent_across_restart(
     current = service.get(operation.operation_id)
     with sessions() as session:
         row = session.get(Job, operation.operation_id)
-        assert row is not None and row.payload == original
+        assert row is not None
+        assert row.payload == original
     if ending == "recovered":
         assert current.state == "running"
         assert current.result is not None
@@ -245,7 +265,8 @@ def test_late_dependency_receipt_resumes_original_checkpoint_after_deadline(
     assert held.result is not None
     assert held.next_attempt_at is not None
     assert held.next_attempt_at == now[0] + timedelta(seconds=60)
-    assert held.status_reason is not None and dependency in held.status_reason
+    assert held.status_reason is not None
+    assert dependency in held.status_reason
     assert service.tick() is False
     executor.pending = False
     now[0] = held.next_attempt_at
@@ -259,9 +280,8 @@ def test_late_dependency_receipt_resumes_original_checkpoint_after_deadline(
     assert restarted.tick()
     recovered = restarted.get(operation.operation_id)
     assert recovered.state == "running"
-    assert (
-        recovered.result is not None and "transfer" in recovered.result.completed_phases
-    )
+    assert recovered.result is not None
+    assert "transfer" in recovered.result.completed_phases
     assert executor.calls_while_pending == 1
 
 
@@ -269,7 +289,6 @@ def test_shared_admission_contention_preserves_operation_for_retry(
     tmp_path: Path,
 ) -> None:
     """A busy child enqueue must retain intent instead of escaping the worker."""
-    from vonk_control.admission_locking import AdmissionLockBusy
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path
@@ -320,7 +339,8 @@ def test_stored_run_switch_with_retired_fields_stays_readable_and_new_work_proce
     )
     with sessions.begin() as session:
         job = session.get(Job, old.operation_id)
-        assert job is not None and isinstance(job.payload, dict)
+        assert job is not None
+        assert isinstance(job.payload, dict)
         payload = dict(job.payload)
         plan = dict(cast("dict[str, object]", payload["plan"]))
         # A field a newer Controller retired must not make history unreadable.
@@ -683,7 +703,8 @@ def test_memory_freed_by_a_confirmed_stop_after_the_sample_is_not_charged_again(
     baseline = service.preview(request, actor="admin")
     required = baseline.fit_current.nodes[0].memory_required_bytes
     floor = baseline.fit_current.nodes[0].memory_floor_bytes
-    assert required is not None and floor is not None
+    assert required is not None
+    assert floor is not None
     # The sample still shows the stopped run's memory in use: free is short of
     # the demand plus the reserve, while the total is ample.
     free = required + floor - 52
@@ -728,18 +749,6 @@ def test_dual_profile_disk_review_does_not_decode_unrelated_catalog_documents(
     tmp_path, request, database
 ):
     """Catches eviction fitting each rank by fetching every catalog head's JSON."""
-    from collections import Counter
-
-    from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-    from vonk_control.fleet_profile_contract.definitions import (
-        FleetProfileAssignmentInput,
-        FleetProfileInput,
-    )
-    from vonk_control.fleet_profiles.factory import (
-        build_production_fleet_profile_service,
-    )
-    from vonk_control.models.catalog import CatalogDocument
-    from vonk_forge_contracts import document_sha256, read_recipe
 
     decoded = Counter()
 
@@ -841,7 +850,7 @@ def test_dual_profile_disk_review_does_not_decode_unrelated_catalog_documents(
         engine.dispose()
 
 
-@pytest.mark.parametrize("unused_models", (None, 5))
+@pytest.mark.parametrize("unused_models", [None, 5])
 def test_disk_review_counts_orphan_model_copies_and_scopes_unmeasured_cleanup(
     tmp_path, unused_models: int | None
 ):
@@ -881,10 +890,10 @@ def test_disk_review_counts_orphan_model_copies_and_scopes_unmeasured_cleanup(
     assert service.preview(request, actor="admin").allowed
 
 
-@pytest.mark.parametrize("memory", ("none", "conditional", "infeasible"))
-@pytest.mark.parametrize("missing_ranks", (0, 1))
-@pytest.mark.parametrize("lifecycle_result", ("allowed", "disallowed", "conflict"))
-@pytest.mark.parametrize("stoppable", (False, True))
+@pytest.mark.parametrize("memory", ["none", "conditional", "infeasible"])
+@pytest.mark.parametrize("missing_ranks", [0, 1])
+@pytest.mark.parametrize("lifecycle_result", ["allowed", "disallowed", "conflict"])
+@pytest.mark.parametrize("stoppable", [False, True])
 def test_planner_entrypoints_return_valid_contracts(
     planner_world: _PlannerWorld,
     monkeypatch: pytest.MonkeyPatch,
@@ -906,8 +915,6 @@ def test_planner_entrypoints_return_valid_contracts(
     retention delete can leave the current fit infeasible while the after-Stop
     fit is conditional.
     """
-    from vonk_control.recipe_operations.impact_plans import StopPlan
-    from vonk_control.run_switch_operations import resource_fit
 
     world = planner_world
     with world.sessions.begin() as session:
@@ -968,7 +975,7 @@ def test_planner_entrypoints_return_valid_contracts(
                 session, world.request, plan.assessment()
             )
         )
-    outputs.append(world.planner.preview_stop(world.run_id, actor="admin"))
+    outputs.append(world.planner.preview_stop(world.run_id))
     if len(world.original_group.nodes) > 1:
         scope = RunSwitchProfileStopScope(
             original_group=world.original_group,
@@ -977,10 +984,8 @@ def test_planner_entrypoints_return_valid_contracts(
             ),
             missing_node_ids=[world.original_group.nodes[-1].node_id],
         )
-        outputs.append(
-            world.planner.preview_profile_stop(world.run_id, scope, actor="admin")
-        )
-    outputs.append(world.planner.preview_cleanup(world.installation_id, actor="admin"))
+        outputs.append(world.planner.preview_profile_stop(world.run_id, scope))
+    outputs.append(world.planner.preview_cleanup(world.installation_id))
     fits = 0
     outputs.append(world.planner.inspect_request(world.request, actor="admin"))
     for output in outputs:
@@ -1012,14 +1017,15 @@ def test_profile_partial_stop_waits_with_lifecycle_scope_blocker(
         alias="old",
     )
     planner = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
-    group = planner.preview_stop(run.owner_id, actor="admin").spark_group
+    group = planner.preview_stop(run.owner_id).spark_group
     scope = RunSwitchProfileStopScope(
         original_group=group, target_node_ids=[nodes[0]], missing_node_ids=[nodes[1]]
     )
     # nodes[1] was declared missing but is enrolled (revoked_at is None): the
     # real lifecycle reports the changed rank membership as a disallowed Stop.
-    plan = planner.preview_profile_stop(run.owner_id, scope, actor="admin")
-    assert not plan.allowed and not plan.stops
+    plan = planner.preview_profile_stop(run.owner_id, scope)
+    assert not plan.allowed
+    assert not plan.stops
     assert [reason.code for reason in plan.blockers] == [
         RunSwitchCode.STOP_PLAN_UNAVAILABLE
     ]
@@ -1029,7 +1035,6 @@ def test_profile_partial_stop_waits_with_lifecycle_scope_blocker(
     child = planner.apply_profile_stop(
         run.owner_id,
         scope,
-        plan_digest=plan.plan_digest,
         request_key=str(uuid.uuid4()),
         actor="admin",
         workload_intent_ordinal=1,
@@ -1038,7 +1043,8 @@ def test_profile_partial_stop_waits_with_lifecycle_scope_blocker(
     assert child.state == LifecycleState.OBSERVING
     assert _result(child).retry_reason == RunSwitchCode.STOP_PLAN_UNAVAILABLE
     assert child.blockers[0].detail == RunSwitchCode.STOP_PLAN_UNAVAILABLE
-    assert child.next_attempt_at is not None and child.next_attempt_at > NOW
+    assert child.next_attempt_at is not None
+    assert child.next_attempt_at > NOW
     assert _result(child).observation_deadline_at is not None
     # A blocked partial Stop must not poison the next workload request on the
     # same Sparks. The switch below replaces this run on both of the child's
@@ -1055,12 +1061,14 @@ def test_profile_partial_stop_waits_with_lifecycle_scope_blocker(
         actor="admin",
     )
     assert fresh.operation_id != child.operation_id
-    assert fresh.state == LifecycleState.QUEUED and not fresh.blockers
+    assert fresh.state == LifecycleState.QUEUED
+    assert not fresh.blockers
     assert sorted(fresh.node_ids) == sorted(nodes)
     with sessions() as session:
         child_job = session.get(Job, child.operation_id)
         fresh_job = session.get(Job, fresh.operation_id)
-        assert child_job is not None and fresh_job is not None
+        assert child_job is not None
+        assert fresh_job is not None
         assert child_job.payload["workload_intent_ordinal"] == 1
         assert fresh_job.payload["workload_intent_ordinal"] == 2
         assert {
@@ -1096,11 +1104,9 @@ def test_planner_outputs_validate_across_stop_and_load_topologies(
     with sessions.begin() as session:
         build = session.get(RecipeBuild, build_id)
         assert build is not None
-        assert (
-            build.image_digest is not None
-            and build.oci_layout_sha256 is not None
-            and build.image_bytes is not None
-        )
+        assert build.image_digest is not None
+        assert build.oci_layout_sha256 is not None
+        assert build.image_bytes is not None
         expected_image = RuntimeImageIdentity(
             image_digest=build.image_digest,
             oci_layout_sha256=build.oci_layout_sha256,
@@ -1204,10 +1210,8 @@ def test_planner_outputs_validate_across_stop_and_load_topologies(
     )
     if memory_shortfall:
         demand = baseline.fit_current.nodes[0]
-        assert (
-            demand.memory_required_bytes is not None
-            and demand.memory_floor_bytes is not None
-        )
+        assert demand.memory_required_bytes is not None
+        assert demand.memory_floor_bytes is not None
         with sessions.begin() as session:
             snapshot = session.scalar(
                 select(NodeInventorySnapshot).where(
@@ -1246,12 +1250,6 @@ def test_plan_reuses_inventory_when_a_new_sample_lands_between_read_points(
     tmp_path: Path, postgres_engine, monkeypatch, during_builder: bool
 ) -> None:
     """Catch READ COMMITTED mixing builder/current/post-stop inventory samples."""
-    from vonk_control.recipe_builds.common import _reopen_build_attempt
-    from vonk_control.run_switch_operations import (
-        build_selection,
-        planning_helpers,
-        resource_fit,
-    )
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine
@@ -1267,12 +1265,10 @@ def test_plan_reuses_inventory_when_a_new_sample_lands_between_read_points(
         node = session.get(AgentNode, node_id)
         build = session.get(RecipeBuild, build_id)
         snapshot = session.scalar(select(NodeInventorySnapshot))
-        assert (
-            run is not None
-            and node is not None
-            and build is not None
-            and snapshot is not None
-        )
+        assert run is not None
+        assert node is not None
+        assert build is not None
+        assert snapshot is not None
         run.state = LifecycleState.RUNNING
         for rank in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
             rank.state = LifecycleState.RUNNING

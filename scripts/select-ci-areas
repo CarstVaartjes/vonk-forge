@@ -10,6 +10,7 @@ import re
 import sys
 from collections.abc import Iterable
 from pathlib import Path
+from typing import TypedDict
 
 AREAS = (
     "rust",
@@ -238,7 +239,7 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
         sorted({path.strip().removeprefix("./") for path in paths if path.strip()})
     )
     if event not in DIFF_EVENTS or not changed:
-        return {area: True for area in AREAS}
+        return dict.fromkeys(AREAS, True)
     selected = {area: area in FAST_AREAS for area in AREAS}
     for path in changed:
         if _core_test_input(path) or path.startswith(FUZZ_CRATE):
@@ -248,7 +249,7 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
             "/" not in path and path.endswith((".md", ".mdx"))
         )
         if path.startswith(INTEGRATION_INPUTS) or not documentation:
-            return {area: True for area in AREAS}
+            return dict.fromkeys(AREAS, True)
     return selected
 
 
@@ -264,7 +265,13 @@ INTEGRATION_HEAD = "integration/"
 ACCEPTANCE_LABEL = "release-acceptance"
 
 
-def full_suites(event: str, payload: dict | None) -> bool:
+class EventPayload(TypedDict, total=False):
+    """The GitHub event payload field this script reads (checked where read)."""
+
+    pull_request: object
+
+
+def full_suites(event: str, payload: EventPayload | None) -> bool:
     """Whether this run carries every suite rather than the member tier."""
     pull = (payload or {}).get("pull_request")
     if event != "pull_request" or not isinstance(pull, dict):

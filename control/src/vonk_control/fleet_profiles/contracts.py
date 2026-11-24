@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
+from typing import ClassVar, Literal, Protocol
 
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
@@ -22,26 +23,29 @@ from vonk_agent_protocol.outcome import (
 )
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
-
-from ..fleet_profile_contract.applications import FleetProfileIntendedConfiguration
-from ..fleet_profile_contract.assessment import FleetProfileReason
-from ..fleet_profile_contract.definitions import (
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileIntendedConfiguration,
+)
+from vonk_control.fleet_profile_contract.assessment import FleetProfileReason
+from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignment,
     FleetProfileDefinition,
 )
-from ..fleet_profile_contract.effects import FleetProfileEffects
-from ..fleet_profile_contract.review import FleetProfilePreview
-from ..fleet_profile_contract.vocabulary import FleetProfileSupersedeCode
-from ..lifecycle.evidence import Residue
-from ..operations.blockers import OperationBlocker, make_blocker
-from ..preparation_contract import RuntimeImageIdentity
-from ..run_switch_contract.plans import RunSwitchAssessment
-from ..run_switch_operations.errors import RunSwitchOperationConflict
-from ..storage_demands import StorageRelief
-from ..wait_contract import QueueWait
-
-if TYPE_CHECKING:
-    from .service import FleetProfileService
+from vonk_control.fleet_profile_contract.effects import FleetProfileEffects
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profile_contract.vocabulary import (
+    FleetProfileAssignmentState,
+    FleetProfileSupersedeCode,
+)
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.execution import RecipeInstallation, RecipeRun
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.operations.blockers import OperationBlocker, make_blocker
+from vonk_control.preparation_contract import RuntimeImageIdentity
+from vonk_control.run_switch_contract.plans import RunSwitchAssessment
+from vonk_control.run_switch_operations.errors import RunSwitchOperationConflict
+from vonk_control.storage_demands import StorageRelief
+from vonk_control.wait_contract import QueueWait
 
 
 class PreparationStarter(Protocol):
@@ -126,7 +130,7 @@ class _AssessmentProvider(Protocol):  # noqa: PYI046 -- used by service composit
 class _ProfileControlEffects:
     """One SQL-owned reconciliation projection for review and admission."""
 
-    states: dict[str, FleetProfileService._AssignmentState]
+    states: dict[str, _AssignmentState]
     effects: FleetProfileEffects
     changed_nodes: set[str]
     unavailable_assignment_ids: set[str]
@@ -372,3 +376,26 @@ def planner_contract_defect(
             f"Planner contract failed for assignment {assignment_id}: {error}",
         ).detail
     )
+
+
+class _AssignmentState:
+    current_state: FleetProfileAssignmentState
+    mapping: ClusterMapping | None
+    installation: RecipeInstallation | None
+    run: RecipeRun | None
+    installation_ready: bool
+
+    def __init__(
+        self,
+        *,
+        current_state: FleetProfileAssignmentState,
+        mapping: ClusterMapping | None,
+        installation: RecipeInstallation | None,
+        run: RecipeRun | None,
+        installation_ready: bool = False,
+    ) -> None:
+        self.current_state = current_state
+        self.mapping = mapping
+        self.installation = installation
+        self.run = run
+        self.installation_ready = installation_ready

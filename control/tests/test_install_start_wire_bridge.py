@@ -9,7 +9,10 @@ from typing import Any
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import AgentResult, RecipeStartResult
+
+from tests.wire_probes import prebuilt_probe
+from vonk_agent_protocol.agent_operations import RecipeStartResult
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.distribution import DistributionAssignment
 from vonk_control.agent_outcome import stored_report
 from vonk_control.distribution.service import DistributionService
@@ -17,8 +20,6 @@ from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.models.execution import InstallationNode, RunNode
 from vonk_control.models.operations import AgentOperation
-
-from tests.wire_probes import prebuilt_probe
 
 from .agent_api_support import NODE_A, agent_headers
 from .agent_api_support import agent_system as _agent_system
@@ -124,7 +125,8 @@ def test_controller_queued_install_and_start_payloads_cross_rust_and_back(
                 InstallationNode.node_id == install_rows[0].node_id,
             )
         )
-        assert node is not None and node.state == "installed"
+        assert node is not None
+        assert node.state == "installed"
 
     start_plan = service.preview_run(install_operation.owner_id, "qwen")
     start_operation = service.start(
@@ -146,7 +148,8 @@ def test_controller_queued_install_and_start_payloads_cross_rust_and_back(
                 RunNode.node_id == start_rows[0].node_id,
             )
         )
-        assert node is not None and node.state == "running"
+        assert node is not None
+        assert node.state == "running"
 
     stop_plan = service.preview_stop(start_operation.owner_id)
     stop_operation = service.stop(
@@ -167,7 +170,8 @@ def test_controller_queued_install_and_start_payloads_cross_rust_and_back(
                 RunNode.node_id == stop_rows[0].node_id,
             )
         )
-        assert node is not None and node.state == "stopped"
+        assert node is not None
+        assert node.state == "stopped"
 
 
 def test_controller_routine_uninstall_payload_crosses_rust_and_back(

@@ -22,8 +22,9 @@ from functools import cached_property
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from vonk_agent_protocol.store_cleanup import STORAGE_POLICY
 from vonk_forge_contracts import CONTRACT_MAJOR
+
+from vonk_agent_protocol.store_cleanup import STORAGE_POLICY
 
 _LOGGER = logging.getLogger(__name__)
 

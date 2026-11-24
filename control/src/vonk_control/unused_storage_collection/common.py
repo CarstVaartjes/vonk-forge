@@ -7,31 +7,30 @@ import shutil
 from collections import Counter
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import InstallationState, RunState
-
-from ..fleet_profile_contract.definitions import FleetProfileAssignmentInput
-from ..jobs import states as job_states
-from ..model_cache.contract import CacheManifest
-from ..models.cache import ModelCacheSet
-from ..recipe_operations.impact_plans import StopPlan
-from ..storage_demands import (
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignmentInput
+from vonk_control.jobs import states as job_states
+from vonk_control.model_cache.contract import CacheManifest
+from vonk_control.models.cache import ModelCacheSet
+from vonk_control.recipe_operations.impact_plans import StopPlan
+from vonk_control.storage_demands import (
     STORAGE_EVICTING,
     STORAGE_EVICTION_TIMED_OUT,
     STORAGE_INSUFFICIENT,
 )
-from ..stored.json_values import read_row_column
+from vonk_control.stored.rows import read_row_column
 
 if TYPE_CHECKING:
-    from .evidence import _Item
+    from vonk_control.unused_storage_collection.evidence import _Item
 
 """Unused storage collection: common concerns."""
 
@@ -355,37 +354,6 @@ def _eviction_sentence(items: Iterable[_Item], shortfall: int) -> str:
         for names, size in by_profile.items()
     )
     return "; ".join(parts)
-
-
-def spark_eviction_capacity(
-    session: Session,
-    node_id: str,
-    now: datetime,
-    superseded_applications: Collection[str] = (),
-) -> EvictionCapacity:
-    """What unused installations on a Spark could free, read-only, and what stays.
-
-    A review asks this to plan the eviction a load needs instead of refusing it:
-    the installations the collector can remove (no saved profile points to them
-    first, then pointed ones, least recently used first) and a sentence naming
-    what it must keep, so a refusal names what blocks. It registers no demand and
-    removes nothing. The loads the reviewed one supersedes keep nothing: they
-    end when it is accepted, before it waits for the eviction.
-    """
-    from .evidence import _Evidence
-    from .service import UnusedStorageCollector
-
-    kept_bytes: Counter[str] = Counter()
-    items = UnusedStorageCollector._spark_items(
-        session,
-        node_id,
-        _Evidence.read(session, now, superseded_applications),
-        Counter(),
-        kept_bytes,
-    )
-    return EvictionCapacity(
-        sum(item.freeable for item in items), _kept_sentence(kept_bytes), tuple(items)
-    )
 
 
 def _disk_usage(path: Path) -> tuple[int, int]:

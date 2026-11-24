@@ -535,7 +535,7 @@ def atomic_output(path: Path, raw: bytes, mode: int = 0o644) -> None:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
-    os.replace(temporary, path)
+    temporary.replace(path)
 
 
 def check_release_key(private_key: Path) -> None:
@@ -671,6 +671,7 @@ def build(
     epoch: int,
     architecture: str,
     build_digest: str,
+    *,
     acceptance_baseline: bool = False,
 ) -> Path:
     if not valid_package_version(version) and not (
@@ -865,7 +866,7 @@ def main() -> int:
             arguments.source_date_epoch,
             arguments.architecture,
             arguments.build_digest,
-            arguments.acceptance_baseline,
+            acceptance_baseline=arguments.acceptance_baseline,
         )
     except (BuildError, OSError, ValueError) as error:
         print(f"build-agent-deb: {error}", file=sys.stderr)

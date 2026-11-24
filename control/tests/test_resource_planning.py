@@ -1,12 +1,25 @@
+import ast
+import inspect
 import json
 from dataclasses import replace
+from importlib import resources
+from pathlib import Path
+
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts.memory_admission import (
+    PLATFORM_MEMORY_FLOOR_BYTES,
+    evaluate_memory_admission,
+)
 
 from vonk_agent_protocol.lifecycle_vocabulary import ResourceBlockerCode
 from vonk_agent_protocol.reason_codes.resources import ResourcePlanningCode
 from vonk_control.owner_liveness import OwnerKind, OwnerRef
 from vonk_control.resource_planning.capacity import plan_capacity
 from vonk_control.resource_planning.demand import resource_demand
-from vonk_control.resource_planning.memory import memory_capacity_snapshot
+from vonk_control.resource_planning.memory import (
+    memory_capacity_snapshot,
+    memory_requirement,
+)
 from vonk_control.resource_planning.preflight import plan_resource_preflight
 from vonk_control.resource_planning.settings import (
     classify_preparation_effects,
@@ -22,7 +35,9 @@ from vonk_control.resource_planning.types import (
     ResourceEvidence,
     UnknownRunMemoryResidual,
 )
-from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
+from vonk_control.run_admission import RunAdmissionService
+from vonk_control.run_switch_contract.evidence import EffectiveSettingsSelection
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 def _recipe_settings(
@@ -72,8 +87,10 @@ def test_text_settings_drive_demand_and_identity() -> None:
     large = resolve_effective_settings(
         _recipe_document(_recipe_settings(context=65_536, concurrency=3))
     )
-    assert small.allowed and large.allowed
-    assert small.settings is not None and large.settings is not None
+    assert small.allowed
+    assert large.allowed
+    assert small.settings is not None
+    assert large.settings is not None
     first = resource_demand(small.settings, _evidence())
     second = resource_demand(large.settings, _evidence())
     assert first.total_bytes == 120
@@ -97,9 +114,11 @@ def test_non_text_settings_may_omit_context_concurrency_and_batch() -> None:
             },
         }
     )
-    assert result.allowed and result.settings is not None
+    assert result.allowed
+    assert result.settings is not None
     demand = resource_demand(result.settings, _evidence())
-    assert demand.allowed and demand.total_bytes == 120
+    assert demand.allowed
+    assert demand.total_bytes == 120
 
 
 def test_parallelism_has_one_topology_authority_and_duplicate_is_blocked() -> None:
@@ -120,7 +139,8 @@ def test_parallelism_has_one_topology_authority_and_duplicate_is_blocked() -> No
     assert not result.allowed
     assert result.settings is None
     repaired = resolve_effective_settings(_recipe_document(_recipe_settings()))
-    assert repaired.allowed and repaired.settings is not None
+    assert repaired.allowed
+    assert repaired.settings is not None
 
 
 def test_dimension_product_must_match_node_count() -> None:
@@ -141,7 +161,8 @@ def test_dimension_product_must_match_node_count() -> None:
     assert not result.allowed
     assert result.settings is None
     repaired = resolve_effective_settings(_recipe_document(_recipe_settings()))
-    assert repaired.allowed and repaired.settings is not None
+    assert repaired.allowed
+    assert repaired.settings is not None
 
 
 def test_capacity_only_uses_explicit_planned_stop_release() -> None:
@@ -169,7 +190,8 @@ def test_capacity_only_uses_explicit_planned_stop_release() -> None:
         memory_floor_bytes=200,
     )
     assert not without.allowed
-    assert with_stop.allowed and with_stop.stop_before_prepare
+    assert with_stop.allowed
+    assert with_stop.stop_before_prepare
     assert with_stop.nodes[0].current_free_after_bytes == 180
     assert with_stop.nodes[0].after_stop_free_after_bytes == 280
 
@@ -641,10 +663,6 @@ def test_composed_preflight_returns_settings_demand_and_capacity() -> None:
 
 
 def test_production_services_use_exactly_the_platform_memory_floor() -> None:
-    import ast
-    from pathlib import Path
-
-    from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
     source = Path(__file__).resolve().parents[1] / "src" / "vonk_control"
     services = {"RunAdmissionService", "RunSwitchOperationService"}
@@ -664,17 +682,13 @@ def test_production_services_use_exactly_the_platform_memory_floor() -> None:
             # Omitting the argument takes the constant default; passing it must
             # pass the constant itself.
             for item in floors:
-                assert (
-                    isinstance(item.value, ast.Name)
-                    and item.value.id == "PLATFORM_MEMORY_FLOOR_BYTES"
-                ), (
+                assert isinstance(item.value, ast.Name), (
+                    f"{path.name}:{node.lineno} passes a floor other than the platform constant"
+                )
+                assert item.value.id == "PLATFORM_MEMORY_FLOOR_BYTES", (
                     f"{path.name}:{node.lineno} passes a floor other than the platform constant"
                 )
     assert seen == {"RunAdmissionService": 2, "RunSwitchOperationService": 2}
-    import inspect
-
-    from vonk_control.run_admission import RunAdmissionService
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     for service in (RunAdmissionService, RunSwitchOperationService):
         default = inspect.signature(service).parameters["memory_floor_bytes"].default
@@ -683,10 +697,6 @@ def test_production_services_use_exactly_the_platform_memory_floor() -> None:
 
 def test_stored_canonical_models_supply_exact_selected_weight_bytes() -> None:
     """Catches counting unused files, or sizing a Model the recipe does not pin."""
-    from importlib import resources
-
-    from vonk_control.resource_planning.memory import memory_requirement
-    from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
     recipe = RecipeDefinition.model_validate_json(
         resources.files("vonk_forge_contracts")
@@ -729,7 +739,6 @@ def test_stored_canonical_models_supply_exact_selected_weight_bytes() -> None:
 
 def test_typed_effective_selection_roundtrip_keeps_bound_identity_and_knobs() -> None:
     """Catches object duck-reading losing the already reviewed settings digest."""
-    from vonk_control.run_switch_contract.evidence import EffectiveSettingsSelection
 
     resolved = resolve_effective_settings(_recipe_document(_recipe_settings())).settings
     assert resolved is not None
@@ -769,7 +778,8 @@ def test_invalid_engine_knob_and_boolean_context_remain_contract_blockers() -> N
         "engine-owned": {"value": {"nested": True}, "change_effect": "restart"}
     }
     result = resolve_effective_settings(_recipe_document(settings))
-    assert not result.allowed and result.settings is None
+    assert not result.allowed
+    assert result.settings is None
     settings = _recipe_settings()
     settings["context_tokens"] = {"value": True, "change_effect": "restart"}
     result = resolve_effective_settings(_recipe_document(settings))
@@ -780,20 +790,20 @@ def test_decision_context_participates_in_resource_settings_identity() -> None:
     settings = _recipe_settings(context=4096)
     settings["kind"] = "decision"
     first = resolve_effective_settings(_recipe_document(settings))
-    assert first.allowed and first.settings is not None
+    assert first.allowed
+    assert first.settings is not None
     assert first.settings.context_tokens == 4096
     assert first.settings.change_effects["context_tokens"] == "reprepare"
     settings["context_tokens"] = {"value": 8192, "change_effect": "reprepare"}
     second = resolve_effective_settings(_recipe_document(settings))
-    assert second.allowed and second.settings is not None
+    assert second.allowed
+    assert second.settings is not None
     assert first.settings.identity_digest != second.settings.identity_digest
 
 
 def test_deepseek_deferral_uses_observed_host_not_recipe_reserve() -> None:
     # Wrong implementation: checking only peak+floor against total, or adding
     # recipe reserve, misses the real reason this empty-host load was refused.
-
-    from vonk_forge_contracts.memory_admission import evaluate_memory_admission
 
     occupied = 4_515_061_760
     left = PLATFORM_MEMORY_FLOOR_BYTES - 500_000_000

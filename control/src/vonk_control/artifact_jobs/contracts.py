@@ -12,12 +12,17 @@ from typing import Literal, NoReturn
 
 from pydantic import ConfigDict, Field, TypeAdapter
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import RecipeDefinition, RecipeDisplay, read_recipe
+
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
-from vonk_agent_protocol.contracts import AgentProtocolError, canonical_message
-from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
+from vonk_agent_protocol.job_inputs import (
+    RecipeJobInputFile,
+    RecipeJobInputManifest,
+    RecipeJobInputRequest,
+)
 from vonk_agent_protocol.job_limits import (
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
@@ -41,44 +46,44 @@ from vonk_agent_protocol.outcome import (
 )
 from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
-    RecipeJobInputFile,
-    RecipeJobInputRequest,
     RecipeJobOutputLimits,
     RecipeJobOutputMapping,
 )
 from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
-from vonk_forge_contracts import RecipeDefinition, RecipeDisplay, read_recipe
-
-from ..compiled_artifact_contract import (
+from vonk_agent_protocol.wire_model import AgentProtocolError, canonical_message
+from vonk_control.artifact_jobs.blob_store import (
+    ArtifactBlobStoreError,
+    BlobReconciliation,
+)
+from vonk_control.artifact_jobs.evidence import (
+    ArtifactJobResultEvidence,
+    OutputContractBreach,
+    OutputContractRule,
+)
+from vonk_control.compiled_artifact_contract import (
     ArtifactSlotContract,
     CompiledArtifactContract,
     ParameterDefinition,
     ParameterScalar,
     compile_artifact_contract,
 )
-from ..jobs.documents import RecipeJobRunParent
-from ..library.contract import UuidId
-from ..lifecycle.evidence import (
+from vonk_control.identifiers import UuidId
+from vonk_control.jobs.documents import RecipeJobRunParent
+from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
     Damaged,
     Residue,
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..models.catalog import CatalogDocument, CatalogDocumentRevision
-from ..models.execution import ArtifactJob, RunNode
-from ..models.jobs import Job
-from ..stored.json_values import read_row_column
-from ..stored.states import CatalogRevisionState
-from ..strict_json import StrictJSONModel, read_stored_model
-from .blob_store import ArtifactBlobStoreError, BlobReconciliation
-from .evidence import (
-    ArtifactJobResultEvidence,
-    OutputContractBreach,
-    OutputContractRule,
-)
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.models.execution import ArtifactJob, RunNode
+from vonk_control.models.jobs import Job
+from vonk_control.stored.rows import read_row_column
+from vonk_control.stored.states import CatalogRevisionState
+from vonk_control.strict_json import StrictJSONModel, read_stored_model
 
 _UUID_ID_ADAPTER = TypeAdapter(UuidId)
 
@@ -715,13 +720,9 @@ def _numeric_rule(definition: ParameterDefinition) -> str:
 def _numeric_fits(definition: ParameterDefinition, value: float) -> bool:
     low, high, step = definition.minimum, definition.maximum, definition.step
     return not (
-        low is not None
-        and value < low
-        or high is not None
-        and value > high
-        or step is not None
-        and low is not None
-        and (value - low) % step
+        (low is not None and value < low)
+        or (high is not None and value > high)
+        or (step is not None and low is not None and (value - low) % step)
     )
 
 
@@ -740,21 +741,25 @@ def _effective_parameters(
         value = supplied.get(name, definition.default)
         kind = definition.type
         valid_type = (
-            kind == "string"
-            and isinstance(value, str)
-            and "\x00" not in value
-            and len(value.encode("utf-8")) <= 4096
-            or kind == "integer"
-            and isinstance(value, int)
-            and not isinstance(value, bool)
-            or kind == "float"
-            and _finite_parameter_number(value)
-            or kind == "boolean"
-            and isinstance(value, bool)
-            or kind == "enum"
-            and any(
-                type(value) is type(item) and value == item
-                for item in definition.allowed_values
+            (
+                kind == "string"
+                and isinstance(value, str)
+                and "\x00" not in value
+                and len(value.encode("utf-8")) <= 4096
+            )
+            or (
+                kind == "integer"
+                and isinstance(value, int)
+                and not isinstance(value, bool)
+            )
+            or (kind == "float" and _finite_parameter_number(value))
+            or (kind == "boolean" and isinstance(value, bool))
+            or (
+                kind == "enum"
+                and any(
+                    type(value) is type(item) and value == item
+                    for item in definition.allowed_values
+                )
             )
         )
         if not valid_type:

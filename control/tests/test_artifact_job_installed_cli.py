@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,6 +14,8 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from packaging.requirements import Requirement
 from sqlalchemy import select
+
+from cluster_profiles.cli_json_contract import DocumentKind
 from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
     RecipeJobRunResult,
@@ -23,6 +26,7 @@ from vonk_agent_protocol.recipe_jobs import (
 from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs.api import install_artifact_job_routes
 from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs.service import ArtifactJobService
@@ -30,9 +34,7 @@ from vonk_control.auth import Actor
 from vonk_control.models.execution import ArtifactJob
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
-from vonk_control.strict_json import ControllerAPIRoute
-
-from cluster_profiles.cli_json_contract import DocumentKind
+from vonk_control.operator_acceptance import ControllerAPIRoute
 
 from .artifact_jobs_support import _configure_artifact_recipe
 from .conftest import load_tools_module
@@ -118,13 +120,15 @@ def _artifact_api(tmp_path: Path, postgres_engine, *, output_min_files: int = 1)
     def configure_recipe(document: dict[str, object]) -> None:
         _configure_artifact_recipe(document)
         interfaces = document.get("interfaces")
-        assert isinstance(interfaces, list) and len(interfaces) == 1
+        assert isinstance(interfaces, list)
+        assert len(interfaces) == 1
         interface = interfaces[0]
         assert isinstance(interface, dict)
         output = interface.get("output")
         assert isinstance(output, dict)
         slots = output.get("slots")
-        assert isinstance(slots, list) and len(slots) == 1
+        assert isinstance(slots, list)
+        assert len(slots) == 1
         slot = slots[0]
         assert isinstance(slot, dict)
         slot["min_files"] = output_min_files
@@ -254,7 +258,8 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
         assert isinstance(job_id, str)
         assert draft["preparation"] == "ready"
         uploaded_inputs = draft.get("input_files")
-        assert isinstance(uploaded_inputs, list) and len(uploaded_inputs) == 1
+        assert isinstance(uploaded_inputs, list)
+        assert len(uploaded_inputs) == 1
         assert uploaded_inputs[0]["name"] == "input.png"
         assert uploaded_inputs[0]["size_bytes"] == len(input_content)
         assert uploaded_inputs[0]["sha256"] == hashlib.sha256(input_content).hexdigest()
@@ -649,10 +654,6 @@ def test_installed_cli_distinguishes_unavailable_from_empty_result_manifest(
             )
 
         if expected_state != "succeeded":
-            from datetime import timedelta
-
-            from vonk_control.agent_jobs.service import AgentJobService
-
             ended_at = service._clock() + timedelta(seconds=3601)
             service._clock = lambda: ended_at
             AgentJobService(sessions, clock=lambda: ended_at).reconcile_orders()

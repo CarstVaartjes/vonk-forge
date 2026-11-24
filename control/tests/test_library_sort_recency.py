@@ -19,11 +19,15 @@ import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Literal
+from types import SimpleNamespace
+from typing import Any, Literal
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
+from tests.recipe_library_source import recipe_library_root
 from vonk_control.auth import CursorError, TokenCodec
 from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.model_primitives import Base
@@ -32,9 +36,6 @@ from vonk_control.models.catalog import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
-
-from tests.recipe_library_source import recipe_library_root
 
 ROOT = recipe_library_root()
 
@@ -60,7 +61,7 @@ def _revision_times() -> dict[str, datetime]:
 
 
 def _insert_synthetic_corpus(
-    sessions: sessionmaker,
+    sessions: sessionmaker[Session],
     *,
     kind: str,
     template: dict[str, object],
@@ -134,7 +135,7 @@ def _insert_synthetic_corpus(
         session.add_all(heads)
 
 
-def _build(path: Path) -> tuple[LibraryProjection, sessionmaker]:
+def _build(path: Path) -> tuple[LibraryProjection, sessionmaker[Session]]:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     engine = create_engine(f"sqlite:///{path / 'library.sqlite'}")
     Base.metadata.create_all(engine)
@@ -174,7 +175,8 @@ def test_cursor_continues_after_a_boundary_that_left_the_catalog(
 
     projection, sessions = _build(tmp_path)
     selectors, cursor = page(projection, 2)
-    assert selectors == _selectors(order[:2]) and cursor
+    assert selectors == _selectors(order[:2])
+    assert cursor
     with sessions.begin() as session:
         session.query(CatalogDocumentHead).filter_by(kind=kind, slug=order[1]).delete()
     # A fresh projection: the first one may hold the earlier catalog snapshot.
@@ -210,11 +212,15 @@ def test_a_cursor_with_an_old_shape_is_an_invalid_cursor(
         cursors=_OldShape(b"k" * 32),
         clock=lambda: _EPOCH + timedelta(days=1),
     )
-    with pytest.raises(CursorError):
+
+    def expected_failure():
         if kind == "model":
             projection.models(limit=2, sort=sort, cursor="any")
         else:
             projection.recipe_library(limit=2, sort=sort, cursor="any")
+
+    with pytest.raises(CursorError):
+        expected_failure()
 
 
 def test_models_sort_name_and_updated_are_distinct_and_complete(
@@ -327,10 +333,6 @@ def test_unknown_sort_is_rejected_by_the_projection(
 
 
 def test_fits_fleet_sort_key_puts_working_recipes_first_then_newest():
-    from types import SimpleNamespace
-    from typing import Any
-
-    from vonk_control.library_projection.service import LibraryProjection
 
     def item(name: str, minute: int, status: str) -> Any:
         return SimpleNamespace(

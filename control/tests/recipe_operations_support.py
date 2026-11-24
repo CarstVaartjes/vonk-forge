@@ -19,8 +19,13 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+)
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
@@ -29,6 +34,7 @@ from vonk_agent_protocol.host_helper import (
 )
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 from vonk_agent_protocol.route_activation import SupervisorPhase
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_contacts import record_contact
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.bounded_json import require_mapping, require_sequence
@@ -77,11 +83,6 @@ from vonk_control.runtime.adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation.contracts import PulledImageEvidence
 from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import (
-    ModelDefinition,
-    RecipeDefinition,
-    document_sha256,
-)
 
 from .agent_fences import fenced_operation
 from .canonical_recipe_fixtures import canonical_example
@@ -670,14 +671,14 @@ def setup_services(
 
 
 def record_exact_empty_snapshot(
-    sessions: sessionmaker, node_id: str, observed_at: datetime
+    sessions: sessionmaker[Session], node_id: str, observed_at: datetime
 ) -> None:
     with sessions.begin() as session:
         prepare_exact_recipe_run_observation_nodes(session, node_id, observed_at, set())
 
 
 def mark_current_exact_observations(
-    sessions: sessionmaker, run_id: str, observed_at: datetime
+    sessions: sessionmaker[Session], run_id: str, observed_at: datetime
 ) -> None:
     with sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
@@ -722,7 +723,8 @@ def _issue_exact_stop_grant(
         runtime_identity=runtime_identity,
         preflight_fingerprint=fingerprint,
     )
-    assert claim is not None and claim.operation.value == "recipe.stop"
+    assert claim is not None
+    assert claim.operation.value == "recipe.stop"
     stop = RecipeStopPayload.model_validate_json(
         canonical_message(claim.payload), strict=True
     )
@@ -985,19 +987,22 @@ def clone_running_run(sessions, source_run_id: str, *, alias: str) -> str:
             for node in source_nodes
         )
         source_phases = source_start.payload.get("phases")
-        assert isinstance(source_phases, list) and source_phases
+        assert isinstance(source_phases, list)
+        assert source_phases
         start_job_id = str(uuid.uuid4())
         cloned_phases: list[list[dict[str, object]]] = []
         cloned_operations: list[AgentOperation] = []
         cloned_targets: set[str] = set()
         for phase in source_phases:
-            assert isinstance(phase, list) and phase
+            assert isinstance(phase, list)
+            assert phase
             cloned_phase: list[dict[str, object]] = []
             for raw_entry in phase:
                 assert isinstance(raw_entry, Mapping)
                 node_id = raw_entry.get("node_id")
                 raw_payload = raw_entry.get("payload")
-                assert isinstance(node_id, str) and isinstance(raw_payload, Mapping)
+                assert isinstance(node_id, str)
+                assert isinstance(raw_payload, Mapping)
                 cloned_targets.add(node_id)
                 source_payload = RecipeStartPayload.model_validate_json(
                     canonical_message(raw_payload), strict=True

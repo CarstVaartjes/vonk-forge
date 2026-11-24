@@ -11,9 +11,11 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.exc import OperationalError
-from vonk_agent_protocol.contracts import canonical_message
+
+from cluster_profiles.cli_render.dispatch import render_payload
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.resources import StorageDemandCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
@@ -29,6 +31,7 @@ from vonk_control.fleet_profiles.contracts import FleetProfileStalePlanConflict
 from vonk_control.fleet_profiles.dependencies import (
     _MAX_PARKED_APPLICATION_OBSERVATIONS,
 )
+from vonk_control.fleet_profiles.persistence import _intended_profile
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.cache import RecipeBuild
@@ -45,12 +48,15 @@ from vonk_control.models.mapping import ClusterMapping
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS, RENDEZVOUS_PORT
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 from vonk_control.storage_demands import (
     STORAGE_EVICTING,
+    STORAGE_EVICTION_TIMED_OUT,
     STORAGE_INSUFFICIENT,
+    StorageDemands,
+    StorageRelief,
 )
-
-from cluster_profiles.cli_render.dispatch import render_payload
+from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
 from .recipe_operations_support import installed_recipe, setup_services, started_recipe
 from .test_fleet_profile_api import _client, _headers
@@ -102,7 +108,8 @@ def _capacity_profile(tmp_path, engine, *, node_count: int = 1):
     api, codec = _client(sessions, profiles=profiles)
     headers = _headers(codec, "administrator")
     review = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
-    assert review.status_code == 200 and review.json()["allowed"], review.text
+    assert review.status_code == 200, review.text
+    assert review.json()["allowed"], review.text
     return sessions, profiles, planner, profile, api, headers, review.json(), nodes
 
 
@@ -118,7 +125,8 @@ def test_unified_memory_review_and_runtime_share_the_same_capacity_boundary(
     with sessions() as session:
         mapping_id = session.scalar(select(ClusterMapping.id))
         build_id = session.scalar(select(RecipeBuild.id))
-        assert mapping_id is not None and build_id is not None
+        assert mapping_id is not None
+        assert build_id is not None
     installed = installed_recipe(
         lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
     )
@@ -160,7 +168,8 @@ def test_unified_memory_review_and_runtime_share_the_same_capacity_boundary(
             snapshot.gpu_memory_free_bytes = demand + floor
         runtime = lifecycle.preview_run(installed.owner_id, "memory-boundary")
         review = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
-        assert review.status_code == 200 and review.json()["allowed"]
+        assert review.status_code == 200
+        assert review.json()["allowed"]
         assert runtime.allowed
     if runtime.allowed:
         started = lifecycle.start(
@@ -178,7 +187,8 @@ def test_unified_memory_review_and_runtime_share_the_same_capacity_boundary(
                     ResourceReservation.state == "active",
                 )
             )
-            assert claim is not None and claim.amount_bytes == demand
+            assert claim is not None
+            assert claim.amount_bytes == demand
 
 
 @pytest.mark.parametrize(
@@ -306,7 +316,8 @@ def test_parked_load_names_a_failing_resource_recheck_and_proceeds_when_it_clear
     assert response.status_code == 202, response.text
     with sessions() as session:
         (parked,) = tuple(session.scalars(select(FleetProfileApplication)))
-        assert parked.state == "queued" and parked.current_operation_id is None
+        assert parked.state == "queued"
+        assert parked.current_operation_id is None
         assert parked.progress["admission_pending"] is True
         (blocker,) = cast(list[dict[str, str]], parked.progress["blockers"])
         # Not the misleading "another change is using a Spark" busy code, and
@@ -317,6 +328,7 @@ def test_parked_load_names_a_failing_resource_recheck_and_proceeds_when_it_clear
     monkeypatch.setattr(
         RunSwitchOperationService, "recheck_resources_in_session", original
     )
+    admitted = None
     for _ in range(6):
         profiles.tick()
         with sessions() as session:
@@ -324,6 +336,7 @@ def test_parked_load_names_a_failing_resource_recheck_and_proceeds_when_it_clear
             assert admitted is not None
             if admitted.current_operation_id is not None:
                 break
+    assert admitted is not None
     assert admitted.current_operation_id is not None, admitted.status_reason
 
 
@@ -382,7 +395,8 @@ def test_review_reuses_only_ports_owned_by_its_exact_planned_stop(
     with sessions() as session:
         mapping_id = session.scalar(select(ClusterMapping.id))
         build_id = session.scalar(select(RecipeBuild.id))
-        assert mapping_id is not None and build_id is not None
+        assert mapping_id is not None
+        assert build_id is not None
     installation = installed_recipe(
         lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
     )
@@ -399,7 +413,8 @@ def test_review_reuses_only_ports_owned_by_its_exact_planned_stop(
     assessment = review.assessments[0].assessment
     assert {stop.run_id for stop in assessment.stops} == {running.owner_id}
     assert not assessment.fit_current.allowed
-    assert assessment.fit_after_stop is not None and assessment.fit_after_stop.allowed
+    assert assessment.fit_after_stop is not None
+    assert assessment.fit_after_stop.allowed
     assert assessment.post_stop_memory_check is None
     with sessions.begin() as session:
         reservations = tuple(
@@ -550,10 +565,8 @@ def test_capacity_writer_is_excluded_until_profile_acceptance_commits(
         )
         try:
             assert checked.wait(30)
-            with (
-                pytest.raises(OperationalError) as refused,
-                sessions.begin() as session,
-            ):
+
+            def expected_failure(session):
                 session.execute(text("SET LOCAL lock_timeout = '100ms'"))
                 if writer == "inventory":
                     row = session.scalar(select(NodeInventorySnapshot))
@@ -564,6 +577,12 @@ def test_capacity_writer_is_excluded_until_profile_acceptance_commits(
                     assert reservation is not None
                     reservation.amount_bytes = 1_000_000
                 session.flush()
+
+            with (
+                pytest.raises(OperationalError) as refused,
+                sessions.begin() as session,
+            ):
+                expected_failure(session)
             assert getattr(refused.value.orig, "sqlstate", None) == "55P03"
         finally:
             release.set()
@@ -572,8 +591,10 @@ def test_capacity_writer_is_excluded_until_profile_acceptance_commits(
     with sessions() as session:
         snapshot = session.scalar(select(NodeInventorySnapshot))
         reservation = session.get(ResourceReservation, reservation_id)
-        assert snapshot is not None and snapshot.host_memory_free_bytes > 0
-        assert reservation is not None and reservation.amount_bytes == 0
+        assert snapshot is not None
+        assert snapshot.host_memory_free_bytes > 0
+        assert reservation is not None
+        assert reservation.amount_bytes == 0
 
 
 def test_profile_load_parks_while_shared_node_admission_is_held(
@@ -587,12 +608,14 @@ def test_profile_load_parks_while_shared_node_admission_is_held(
     with sessions() as session:
         mapping_id = session.scalar(select(ClusterMapping.id))
         build_id = session.scalar(select(RecipeBuild.id))
-        assert mapping_id is not None and build_id is not None
+        assert mapping_id is not None
+        assert build_id is not None
     installation = installed_recipe(
         lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
     )
     review = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
-    assert review.status_code == 200 and review.json()["allowed"], review.text
+    assert review.status_code == 200, review.text
+    assert review.json()["allowed"], review.text
     run_plan = lifecycle.preview_run(installation.owner_id, "shared-node-admission")
     assert run_plan.allowed, run_plan.nodes
     request_key = str(uuid4())
@@ -612,17 +635,13 @@ def test_profile_load_parks_while_shared_node_admission_is_held(
     def hold_after_run_admission_key(
         _connection, _cursor, statement, parameters, _context, _many
     ):
-        if "pg_try_advisory_xact_lock" in statement:
-            values = parameters if isinstance(parameters, dict) else {}
-            thread_id = threading.get_ident()
-            key = values.get("key")
-            observed_keys.append((thread_id, key))
-        if (
-            "pg_try_advisory_xact_lock" in statement
-            and key == expected_key
-            and run_thread_ids
-            and thread_id == run_thread_ids[0]
-        ):
+        if "pg_try_advisory_xact_lock" not in statement:
+            return
+        values = parameters if isinstance(parameters, dict) else {}
+        thread_id = threading.get_ident()
+        key = values.get("key")
+        observed_keys.append((thread_id, key))
+        if key == expected_key and run_thread_ids and thread_id == run_thread_ids[0]:
             run_key_acquired.set()
             assert release_run.wait(timeout=10), (
                 "test did not release the run admission"
@@ -711,7 +730,6 @@ def test_pending_admission_constraint_defect_fails_at_once_and_a_fresh_load_is_a
 ) -> None:
     """A schema refusal is a defect: the load fails naming the constraint (never
     retried as it stands), and once it is corrected a fresh load is admitted."""
-    from datetime import timedelta
 
     sessions, profiles, _, profile, _, _, _, _ = _capacity_profile(
         tmp_path, postgres_engine
@@ -868,7 +886,8 @@ def test_a_waiting_newer_load_does_not_supersede_an_older_due_load(
     with sessions() as session:
         admitted = session.get(FleetProfileApplication, older.id)
         parked = session.get(FleetProfileApplication, newer.id)
-        assert admitted is not None and parked is not None
+        assert admitted is not None
+        assert parked is not None
         assert admitted.state == "queued", admitted.status_reason
         assert admitted.progress["admission_pending"] is False
         assert parked.state == "queued", parked.status_reason
@@ -1022,7 +1041,7 @@ def test_profile_admission_recovers_after_agent_heartbeat_row_lock(
         assert recovered.request_key == request_key
         assert recovered.plan_digest == pending_plan_digest
         assert recovered.progress["admission_pending"] is False
-        intended = restarted._intended_profile(recovered, session=session)
+        intended = _intended_profile(recovered, session=session)
         assert not isinstance(intended, Residue)
         assert intended.reviewed_plan_digest == review["plan_digest"]
         switch_state = FleetProfileSwitchAdapterState.model_validate_json(
@@ -1068,7 +1087,7 @@ def test_queued_admission_survives_submitter_death_before_first_attempt(
         assert row is not None
         assert row.progress["admission_pending"] is False
         assert row.plan_digest == pending.plan_digest
-        restarted_intent = restarted._intended_profile(row, session=session)
+        restarted_intent = _intended_profile(row, session=session)
         assert not isinstance(restarted_intent, Residue)
         assert restarted_intent.reviewed_plan_digest == review.plan_digest
         assert row.state == "running", row.status_reason
@@ -1168,9 +1187,11 @@ def test_pending_admission_continues_under_platform_authority_after_actor_revoca
         )
         assert set(session.scalars(select(Job.id))) == admitted_jobs
         node = session.get(AgentNode, nodes[0])
-        assert node is not None and node.workload_intent_ordinal == ordinal
+        assert node is not None
+        assert node.workload_intent_ordinal == ordinal
         row = session.get(FleetProfileApplication, pending.id)
-        assert row is not None and row.state == "running"
+        assert row is not None
+        assert row.state == "running"
 
     # The denial leaves no gate against a fresh change by a current administrator.
     changed = api.put(
@@ -1305,7 +1326,6 @@ class _Relief:
         self.inventory_observed_at: datetime | None = None
 
     def __call__(self, node_id, required_free_bytes, *, source, subject, reason):
-        from vonk_control.storage_demands import StorageRelief
 
         self.asked.append((node_id, required_free_bytes, source))
         return StorageRelief(
@@ -1326,17 +1346,13 @@ def _load_short_of_disk(tmp_path, monkeypatch, relief: _Relief | None, engine=No
         _capacity_profile(tmp_path, engine)
     )
     if relief is None:
-        from vonk_control.unused_storage_collection.service import (
-            UnusedStorageCollector,
-        )
-
         lifecycle = planner._lifecycle
         assert lifecycle is not None
-        planner._clock = lambda: profiles._clock()
-        lifecycle._clock = lambda: profiles._clock()
+        planner._clock = lambda: profiles._clock()  # noqa: PLW0108 -- reads the replaceable clock or attribute late
+        lifecycle._clock = lambda: profiles._clock()  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         collector = UnusedStorageCollector(
             sessions,
-            clock=lambda: profiles._clock(),
+            clock=lambda: profiles._clock(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
             lifecycle=lifecycle,
         )
         profiles.bind_storage_relief(collector.relief_for_spark)
@@ -1386,13 +1402,15 @@ def test_admission_short_of_disk_asks_for_the_bytes_and_names_what_it_waits_for(
     )
 
     parked = _only_application(sessions)
-    assert parked.state == "queued" and parked.current_operation_id is None
+    assert parked.state == "queued"
+    assert parked.current_operation_id is None
     assert parked.progress["admission_pending"] is True
     (blocker,) = cast(list[dict[str, object]], parked.progress["blockers"])
     assert blocker["node_ids"] == [nodes[0]]
     assert parked.progress["storage_wait_since"] is not None
     ((node_id, needed, source),) = relief.asked
-    assert (node_id, source) == (nodes[0], "profile-load") and needed > 0
+    assert (node_id, source) == (nodes[0], "profile-load")
+    assert needed > 0
 
     with sessions.begin() as session:
         snapshot = session.scalar(select(NodeInventorySnapshot))
@@ -1479,8 +1497,6 @@ def test_storage_observation_without_fresh_inventory_has_a_durable_deadline(
     tmp_path,
     monkeypatch,
 ) -> None:
-    from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
-    from vonk_control.storage_demands import STORAGE_EVICTION_TIMED_OUT
 
     relief = _Relief(STORAGE_INSUFFICIENT)
     sessions, profiles, _nodes, _lifecycle = _load_short_of_disk(
@@ -1499,7 +1515,6 @@ def test_active_storage_relief_waits_then_settled_shortfall_ends(
     monkeypatch,
 ) -> None:
     """A paused collector can recover within the bound and settle its shortfall."""
-    from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
     relief = _Relief(STORAGE_INSUFFICIENT, paused=True)
     sessions, profiles, _nodes, _lifecycle = _load_short_of_disk(
@@ -1522,7 +1537,6 @@ def test_storage_wait_ends_without_measured_progress_after_restart(
     tmp_path, monkeypatch, postgres_engine, code, paused
 ) -> None:
     """Catches eviction reports resetting the durable wait on each fresh inventory."""
-    from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
     relief = _Relief(code, paused=paused)
     sessions, profiles, nodes, _lifecycle = _load_short_of_disk(
@@ -1565,7 +1579,6 @@ def test_storage_wait_extends_only_when_measured_available_bytes_increase(
     tmp_path, monkeypatch, postgres_engine
 ) -> None:
     """Catches expiring a reclaim that advances bytes, or treating retries as progress."""
-    from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
     relief = _Relief(STORAGE_EVICTING)
     sessions, profiles, _nodes, lifecycle = _load_short_of_disk(
@@ -1574,8 +1587,6 @@ def test_storage_wait_extends_only_when_measured_available_bytes_increase(
     application_id = _only_application(sessions).id
     _later(profiles, PROFILE_STALL_WINDOW_SECONDS - 1)
     # Exercise the real collector's typed bytes, with optional object evidence absent.
-    from vonk_control.storage_demands import StorageDemands
-    from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
     assert lifecycle is not None
     collector = UnusedStorageCollector(

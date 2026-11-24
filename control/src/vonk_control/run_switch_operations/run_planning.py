@@ -8,58 +8,52 @@ from typing import (
 from typing import cast as typing_cast
 
 from pydantic import ValidationError
+
 from vonk_agent_protocol.lifecycle_vocabulary import RunAdmissionCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import InstallationState
-
-from ..categorized_errors import (
-    MissingRecord,
-)
-from ..content_identity import differing_image_fields
-from ..fleet_profiles.capacity import (
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.content_identity import differing_image_fields
+from vonk_control.fleet_profiles.capacity import (
     accepted_profile_runtime_image,
     profile_replaced_runs,
     sibling_profile_ports,
     sibling_profile_runs,
 )
-from ..models.cache import RecipeBuild
-from ..prebuilt_images import policy_prebuilt_reference
-from ..preparation_contract import (
-    RuntimeImageIdentity,
-)
-from ..recipe_operations.errors import RecipeOperationConflict
-from ..recipe_operations.execution_contract import (
+from vonk_control.gpu.clock_validation import assess_gpu_clock
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.prebuilt_images import policy_prebuilt_reference
+from vonk_control.preparation_contract import RuntimeImageIdentity
+from vonk_control.recipe_operations.errors import RecipeOperationConflict
+from vonk_control.recipe_operations.execution_contract import (
     installation_matches_runtime_image,
     parse_stored_installation_plan,
 )
-from ..recipe_operations.runtime_specs import (
-    RUNTIME_INTERFACE,
+from vonk_control.recipe_operations.runtime_specs import RUNTIME_INTERFACE
+from vonk_control.resource_planning.settings import resolve_effective_settings
+from vonk_control.run_admission import PORT_ADMISSION_CODES
+from vonk_control.run_switch_contract.evidence import RunSwitchReason
+from vonk_control.run_switch_contract.observation import RunSwitchObservedImageIdentity
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.requests import RunSwitchPreviewRequest
+from vonk_control.run_switch_operations.constants import (
+    _active_recipe_revision,
+    _is_artifact_phase,
 )
-from ..resource_planning.settings import resolve_effective_settings
-from ..run_admission import (
-    PORT_ADMISSION_CODES,
-)
-from ..run_switch_contract.evidence import RunSwitchReason
-from ..run_switch_contract.observation import (
-    RunSwitchObservedImageIdentity,
-)
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.requests import RunSwitchPreviewRequest
-from ..stored.states import CatalogRevisionState
-from ..strict_json import read_stored_model
-from .constants import _active_recipe_revision, _is_artifact_phase
-from .identity_helpers import _primary_model_digest
-from .phase_planning import targets_hold_model
-from .planning_helpers import (
+from vonk_control.run_switch_operations.identity_helpers import _primary_model_digest
+from vonk_control.run_switch_operations.phase_planning import targets_hold_model
+from vonk_control.run_switch_operations.planning_helpers import (
     PlanInventory,
     _as_reason,
     _now,
     _resource_reason,
     _settings_view,
 )
+from vonk_control.stored.states import CatalogRevisionState
+from vonk_control.strict_json import read_stored_model
 
 if TYPE_CHECKING:
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 # Reasons about a NAS download, which only a load that downloads has.
 _NAS_DOWNLOAD = frozenset(
@@ -103,10 +97,7 @@ class RunPlanningMixin:
             )
             blockers: list[RunSwitchReason] = []
             warnings: list[RunSwitchReason] = []
-            if (
-                revision.state != CatalogRevisionState.ACTIVE
-                or revision.content_digest is None
-            ):
+            if revision.state != CatalogRevisionState.ACTIVE:
                 blockers.append(
                     _as_reason(
                         RunSwitchCode.RECIPE_UNRESOLVED,
@@ -233,6 +224,7 @@ class RunPlanningMixin:
             build_selection = None
             build = None
             build_candidate = None
+            reuse_installed = installed_image is not None
             if installed_image is not None:
                 build_evidence, runtime_storage, build_blockers, build_warnings = (
                     service._build_evidence(
@@ -246,8 +238,7 @@ class RunPlanningMixin:
                         image_installed=True,
                     )
                 )
-            reuse_installed = installed_image is not None
-            if not reuse_installed:
+            else:
                 build = service._matching_build(
                     session,
                     revision.id,
@@ -265,7 +256,6 @@ class RunPlanningMixin:
                     build,
                     build_candidate,
                     group,
-                    now=now,
                     inventory=inventory,
                     create_build=create_build,
                 )
@@ -475,16 +465,16 @@ class RunPlanningMixin:
                                     swap=reason.swap,
                                 )
                             )
-                        for reason in item.warnings:
-                            warnings.append(
-                                _as_reason(
-                                    reason.code,
-                                    reason.detail,
-                                    scope="node",
-                                    severity="warning",
-                                    node_ids=(item.node_id,),
-                                )
+                        warnings.extend(
+                            _as_reason(
+                                reason.code,
+                                reason.detail,
+                                scope="node",
+                                severity="warning",
+                                node_ids=(item.node_id,),
                             )
+                            for reason in item.warnings
+                        )
                     if remaining_admission_blockers:
                         blockers.append(
                             _as_reason(
@@ -576,10 +566,8 @@ class RunPlanningMixin:
                     ),
                 )
             if request.gpu_clock is not None:
-                from ..gpu.clock_validation import assess_gpu_clock
-
                 clock_blockers, clock_warnings = assess_gpu_clock(
-                    session, node_ids, request.gpu_clock
+                    node_ids, request.gpu_clock
                 )
                 blockers.extend(clock_blockers)
                 warnings.extend(clock_warnings)

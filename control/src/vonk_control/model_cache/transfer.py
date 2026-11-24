@@ -9,26 +9,25 @@ from typing import TYPE_CHECKING, cast
 import httpx2
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import OperationMemberProgress
-
-from ..categorized_faults import OperationInterrupted
-from ..fleet_profiles.read_observation import observing_profile
-from ..models.cache import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
-from . import constants
-from .artifacts import (
+from vonk_control.categorized_faults import OperationInterrupted
+from vonk_control.fleet_profiles.read_observation import observing_profile
+from vonk_control.model_cache import constants
+from vonk_control.model_cache.artifacts import (
     ArtifactPart,
     ArtifactSetManifest,
     ArtifactSpec,
     _unique_artifacts,
 )
-from .catalog_helpers import _iso_now
-from .constants import (
+from vonk_control.model_cache.catalog_helpers import _iso_now
+from vonk_control.model_cache.constants import (
     _PARALLEL_RANGE_WORKERS,
     _USE_MANIFEST_BYTES,
     SCHEMA_VERSION,
 )
-from .contract import (
+from vonk_control.model_cache.contract import (
     ModelCacheCounters,
     ModelCacheDownloadPayload,
     ModelCacheDownloadResult,
@@ -40,13 +39,22 @@ from .contract import (
     ModelCacheTransfer,
     ModelCacheTransferArtifact,
 )
-from .errors import ModelCacheError, _ArtifactWriterBusy
-from .persistence import _manifest_of, _operation_cancellation, _store_operation_payload
-from .progress import PHASES, cache_progress
-from .ranges import range_partial_bytes
+from vonk_control.model_cache.errors import ModelCacheError, _ArtifactWriterBusy
+from vonk_control.model_cache.persistence import (
+    _manifest_of,
+    _operation_cancellation,
+    _store_operation_payload,
+)
+from vonk_control.model_cache.progress import PHASES, cache_progress
+from vonk_control.model_cache.ranges import range_partial_bytes
+from vonk_control.models.cache import (
+    ModelCacheOperation,
+    ModelCacheSet,
+    ModelCacheSetArtifact,
+)
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class TransferMixin:
@@ -340,7 +348,7 @@ class TransferMixin:
         phase: ModelCacheOperationPhase,
         completed_artifacts: int = 0,
         downloaded_bytes: int = 0,
-        expected_bytes: int | None | object = _USE_MANIFEST_BYTES,
+        expected_bytes: int | object | None = _USE_MANIFEST_BYTES,
         current_artifact_key: str | None = None,
         transfer: ModelCacheTransfer | None = None,
         previous: ModelCacheOperationProgress | None = None,
@@ -569,7 +577,7 @@ class TransferMixin:
             )
             repaired = checkpoint.completed_objects if checkpoint is not None else []
         if (not force or spec.sha256 in repaired) and cache._object_is_stored(spec):
-            cache._mark_artifact_verified(spec, set_digest)
+            cache._mark_artifact_verified(set_digest)
             return
         if spec.parts is not None:
             cache._download_split(
@@ -577,7 +585,6 @@ class TransferMixin:
                 set_digest,
                 owner=owner,
                 operation_id=operation_id,
-                force=force,
                 interrupt_after_bytes=interrupt_after_bytes,
             )
         else:
@@ -587,7 +594,6 @@ class TransferMixin:
                 owner=owner,
                 operation_id=operation_id,
                 completed_artifacts=0,
-                force=force,
                 interrupt_after_bytes=interrupt_after_bytes,
             )
         if is_repair:

@@ -9,16 +9,15 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from vonk_agent_protocol.outcome import UnknownOutcomeError
-
-from .browser_auth import bootstrap_administrator
-from .db.connections import (
+from vonk_control.browser_auth import bootstrap_administrator
+from vonk_control.db.connections import (
     build_engine,
     run_with_database_startup_retry,
     session_factory,
 )
-from .db.startup import initialize_database
-from .runtime_init import read_runtime_secret
-from .settings import SECRETS_ROOT
+from vonk_control.db.startup import initialize_database
+from vonk_control.runtime_init import read_runtime_secret
+from vonk_control.settings import SECRETS_ROOT
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -81,7 +80,7 @@ def initialize_administrator(database_url: str, password_path: Path) -> None:
 
 
 def _exec(command: tuple[str, ...]) -> None:
-    os.execvp(command[0], command)
+    os.execvp(command[0], command)  # noqa: S606 -- the exec or pty spawn is intended
 
 
 def main(

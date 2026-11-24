@@ -63,22 +63,29 @@ from typing import TypeGuard
 
 from pydantic import ValidationError
 from sqlalchemy import event, inspect
-from vonk_agent_protocol.agent_words import ProfileReasonSeverity
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, ProgressAlarmCode
 
-from .fleet_profile_contract.applications import FleetProfileApplicationProgress
-from .models.fleet import FleetProfileApplication
-from .operations.blockers import (
+from vonk_agent_protocol.agent_words import ProfileReasonSeverity
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    ProgressAlarmCode,
+    WaitReason,
+)
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.operations.blockers import (
     OperationBlocker,
     ProgressStall,
     StallMark,
     StallWait,
     make_blocker,
 )
-from .settings import PROFILE_STALL_WINDOW_SECONDS
-from .stall_window import Verdict, progress_verdict
-from .wait_contract import WaitEvidence
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
+from vonk_control.stall_window import Verdict, progress_verdict
+from vonk_control.wait_contract import WaitEvidence, typed_wait_reason
 
 #: How long a wait shows no movement before it is shown as stalled: the load's
 #: own stall window.  It is longer than a preparation's own stall window, so a
@@ -339,7 +346,7 @@ def observe_application_progress(
     if not any(
         item.history.has_changes()
         for item in (attrs.progress, attrs.wait_evidence, attrs.next_action_at)
-    ) or not isinstance(current, dict):
+    ) or not isinstance(current, dict):  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
         return
     progress = _read_progress(current)
     if progress is None:
@@ -347,10 +354,6 @@ def observe_application_progress(
     # Progress producers may replace their typed blockers after the lifecycle
     # transition. Publish those exact causes with the same SQL update and clock.
     if target.next_action_at is not None and progress.blockers:
-        from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-
-        from .persisted_waits import schedule_wait, typed_wait_reason
-
         causes = [
             b for b in progress.blockers if b.code is not ProgressAlarmCode.STALLED
         ]
@@ -370,12 +373,12 @@ def observe_application_progress(
         target.wait_evidence if isinstance(target.wait_evidence, WaitEvidence) else None
     )
     observed_at = target.updated_at or target.created_at
-    if observed_at is not None and wait is not None:
+    if observed_at is not None and wait is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
         # A wait written without touching the row's time began when it says.
         observed_at = max(_aware(observed_at), _aware(wait.first_blocked_at))
     stall = (
         None
-        if observed_at is None
+        if observed_at is None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
         else next_stall(
             previous,
             progress,

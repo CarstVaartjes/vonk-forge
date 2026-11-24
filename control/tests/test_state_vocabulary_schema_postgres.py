@@ -15,6 +15,7 @@ from typing import cast
 import pytest
 from sqlalchemy import Table, text
 from sqlalchemy.exc import IntegrityError
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.db.schema import reconcile_schema
 from vonk_control.model_primitives import Base
@@ -85,7 +86,7 @@ def test_startup_tightens_the_state_check_and_never_refuses(
         # A clean database gets a fully valid constraint; a retired row is kept.
         assert _validated(connection) is not retired_row
         states = connection.execute(
-            text(f"SELECT state FROM {table.name} ORDER BY id")
+            text(f"SELECT state FROM {table.name} ORDER BY id")  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
         ).scalars()
         assert list(states) == ["backoff", "partial"][: 2 if retired_row else 1]
         with pytest.raises(IntegrityError), connection.begin_nested():

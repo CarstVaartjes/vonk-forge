@@ -17,12 +17,20 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, event, update
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_control.artifact_jobs.lifecycle import ArtifactIdentity, reserve_removal
 from vonk_control.artifact_reference_scan.image_references import (
     runtime_image_reference_findings,
 )
+from vonk_control.fleet_profile_contract.definitions import (
+    FleetProfileAssignmentInput,
+    FleetProfileInput,
+)
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocument
 from vonk_control.models.fleet import FleetProfile
 from vonk_control.models.jobs import Job
 from vonk_control.recipe_image_availability.contracts import OPERATION_KIND
@@ -31,6 +39,7 @@ from vonk_control.revision_images import (
     revision_images,
 )
 
+from .fleet_profiles_support import _seed
 from .recipe_image_availability_support import (
     ARCHIVE,
     ARCHIVE_SHA,
@@ -264,7 +273,10 @@ def test_a_pinned_image_is_read_from_the_projection_not_the_document(
         mine.projected = projected
     statements: list[str] = []
     engine = sessions.kw["bind"]
-    record = lambda *args: statements.append(str(args[2]))
+
+    def record(*args):
+        return statements.append(str(args[2]))
+
     event.listen(engine, "before_cursor_execute", record)
     try:
         with sessions() as session:
@@ -382,21 +394,11 @@ def test_a_saved_profile_keeps_the_image_its_recipes_successor_reuses(
 
 def test_saved_profile_selector_remains_editable_during_image_removal(sessions) -> None:
     """Cache availability is enforced by apply; saving logical intent never waits."""
-    from vonk_control.artifact_jobs.lifecycle import ArtifactIdentity, reserve_removal
-    from vonk_control.fleet_profile_contract.definitions import (
-        FleetProfileAssignmentInput,
-        FleetProfileInput,
-    )
-    from vonk_control.fleet_profiles.service import FleetProfileService
-
-    from .fleet_profiles_support import _seed
 
     with sessions.begin() as session:
         recipe_id, revision_id = _seed(sessions)
         _build(session, revision_id, archive=ARCHIVE_SHA)
     with sessions() as session:
-        from vonk_control.models.catalog import CatalogDocument
-
         recipe = session.get(CatalogDocument, recipe_id)
         assert recipe is not None
         selector = f"{recipe.publisher}/{recipe.slug}"

@@ -4,7 +4,7 @@ from enum import StrEnum
 
 from pydantic import Field
 
-from .wire_model import WireModel
+from vonk_agent_protocol.wire_model import WireModel
 
 
 class TransientReason(StrEnum):

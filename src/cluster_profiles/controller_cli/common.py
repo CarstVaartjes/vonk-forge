@@ -9,13 +9,19 @@ import urllib.parse
 import uuid
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, override, runtime_checkable
+
+from cluster_profiles.control_client.errors import (
+    ControlClientError,
+    ControlHTTPError,
+    ControlMalformedResponse,
+)
 
 if TYPE_CHECKING:
-    from ..generated_control.models.fleet_profile_endpoints_view import (
+    from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
         FleetProfileEndpointsView,
     )
-    from ..generated_control.models.metric_spec import MetricSpec
+    from cluster_profiles.generated_control.models.metric_spec import MetricSpec
 
 
 MAX_PAGE_LIMIT = 512
@@ -134,7 +140,8 @@ class _ValueList(argparse.Action):
         self._item = item
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
 
-    def __call__(self, parser, namespace, values, option_string=None):  # type: ignore[no-untyped-def]
+    @override
+    def __call__(self, parser, namespace, values, option_string=None):
         current = list(getattr(namespace, self.dest, None) or [])
         for raw in str(values).split(","):
             text = raw.strip()
@@ -477,3 +484,39 @@ def _profile_number(args: argparse.Namespace) -> int:
 
 
 __all__ = ["_WatchCallback"]
+
+
+def _known_http_refusal_status(error: ControlClientError) -> int | None:
+    status = (
+        error.status_code
+        if isinstance(error, ControlHTTPError)
+        else (error.context.http_status if error.context else None)
+    )
+    # HTTP evidence on a malformed body is not an owner decision.
+    return (
+        status
+        if status is not None
+        and (
+            status in {401, 403}
+            or (isinstance(error, ControlHTTPError) and 400 <= status <= 499)
+        )
+        else None
+    )
+
+
+def _cache_operation_id(noun: str, result: Mapping[str, object]) -> str:
+    if noun == "model":
+        field = "operation_id"
+    elif result.get("kind") in {
+        "recipe.image.availability.v2",
+        "recipe.cache.update.v2",
+    }:
+        field = "id"
+    elif result.get("action") == "remove":
+        field = "operation_id"
+    else:
+        raise ControlMalformedResponse("recipe response does not identify an operation")
+    operation_id = result.get(field)
+    if not isinstance(operation_id, str) or not operation_id:
+        raise ControlMalformedResponse("cache response does not identify an operation")
+    return operation_id

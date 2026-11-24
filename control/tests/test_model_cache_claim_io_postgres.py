@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
+
 from vonk_control.model_cache.persistence import (
     _manifest_of,
     _store_operation_payload,
@@ -25,7 +26,7 @@ class _Reads:
 
     def __init__(self, postgres_engine, service, monkeypatch, rows, names, scopes=()):
         self.problems: list[str] = []
-        self.count: dict[str, int] = {name: 0 for name in names}
+        self.count: dict[str, int] = dict.fromkeys(names, 0)
         self._engine, self._service, self._rows = postgres_engine, service, rows
         self._active = 0
         self._thread = threading.current_thread()

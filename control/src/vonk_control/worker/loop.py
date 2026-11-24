@@ -9,15 +9,14 @@ from dataclasses import dataclass
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleEventKind, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
-
-from ..bounded_retry import bounded_attempts
-from ..coordinator_failures import CoordinatorFailures
-from ..failure_classification import disposition
-from ..jobs.queue import JobService
-from ..logging import log_event, redact_text
-from ..operator_receipt_contract import ReceiptOwner
-from .liveness import _READINESS_BEAT_SECONDS
-from .memory_contract import WorkerMemoryComponent
+from vonk_control.bounded_retry import bounded_attempts
+from vonk_control.coordinator_failures import CoordinatorFailures
+from vonk_control.failure_classification import disposition
+from vonk_control.jobs.queue import JobService
+from vonk_control.logging import log_event, redact_text
+from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.worker.liveness import _READINESS_BEAT_SECONDS
+from vonk_control.worker.memory_contract import WorkerMemoryComponent
 
 _LOGGER = logging.getLogger("vonk-control-worker")
 
@@ -271,13 +270,13 @@ class Worker:
             sources.append(("recipes", self._recipes.tick))
         if self._model_cache is not None:
             sources.append(("model-cache", self._run_model_cache))
-        for service in self._background_services:
-            sources.append(
-                (
-                    _background_source_name(service),
-                    lambda service=service: bool(service()),
-                )
+        sources.extend(
+            (
+                _background_source_name(service),
+                lambda service=service: bool(service()),
             )
+            for service in self._background_services
+        )
         sources.append(("jobs", self._run_generic))
         return sources
 

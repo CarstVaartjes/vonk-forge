@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import base64
 import threading
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_control.auth import Actor
 from vonk_control.browser_auth import (
     BootstrapResult,
@@ -21,6 +21,8 @@ from vonk_control.browser_auth import (
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import LoginSession, User
 from vonk_control.passwords import hash_password, verify_password
+
+from .insert_collision_support import Rendezvous
 
 ADMIN_PASSWORD = "correct horse battery staple"
 NOW = datetime(2026, 8, 13, 9, 30, tzinfo=UTC)
@@ -60,7 +62,10 @@ def browser_auth(
     *tokens: str,
 ) -> BrowserAuthService:
     iterator = iter(tokens)
-    source: Callable[[], str] = lambda: next(iterator)
+
+    def source() -> str:
+        return next(iterator)
+
     return BrowserAuthService(
         sessions,
         token_signing_key=b"test-token-signing-key",
@@ -73,7 +78,7 @@ def add_admin(
     sessions: sessionmaker[Session],
     *,
     disabled_at: datetime | None = None,
-    verifier: str | None | object = DEFAULT_VERIFIER,
+    verifier: str | object | None = DEFAULT_VERIFIER,
 ) -> User:
     user = User(
         subject="admin",
@@ -313,7 +318,8 @@ def test_throttle_success_clears_only_its_subject_failure_state() -> None:
     for _ in range(4):
         admin = limiter.reserve("admin")
         other = limiter.reserve("other-subject")
-        assert admin is not None and other is not None
+        assert admin is not None
+        assert other is not None
         limiter.fail(admin)
         limiter.fail(other)
     other = limiter.reserve("other-subject")
@@ -374,7 +380,7 @@ def test_login_issues_independent_session_and_csrf_tokens(
     assert issued.token != issued.csrf
 
 
-@pytest.mark.parametrize(("field", "value"), (("role", "viewer"), ("subject", "other")))
+@pytest.mark.parametrize(("field", "value"), [("role", "viewer"), ("subject", "other")])
 def test_resolution_rejects_session_when_exact_browser_authority_changes(
     sessions: sessionmaker[Session], field: str, value: str
 ) -> None:
@@ -394,18 +400,18 @@ def test_resolution_rejects_session_when_exact_browser_authority_changes(
 def _concurrently_reserve(
     limiter: LoginRateLimiter, subjects: tuple[str, ...]
 ) -> list[object]:
-    start = threading.Barrier(len(subjects) + 1)
-    reserved = threading.Barrier(len(subjects) + 1)
+    start = Rendezvous(len(subjects) + 1)
+    reserved = Rendezvous(len(subjects) + 1)
     release = threading.Event()
     attempts: list[object] = []
     attempts_lock = threading.Lock()
 
     def reserve(subject: str) -> None:
-        start.wait(timeout=30)
+        start.wait()
         attempt = limiter.reserve(subject)
         with attempts_lock:
             attempts.append(attempt)
-        reserved.wait(timeout=30)
+        reserved.wait()
         assert release.wait(timeout=30)
         if attempt is not None:
             limiter.fail(attempt)
@@ -415,8 +421,8 @@ def _concurrently_reserve(
     ]
     for thread in threads:
         thread.start()
-    start.wait(timeout=30)
-    reserved.wait(timeout=30)
+    start.wait()
+    reserved.wait()
     release.set()
     for thread in threads:
         thread.join(timeout=30)

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from pydantic import Field, model_validator
 
-from ..strict_json import StrictModel
-from .contract import CacheManifestArtifactPart
+from vonk_control.model_cache.contract import CacheManifestArtifactPart
+from vonk_control.model_cache.providers import source_is_repository
+from vonk_control.strict_json import StrictModel
 
 
 class CatalogArtifactPart(StrictModel):
@@ -45,7 +46,6 @@ class FixtureArtifact(StrictModel):
 
     @model_validator(mode="after")
     def source_is_present(self) -> FixtureArtifact:
-        from .providers import source_is_repository
 
         if self.source is None and not (
             source_is_repository(self.kind) and self.repository is not None

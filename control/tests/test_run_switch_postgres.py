@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,12 +11,21 @@ from types import SimpleNamespace
 import pytest
 from alembic import command
 from alembic.config import Config
+from fastapi.testclient import TestClient
 from sqlalchemy import event, select
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
+from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_agent_protocol.state_machines import RouteState
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.agent_api.common import AgentApiServices
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.api import production
+from vonk_control.distribution_executor.preparation import (
+    CompositeDistributionPhaseExecutor,
+)
 from vonk_control.logging import configure_controller_logging
 from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
 from vonk_control.models.fleet import AgentNode
@@ -31,8 +41,13 @@ from vonk_control.run_switch_contract.requests import (
     SparkGroupNode,
 )
 from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runtime.preflight import latest_result, request_digest
+from vonk_control.settings import Settings
 
+from .agent_api_support import agent_headers
 from .agent_fences import fenced_operation
+from .insert_collision_support import Rendezvous
 from .non_blocking import assert_ended_without_blocking
 from .recipe_operations_support import (
     NOW,
@@ -47,11 +62,14 @@ from .recipe_operations_support import (
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
+    _finish,
     _replace_child,
     _request,
     _service,
 )
-from .test_lifecycle_preflight import _finish
+from .runtime_identity_support import claim_agent
+from .test_lifecycle_preflight import _clear
+from .test_runtime_preflight import result as passing_result
 
 
 @pytest.fixture
@@ -110,7 +128,8 @@ def test_postgres_conflicts_deduplicate_distributed_runs_and_preserve_group_safe
             session, nodes[:1], action="switch"
         )
         assert blockers
-        assert len(conflicts) == 1 and stops == []
+        assert len(conflicts) == 1
+        assert stops == []
 
 
 def test_postgres_invalid_terminal_child_fails_without_nested_row_lock(
@@ -227,6 +246,7 @@ def _awaiting_final_verification(
         actor="admin",
     )
     completed = set()
+    current = None
     for _ in range(20):
         if queued_distribution:
             before = service.get(operation.operation_id)
@@ -310,11 +330,13 @@ def _awaiting_final_verification(
         if current.current_phase == "final_verify":
             break
     else:
+        assert current is not None
         pytest.fail(f"Run did not reach final verification: {current.status_reason}")
     with sessions() as session:
         run = session.scalar(select(RecipeRun))
         assert run is not None
-        assert run.state == LifecycleState.RUNNING and run.route_state == "pending"
+        assert run.state == LifecycleState.RUNNING
+        assert run.route_state == "pending"
         run_id = run.id
     mark_current_exact_observations(sessions, run_id, now[0])
     service.tick()
@@ -445,7 +467,8 @@ def test_postgres_final_verification_waits_after_accepted_start_deadline(
     assert expired_observation.route_state == "pending"
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == LifecycleState.RUNNING
+        assert run is not None
+        assert run.state == LifecycleState.RUNNING
         reservations = tuple(
             session.scalars(
                 select(ResourceReservation).where(
@@ -484,7 +507,8 @@ def test_postgres_final_verification_timeout_hands_run_to_recovery(
         tmp_path, migrated_engine, distributed=True
     )
     current = service.get(operation.operation_id)
-    assert current.result is not None and current.result.start_deadline is not None
+    assert current.result is not None
+    assert current.result.start_deadline is not None
     observation = current.result.final_observation
     assert isinstance(observation, RunSwitchFinalVerifyResult)
     run_id = observation.run_id
@@ -506,12 +530,14 @@ def test_postgres_final_verification_timeout_hands_run_to_recovery(
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
         nodes = tuple(session.scalars(select(RunNode).where(RunNode.run_id == run_id)))
-        assert run is not None and run.state == LifecycleState.RUNNING
+        assert run is not None
+        assert run.state == LifecycleState.RUNNING
         # The fixture has never published a working route. Recovery retains
         # the run and schedules its route worker rather than claiming a stop.
         assert observation.route_state == RouteState.PENDING
         assert run.route_state == RouteState.PENDING
-        assert nodes and all(node.state == LifecycleState.RUNNING for node in nodes)
+        assert nodes
+        assert all(node.state == LifecycleState.RUNNING for node in nodes)
     # A settled observation timeout must release the planner's busy state even
     # while the existing run's route worker owns exact workload recovery.
     with sessions() as session:
@@ -524,7 +550,8 @@ def test_postgres_final_verification_timeout_hands_run_to_recovery(
     routes.publish_run(run_id)
     with sessions() as session:
         recovered = session.get(RecipeRun, run_id)
-        assert recovered is not None and recovered.state == LifecycleState.RUNNING
+        assert recovered is not None
+        assert recovered.state == LifecycleState.RUNNING
         assert recovered.route_state == RouteState.PUBLISHED
     retried = service.retry(
         failed.operation_id, actor="admin", request_key=str(uuid.uuid4())
@@ -575,17 +602,15 @@ def test_postgres_newer_intent_supersedes_parked_final_verification(
 def test_postgres_duplicate_apply_converges_under_target_lock(
     tmp_path, migrated_engine
 ):
-    from concurrent.futures import ThreadPoolExecutor
-    from threading import Barrier
 
     sessions, lifecycle, nodes, _ = _installed(tmp_path, migrated_engine)
     service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
     plan = service.preview(_request(sessions, nodes[0]), actor="admin")
     key = str(uuid.uuid4())
-    barrier = Barrier(2)
+    barrier = Rendezvous(2)
 
     def apply():
-        barrier.wait(timeout=30)
+        barrier.wait()
         return service._apply_plan(
             plan,
             request_key=key,
@@ -601,7 +626,9 @@ def test_postgres_duplicate_apply_converges_under_target_lock(
 
 
 @pytest.mark.parametrize("completion_wake", [False, True])
-@pytest.mark.parametrize("node_count,latency", [(2, 180), (2, 240), (1, 360), (2, 360)])
+@pytest.mark.parametrize(
+    ("node_count", "latency"), [(2, 180), (2, 240), (1, 360), (2, 360)]
+)
 def test_preflight_delayed_passes_and_completion_wake_reach_transfer(
     tmp_path, migrated_engine, node_count, latency, completion_wake
 ):
@@ -612,14 +639,6 @@ def test_preflight_delayed_passes_and_completion_wake_reach_transfer(
     whether the completion notification arrives or is lost.
     The Spark clock leads the Controller by ten minutes throughout.
     """
-    from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
-    from vonk_control.agent_jobs.service import AgentJobService
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
-    from vonk_control.runtime.preflight import latest_result, request_digest
-
-    from .runtime_identity_support import claim_agent
-    from .test_lifecycle_preflight import _clear
-    from .test_runtime_preflight import result as passing_result
 
     sessions, lifecycle, nodes, _ = _installed(
         tmp_path, migrated_engine, nodes=node_count
@@ -654,14 +673,14 @@ def test_preflight_delayed_passes_and_completion_wake_reach_transfer(
     )
     service.tick()
     pending = service.get(owner.operation_id)
-    assert pending.result is not None and pending.result.preflight is not None
+    assert pending.result is not None
+    assert pending.result.preflight is not None
     assert set(pending.result.preflight.pending_jobs) == set(nodes)
     # The gate's wait stays typed through the tick, never a generic fallback.
     assert pending.wait is not None
     assert pending.wait.reason is RuntimePreflightCode.REQUIRED
-    assert (
-        pending.blockers and pending.blockers[0].code == RuntimePreflightCode.REQUIRED
-    )
+    assert pending.blockers
+    assert pending.blockers[0].code == RuntimePreflightCode.REQUIRED
     assert not artifacts.children
 
     def report_probes():
@@ -686,7 +705,8 @@ def test_preflight_delayed_passes_and_completion_wake_reach_transfer(
                 receipt = latest_result(
                     session, node_id, requirements_sha256=request_digest(probe_request)
                 )
-                assert receipt is not None and receipt.received_at == clock.now
+                assert receipt is not None
+                assert receipt.received_at == clock.now
 
     if completion_wake:
         service.wake_on_child_end()
@@ -695,10 +715,10 @@ def test_preflight_delayed_passes_and_completion_wake_reach_transfer(
     clock.now = NOW + timedelta(seconds=latency)
     service.tick()
     active = service.get(owner.operation_id)
-    assert active.result is not None and active.result.child_operation_id
-    assert (
-        active.result.preflight is not None and not active.result.preflight.pending_jobs
-    )
+    assert active.result is not None
+    assert active.result.child_operation_id
+    assert active.result.preflight is not None
+    assert not active.result.preflight.pending_jobs
     assert len(artifacts.children) == 1
 
 
@@ -706,19 +726,6 @@ def test_production_result_handler_only_schedules_worker(
     tmp_path, migrated_engine, monkeypatch
 ):
     """Production's synchronous Composite executor must never run inside POST /result."""
-    from fastapi.testclient import TestClient
-    from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
-    from vonk_control.agent_api.common import AgentApiServices
-    from vonk_control.api import production
-    from vonk_control.distribution_executor.preparation import (
-        CompositeDistributionPhaseExecutor,
-    )
-    from vonk_control.settings import Settings
-
-    from .agent_api_support import agent_headers
-    from .runtime_identity_support import claim_agent
-    from .test_lifecycle_preflight import _clear
-    from .test_runtime_preflight import result as passing_result
 
     sessions, lifecycle, nodes, _ = _installed(tmp_path, migrated_engine)
     _clear(sessions)
@@ -814,10 +821,13 @@ def test_production_result_handler_only_schedules_worker(
             },
         )
         assert response.status_code == 204, response.text
-        assert not advanced and not phases and not artifacts.children
+        assert not advanced
+        assert not phases
+        assert not artifacts.children
         with sessions() as session:
             job = session.get(Job, owner.operation_id)
-            assert job is not None and job.next_action_at == NOW
+            assert job is not None
+            assert job.next_action_at == NOW
         worker.tick()
         assert len(artifacts.children) == 1
     finally:

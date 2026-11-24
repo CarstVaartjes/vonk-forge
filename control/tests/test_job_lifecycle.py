@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OperatorActionName
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.queue import JobService
@@ -68,12 +69,14 @@ def test_a_lapsed_lease_is_claimed_again_and_the_old_attempt_expires(env) -> Non
     assert jobs.claim("w2", 30, kinds=("probe",)) is None  # a live lease is untouched
     clock.now += timedelta(seconds=31)
     second = jobs.claim("w2", 30, kinds=("probe",))
-    assert second is not None and second.attempt == 2
+    assert second is not None
+    assert second.attempt == 2
     with sessions() as session:
         stored = {a.attempt: a for a in session.scalars(select(JobAttempt))}
         # The first attempt was interrupted: observed, because its lease lapsed.
         assert job_states.attempt_lapsed(stored[1])
-        assert stored[1].state == "observing" and stored[2].state == "running"
+        assert stored[1].state == "observing"
+        assert stored[2].state == "running"
         assert session.get(Job, job.id).state == "running"
     with pytest.raises(Exception) as _ending:
         jobs.succeed(first, {})  # the old fence is closed
@@ -94,7 +97,8 @@ def test_finish_ends_the_job_and_its_attempt_once(env) -> None:
         assert session.get(Job, job.id).state == State.FAILED.value
     fresh = jobs.enqueue("probe", "a", "r", ["n"], {})
     successor = jobs.claim("w", 30, kinds=("probe",))
-    assert successor is not None and successor.job_id == fresh.id
+    assert successor is not None
+    assert successor.job_id == fresh.id
     jobs.succeed(successor, {})
     assert jobs.get(fresh.id).state == State.SUCCEEDED.value
 
@@ -172,9 +176,11 @@ def test_the_adapter_re_evaluates_a_word_it_does_not_know(word: str) -> None:
     adapter = JobAdapter()
     row = adapter.adopt(job)
     retried = transition(row, Tick(), adapter, NOW).row
-    assert retried.state is State.BACKOFF and retried.next_action_at is not None
+    assert retried.state is State.BACKOFF
+    assert retried.next_action_at is not None
     due = transition(retried, Tick(), adapter, retried.next_action_at)
-    assert due.row.state is State.QUEUED and Execute() in due.commands
+    assert due.row.state is State.QUEUED
+    assert Execute() in due.commands
 
 
 def test_resume_queues_a_waiting_job_and_refuses_anything_else(env) -> None:
@@ -202,7 +208,8 @@ def test_a_parked_job_with_a_lapsed_attempt_heals_by_resume_then_claim(env) -> N
     with sessions.begin() as session:
         assert JobAdapter().resume(session, session.get(Job, job.id), clock.now)
     second = jobs.claim("w2", 30, kinds=("probe",))
-    assert second is not None and second.attempt == 2
+    assert second is not None
+    assert second.attempt == 2
 
 
 def test_a_running_job_with_a_live_lease_is_left_alone(env) -> None:

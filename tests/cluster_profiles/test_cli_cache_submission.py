@@ -9,7 +9,8 @@ from io import BytesIO, StringIO
 from urllib.error import HTTPError
 
 import pytest
-from controller_cli_support import FakeClient, run
+from controller_cli_support import FakeClient, _removal_review, run
+from test_control_client_requests import _artifact_job_response, _Response
 
 from cluster_profiles import cli
 from cluster_profiles.control_client.errors import (
@@ -75,7 +76,8 @@ def _fresh_observation(client, noun):
     path = f"/api/{noun}/requests/{KEY}"
     client.responses[("GET", path)] = receipt(noun)
     status, result = run((noun, "progress", "--request-key", KEY, "--json"), client)
-    assert status == 0 and result == receipt(noun)
+    assert status == 0
+    assert result == receipt(noun)
     assert client.calls[-1][0] == "GET"
 
 
@@ -89,7 +91,8 @@ def test_lost_download_response_finds_original_without_second_submission(noun):
         }
     )
     status, result = run((noun, "download", "chosen", "--detach", "--json"), client)
-    assert status == 0 and result == accepted
+    assert status == 0
+    assert result == accepted
     assert [call[0] for call in client.calls] == ["POST", "GET"]
 
 
@@ -117,7 +120,8 @@ def test_only_authoritative_absence_allows_one_identical_replay(second_lost):
         assert result["request_key"] == KEY
         _fresh_observation(client, "model")
     else:
-        assert status == 0 and result == receipt("model")
+        assert status == 0
+        assert result == receipt("model")
 
 
 @pytest.mark.parametrize(
@@ -138,7 +142,8 @@ def test_failed_or_foreign_lookup_cannot_justify_replay(failure):
         }
     )
     status, result = run(("model", "download", "chosen", "--detach", "--json"), client)
-    assert status == 2 and acceptance(result) == "unknown"
+    assert status == 2
+    assert acceptance(result) == "unknown"
     reconnect = result.get("observation", result.get("reconcile"))
     assert isinstance(reconnect, dict)
     assert reconnect.get("reconnect_command", reconnect.get("operation")) == (
@@ -181,12 +186,14 @@ def test_definite_refusal_is_not_looked_up_or_retried():
         }
     )
     status, result = run(("model", "download", "chosen", "--json"), client)
-    assert status == 2 and acceptance(result) == "refused"
+    assert status == 2
+    assert acceptance(result) == "refused"
     assert result["http_status"] == 403
     assert len(client.calls) == 1
     client.responses[("POST", "/api/model/chosen/download")] = receipt("model")
     status, result = run(("model", "download", "chosen", "--detach", "--json"), client)
-    assert status == 0 and result == receipt("model")
+    assert status == 0
+    assert result == receipt("model")
     assert [call[0] for call in client.calls] == ["POST", "POST"]
 
 
@@ -211,9 +218,11 @@ def test_stored_conflict_observes_without_replay_and_fresh_request_is_admitted(
     assert all(call[0] == "GET" for call in client.calls[1:])
     assert len(client.calls) <= 5
     if accepted:
-        assert status == 0 and result == receipt("model")
+        assert status == 0
+        assert result == receipt("model")
     else:
-        assert status == 2 and acceptance(result) == "unknown"
+        assert status == 2
+        assert acceptance(result) == "unknown"
     fresh_key = "22222222-2222-4222-8222-222222222222"
     fresh_receipt = receipt("model") | {
         "request_key": fresh_key,
@@ -233,7 +242,8 @@ def test_stored_conflict_observes_without_replay_and_fresh_request_is_admitted(
         ),
         client,
     )
-    assert status == 0 and result == fresh_receipt
+    assert status == 0
+    assert result == fresh_receipt
     assert [call[0] for call in client.calls[before:]] == ["POST"]
 
 
@@ -252,14 +262,16 @@ def test_submit_answer_is_the_reported_cause_not_the_lookup_miss():
         }
     )
     status, result = run(("model", "download", "chosen", "--detach", "--json"), client)
-    assert status == 2 and acceptance(result) == "unknown"
+    assert status == 2
+    assert acceptance(result) == "unknown"
     assert result["http_status"] == 409
     assert result["code"] == "controller.conflict"
     assert result["endpoint"] == post
     submission = result["submission"]
     assert isinstance(submission, dict)
     first = submission["failures"][0]
-    assert first["stage"] == "submit" and first["http_status"] == 409
+    assert first["stage"] == "submit"
+    assert first["http_status"] == 409
 
 
 @pytest.mark.parametrize("exhausted", [False, True])
@@ -319,11 +331,14 @@ def test_server_retry_delay_consumes_the_existing_submission_budget(monkeypatch,
     )
     status, result = run(("model", "download", "chosen", "--detach", "--json"), client)
     if delay < 6:
-        assert status == 0 and slept == [delay]
+        assert status == 0
+        assert slept == [delay]
         assert [call[0] for call in client.calls] == ["POST", "GET", "POST"]
     else:
-        assert status == 2 and acceptance(result) == "unknown"
-        assert not slept and [call[0] for call in client.calls] == ["POST", "GET"]
+        assert status == 2
+        assert acceptance(result) == "unknown"
+        assert not slept
+        assert [call[0] for call in client.calls] == ["POST", "GET"]
 
 
 def test_observation_does_not_shorten_a_server_delay_to_poll_early(monkeypatch):
@@ -359,8 +374,10 @@ def test_observation_does_not_shorten_a_server_delay_to_poll_early(monkeypatch):
     )
     assert status == 2
     observation = result["observation"]
-    assert isinstance(observation, dict) and observation["status"] == "timed_out"
-    assert len(client.calls) == 2 and elapsed == 60
+    assert isinstance(observation, dict)
+    assert observation["status"] == "timed_out"
+    assert len(client.calls) == 2
+    assert elapsed == 60
 
 
 def test_recipe_observer_keeps_terminal_residue_until_the_same_snapshot_repairs(
@@ -383,7 +400,8 @@ def test_recipe_observer_keeps_terminal_residue_until_the_same_snapshot_repairs(
         ("recipe", "progress", "original", "--follow", "--json"), client
     )
     assert status == 0
-    assert result["id"] == "original" and result["residue"] is None
+    assert result["id"] == "original"
+    assert result["residue"] is None
     assert len(client.calls) == 2
 
 
@@ -397,7 +415,7 @@ def test_received_403_remains_a_refusal_when_its_body_is_lost(
     calls = []
 
     class BrokenBody(BytesIO):
-        def read(self, size=-1):
+        def read(self, size: int | None = -1, /) -> bytes:
             raise http.client.IncompleteRead(b"Bearer partial-secret", 100)
 
     def opener(request, timeout):
@@ -444,7 +462,7 @@ def test_lost_server_error_body_preserves_its_retry_delay(
     sleeps = []
 
     class BrokenBody(BytesIO):
-        def read(self, size=-1):
+        def read(self, size: int | None = -1, /) -> bytes:
             raise http.client.IncompleteRead(b"partial", 100)
 
     def opener(request, timeout):
@@ -480,12 +498,12 @@ def test_lost_server_error_body_preserves_its_retry_delay(
     )
     result = json.loads(capsys.readouterr().out)
     assert acceptance(result) == "unknown"
-    assert calls[0] == "POST" and calls[1:] == ["GET"] * (len(calls) - 1)
+    assert calls[0] == "POST"
+    assert calls[1:] == ["GET"] * (len(calls) - 1)
     assert calls == ["POST", "GET"]
     assert not sleeps
     assert sum(sleeps) < result["submission"]["timeout_seconds"]
     # Ending observation retains no client gate: a fresh read can succeed.
-    from test_control_client_requests import _artifact_job_response, _Response
 
     control._opener = lambda *_args, **_kwargs: _Response(200, _artifact_job_response())
     assert (
@@ -509,12 +527,13 @@ def test_human_key_is_flushed_before_the_post_and_interrupt_keeps_unknown(
 
     class InterruptedClient(SubmissionClient):
         def request(self, *args, **kwargs):
-            assert output.flushed and KEY in output.getvalue()
+            assert output.flushed
+            assert KEY in output.getvalue()
             assert (
                 f"vonkctl model progress --request-key {KEY} --follow"
                 in output.getvalue()
             )
-            raise KeyboardInterrupt()
+            raise KeyboardInterrupt
 
     assert (
         cli.main(
@@ -568,7 +587,8 @@ def test_uncertain_cancellation_reconnect_preserves_cancellation_identity(noun):
         ),
         client,
     )
-    assert status == 2 and acceptance(result) == "unknown"
+    assert status == 2
+    assert acceptance(result) == "unknown"
     reconcile = result["observation"]
     assert isinstance(reconcile, dict)
     assert reconcile["reconnect_command"] == (
@@ -615,7 +635,8 @@ def test_malformed_poll_keeps_original_snapshot_and_bounded_observation(
     assert elapsed[0] <= 3
     if repairs:
         assert status == 0
-        assert result["operation_id"] == "original" and result["state"] == "succeeded"
+        assert result["operation_id"] == "original"
+        assert result["state"] == "succeeded"
     else:
         assert status == 2
         assert result["result"] == identity
@@ -695,7 +716,8 @@ def test_model_resume_access_reconciles_same_request_without_second_post(lost_re
     status, observed = run(
         ("model", "resume-access", operation_id, "--detach", "--json"), client
     )
-    assert status == 0 and observed == result
+    assert status == 0
+    assert observed == result
     assert client.calls[0][:3] == ("POST", path, {"request_key": KEY})
     assert [call[0] for call in client.calls] == (
         ["POST", "GET"] if lost_reply else ["POST"]
@@ -724,7 +746,6 @@ def test_model_resume_access_rejects_other_request_receipt():
 def _fleet_review(
     selector, *, removable, nas_bytes=100, digest="d", blocker=None, spark_bytes=None
 ):
-    from controller_cli_support import _removal_review
 
     return _removal_review("model", selector, model_digest="a" * 64) | {
         "review_digest": digest * 64,
@@ -841,7 +862,8 @@ def test_unused_yes_replans_a_moved_scope_with_the_fresh_digest():
     status, result = run(("model", "remove", "--unused", "--yes", "--json"), client)
     assert posted_digests(client) == ["d" * 64, "e" * 64]
     assert [e["request_key"] for e in entries(result, "submissions")] == [KEY]
-    assert status == 0 and "partial" not in result
+    assert status == 0
+    assert "partial" not in result
 
 
 def test_unused_yes_refused_everywhere_exits_nonzero_and_keeps_the_key():
@@ -852,9 +874,11 @@ def test_unused_yes_refused_everywhere_exits_nonzero_and_keeps_the_key():
         }
     )
     status, result = run(("model", "remove", "--unused", "--yes", "--json"), client)
-    assert status != 0 and result["partial"] is True
+    assert status != 0
+    assert result["partial"] is True
     [entry] = entries(result, "submissions")
-    assert entry["request_key"] == KEY and entry["failure"]
+    assert entry["request_key"] == KEY
+    assert entry["failure"]
 
 
 def test_unused_yes_unknown_acceptance_is_not_labelled_refused():
@@ -866,7 +890,8 @@ def test_unused_yes_unknown_acceptance_is_not_labelled_refused():
     )
     status, result = run(("model", "remove", "--unused", "--yes", "--json"), client)
     [entry] = entries(result, "submissions")
-    assert status != 0 and entry["failure"]
+    assert status != 0
+    assert entry["failure"]
     assert f"--request-key {KEY}" in str(entry["reconnect"])
 
 
@@ -886,5 +911,6 @@ def test_fleet_remove_replans_once_when_the_scope_moved_before_acceptance():
     ]
     argv = ("model", "remove", "a", "--fleet", "--yes", "--detach", "--json")
     status, result = run(argv, client)
-    assert status == 0 and result["operation_id"]
+    assert status == 0
+    assert result["operation_id"]
     assert posted_digests(client) == ["d" * 64, "e" * 64]

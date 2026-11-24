@@ -6,12 +6,14 @@ from datetime import timedelta
 from pathlib import Path
 
 from sqlalchemy import create_engine, select
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, OutcomeKind
 from vonk_agent_protocol.outcome import OutcomeDone
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload, RecipeStopResult
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_agent_protocol.state_machines import ReservationState, RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
@@ -88,10 +90,8 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
             runtime_identity=identity,
             preflight_fingerprint=fingerprint,
         )
-        assert (
-            old_claim is not None
-            and fenced_operation(sessions, old_claim).parent_job_id == old_start.id
-        )
+        assert old_claim is not None
+        assert fenced_operation(sessions, old_claim).parent_job_id == old_start.id
 
         with sessions() as session:
             revision = session.scalar(
@@ -150,7 +150,8 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
         with sessions() as session:
             old_run = session.get(RecipeRun, old_start.owner_id)
             old_job = session.get(Job, old_start.id)
-            assert old_run is not None and old_job is not None
+            assert old_run is not None
+            assert old_job is not None
             assert old_run.state == RunState.STARTING
             assert old_run.route_state == "withdrawn"
             assert old_job.state == "cancelled"
@@ -183,10 +184,8 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
             runtime_identity=identity,
             preflight_fingerprint=fingerprint,
         )
-        assert (
-            stop_claim is not None
-            and fenced_operation(sessions, stop_claim).parent_job_id == stop_job.id
-        )
+        assert stop_claim is not None
+        assert fenced_operation(sessions, stop_claim).parent_job_id == stop_job.id
         assert isinstance(stop_claim.payload, RecipeStopPayload)
         assert stop_claim.payload.run_id == old_start.owner_id
         assert fenced_operation(sessions, stop_claim).node_id == node_id
@@ -199,7 +198,8 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
         )
         with sessions() as session:
             old_run = session.get(RecipeRun, old_start.owner_id)
-            assert old_run is not None and old_run.state == "stopped"
+            assert old_run is not None
+            assert old_run.state == "stopped"
             stopped_at = old_run.stopped_at
             snapshot = session.scalar(
                 select(NodeInventorySnapshot).where(
@@ -221,7 +221,10 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
         # that its memory is actually free. Keep the replacement unqueued until
         # a sample clears the stop timestamp and admitted clock skew.
         fresh_at = stopped_at + MAX_INVENTORY_FUTURE_SKEW + timedelta(seconds=1)
-        fresh_clock = lambda: fresh_at
+
+        def fresh_clock():
+            return fresh_at
+
         lifecycle._clock = fresh_clock
         agent_jobs._clock = fresh_clock
         switch._clock = fresh_clock
@@ -310,10 +313,8 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
             runtime_identity=identity,
             preflight_fingerprint=fingerprint,
         )
-        assert (
-            new_claim is not None
-            and fenced_operation(sessions, new_claim).parent_job_id == replacement.id
-        )
+        assert new_claim is not None
+        assert fenced_operation(sessions, new_claim).parent_job_id == replacement.id
         assert (
             fenced_operation(sessions, new_claim).id
             != fenced_operation(sessions, old_claim).id

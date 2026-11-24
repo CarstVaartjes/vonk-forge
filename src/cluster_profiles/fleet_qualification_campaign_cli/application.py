@@ -6,6 +6,18 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from cluster_profiles.cli_states_generated import RUNNING
+from cluster_profiles.fleet_qualification_campaign_cli.contracts import (
+    Batch,
+    Campaign,
+    ResultsLog,
+)
+from cluster_profiles.fleet_qualification_campaign_cli.lanes import _lanes_from_sparks
+from cluster_profiles.fleet_qualification_campaign_cli.profiles import (
+    _apply_profile,
+    _quote,
+    _save_profile,
+)
+from cluster_profiles.fleet_qualification_campaign_cli.smoke import _smoke_lanes
 from cluster_profiles.fleet_qualification_observation import (
     QualificationObservationUnknown,
     _BudgetClient,
@@ -13,11 +25,6 @@ from cluster_profiles.fleet_qualification_observation import (
     _forget_key,
     _observe,
 )
-
-from .contracts import Batch, Campaign, ResultsLog
-from .lanes import _lanes_from_sparks
-from .profiles import _apply_profile, _quote, _save_profile
-from .smoke import _smoke_lanes
 
 
 def load(

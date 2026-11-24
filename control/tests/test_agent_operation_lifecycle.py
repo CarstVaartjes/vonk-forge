@@ -16,16 +16,32 @@ import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
+from sqlalchemy.orm import Session
+
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
+)
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     ObservationCause,
     WaitReason,
 )
+from vonk_agent_protocol.recipe_jobs import (
+    RecipeJobFile,
+    RecipeJobRunResult,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_document as recipe_job_manifest_document,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_sha256 as recipe_job_manifest_sha256,
+)
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.retirement import operator_resume_candidates_in_session
 from vonk_control.agent_jobs.service import AgentJobService
@@ -40,10 +56,18 @@ from vonk_control.lifecycle.core import (
     STOP_BUDGET,
     transition,
 )
-from vonk_control.lifecycle.types import Effect, State, Tick
+from vonk_control.lifecycle.types import (
+    Claimed,
+    Effect,
+    Lifecycle,
+    Observed,
+    State,
+    Tick,
+)
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.recovery_policy import RECOVERY, WAIT_STEP
 
 from .agent_jobs_support import (
     COMMIT,
@@ -56,6 +80,7 @@ from .agent_jobs_support import (
     parent,
 )
 from .agent_jobs_support import service as agent_service  # noqa: F401 - the fixture
+from .non_blocking import assert_ended_without_blocking
 from .runtime_identity_support import claim_agent
 
 KIND_STOP = ProtocolAgentOperation.RECIPE_STOP.value
@@ -126,8 +151,10 @@ def test_a_stored_order_maps_onto_the_core_states(agent_service) -> None:
     claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
     running = adapter.adopt(_stored(sessions, queued.id))
-    assert running.state is State.RUNNING and running.attempt == 1
-    assert running.effect is Effect.ISSUED and running.lease_deadline is not None
+    assert running.state is State.RUNNING
+    assert running.attempt == 1
+    assert running.effect is Effect.ISSUED
+    assert running.lease_deadline is not None
 
     # A waiting order is a wait; a backing-off one with a schedule is a retry.
     _park(sessions, queued.id)
@@ -137,7 +164,8 @@ def test_a_stored_order_maps_onto_the_core_states(agent_service) -> None:
         stored = session.get(AgentOperation, queued.id)
         stored.state, stored.next_action_at = LifecycleState.BACKOFF.value, clock.now
     scheduled = adapter.adopt(_stored(sessions, queued.id))
-    assert scheduled.state is State.BACKOFF and scheduled.next_action_at == clock.now
+    assert scheduled.state is State.BACKOFF
+    assert scheduled.next_action_at == clock.now
 
 
 # ------------------------------------------------------------ the kind's facts
@@ -151,8 +179,6 @@ def test_unknown_effect_is_lost_or_retried_without_blindly_repeating_user_jobs(
     kind,
 ) -> None:
     """Catches repeating or failing an unobserved user effect, and parking rebuildable work."""
-    from sqlalchemy.orm import Session
-    from vonk_control.lifecycle.types import Lifecycle, Observed
 
     now = datetime(2026, 10, 6, tzinfo=UTC)
     with Session() as session:
@@ -171,26 +197,16 @@ def test_unknown_effect_is_lost_or_retried_without_blindly_repeating_user_jobs(
         if kind is ProtocolAgentOperation.RECIPE_JOB_RUN:
             # Lost, never failed: the job may still run, so it is observed again.
             assert after.state is State.OBSERVING
-            assert after.next_action_at is not None and after.next_action_at > now
+            assert after.next_action_at is not None
+            assert after.next_action_at > now
         else:
             assert after.state is State.BACKOFF
-            assert after.next_action_at is not None and after.next_action_at > now
+            assert after.next_action_at is not None
+            assert after.next_action_at > now
 
 
 def _exit_receipt(code: int) -> dict[str, object]:
     """The stored document of a job's measured exit (its ``RecipeJobRunResult``)."""
-
-    from vonk_agent_protocol.contracts import canonical_message
-    from vonk_agent_protocol.recipe_jobs import (
-        RecipeJobFile,
-        RecipeJobRunResult,
-    )
-    from vonk_agent_protocol.recipe_jobs import (
-        manifest_document as recipe_job_manifest_document,
-    )
-    from vonk_agent_protocol.recipe_jobs import (
-        manifest_sha256 as recipe_job_manifest_sha256,
-    )
 
     _kind, payload = _job_run_payload()
     empty: tuple[RecipeJobFile, ...] = ()
@@ -325,12 +341,12 @@ def test_a_lost_job_order_is_observed_at_its_own_cadence_never_ended(
     assert lost.next_action_at is not None
     # Its next look is at the bounded backoff's ceiling: later than a short
     # wait re-check, since each look rewrites the row under its node locks.
-    from vonk_control.recovery_policy import RECOVERY, WAIT_STEP
 
     wait = RECOVERY.next_attempt(
         operation.id, WAIT_STEP, clock.now, ongoing_intent=True
     )
-    assert wait is not None and lost.next_action_at.replace(tzinfo=UTC) > wait
+    assert wait is not None
+    assert lost.next_action_at.replace(tzinfo=UTC) > wait
     assert lost.next_action_at.replace(tzinfo=UTC) <= clock.now + 2 * timedelta(
         seconds=RECOVERY.max_delay_seconds
     )
@@ -375,9 +391,11 @@ def test_a_never_executed_order_parked_for_an_operator_is_queued_again(
     assert jobs.reconcile_orders() is True
 
     stored = _stored(sessions, operation.id)
-    assert stored.state == "queued" and stored.next_action_at is not None
+    assert stored.state == "queued"
+    assert stored.next_action_at is not None
     claim = claim_agent(jobs, NODE_A, "serial-a")
-    assert claim is not None and claim.operation.value == kind
+    assert claim is not None
+    assert claim.operation.value == kind
 
 
 def test_a_never_executed_start_parked_for_an_operator_is_queued_again(
@@ -397,7 +415,8 @@ def test_a_never_executed_start_parked_for_an_operator_is_queued_again(
 
     assert _stored(sessions, operation.id).state == "queued"
     claim = claim_agent(jobs, NODE_A, "serial-a")
-    assert claim is not None and claim.operation.value == "recipe.start"
+    assert claim is not None
+    assert claim.operation.value == "recipe.start"
 
 
 def test_a_restart_safe_order_parked_for_an_operator_is_retried(agent_service) -> None:
@@ -416,7 +435,8 @@ def test_a_restart_safe_order_parked_for_an_operator_is_retried(agent_service) -
     assert jobs.reconcile_orders() is True
 
     after = _stored(sessions, operation.id)
-    assert after.state == aos.BACKOFF and after.next_action_at is not None
+    assert after.state == aos.BACKOFF
+    assert after.next_action_at is not None
     assert job_state(sessions, operation.parent_job_id).state == "queued"
     clock.now = after.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
     retried = claim_agent(jobs, NODE_A, "serial-a")
@@ -500,7 +520,8 @@ def test_a_cancel_completes_past_dead_work(agent_service) -> None:
     assert jobs.reconcile_orders() is True
 
     stored = _stored(sessions, operation.id)
-    assert stored.state == "cancelled" and stored.next_action_at is None
+    assert stored.state == "cancelled"
+    assert stored.next_action_at is None
     assert job_state(sessions, parent_job.id).state == "cancelled"
 
 
@@ -567,7 +588,8 @@ def test_a_lapsed_running_order_is_decided_without_the_node_polling(
     assert jobs.reconcile_orders() is True
 
     stored = _stored(sessions, operation.id)
-    assert stored.state == aos.BACKOFF and stored.next_action_at is not None
+    assert stored.state == aos.BACKOFF
+    assert stored.next_action_at is not None
 
 
 def test_many_legacy_parked_orders_heal_in_one_pass(agent_service) -> None:
@@ -705,9 +727,6 @@ def test_nodes_never_polled_are_still_reconciled(agent_service) -> None:
         node.state = NodeIdentityState.RETIRED
         node.revoked_at = clock.now
     clock.advance(seconds=45)
-    from types import SimpleNamespace
-
-    from .non_blocking import assert_ended_without_blocking
 
     def end(_):
         assert jobs.reconcile_orders()
@@ -757,7 +776,8 @@ def test_a_lapsed_attempt_is_observed_with_its_cause_and_an_old_one_reads_the_sa
         )
         assert attempt.state == aos.OBSERVING
         assert attempt.observation_cause == "lease-lapsed"
-        assert aos.attempt_lapsed(attempt) and not aos.attempt_reported_unknown(attempt)
+        assert aos.attempt_lapsed(attempt)
+        assert not aos.attempt_reported_unknown(attempt)
         found = session.scalars(
             select(AgentOperationAttempt.id).where(
                 aos.sql_attempt_lapsed(AgentOperationAttempt)
@@ -792,7 +812,8 @@ def test_a_parked_order_is_found_by_every_selection(
                     ).all()
                 ), (word, words)
         assert aos.order_is_parked(word)
-    assert not aos.order_is_parked("running") and not aos.order_is_parked("queued")
+    assert not aos.order_is_parked("running")
+    assert not aos.order_is_parked("queued")
 
 
 def test_the_agent_word_for_unknown_is_mapped_at_ingress_to_an_observed_attempt(
@@ -804,7 +825,8 @@ def test_the_agent_word_for_unknown_is_mapped_at_ingress_to_an_observed_attempt(
     assert aos.attempt_reported_unknown(attempt)
     assert aos.attempt_wire_state(attempt) == aos.WIRE_UNKNOWN
     aos.record_wire_state(attempt, "failed")
-    assert attempt.state == "failed" and attempt.observation_cause is None
+    assert attempt.state == "failed"
+    assert attempt.observation_cause is None
     assert aos.attempt_wire_state(attempt) == "failed"
     aos.lapse(attempt)
     assert aos.attempt_lapsed(attempt)
@@ -816,8 +838,6 @@ def test_the_agent_word_for_unknown_is_mapped_at_ingress_to_an_observed_attempt(
 )
 def test_unknown_build_effect_retries_after_the_observation_budget(kind) -> None:
     """Rebuildable work must not inherit the irreversible user-job observation loop."""
-    from sqlalchemy.orm import Session
-    from vonk_control.lifecycle.types import Claimed, Lifecycle, Observed
 
     now = datetime(2026, 10, 6, tzinfo=UTC)
     with Session() as session:
@@ -833,7 +853,8 @@ def test_unknown_build_effect_retries_after_the_observation_budget(kind) -> None
         )
         scheduled = transition(row, Observed(Effect.UNKNOWN), adapter, now).row
         assert scheduled.state is State.BACKOFF
-        assert scheduled.next_action_at is not None and scheduled.next_action_at > now
+        assert scheduled.next_action_at is not None
+        assert scheduled.next_action_at > now
         due = scheduled.next_action_at
         claimed = transition(
             scheduled,

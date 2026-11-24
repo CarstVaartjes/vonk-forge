@@ -5,15 +5,7 @@ from __future__ import annotations
 import shlex
 from collections.abc import Mapping
 
-from ..cli_states_generated import (
-    CANCELLED,
-    ENDPOINT_UNAVAILABLE,
-    LIVE_LIFECYCLE_STATES,
-    TERMINAL_LIFECYCLE_STATES,
-    UNKNOWN,
-    UNSUCCESSFUL_LIFECYCLE_STATES,
-)
-from .common import (
+from cluster_profiles.cli_render.common import (
     _actions,
     _field,
     _optional,
@@ -24,6 +16,14 @@ from .common import (
     _waiting,
     _warn,
     _words,
+)
+from cluster_profiles.cli_states_generated import (
+    CANCELLED,
+    ENDPOINT_UNAVAILABLE,
+    LIVE_LIFECYCLE_STATES,
+    TERMINAL_LIFECYCLE_STATES,
+    UNKNOWN,
+    UNSUCCESSFUL_LIFECYCLE_STATES,
 )
 
 

@@ -7,6 +7,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from sqlalchemy import select
+
 from vonk_control.agent_operation_facts import START_STALL_WINDOW
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.fleet import AgentCertificate

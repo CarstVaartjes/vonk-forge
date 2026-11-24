@@ -15,16 +15,16 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from control.tests.observation_transfer_peer import fleet_authority
+from tests.acceptance.controller_contract import ContractSkew, ControllerContract
+from tests.acceptance.test_spark_lifecycle import LifecycleError, LocalBrowserController
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.fleet_projection.common import FleetSnapshot
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.model_primitives import Base
 from vonk_control.strict_json import serialize_json_value
-
-from control.tests.observation_transfer_peer import fleet_authority
-from tests.acceptance.controller_contract import ContractSkew, ControllerContract
-from tests.acceptance.test_spark_lifecycle import LifecycleError, LocalBrowserController
 
 ROOT = Path(__file__).resolve().parents[1]
 HISTORICAL_SOURCE = "82f7e265d837de0ab37072a48bc8f707fa3bb181"
@@ -218,7 +218,7 @@ def test_local_acceptance_bearer_keeps_authorization_and_retries_verified_receip
                 self.end_headers()
                 self.wfile.write(body)
 
-            def log_message(self, _format: str, *_args: object) -> None:
+            def log_message(self, format: str, *args: object) -> None:
                 return
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)

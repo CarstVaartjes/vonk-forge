@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..agent_api.common import AgentApiServices
-from ..agent_upgrades.service import AgentUpgradeService
-from .logs import AgentFailureLogProvider
-from .services import FleetLogProvider, FleetOperatorServices, _AgentEnrollmentAdapter
+from vonk_control.agent_api.common import AgentApiServices
+from vonk_control.agent_upgrades.service import AgentUpgradeService
+from vonk_control.operator_projection_api.logs import AgentFailureLogProvider
+from vonk_control.operator_projection_api.services import (
+    FleetLogProvider,
+    FleetOperatorServices,
+    _AgentEnrollmentAdapter,
+)
 
 
 def build_fleet_operator_services(

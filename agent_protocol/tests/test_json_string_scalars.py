@@ -19,9 +19,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import vonk_agent_protocol
 from pydantic import BaseModel
-from vonk_agent_protocol.contracts import AgentFailureResult, AgentResult
+
+import vonk_agent_protocol
+from vonk_agent_protocol.agent_operations import AgentFailureResult
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.failure_evidence import FAILURE_LOG_POLICY, FailureDiagnostics
 from vonk_agent_protocol.optional_evidence import EvidenceDrop
 from vonk_agent_protocol.page_cache import PageCacheDropProblem, PageCacheDropReport
@@ -56,7 +58,8 @@ def test_a_start_failure_keeps_its_page_cache_drops_in_every_mode(mode: str) -> 
     assert drops is not None
     assert drops.last_problem is not None
     assert drops.last_problem.problem is PageCacheDropProblem.DROP_IN_PROGRESS
-    assert drops.last is not None and drops.last.dropped_at.tzinfo is not None
+    assert drops.last is not None
+    assert drops.last.dropped_at.tzinfo is not None
 
 
 def test_a_report_read_from_its_json_strings_round_trips_unchanged() -> None:
@@ -196,7 +199,7 @@ def test_every_strict_protocol_model_reads_uuids_and_timestamps_from_json() -> N
     unbound = {
         model.__qualname__: found
         for model in _strict_models()
-        if isinstance(model.__pydantic_core_schema__, dict)
+        if isinstance(model.__pydantic_core_schema__, dict)  # pyright: ignore[reportUnnecessaryIsInstance]  # an unbuilt model carries a mock schema
         and (found := _unbound_scalars(model.__pydantic_core_schema__))
     }
 

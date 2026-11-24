@@ -36,7 +36,7 @@ from vonk_forge_contracts.qualification_status import (
 )
 
 # JSON as the contract dumps it; what a rebuilt block is validated from.
-type _Json = str | int | float | bool | None | list[_Json] | dict[str, _Json]
+type _Json = str | int | float | bool | list[_Json] | dict[str, _Json] | None
 
 #: A scalar field's neutral value for a word this Controller does not know.
 #: A scalar word in any other field leaves out its enclosing object.

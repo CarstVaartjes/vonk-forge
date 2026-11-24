@@ -1,7 +1,7 @@
 """Explicit enrollment revocation denies route effects, regardless of observations."""
 
-from ..models.fleet import AgentNode
-from ..recipe_routes.shared import RecipeEndpointAuthorityRefused
+from vonk_control.models.fleet import AgentNode
+from vonk_control.recipe_routes.shared import RecipeEndpointAuthorityRefused
 
 
 def require_route_authority(agent: AgentNode | None, run_id: str) -> None:

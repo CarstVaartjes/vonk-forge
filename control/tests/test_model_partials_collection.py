@@ -8,10 +8,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
+import httpx2
 import pytest
 from sqlalchemy import event
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.model_cache import partials_collection
@@ -23,6 +25,14 @@ from vonk_control.models.cache import ModelCacheOperation
 
 from .model_cache_support import _artifact, _download, _remove_model, cache
 from .removal_settle import advance_until_ended
+from .test_model_cache_availability_regressions import (
+    _artifact as http_artifact,
+)
+from .test_model_cache_availability_regressions import (
+    _database,
+    _service,
+    _start,
+)
 
 __all__ = ["cache"]
 
@@ -187,17 +197,6 @@ def test_live_repair_keeps_its_partial_and_a_failed_one_loses_it_a_day_later(
 ) -> None:
     """A repair cannot be cancelled; it ends by failing, which starts the clock."""
 
-    import httpx2
-
-    from .test_model_cache_availability_regressions import (
-        _artifact as http_artifact,
-    )
-    from .test_model_cache_availability_regressions import (
-        _database,
-        _service,
-        _start,
-    )
-
     sessions = _database(tmp_path)
     body = b"x" * 100
     serving = [True]
@@ -239,7 +238,8 @@ def test_live_repair_keeps_its_partial_and_a_failed_one_loses_it_a_day_later(
         if service.get_operation(repair.id).state == LifecycleState.FAILED:
             break
     failure = service.get_operation(repair.id).failure
-    assert failure is not None and failure["code"] == ModelCacheCode.SOURCE_GONE
+    assert failure is not None
+    assert failure["code"] == ModelCacheCode.SOURCE_GONE
     ended = _updated_at(sessions, repair.id)
     clock.now = ended + timedelta(hours=23, minutes=59)
     assert gatherer.collect() == (0, False)
@@ -314,9 +314,10 @@ def test_transfers_take_the_shared_owner_lock(collector, tmp_path: Path) -> None
             seen.append(True)
         return original(spec, set_digest, **kwargs)
 
-    service._download_locked = probe  # type: ignore[method-assign]
+    service._download_locked = probe
     service._run_download(started.id, force=False, interrupt_after_bytes=_HALF_MEBIBYTE)
-    assert seen and all(seen)
+    assert seen
+    assert all(seen)
 
 
 def test_pass_resumes_from_a_cursor_with_one_query_per_stale_directory(
@@ -373,17 +374,6 @@ def test_tick_runs_once_per_interval(collector) -> None:
 def test_a_failed_download_keeps_its_partial_a_day_from_the_failure(tmp_path: Path):
     """A real terminal failure (the source is gone) starts the same clock."""
 
-    import httpx2
-
-    from .test_model_cache_availability_regressions import (
-        _artifact as http_artifact,
-    )
-    from .test_model_cache_availability_regressions import (
-        _database,
-        _service,
-        _start,
-    )
-
     sessions = _database(tmp_path)
     service, _client = _service(
         tmp_path,
@@ -403,7 +393,8 @@ def test_a_failed_download_keeps_its_partial_a_day_from_the_failure(tmp_path: Pa
         if service.get_operation(started.id).state == LifecycleState.FAILED:
             break
     failure = service.get_operation(started.id).failure
-    assert failure is not None and failure["code"] == ModelCacheCode.SOURCE_GONE
+    assert failure is not None
+    assert failure["code"] == ModelCacheCode.SOURCE_GONE
     ended = _updated_at(sessions, started.id)
     clock.now = ended + timedelta(hours=23, minutes=59)
     assert gatherer.collect() == (0, False)
@@ -524,7 +515,8 @@ def test_a_failed_query_or_unreadable_directory_does_not_stop_the_pass(
     monkeypatch.setattr(gatherer, "_ownership", ownership)
     monkeypatch.setattr(gatherer, "_newest_change", newest_change)
     assert gatherer.collect() == (1, False)
-    assert broken_query.exists() and unreadable.exists()
+    assert broken_query.exists()
+    assert unreadable.exists()
     assert not healthy.exists()
     monkeypatch.undo()
     # Both heal on the next pass.
@@ -569,7 +561,6 @@ def test_a_writer_without_the_owner_lock_fails_loudly(collector, tmp_path: Path)
     kwargs = {
         "operation_id": started.id,
         "completed_artifacts": 0,
-        "force": False,
         "interrupt_after_bytes": None,
     }
     with pytest.raises(RuntimeError, match="without its lock"):

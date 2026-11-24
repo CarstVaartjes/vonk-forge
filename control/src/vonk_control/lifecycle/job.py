@@ -52,23 +52,20 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     OperatorActionName,
     WaitOwnerKind,
 )
-
-from ..agent_operation_facts import aware
-from ..jobs import states as job_states
-from ..logging import redact_text
-from ..models.jobs import Job, JobAttempt
-from ..persisted_waits import initialize_wait, lifecycle_wait, wait_due
-from .adapter import Dispatch
-from .core import transition
-from .reconciler import Settled
-from .reconciler import settle as settle_event
-from .types import (
+from vonk_control.agent_operation_facts import aware
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.adapter import Dispatch
+from vonk_control.lifecycle.core import transition
+from vonk_control.lifecycle.reconciler import Settled
+from vonk_control.lifecycle.reconciler import settle as settle_event
+from vonk_control.lifecycle.types import (
     Claimed,
     Effect,
     Event,
@@ -82,6 +79,9 @@ from .types import (
     State,
     StopResult,
 )
+from vonk_control.logging import redact_text
+from vonk_control.models.jobs import Job, JobAttempt
+from vonk_control.persisted_waits import initialize_wait, lifecycle_wait, wait_due
 
 KIND = "job"
 WAITING = LifecycleState.NEEDS_OPERATOR.value
@@ -146,7 +146,7 @@ class JobAdapter:
             effect = Effect.ISSUED if job.current_attempt else Effect.NONE
         ordinal = (
             job.payload.get("workload_intent_ordinal")
-            if isinstance(job.payload, Mapping)
+            if isinstance(job.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             else None
         )
         return Lifecycle(
@@ -166,21 +166,21 @@ class JobAdapter:
 
     # ----------------------------------------------------- the kind's facts
 
-    def irreversible(self, row: Lifecycle) -> bool:
+    def irreversible(self, _row: Lifecycle) -> bool:
         return False
 
-    def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
+    def retry_not_before(self, _row: Lifecycle, _now: datetime) -> datetime | None:
         return None
 
-    def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
+    def execute(self, _row: Lifecycle, _attempt: int) -> Dispatch:
         """The executor claims its own work (a polled kind)."""
 
         return Dispatch(issued=False)
 
-    def observe(self, row: Lifecycle) -> Observed:
+    def observe(self, _row: Lifecycle) -> Observed:
         return Observed(Effect.UNKNOWN, "a generic job has no effect to inspect")
 
-    def stop(self, row: Lifecycle) -> StopResult:
+    def stop(self, _row: Lifecycle) -> StopResult:
         return StopResult.UNCONFIRMED
 
     def actions(self, row: Lifecycle) -> tuple[str, ...]:
@@ -188,7 +188,7 @@ class JobAdapter:
 
         return (OperatorActionName.RESUME,) if row.state is State.NEEDS_OPERATOR else ()
 
-    def children(self, row: Lifecycle) -> tuple[Lifecycle, ...]:
+    def children(self, _row: Lifecycle) -> tuple[Lifecycle, ...]:
         return ()
 
     # ---------------------------------------------------------------- writes
@@ -210,7 +210,7 @@ class JobAdapter:
         *,
         attempt: JobAttempt | None = None,
         result: Mapping[str, object] | None | object = None,
-        reason: str | None | object = None,
+        reason: str | object | None = None,
     ) -> None:
         """The only writer of ``Job.state`` and ``JobAttempt.state`` of a generic job."""
 
@@ -261,7 +261,7 @@ class JobAdapter:
 
         row = self.lifecycle(job, attempt or self._attempt(session, job))
 
-        def save(before: Lifecycle, after: Lifecycle) -> bool:
+        def save(_before: Lifecycle, after: Lifecycle) -> bool:
             if guard is not None and job.state != guard:
                 return False
             # The mapper checks the read version at flush. A bulk state CAS

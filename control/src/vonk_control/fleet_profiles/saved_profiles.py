@@ -8,20 +8,20 @@ from typing import cast as _typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import (
     ProfileDocumentState,
     ProfileInstallationPolicy,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
-
-from ..admission_locking import (
+from vonk_control.admission_locking import (
     ConstraintReplan,
     ConstraintReplay,
     admitting,
     label_transaction,
 )
-from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract.definitions import (
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.fleet_profile_contract.definitions import (
     FleetNodeView,
     FleetProfileDefinition,
     FleetProfileDefinitionView,
@@ -32,30 +32,32 @@ from ..fleet_profile_contract.definitions import (
     SavedProfileProjectionIssue,
     UnavailableFleetProfileView,
 )
-from ..fleet_profile_contract.review import FleetProfileApplicationView
-from ..models.fleet import (
-    AgentNode,
-    AgentNodeProfile,
-    FleetProfile,
-    FleetProfileApplication,
-)
-from .contracts import (
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileDefinitionUnavailable,
     FleetProfileInvalid,
     FleetProfileRevisionConflict,
 )
-from .projection_support import (
+from vonk_control.fleet_profiles.projection_support import (
     _aware,
     _digest,
     _profile_definition,
     _with_save_notes,
 )
-from .read_observation import profile_read
+from vonk_control.fleet_profiles.read_observation import profile_read
+from vonk_control.models.fleet import (
+    AgentNode,
+    AgentNodeProfile,
+    FleetProfile,
+    FleetProfileApplication,
+)
 
 if TYPE_CHECKING:
-    from .profile_projection import _ProfilePageReads
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.profile_projection import _ProfilePageReads
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 class FleetProfileService:
@@ -201,12 +203,6 @@ class FleetProfileService:
                 updated_at=now,
             )
 
-    @staticmethod
-    def _definition(row: FleetProfile) -> FleetProfileDefinition:
-        """Read exact authoring intent; partial reconstruction could delete choices."""
-
-        return _profile_definition(row)
-
     def _required_definition(self, row: FleetProfile) -> FleetProfileDefinition:
         """Refuse new effects with the same typed cause as the draft read."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
@@ -253,7 +249,7 @@ class FleetProfileService:
     ) -> FleetProfileDefinition | SavedProfileProjectionIssue:
         """The saved definition, or the typed issue that it cannot be read."""
         try:
-            return self._definition(row)
+            return _definition(row)
         except (TypeError, ValueError):
             return self._definition_issue()
 
@@ -357,7 +353,7 @@ class FleetProfileService:
                 value.model_dump(exclude={"expected_revision"})
             )
             try:
-                previous = self._definition(row)
+                previous = _definition(row)
             except (TypeError, ValueError):
                 # Equality is only an optimization. An unreadable old draft
                 # cannot prevent an authorized complete replacement.
@@ -472,3 +468,9 @@ class FleetProfileService:
             if row is None:
                 raise MissingRecord(number, reason=InvalidRequestReason.NOT_FOUND)
             return self._application_view(row)
+
+
+def _definition(row: FleetProfile) -> FleetProfileDefinition:
+    """Read exact authoring intent; partial reconstruction could delete choices."""
+
+    return _profile_definition(row)

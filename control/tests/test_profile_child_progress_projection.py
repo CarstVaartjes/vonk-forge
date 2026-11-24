@@ -3,16 +3,26 @@
 from __future__ import annotations
 
 import copy
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+
+from cluster_profiles.cli_render.dispatch import render_payload
+from cluster_profiles.control_client.schema import validate_control_document
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
+from vonk_agent_protocol.agent_words import ProfileDocumentState
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    WaitOwnerKind,
+    WaitReason,
+    WaitResumeCondition,
+)
+from vonk_agent_protocol.state_machines import DesiredAssignmentState
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control.agent_contacts import record_contact
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.execution_plan_service import (
@@ -39,6 +49,7 @@ from vonk_control.models.fleet import (
 )
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operations.blockers import BlockingOperation, make_blocker
 from vonk_control.operations.progress import aggregate_progress, member_progress
 from vonk_control.recipe_operations.progress import _stored_phases
 from vonk_control.recipe_operations.runtime_specs import (
@@ -57,8 +68,7 @@ from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
 from vonk_control.run_switch_operations.results import _stored_result
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.stored.json_values import write_guard_mode
-
-from cluster_profiles.control_client.schema import validate_control_document
+from vonk_control.wait_contract import QueueWait
 
 from .node_contacts import contact_row
 from .preflight_fixtures import record_passing_preflight
@@ -115,7 +125,8 @@ class _PreparedImageExecutor(RecordingArtifactExecutor):
         with self.sessions() as session:
             revision = session.get(CatalogDocumentRevision, plan.recipe_revision_id)
             build = session.get(RecipeBuild, plan.recipe_build_id)
-            assert revision is not None and build is not None
+            assert revision is not None
+            assert build is not None
             resolved = resolve_recipe_entities(session, revision)
             document = revision.document
         # Managed storage preparation is outside the SQL read transaction.
@@ -220,6 +231,7 @@ def _follow_saved_due(sessions, service, application_id, clock):
 
 
 def _drive_install(sessions, service, planner, application_id, clock, count):
+    identities = None
     for _ in range(24):
         _follow_saved_due(sessions, service, application_id, clock)
         planner.tick()
@@ -248,6 +260,7 @@ def _drive_install(sessions, service, planner, application_id, clock, count):
                     "request_key": operation.request_key,
                 }
             )
+    assert identities is not None
     raise AssertionError(
         f"Expected {count} exact native installs, found {identities}; "
         f"now={clock[0]}, state={observed.state}, "
@@ -284,7 +297,8 @@ def _assert_plain_install_measurement(
     plan: RunSwitchPlan, phase: RunSwitchPhase, now
 ) -> None:
     """Rejects both cross-budget counting and dropping plain phase samples."""
-    assert phase.kind == "prepare" and phase.subphase == "runtime-install"
+    assert phase.kind == "prepare"
+    assert phase.subphase == "runtime-install"
     progress = RunSwitchOperationResult(total_bytes=0, total_bytes_known=True)
     for completed, observed in ((32, now - timedelta(seconds=2)), (48, now)):
         _merge_progress_evidence(
@@ -295,11 +309,14 @@ def _assert_plain_install_measurement(
             observed,
         )
     assert progress.completed_bytes == 0
-    assert progress.total_bytes == 0 and progress.total_bytes_known
+    assert progress.total_bytes == 0
+    assert progress.total_bytes_known
     assert progress.operation_phase_index == phase.index
     measured = progress.operation
-    assert measured is not None and measured.phase == phase.kind
-    assert measured.completed_bytes == 48 and measured.total_bytes == 64
+    assert measured is not None
+    assert measured.phase == phase.kind
+    assert measured.completed_bytes == 48
+    assert measured.total_bytes == 64
     assert measured.observed_at == now.isoformat()
     # Plain preparation counters carry no native transfer-phase attribution.
     # Keep their bytes/timing, without inventing a throughput or transfer ETA.
@@ -405,7 +422,8 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
                 AgentOperationAttempt.fence == claim.fence
             )
         )
-        assert sample is not None and sample.progress is not None
+        assert sample is not None
+        assert sample.progress is not None
         persisted_progress = copy.deepcopy(sample.progress)
 
     clock[0] = base_now + timedelta(seconds=60)
@@ -442,7 +460,8 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
                 AgentOperationAttempt.fence == claim.fence
             )
         )
-        assert sample is not None and sample.progress == persisted_progress
+        assert sample is not None
+        assert sample.progress == persisted_progress
 
     # A restarted lifecycle and both coordinators share the saved-due clock.
     planner._lifecycle = lifecycle
@@ -454,9 +473,9 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
         switch_id = switch_job.id
         plan = _stored_job_plan(switch_job)
         result = _stored_result(switch_job.result)
-        assert (
-            plan is not None and result is not None and not isinstance(result, Residue)
-        )
+        assert plan is not None
+        assert result is not None
+        assert not isinstance(result, Residue)
         phase = plan.phases[result.phase_index]
     _assert_plain_install_measurement(plan, phase, clock[0])
     _follow_saved_due(sessions, service, application.id, clock)
@@ -468,7 +487,8 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
     assert switch.result.completed_bytes == 0
     assert switch.result.total_bytes == 0
     assert switch.result.total_bytes_known
-    assert switch.progress is not None and switch.progress.operation is not None
+    assert switch.progress is not None
+    assert switch.progress.operation is not None
     assert switch.progress.operation.completed_bytes == 48
     assert [member.member_id for member in switch.progress.operation.members] == list(
         nodes
@@ -488,7 +508,8 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
     service.tick()
     profile_view = service.application(application.id)
     profile_progress = profile_view.progress.child_progress
-    assert profile_progress is not None and profile_progress.operation is not None
+    assert profile_progress is not None
+    assert profile_progress.operation is not None
     assert profile_progress.operation.completed_bytes == 48
     assert [member.member_id for member in profile_progress.operation.members] == list(
         nodes
@@ -499,7 +520,8 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
     effects = [
         effect for effect in profile_view.progress.effects if effect.kind == "install"
     ]
-    assert len(effects) == 1 and effects[0].progress is not None
+    assert len(effects) == 1
+    assert effects[0].progress is not None
     assert effects[0].progress.operation == profile_progress.operation
     # Exercise the actual authenticated HTTP response and canonical CLI schema
     # reader, rather than validating a second hand-built progress document.
@@ -684,12 +706,14 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
     assert len(effects) == 2
     for effect in effects:
         assert len(effect.node_ids) == 1
-        assert effect.progress is not None and effect.progress.operation is not None
+        assert effect.progress is not None
+        assert effect.progress.operation is not None
         progress = effect.progress.operation
         node = effect.node_ids[0]
         assert (progress.completed_bytes, progress.total_bytes) == measured[node]
         assert [member.member_id for member in progress.members] == [node]
-        assert effect.request_key and effect.operation_id
+        assert effect.request_key
+        assert effect.operation_id
     with sessions() as session:
         for claim in claims:
             attempt = session.scalar(
@@ -697,10 +721,8 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
                     AgentOperationAttempt.fence == claim.fence
                 )
             )
-            assert (
-                attempt is not None
-                and attempt.progress == original_samples[claim.fence]
-            )
+            assert attempt is not None
+            assert attempt.progress == original_samples[claim.fence]
 
 
 def test_future_start_role_is_queued_without_a_measurement(tmp_path: Path) -> None:
@@ -720,7 +742,8 @@ def test_future_start_role_is_queued_without_a_measurement(tmp_path: Path) -> No
         job = session.get(Job, start.id)
         assert job is not None
         phases = _stored_phases(job)
-        assert not isinstance(phases, Residue) and len(phases) >= 2
+        assert not isinstance(phases, Residue)
+        assert len(phases) >= 2
         future_node = phases[1][0][1]
         children = tuple(
             session.scalars(
@@ -740,10 +763,14 @@ def test_future_start_role_is_queued_without_a_measurement(tmp_path: Path) -> No
     member = next(
         item for item in observed.progress.members if item.member_id == future_node
     )
-    assert member.state == "queued" and member.activity == "waiting"
-    assert member.observed_at is None and member.last_progress_at is None
-    assert member.total_bytes is None and member.bytes_per_second is None
-    assert member.eta_seconds is None and member.elapsed_seconds is None
+    assert member.state == "queued"
+    assert member.activity == "waiting"
+    assert member.observed_at is None
+    assert member.last_progress_at is None
+    assert member.total_bytes is None
+    assert member.bytes_per_second is None
+    assert member.eta_seconds is None
+    assert member.elapsed_seconds is None
 
 
 @pytest.mark.parametrize(
@@ -786,20 +813,19 @@ def test_damaged_membership_is_unknown_and_does_not_mutate_execution(
         original_state = job.state
     observed = service.get(start.id)
     assert observed.progress is None
-    assert observed.id == start.id and observed.state == original_state
+    assert observed.id == start.id
+    assert observed.state == original_state
     with sessions() as session:
         job = session.get(Job, start.id)
-        assert (
-            job is not None and job.payload == damaged and job.state == original_state
-        )
+        assert job is not None
+        assert job.payload == damaged
+        assert job.state == original_state
 
 
 def test_dual_agent_loss_mid_load_keeps_bounded_wait_visible_after_return(
     tmp_path: Path, postgres_engine
 ) -> None:
     """Reject losing the native recovery clock at the profile adapter seam."""
-    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-    from vonk_agent_protocol.state_machines import DesiredAssignmentState
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
         tmp_path, nodes=2, engine=postgres_engine
@@ -851,9 +877,11 @@ def test_dual_agent_loss_mid_load_keeps_bounded_wait_visible_after_return(
         service.tick()
     observed = service.application(application.id)
     adapter = observed.progress.switch_adapter
-    assert adapter is not None and adapter.pending_children
+    assert adapter is not None
+    assert adapter.pending_children
     child = planner.get(adapter.pending_children[0].operation_id)
-    assert child.wait is not None and child.wait.dependency_deadline is not None
+    assert child.wait is not None
+    assert child.wait.dependency_deadline is not None
     assert observed.wait is not None
     assert observed.wait.reason == child.wait.reason
     assert observed.wait.blockers == child.wait.blockers
@@ -872,18 +900,6 @@ def test_dual_agent_loss_mid_load_keeps_bounded_wait_visible_after_return(
 
 def test_profile_renders_typed_recovery_wait_and_its_clock(capsys):
     """Catches a loaded profile hiding the Controller's recovery explanation."""
-    from datetime import UTC, datetime, timedelta
-
-    from vonk_agent_protocol.agent_words import ProfileDocumentState
-    from vonk_agent_protocol.lifecycle_vocabulary import (
-        WaitOwnerKind,
-        WaitReason,
-        WaitResumeCondition,
-    )
-    from vonk_control.operations.blockers import BlockingOperation, make_blocker
-    from vonk_control.wait_contract import QueueWait
-
-    from cluster_profiles.cli_render.dispatch import render_payload
 
     now = datetime(2026, 10, 22, 12, 55, tzinfo=UTC)
     wait = QueueWait(

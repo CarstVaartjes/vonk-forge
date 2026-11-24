@@ -92,14 +92,14 @@ def test_lightweight_remote_tag_is_rejected(
 
 @pytest.mark.parametrize(
     ("tag", "tag_oid", "source_sha"),
-    (
+    [
         ("latest", "a" * 40, "b" * 40),
         ("v01.2.3", "a" * 40, "b" * 40),
         ("v1.2.3", "A" * 40, "b" * 40),
         ("v1.2.3", "a" * 39, "b" * 40),
         ("v1.2.3", "a" * 40, "B" * 40),
         ("v1.2.3", "a" * 40, "b" * 39),
-    ),
+    ],
 )
 def test_noncanonical_authority_inputs_fail_before_fetch(
     tagged_remote: tuple[Path, Path, str, str],

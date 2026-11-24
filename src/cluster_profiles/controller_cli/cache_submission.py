@@ -6,27 +6,30 @@ import argparse
 import shlex
 import uuid
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING
 
-from ..cli_states import (
-    CANCEL_ACCEPTED_STATES,
+from cluster_profiles.cli_states import CANCEL_ACCEPTED_STATES
+from cluster_profiles.control_client.errors import (
+    ControlClientError,
+    ControlMalformedResponse,
 )
-from ..control_client.errors import ControlClientError, ControlMalformedResponse
-from ..control_client.schema import validate_control_document
-
-if TYPE_CHECKING:
-    from ..generated_control.models.model_cache_operator_response import (
-        ModelCacheOperatorResponse,
-    )
-    from ..generated_control.models.recipe_image_availability_response import (
-        RecipeImageAvailabilityResponse,
-    )
-
-
-from .cache_removal import _cache_operation_id
-from .common import ControllerClient, _quoted, _request_key
-from .confirmation import _confirm_action
-from .submission import _submit_idempotent_request
+from cluster_profiles.control_client.schema import validate_control_document
+from cluster_profiles.controller_cli.common import (
+    ControllerClient,
+    _cache_operation_id,
+    _quoted,
+    _request_key,
+)
+from cluster_profiles.controller_cli.confirmation import _confirm_action
+from cluster_profiles.controller_cli.submission import _submit_idempotent_request
+from cluster_profiles.generated_control.models.model_cache_operator_response import (
+    ModelCacheOperatorResponse,
+)
+from cluster_profiles.generated_control.models.recipe_image_availability_response import (
+    RecipeImageAvailabilityResponse,
+)
+from cluster_profiles.generated_control.models.recipe_retry_intent import (
+    RecipeRetryIntent,
+)
 
 
 def _submit_cache_request(
@@ -104,9 +107,6 @@ def _submit_model_access_resume(
     factory: Callable[[], str],
 ) -> ModelCacheOperatorResponse:
     """Recheck through the Controller, reconciling a lost response by request key."""
-    from ..generated_control.models.model_cache_operator_response import (
-        ModelCacheOperatorResponse,
-    )
 
     operation_id = str(uuid.UUID(args.operation_id))
     key = _request_key(args, factory)
@@ -242,10 +242,6 @@ def _submit_recipe_retry(
     factory: Callable[[], str],
 ) -> RecipeImageAvailabilityResponse:
     """Preserve the owning frozen intent instead of a mutable recipe selector."""
-    from ..generated_control.models.recipe_image_availability_response import (
-        RecipeImageAvailabilityResponse,
-    )
-    from ..generated_control.models.recipe_retry_intent import RecipeRetryIntent
 
     def decode(value: object) -> RecipeImageAvailabilityResponse:
         if not isinstance(value, Mapping):
@@ -282,7 +278,7 @@ def _submit_recipe_retry(
                 "recipe retry receipt identifies another request or frozen intent"
             )
         operation_id = _cache_operation_id("recipe", result.to_dict())
-        return operation_id
+        return operation_id  # noqa: RET504 -- inlining re-adds a contract-literal guard finding
 
     return decode(
         _submit_idempotent_request(

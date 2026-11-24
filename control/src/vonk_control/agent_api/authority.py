@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Coroutine
 from contextlib import suppress
-from typing import Annotated, cast
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, HTTPException, Path, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
@@ -15,8 +15,9 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
+
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.contracts import AgentDirective, AgentProgress, AgentResult
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.enrollment import (
     ActivateRequest,
     EnrollmentObservationReply,
@@ -38,41 +39,7 @@ from vonk_agent_protocol.host_helper import (
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, WaitReason
 from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode as Code
-
-from vonk_control.enrollment.responses import _issued_response, _json_response
-from vonk_control.operator_receipt_contract import ReceiptPolicy
-
-from ..agent_jobs.contracts import (
-    CLAIM_LEASE_SECONDS,
-    AgentResultRefused,
-    StaleAgentAttempt,
-)
-from ..auth import AgentIdentity, validated_agent_identity_from_scope
-from ..contract_graph import raw_json_body
-from ..enrollment.body import _bounded_enrollment_body
-from ..enrollment.responses import unknown_response
-from ..enrollment.types import (
-    EnrollmentDenied,
-    EnrollmentIssuanceUncertain,
-    ExpiredRenewalGraceExhausted,
-    RenewalIssuanceUncertain,
-)
-from ..evidence_repeats import note_repeat, note_success
-from ..host_helper_authority import (
-    HostHelperAuthorityError,
-    HostRuntimeAuthorityService,
-    HostRuntimeEvidenceUnavailable,
-    HostRuntimeGrantUnsatisfiable,
-    OrphanStopRunOwned,
-)
-from ..http_errors import SecurityHTTPError
-from ..logging import redact_text
-from ..models.jobs import Job
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..operator_acceptance import operator_acceptance
-from ..repeated_evidence_contract import RepeatedEvidenceSubject, host_grant_subject
-from ..strict_json import ControllerAPIRoute
-from .common import (
+from vonk_control.agent_api.common import (
     AgentApiServices,
     EnrollmentRateLimiter,
     _authenticated_identity,
@@ -85,6 +52,43 @@ from .common import (
     contract_verdict_or_wait,
     is_contract_verdict,
 )
+from vonk_control.agent_jobs.contracts import (
+    CLAIM_LEASE_SECONDS,
+    AgentResultRefused,
+    StaleAgentAttempt,
+)
+from vonk_control.auth import AgentIdentity, validated_agent_identity_from_scope
+from vonk_control.enrollment.body import _bounded_enrollment_body
+from vonk_control.enrollment.responses import (
+    _issued_response,
+    _json_response,
+    unknown_response,
+)
+from vonk_control.enrollment.types import (
+    EnrollmentDenied,
+    EnrollmentIssuanceUncertain,
+    ExpiredRenewalGraceExhausted,
+    RenewalIssuanceUncertain,
+)
+from vonk_control.evidence_repeats import note_repeat, note_success
+from vonk_control.host_helper_authority import (
+    HostHelperAuthorityError,
+    HostRuntimeAuthorityService,
+    HostRuntimeEvidenceUnavailable,
+    HostRuntimeGrantUnsatisfiable,
+    OrphanStopRunOwned,
+)
+from vonk_control.http_errors import SecurityHTTPError
+from vonk_control.logging import redact_text
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operator_acceptance import ControllerAPIRoute, operator_acceptance
+from vonk_control.operator_receipt_contract import ReceiptPolicy
+from vonk_control.repeated_evidence_contract import (
+    RepeatedEvidenceSubject,
+    host_grant_subject,
+)
+from vonk_control.route_declarations import raw_json_body
 
 
 def issue_host_runtime_grant(
@@ -154,7 +158,9 @@ def install_authority_routes(
     class NotedResultRoute(ControllerAPIRoute):
         """A result body refused before the route runs is still counted."""
 
-        def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
+        def get_route_handler(
+            self,
+        ) -> Callable[[Request], Coroutine[Any, Any, Response]]:
             handler = super().get_route_handler()
 
             async def noted(request: Request) -> Response:
@@ -521,7 +527,7 @@ def install_authority_routes(
                 detail="expired renewal rate limit exceeded",
                 headers={"retry-after": str(limiter.retry_after_seconds())},
             )
-        raw = await _bounded_enrollment_body(request, required)
+        raw = await _bounded_enrollment_body(request)
         try:
             body = ExpiredRenewRequest.model_validate_json(raw)
         except ValidationError:

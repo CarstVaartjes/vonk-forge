@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
 from vonk_control.agent_api.common import (
     _open_upload_storage,
     _prepare_recipe_image_upload,
@@ -255,7 +256,8 @@ def test_an_unreadable_manifest_deletes_nothing_until_it_can_be_read(
     monkeypatch.undo()
     result = collector.collect()
 
-    assert manifest.exists() and result is not None
+    assert manifest.exists()
+    assert result is not None
     assert _blobs(storage) == published
     assert result.blobs_removed == len(retired - published)
 

@@ -2,6 +2,7 @@
 
 import os
 import select
+import sys
 
 import pytest
 
@@ -147,7 +148,6 @@ def test_json_review_returns_one_blocked_review_without_load(vonkctl_json):
 
 
 def test_interactive_blocked_preview_can_be_confirmed_and_submitted(monkeypatch):
-    import sys
 
     master, slave = os.openpty()
     try:
@@ -179,11 +179,10 @@ def test_interactive_blocked_preview_can_be_confirmed_and_submitted(monkeypatch)
 
 
 @pytest.mark.parametrize(
-    "answer,expected",
+    ("answer", "expected"),
     [("no", 2), ("yes", 0), (None, 2)],
 )
 def test_terminal_reviews_and_confirms_once(answer, expected, monkeypatch):
-    import sys
 
     master, slave = os.openpty()
     try:
@@ -224,7 +223,6 @@ def test_terminal_reviews_and_confirms_once(answer, expected, monkeypatch):
 
 
 def test_interactive_load_still_shows_current_effect_review(monkeypatch):
-    import sys
 
     master, slave = os.openpty()
     try:
@@ -264,7 +262,6 @@ def test_interactive_load_still_shows_current_effect_review(monkeypatch):
 
 
 def test_interactive_load_uses_latest_preview(monkeypatch):
-    import sys
 
     current_digest = "d" * 64
     master, slave = os.openpty()
@@ -305,7 +302,6 @@ def test_interactive_load_uses_latest_preview(monkeypatch):
 
 
 def test_changed_image_plan_can_be_loaded_without_repeating_review(monkeypatch):
-    import sys
 
     current_digest = "d" * 64
     image_digest = "sha256:" + "1" * 64

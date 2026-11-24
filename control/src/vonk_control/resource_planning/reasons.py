@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Literal
 
-from ..operations.blockers import SwapShortfallEvidence
-from .types import ResourceReason
+from vonk_control.operations.blockers import SwapShortfallEvidence
+from vonk_control.resource_planning.types import ResourceReason
 
 
 def _same_memory_kind(left: str, right: str) -> bool:

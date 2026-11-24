@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import hashlib
 import logging
@@ -23,9 +24,10 @@ from fastapi import HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.agent_words import RecipeRunDispositionValue
-from vonk_agent_protocol.contracts import PAYLOAD_MODELS, AgentProtocolError
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.contracts import PAYLOAD_MODELS
 from vonk_agent_protocol.grant_requests import HostHelperGrantResponse
 from vonk_agent_protocol.host_helper import SignedHostHelperGrant
 from vonk_agent_protocol.http_failure import TransientReason
@@ -42,27 +44,31 @@ from vonk_agent_protocol.state_machines import (
     EnrollmentPurpose,
     NodeIdentityState,
 )
-
-from ..agent_jobs.service import AgentJobService
-from ..auth import (
+from vonk_agent_protocol.wire_model import AgentProtocolError
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.auth import (
     AgentIdentity,
     AgentSource,
     agent_source_from_scope,
     validated_agent_identity_from_scope,
 )
-from ..distribution.service import DistributionService
-from ..enrollment.bootstrap import EnrollmentBootstrapConfig, InstallerUrl
-from ..enrollment.contract import EnrollmentId
-from ..enrollment.responses import _now
-from ..enrollment.service import EnrollmentService
-from ..host_helper_authority import HostRuntimeAuthorityService
-from ..http_errors import SecurityHTTPError, temporary_http_answer
-from ..logging import log_event
-from ..models.fleet import AgentCertificate, AgentNode
-from ..models.operations import AgentOperation
-from ..presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
-from ..source_bundles import SourceBundleStoreProtocol
-from ..strict_json import StrictJSONModel, read_stored_model
+from vonk_control.distribution.service import DistributionService
+from vonk_control.enrollment.bootstrap import EnrollmentBootstrapConfig, InstallerUrl
+from vonk_control.enrollment.contract import EnrollmentId
+from vonk_control.enrollment.responses import _now
+from vonk_control.enrollment.service import EnrollmentService
+from vonk_control.host_helper_authority import HostRuntimeAuthorityService
+from vonk_control.http_errors import SecurityHTTPError, temporary_http_answer
+from vonk_control.logging import log_event
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.operations import AgentOperation
+from vonk_control.presence import (
+    AgentPresenceService,
+    ManagementAddressPolicy,
+    PresenceError,
+)
+from vonk_control.source_bundles import SourceBundleStoreProtocol
+from vonk_control.strict_json import StrictJSONModel, read_stored_model
 
 """mTLS-authenticated machine agent API routes."""
 
@@ -123,7 +129,7 @@ def contract_verdict_or_wait(error: Exception) -> NoReturn:
             status_code=422,  # 422-verdict: the request's own bytes are refused
             detail=str(error),
         ) from None
-    _LOGGER.exception("agent route failed internally; answering a wait")
+    _LOGGER.error("agent route failed internally; answering a wait", exc_info=error)
     temporary_http_answer(TransientReason.DEPENDENCY_UNAVAILABLE)
 
 
@@ -329,7 +335,7 @@ def _agent_identity_state(
         return None
     now = _now(services.clock())
     with services.sessions() as session:
-        valid = session.scalar(
+        return session.scalar(
             select(AgentCertificate.state)
             .join(AgentNode, AgentNode.node_id == AgentCertificate.node_id)
             .where(
@@ -343,7 +349,6 @@ def _agent_identity_state(
                 AgentNode.revoked_at.is_(None),
             )
         )
-    return valid
 
 
 def _authenticated_identity(request: Request) -> AgentIdentity:
@@ -569,8 +574,8 @@ def _commit_recipe_image_upload(
         else:
             # Only ingress-verified bytes reach this publisher. Atomic replace
             # repairs a damaged regular object without a missing-entry window.
-            os.chmod(temporary, 0o640)
-            os.replace(temporary, destination)
+            temporary.chmod(0o640)
+            temporary.replace(destination)
         directory = os.open(destination.parent, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(directory)
@@ -591,10 +596,8 @@ def _commit_recipe_image_upload(
 
 
 def _unlink_if_present(path: Path) -> None:
-    try:
+    with contextlib.suppress(FileNotFoundError):
         path.unlink()
-    except FileNotFoundError:
-        pass
 
 
 def _owned_artifact(
@@ -643,7 +646,7 @@ def _owned_artifact(
         if delay:
             time.sleep(delay)
         try:
-            metadata = os.stat(path, follow_symlinks=False)
+            metadata = path.stat(follow_symlinks=False)
         except PermissionError:
             _LOGGER.warning(
                 "Controller storage needs operator attention: access denied %s", path

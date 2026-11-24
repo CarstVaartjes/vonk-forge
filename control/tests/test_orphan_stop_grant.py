@@ -14,6 +14,7 @@ from datetime import timedelta
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
+
 from vonk_agent_protocol.host_helper import (
     ExecuteContainerRuntimeRequestOperation,
     SignedHostHelperGrant,
@@ -27,6 +28,7 @@ from vonk_control.host_helper_authority import (
 from vonk_control.models.execution import RecipeRun, RunNode
 from vonk_control.models.fleet import AgentCertificate
 from vonk_control.models.jobs import Job
+from vonk_control.untracked_installations import run_wanted_here
 
 from .agent_api_support import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 
@@ -185,7 +187,7 @@ def _unowned(client, run_id: str, node: str) -> bool:
 
 
 @pytest.mark.parametrize(
-    "state, on, remapped",
+    ("state", "on", "remapped"),
     [
         pytest.param(None, (NODE_A,), False, id="run-row-deleted"),
         pytest.param("running", (NODE_A,), True, id="running-installation-remapped"),
@@ -244,7 +246,7 @@ def test_grant_is_refused_while_a_live_operation_owns_the_run(world, state) -> N
 
 
 @pytest.mark.parametrize(
-    "state, assigned",
+    ("state", "assigned"),
     [
         (state, assigned)
         for state in (
@@ -264,7 +266,6 @@ def test_disposition_and_grant_agree_for_every_node_and_run(
     world, state, assigned
 ) -> None:
     # One rule: a run is granted a stop exactly when its disposition is unowned.
-    from vonk_control.untracked_installations import run_wanted_here
 
     client, services, clock, _ = world
     run_id = _run(services, clock, state=state, on=assigned)

@@ -28,6 +28,7 @@ import uuid
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
@@ -94,7 +95,8 @@ def _service(tmp_path):
 
 def _order(session, artifact_job_id: str) -> tuple[Job, AgentOperation]:
     artifact = session.get(ArtifactJob, artifact_job_id)
-    assert artifact is not None and artifact.operation_id is not None
+    assert artifact is not None
+    assert artifact.operation_id is not None
     order = session.get(Job, artifact.operation_id)
     assert order is not None
     (child,) = session.scalars(
@@ -171,7 +173,8 @@ def _run_state(sessions, run_id: str) -> str:
 def _activate_fresh_job_run(sessions, operations, run_id: str) -> None:
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "stopped"
+        assert run is not None
+        assert run.state == "stopped"
         installation_id = run.installation_id
     fresh = operations.preview_run(installation_id, "image-job")
     activated = operations.activate_job_run(
@@ -209,7 +212,8 @@ def _receipt_exact_stop(agent_jobs, clock, node_id, job_claim, artifact_job):
     exact = claim_agent(agent_jobs, node_id, "serial-0") or claim_agent(
         agent_jobs, node_id, "serial-0"
     )
-    assert exact is not None and exact.fence != job_claim.fence
+    assert exact is not None
+    assert exact.fence != job_claim.fence
     assert isinstance(exact.payload, RecipeStopPayload)
     assert exact.payload.target_runtime_id == artifact_job.id
     agent_jobs.record_result(
@@ -318,7 +322,8 @@ def test_a_pending_stop_that_succeeds_carries_no_deferral_note(tmp_path) -> None
     assert stop().state == "succeeded"
     with sessions() as session:
         ended = session.scalar(select(Job).where(Job.request_id == _STOP_REQUEST))
-        assert ended is not None and ended.state == "succeeded"
+        assert ended is not None
+        assert ended.state == "succeeded"
         assert ended.status_reason is None
     _activate_fresh_job_run(sessions, operations, run_id)
 

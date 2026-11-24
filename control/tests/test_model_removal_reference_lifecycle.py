@@ -10,6 +10,8 @@ from typing import cast
 import pytest
 from sqlalchemy import Engine, Table, select, text
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition, document_sha256
+
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_cache.views import CacheOperationView
@@ -21,7 +23,6 @@ from vonk_control.models.cache import (
     ModelCacheSetArtifact,
 )
 from vonk_control.models.fleet import FleetProfileApplication, FleetProfileSelection
-from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from .display_fixtures import create_draft
 from .model_cache_support import _artifact, _canonical_model, _download, _remove_model
@@ -265,7 +266,8 @@ def test_removing_one_set_leaves_shared_object_open_for_second_model(
                 )
             )
         )
-        assert set_b in b_sets and set_a not in b_sets
+        assert set_b in b_sets
+        assert set_a not in b_sets
         assert sorted(
             (finding.owner_kind, finding.owner_id, finding.state)
             for finding in shared_findings
@@ -364,7 +366,8 @@ def test_sibling_membership_change_after_review_keeps_the_shared_object(
         with sessions() as session:
             assert session.get(ModelCacheSet, set_a) is None
             sibling = session.get(ModelCacheSet, set_b)
-            assert sibling is not None and sibling.state == "failed"
+            assert sibling is not None
+            assert sibling.state == "failed"
             assert (
                 session.scalar(
                     select(ModelCacheSetArtifact).where(

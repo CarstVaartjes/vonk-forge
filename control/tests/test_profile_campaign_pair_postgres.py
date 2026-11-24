@@ -8,9 +8,11 @@ from uuid import uuid4
 import pytest
 from httpx2 import Response
 from sqlalchemy import select
-from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol.contracts import canonical_message
+from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileChildOperation,
@@ -28,7 +30,6 @@ from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.progress import RunSwitchMemberReceipt
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .fleet_profiles_support import (
     NOW,
@@ -119,7 +120,7 @@ class _PairedReceiptAdapter(_SwitchAdapter):
         return started
 
 
-def _add_second_recipe_revision(sessions: sessionmaker) -> str:
+def _add_second_recipe_revision(sessions: sessionmaker[Session]) -> str:
     document = _recipe_document()
     identity = document.get("identity")
     assert isinstance(identity, dict)

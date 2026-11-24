@@ -15,11 +15,12 @@ import uuid
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import OperationalError
+
 from vonk_control.attempt_residues import (
     LEFTOVER_GRACE,
     AttemptResidueReconciler,
@@ -28,6 +29,8 @@ from vonk_control.attempt_residues import (
 )
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.install_admission.contracts import InstallAdmissionBusy
+from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import (
     InstallationNode,
@@ -47,7 +50,10 @@ from vonk_control.owner_liveness import (
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes.service import RecipeRouteService
-from vonk_control.run_switch_contract.requests import RunSwitchCleanupApplyRequest
+from vonk_control.run_switch_contract.requests import (
+    RunSwitchCleanupApplyRequest,
+    RunSwitchCleanupPreviewRequest,
+)
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .profile_due_fixtures import next_profile_due
@@ -56,6 +62,8 @@ from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )
+from .runtime_image_fixtures import refresh_inventory
+from .test_catalog_revision_collection import Catalog
 from .test_profile_build_process_recovery import _complete_agent_work
 
 
@@ -228,7 +236,7 @@ def test_the_next_attempt_proceeds_after_a_failure_at_every_phase(
     load = _load(tmp_path)
     # Agents answer only once the attempt is past its own install plan, so
     # the earlier phases fail with nothing issued to a Spark.
-    late = phase in {"start"}
+    late = phase == "start"
     assert _loop(load, lambda: _at_phase(load, phase), complete=late), phase
     _fail_switch(load)
     _leave_room_for_one_attempt(load)
@@ -246,7 +254,8 @@ def test_the_next_attempt_proceeds_after_a_failure_at_every_phase(
             for row in session.scalars(select(RecipeInstallation))
             if row.state != "uninstalled"
         ]
-        assert len(live) == 1 and live[0].state == "installed"
+        assert len(live) == 1
+        assert live[0].state == "installed"
         claims = {
             row.owner_id
             for row in session.scalars(
@@ -294,7 +303,6 @@ def test_an_install_that_fails_on_one_member_is_cleaned_and_retried(
     # The switch retries its phase on its own until the recovery window closes.
     load.now[0] += timedelta(hours=1, seconds=1)
     assert _loop(load, settled)
-    from .runtime_image_fixtures import refresh_inventory
 
     refresh_inventory(load.sessions, load.now[0])
     retried = _next_attempt(load)
@@ -317,7 +325,8 @@ def _planned_left_by_failed_copy(load) -> str:
     load.profiles.tick()  # observe the failed child when the accepted parent is due
     with load.sessions() as session:
         installation = session.scalar(select(RecipeInstallation))
-        assert installation is not None and installation.state == "planned"
+        assert installation is not None
+        assert installation.state == "planned"
         planned_id = installation.id
     # Only one attempt's worth of disk remains free: a claim that held
     # admission would keep every later attempt "waiting for capacity".
@@ -360,7 +369,8 @@ def test_a_plan_nobody_adopts_is_released_after_the_adoption_window(
     assert later.tick()
     with load.sessions() as session:
         installation = session.get(RecipeInstallation, planned_id)
-        assert installation is not None and installation.state == "uninstalled"
+        assert installation is not None
+        assert installation.state == "uninstalled"
         assert all(
             member.state == "uninstalled"
             for member in session.scalars(
@@ -433,7 +443,9 @@ def test_a_plan_the_next_attempt_replaced_is_released_without_the_wait(
             for row in session.scalars(select(RecipeInstallation))
             if row.state != "uninstalled"
         ]
-        assert len(live) == 1 and live[0][0] != old_id and live[0][1] == "installed"
+        assert len(live) == 1
+        assert live[0][0] != old_id
+        assert live[0][1] == "installed"
         assert session.get(RecipeInstallation, old_id).state == "uninstalled"
 
 
@@ -463,7 +475,8 @@ def test_a_plan_with_a_missing_rank_row_is_still_released(tmp_path: Path) -> Non
     assert later.tick()
     with load.sessions() as session:
         installation = session.get(RecipeInstallation, planned_id)
-        assert installation is not None and installation.state == "uninstalled"
+        assert installation is not None
+        assert installation.state == "uninstalled"
         assert not session.scalar(
             select(ResourceReservation).where(
                 ResourceReservation.owner_id == planned_id,
@@ -500,7 +513,8 @@ def test_a_plan_where_a_rank_shows_an_effect_is_not_abandoned(tmp_path: Path) ->
     assert not later.tick()
     with load.sessions() as session:
         installation = session.get(RecipeInstallation, planned_id)
-        assert installation is not None and installation.state == "planned"
+        assert installation is not None
+        assert installation.state == "planned"
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -579,8 +593,10 @@ def test_a_plan_a_newer_revision_of_the_recipe_replaced_is_released(
     with load.sessions() as session:
         released = session.get(RecipeInstallation, old_id)
         kept = session.get(RecipeInstallation, later_id)
-        assert released is not None and released.state == "uninstalled"
-        assert kept is not None and kept.state == "installed"
+        assert released is not None
+        assert released.state == "uninstalled"
+        assert kept is not None
+        assert kept.state == "installed"
 
 
 def test_a_record_an_active_attempt_owns_is_left_alone(tmp_path: Path) -> None:
@@ -589,16 +605,12 @@ def test_a_record_an_active_attempt_owns_is_left_alone(tmp_path: Path) -> None:
     assert not load.residues.tick()
     with load.sessions() as session:
         installation = session.scalar(select(RecipeInstallation))
-        assert installation is not None and installation.state == "planned"
+        assert installation is not None
+        assert installation.state == "planned"
 
 
 def test_reconcile_discards_a_plan_that_never_reached_a_node(tmp_path: Path) -> None:
     """``recipe installation reconcile`` handles a planned installation too."""
-
-    from vonk_control.run_switch_contract.requests import (
-        RunSwitchCleanupApplyRequest,
-        RunSwitchCleanupPreviewRequest,
-    )
 
     load = _load(tmp_path)
     assert _loop(load, lambda: _at_phase(load, "target-copy"), complete=False)
@@ -606,13 +618,13 @@ def test_reconcile_discards_a_plan_that_never_reached_a_node(tmp_path: Path) -> 
     load.planner.tick()
     with load.sessions() as session:
         installation = session.scalar(select(RecipeInstallation))
-        assert installation is not None and installation.state == "planned"
+        assert installation is not None
+        assert installation.state == "planned"
         installation_id = installation.id
     review = load.planner.preview_cleanup(
         RunSwitchCleanupPreviewRequest(
             installation_id=installation_id, cleanup_mode="reconcile"
-        ),
-        actor="admin",
+        )
     )
     assert review.allowed, [reason.code for reason in review.blockers]
     assert review.cleanup_disposition == "abandon"
@@ -629,7 +641,8 @@ def test_reconcile_discards_a_plan_that_never_reached_a_node(tmp_path: Path) -> 
     assert load.planner.get(operation.operation_id).state == "succeeded"
     with load.sessions() as session:
         installation = session.get(RecipeInstallation, installation_id)
-        assert installation is not None and installation.state == "uninstalled"
+        assert installation is not None
+        assert installation.state == "uninstalled"
 
 
 def test_an_unexpected_advance_failure_is_shown_and_backed_off(
@@ -656,7 +669,7 @@ def test_an_unexpected_advance_failure_is_shown_and_backed_off(
     assert view.next_attempt_at is not None
     # Backed off: the next tick does not retry it straight away.
     calls: list[str] = []
-    monkeypatch.setattr(load.planner, "_advance", lambda job_id: calls.append(job_id))
+    monkeypatch.setattr(load.planner, "_advance", calls.append)
     load.planner.tick()
     assert calls == []
     monkeypatch.setattr(load.planner, "_advance", advance)
@@ -720,11 +733,6 @@ def _uninstalls(load, installation_id: str) -> list[Job]:
 @pytest.mark.parametrize("kind", ["leftover", "never-installed"])
 def test_unknown_residue_cleanup_backs_off_then_resumes(tmp_path, kind):
     """Catches retrying busy ownership on every tick or never revisiting it."""
-    from sqlalchemy import create_engine
-    from vonk_control.install_admission.contracts import InstallAdmissionBusy
-    from vonk_control.model_primitives import Base
-
-    from .test_catalog_revision_collection import Catalog
 
     engine = create_engine(f"sqlite:///{tmp_path / 'residues.sqlite'}")
     Base.metadata.create_all(engine)
@@ -768,7 +776,8 @@ def test_unknown_residue_cleanup_backs_off_then_resumes(tmp_path, kind):
     assert calls == [installation_id] * 2
     with catalog.sessions() as session:
         row = session.get(RecipeInstallation, installation_id)
-        assert row is not None and row.state == "uninstalled"
+        assert row is not None
+        assert row.state == "uninstalled"
 
 
 @pytest.mark.parametrize(
@@ -885,7 +894,8 @@ def test_a_never_installed_plan_goes_while_other_work_is_live_on_its_sparks(
     assert _reconciler(load, after=ADOPTION_WINDOW + timedelta(seconds=1)).tick()
     with load.sessions() as session:
         installation = session.get(RecipeInstallation, planned_id)
-        assert installation is not None and installation.state == "uninstalled"
+        assert installation is not None
+        assert installation.state == "uninstalled"
 
 
 def test_a_plan_adopted_just_before_its_release_is_not_abandoned(
@@ -907,7 +917,8 @@ def test_a_plan_adopted_just_before_its_release_is_not_abandoned(
         )
     with load.sessions() as session:
         installation = session.get(RecipeInstallation, planned_id)
-        assert installation is not None and installation.state == "planned"
+        assert installation is not None
+        assert installation.state == "planned"
 
 
 def _installed_but_short(load, spark_files: CompleteArtifactInspector) -> str:
@@ -956,7 +967,10 @@ def test_a_run_switch_copying_into_a_short_installation_keeps_it(
     )
     switch = _switch(load)
     assert switch is not None
-    assert cast(dict, switch.payload["plan"])["installation_id"] == installation_id
+    assert (
+        cast(dict[str, Any], switch.payload["plan"])["installation_id"]
+        == installation_id
+    )
     _reconciler(load, after=LEFTOVER_GRACE + timedelta(days=2)).tick()
     assert not _uninstalls(load, installation_id)
 
@@ -981,8 +995,12 @@ def test_a_queued_cleanup_order_keeps_its_installation_from_the_sweep(
     )
     with load.sessions() as session:
         cleanup = session.get(Job, operation.operation_id)
-        assert cleanup is not None and cleanup.kind == "recipe.cleanup.v2"
-        assert cast(dict, cleanup.payload["plan"])["installation_id"] == installation_id
+        assert cleanup is not None
+        assert cleanup.kind == "recipe.cleanup.v2"
+        assert (
+            cast(dict[str, Any], cleanup.payload["plan"])["installation_id"]
+            == installation_id
+        )
     _agree(load, installation_id, named=True)  # by its plan
     _reconciler(load, after=LEFTOVER_GRACE + timedelta(days=2)).tick()
     assert not _uninstalls(load, installation_id)

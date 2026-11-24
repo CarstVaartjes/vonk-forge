@@ -12,11 +12,6 @@ from email.message import Message
 from pathlib import Path
 
 import pytest
-from vonk_control.fleet_projection.common import FleetSnapshot
-from vonk_control.observation.transfer import (
-    OBSERVATION_MEDIA_TYPE,
-    observation_response,
-)
 
 from cluster_profiles import cli
 from cluster_profiles.control_client.transfers import ControlClient
@@ -26,6 +21,11 @@ from cluster_profiles.error_reporting import (
     safe_endpoint,
 )
 from control.tests.consumer_outcomes import not_adopted
+from vonk_control.fleet_projection.common import FleetSnapshot
+from vonk_control.observation.transfer import (
+    OBSERVATION_MEDIA_TYPE,
+    observation_response,
+)
 
 
 def _token(tmp_path: Path) -> Path:
@@ -78,9 +78,10 @@ class _FleetReply(io.BytesIO):
         response = observation_response(snapshot, resource="fleet")
 
         async def collect() -> bytes:
-            parts: list[bytes] = []
-            async for part in response.body_iterator:
-                parts.append(part.encode() if isinstance(part, str) else bytes(part))
+            parts: list[bytes] = [
+                part.encode() if isinstance(part, str) else bytes(part)
+                async for part in response.body_iterator
+            ]
             return b"".join(parts)
 
         super().__init__(asyncio.run(collect()))

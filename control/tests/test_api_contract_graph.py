@@ -5,8 +5,12 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from pathlib import Path
 
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts.recipe import RecipeJobInput
+
+from vonk_agent_protocol.compiled_execution_plan import CompiledJobInput
 from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
@@ -63,7 +67,6 @@ def test_published_contract_graph_only_leaves_engine_and_document_values_open() 
 def test_download_authority_binds_the_exact_bytes_and_rejects_unbound_ranges(
     agent_system,
 ) -> None:
-    from pathlib import Path
 
     client, services, _sessions, clock = agent_system
     source = MemoryObjectSource()
@@ -115,8 +118,6 @@ def test_successful_response_content_has_a_declared_schema() -> None:
 
 
 def test_authored_job_input_is_consumed_without_losing_defaults_or_false() -> None:
-    from vonk_agent_protocol.compiled_execution_plan import CompiledJobInput
-    from vonk_forge_contracts.recipe import RecipeJobInput
 
     authored = RecipeJobInput(required=False, media_types=["image/png"], max_bytes=1024)
     compiled = CompiledJobInput.model_validate_json(authored.model_dump_json())

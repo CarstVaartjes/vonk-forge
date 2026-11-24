@@ -389,8 +389,7 @@ def _ends_work(node: ast.AST) -> bool:
     for part in ast.walk(node):
         if isinstance(part, ast.Return) and (
             part.value is None
-            or isinstance(part.value, ast.Constant)
-            and part.value.value is None
+            or (isinstance(part.value, ast.Constant) and part.value.value is None)
         ):
             return True
         if isinstance(part, ast.Attribute) and part.attr in _TERMINAL:
@@ -426,10 +425,8 @@ def _ends_work(node: ast.AST) -> bool:
 def _request_or_cancel(test: ast.AST) -> bool:
     if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.And):
         return any(_request_or_cancel(value) for value in test.values)
-    return (
-        isinstance(test, ast.Attribute)
-        and test.attr == "cancel_requested"
-        or isinstance(test, ast.UnaryOp)
+    return (isinstance(test, ast.Attribute) and test.attr == "cancel_requested") or (
+        isinstance(test, ast.UnaryOp)
         and isinstance(test.op, ast.Not)
         and isinstance(test.operand, ast.Name)
         and test.operand.id == "ongoing_intent"

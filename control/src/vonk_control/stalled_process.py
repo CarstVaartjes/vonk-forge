@@ -13,7 +13,7 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from .stall_window import Verdict, progress_verdict
+from vonk_control.stall_window import Verdict, progress_verdict
 
 
 def tree_bytes(*roots: Path) -> int:
@@ -24,7 +24,7 @@ def tree_bytes(*roots: Path) -> int:
         for directory, _subdirectories, names in os.walk(root):
             for name in names:
                 try:
-                    total += os.lstat(os.path.join(directory, name)).st_size
+                    total += Path(directory, name).lstat().st_size
                 except OSError:
                     continue
     return total

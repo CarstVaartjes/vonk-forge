@@ -28,8 +28,8 @@ from typing import Protocol
 
 from pydantic import ValidationError
 
-from ..logging import log_event
-from .memory_contract import (
+from vonk_control.logging import log_event
+from vonk_control.worker.memory_contract import (
     MAX_LOCATION_LENGTH,
     MAX_TOP_ALLOCATIONS,
     WorkerMemoryCgroupKind,
@@ -354,7 +354,7 @@ class WorkerMemoryMonitor:
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         temporary = self._report_path.with_name(f".{self._report_path.name}.part")
         temporary.write_text(report.model_dump_json(), encoding="utf-8")
-        os.replace(temporary, self._report_path)
+        temporary.replace(self._report_path)
 
 
 def read_worker_memory_report(

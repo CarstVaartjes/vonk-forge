@@ -16,7 +16,8 @@ from fastapi import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import StreamingResponse
-from vonk_agent_protocol.contracts import AgentProtocolError
+
+from vonk_agent_protocol.job_inputs import RecipeJobInputRequest
 from vonk_agent_protocol.job_limits import (
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
@@ -33,17 +34,10 @@ from vonk_agent_protocol.outcome import (
     SecurityRefusalError,
     UnknownOutcomeError,
 )
-from vonk_agent_protocol.recipe_jobs import RecipeJobInputRequest, RecipeJobOutputLimits
-
-from vonk_control.operator_receipt_contract import ReceiptPolicy
-
-from ..auth import Actor, agent_identity_from_scope
-from ..compiled_artifact_contract import ParameterScalar
-from ..download_contract import download_responses, upload_request_body
-from ..operation_api.contracts import bounded_error_responses
-from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
-from .blob_store import ArtifactBlobStore
-from .contracts import (
+from vonk_agent_protocol.recipe_jobs import RecipeJobOutputLimits
+from vonk_agent_protocol.wire_model import AgentProtocolError
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
+from vonk_control.artifact_jobs.contracts import (
     ArtifactJobCapabilitiesResponse,
     ArtifactJobError,
     ArtifactJobListResponse,
@@ -51,12 +45,21 @@ from .contracts import (
     ArtifactJobUnavailableError,
     ArtifactJobView,
 )
-from .job_contract import (
+from vonk_control.artifact_jobs.job_contract import (
     JOB_CONTRACT_NOT_FOUND,
     ArtifactJobContractResponse,
     JobContractNotFound,
 )
-from .service import ArtifactJobService
+from vonk_control.artifact_jobs.service import ArtifactJobService
+from vonk_control.auth import Actor, agent_identity_from_scope
+from vonk_control.compiled_artifact_contract import ParameterScalar
+from vonk_control.download_contract import download_responses, upload_request_body
+from vonk_control.operation_api.contracts import bounded_error_responses
+from vonk_control.operator_acceptance import (
+    OperatorReceiptResolver,
+    operator_acceptance,
+)
+from vonk_control.operator_receipt_contract import ReceiptPolicy
 
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _DIGEST = r"^[0-9a-f]{64}$"
@@ -162,9 +165,9 @@ def install_artifact_job_routes(
         operation_id="listArtifactJobsForRun",
     )
     def list_jobs(
-        run_id: str = Path(pattern=_UUID),
+        run_id: Annotated[str, Path(pattern=_UUID)],
         # A read never refuses: a limit outside 1..100 is clamped into it.
-        limit: int = Query(default=100),
+        limit: Annotated[int, Query()] = 100,
         _actor: Actor = actor_dependency,
     ) -> ArtifactJobListResponse:
         try:
@@ -192,7 +195,7 @@ def install_artifact_job_routes(
     def create_job(
         body: ArtifactJobCreate,
         request_id: Annotated[str, Header(alias="X-Request-ID", pattern=_UUID)],
-        run_id: str = Path(pattern=_UUID),
+        run_id: Annotated[str, Path(pattern=_UUID)],
         actor: Actor = actor_dependency,
     ) -> ArtifactJobResponse:
         _mutating(actor)
@@ -221,7 +224,8 @@ def install_artifact_job_routes(
         operation_id="getArtifactJobByRequestId",
     )
     def job_by_request_id(
-        request_id: str = Path(pattern=_UUID), _actor: Actor = actor_dependency
+        request_id: Annotated[str, Path(pattern=_UUID)],
+        _actor: Actor = actor_dependency,
     ) -> ArtifactJobResponse:
         try:
             return _view(_service(service).get_by_request_id(request_id))
@@ -250,8 +254,8 @@ def install_artifact_job_routes(
     @operator_acceptance(ReceiptPolicy.ARTIFACT_JOB)
     async def upload_input(
         request: Request,
-        job_id: str = Path(pattern=_UUID),
-        name: str = Path(pattern=_NAME),
+        job_id: Annotated[str, Path(pattern=_UUID)],
+        name: Annotated[str, Path(pattern=_NAME)],
         content_sha256: Annotated[
             str, Header(alias="X-Content-SHA256", pattern=_DIGEST)
         ] = "",
@@ -292,7 +296,7 @@ def install_artifact_job_routes(
     )
     @operator_acceptance(ReceiptPolicy.ARTIFACT_JOB)
     def finalize_job(
-        job_id: str = Path(pattern=_UUID), actor: Actor = actor_dependency
+        job_id: Annotated[str, Path(pattern=_UUID)], actor: Actor = actor_dependency
     ) -> ArtifactJobResponse:
         _mutating(actor)
         try:
@@ -317,7 +321,7 @@ def install_artifact_job_routes(
     @operator_acceptance(ReceiptPolicy.ARTIFACT_SUBMIT)
     def submit_job(
         request_id: Annotated[str, Header(alias="X-Request-ID", pattern=_UUID)],
-        job_id: str = Path(pattern=_UUID),
+        job_id: Annotated[str, Path(pattern=_UUID)],
         actor: Actor = actor_dependency,
     ) -> ArtifactJobResponse:
         _mutating(actor)
@@ -375,7 +379,7 @@ def install_artifact_job_routes(
         operation_id="getArtifactJobStatus",
     )
     def job_status(
-        job_id: str = Path(pattern=_UUID), _actor: Actor = actor_dependency
+        job_id: Annotated[str, Path(pattern=_UUID)], _actor: Actor = actor_dependency
     ) -> ArtifactJobResponse:
         try:
             return _view(_service(service).get(job_id))
@@ -394,7 +398,7 @@ def install_artifact_job_routes(
     def cancel_job(
         body: CancelRequest,
         request_id: Annotated[str, Header(alias="X-Request-ID", pattern=_UUID)],
-        job_id: str = Path(pattern=_UUID),
+        job_id: Annotated[str, Path(pattern=_UUID)],
         actor: Actor = actor_dependency,
     ) -> ArtifactJobResponse:
         _mutating(actor)
@@ -429,9 +433,9 @@ def install_artifact_job_routes(
         openapi_extra={"x-vonk-streaming-transport": True},
     )
     def download_result(
-        job_id: str = Path(pattern=_UUID),
-        name: str = Path(pattern=_NAME),
-        sha256: str = Path(pattern=_DIGEST),
+        job_id: Annotated[str, Path(pattern=_UUID)],
+        name: Annotated[str, Path(pattern=_NAME)],
+        sha256: Annotated[str, Path(pattern=_DIGEST)],
         _actor: Actor = actor_dependency,
     ) -> Response:
         try:

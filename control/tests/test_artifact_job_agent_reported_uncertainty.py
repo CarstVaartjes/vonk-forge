@@ -6,7 +6,8 @@ Stop stays advertised until a receipt, its run's end or a cancel ends it.
 
 from __future__ import annotations
 
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs import states as ajs
 
@@ -58,7 +59,8 @@ def test_agent_reported_unconfirmed_job_is_lost_with_its_reason(
     observed = service.get(submitted.id)
     assert observed.state == ajs.OBSERVING
     assert observed.status_reason is not None
-    assert _REASON in observed.status_reason and _CAUSE in observed.status_reason
+    assert _REASON in observed.status_reason
+    assert _CAUSE in observed.status_reason
 
     for _ in range(30):  # past the observation budget, inside the job's own bound
         clock.advance(seconds=120)
@@ -71,7 +73,8 @@ def test_agent_reported_unconfirmed_job_is_lost_with_its_reason(
     assert lost.state == ajs.OBSERVING
     assert lost.supported_actions == ("stop",)
     assert lost.status_reason is not None
-    assert _REASON in lost.status_reason and _CAUSE in lost.status_reason
+    assert _REASON in lost.status_reason
+    assert _CAUSE in lost.status_reason
     assert lost.result_evidence is not None
     assert lost.result_evidence.failure_kind is None
     assert lost.result_evidence.active_scope_may_remain is True

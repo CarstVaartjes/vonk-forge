@@ -7,10 +7,10 @@ from datetime import datetime, timedelta
 from typing import TypedDict
 
 from vonk_agent_protocol.contracts import AgentResult
+from vonk_agent_protocol.job_inputs import RecipeJobInputRequest
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState
 from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
-    RecipeJobInputRequest,
     RecipeJobOutputLimits,
     RecipeJobRunResult,
 )

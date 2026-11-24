@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 from importlib.resources import files
 
-from vonk_control.library_projection.common import _recipe_usage
 from vonk_forge_contracts import RecipeApi
+
+from vonk_control.library_projection.common import _recipe_usage
 
 
 def _example(name: str) -> RecipeApi:

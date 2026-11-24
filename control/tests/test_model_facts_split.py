@@ -17,8 +17,22 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import vonk_control.catalog.service as catalog_service_module
 from sqlalchemy import select, update
+from vonk_forge_contracts import (
+    ModelDefinition,
+    document_sha256,
+    read_model,
+    read_recipe,
+    read_recipe_api,
+)
+from vonk_forge_contracts.qualification_status import (
+    PublishedQualificationStatusView,
+    QualificationQualityNote,
+)
+
+import vonk_control.catalog.service as catalog_service_module
+from tests.recipe_library_source import recipe_library_root
+from tests.signed_recipe_release import signed_recipe_releases
 from vonk_agent_protocol.reason_codes.catalog import CatalogCode
 from vonk_control.catalog.entities import (
     CatalogEntityService,
@@ -26,6 +40,7 @@ from vonk_control.catalog.entities import (
     _digest,
     _execution_projection,
 )
+from vonk_control.catalog.entities import CatalogEntityService as Entities
 from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
@@ -42,19 +57,6 @@ from vonk_control.models.catalog import (
 )
 from vonk_control.models.execution import MeasuredRolePeak, RecipeRun
 from vonk_control.observed_run_memory import observed_role_peaks
-from vonk_forge_contracts import (
-    ModelDefinition,
-    document_sha256,
-    read_model,
-    read_recipe,
-)
-from vonk_forge_contracts.qualification_status import (
-    PublishedQualificationStatusView,
-    QualificationQualityNote,
-)
-
-from tests.recipe_library_source import recipe_library_root
-from tests.signed_recipe_release import signed_recipe_releases
 
 from .display_fixtures import create_draft
 from .test_catalog_sync import _fixture, _sync
@@ -75,7 +77,7 @@ def _artifact_key(model: ModelDefinition) -> str:
     return str(projection["artifact_key"])
 
 
-def _legacy_model(model: dict) -> dict:
+def _legacy_model(model: dict[str, Any]) -> dict[str, Any]:
     """The Model document a 3.x library published: the facts inside it."""
     return {
         **copy.deepcopy(model),
@@ -87,9 +89,9 @@ def _legacy_model(model: dict) -> dict:
 
 def _store(
     session,
-    document: dict,
+    document: dict[str, Any],
     *,
-    projected: dict,
+    projected: dict[str, Any],
     artifact_key: str,
     execution_key: str = "2" * 64,
     source_bundle_sha256: str | None = None,
@@ -142,7 +144,9 @@ def _store(
     return revision.id
 
 
-def _legacy_projection(model: ModelDefinition, legacy: dict) -> dict:
+def _legacy_projection(
+    model: ModelDefinition, legacy: dict[str, Any]
+) -> dict[str, Any]:
     return {
         "identity": legacy["identity"],
         "format": legacy["format"],
@@ -371,13 +375,16 @@ def test_a_stored_3x_model_projection_is_rederived_without_the_moved_facts(
         row = session.get(CatalogDocumentRevision, revision_id)
         assert row is not None
         stored = dict(row.projected)
-        assert "capabilities" not in stored and "modalities" not in stored
+        assert "capabilities" not in stored
+        assert "modalities" not in stored
         assert stored["artifact_count"] == len(new_model.files)
-        assert row.document == legacy and row.artifact_key == "1" * 64
+        assert row.document == legacy
+        assert row.artifact_key == "1" * 64
     CatalogEntityService(sessions, clock=lambda: NOW).refresh_model_projections()
     with sessions() as session:
         row = session.get(CatalogDocumentRevision, revision_id)
-        assert row is not None and dict(row.projected) == stored
+        assert row is not None
+        assert dict(row.projected) == stored
 
 
 def test_a_write_refuses_a_model_that_still_carries_its_facts(tmp_path: Path) -> None:
@@ -413,8 +420,6 @@ def test_a_build_policy_refresh_keeps_the_api_facts_nullable_members(
 ) -> None:
     """The refresh re-validates what it wrote: an api block's required nullable
     member (max_input_tokens) must survive it, not be dropped as a None."""
-    from vonk_control.catalog.entities import CatalogEntityService as Entities
-    from vonk_forge_contracts import read_recipe_api
 
     sessions, _service, reader, item = _fixture(tmp_path)
     for entity in reader.snapshot.catalog_entities:
@@ -438,7 +443,9 @@ def test_a_build_policy_refresh_keeps_the_api_facts_nullable_members(
         row = session.get(CatalogDocumentRevision, revision.id)
         assert row is not None
         stale = copy.deepcopy(row.projected)
-        stale["build_options"]["layers"] = True  # a previous compiler's policy
+        build_options = stale["build_options"]
+        assert isinstance(build_options, dict)
+        build_options["layers"] = True  # a previous compiler's policy
         session.execute(
             update(CatalogDocumentRevision)
             .where(CatalogDocumentRevision.id == row.id)
@@ -453,4 +460,6 @@ def test_a_build_policy_refresh_keeps_the_api_facts_nullable_members(
         stored = read_catalog_projection(row)
         assert isinstance(stored, RecipeRevisionProjection)
         assert stored.api == api
-        assert row.projected["build_options"]["layers"] is False
+        build_options = row.projected["build_options"]
+        assert isinstance(build_options, dict)
+        assert build_options["layers"] is False

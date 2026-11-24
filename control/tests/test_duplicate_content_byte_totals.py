@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import hashlib
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+
 from vonk_agent_protocol.distribution import DistributionAssignment, DistributionObject
 from vonk_control.distribution.types import plan_objects
+from vonk_control.distribution_executor import identity as identity_module
 from vonk_control.distribution_executor.identity import DistributionIdentity
 from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
 
@@ -99,9 +102,6 @@ def test_assignment_carries_each_digest_once() -> None:
 def test_every_node_is_delivered_the_union_of_its_roles_files(monkeypatch) -> None:
     """Role-split plans each name their own files; the model is the unit, so
     every node gets all of them and the bytes equal the prepared set's."""
-    from contextlib import nullcontext
-
-    from vonk_control.distribution_executor import identity as identity_module
 
     def plan(*files: tuple[str, int]) -> SimpleNamespace:
         return SimpleNamespace(

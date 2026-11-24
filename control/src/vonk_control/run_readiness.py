@@ -21,11 +21,11 @@ from typing import NamedTuple
 from pydantic import GetJsonSchemaHandler
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import CoreSchema
+
 from vonk_agent_protocol.reason_codes.evidence import RunDegradedReason
 from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_agent_protocol.wire_model import WireEnum
-
-from .run_states import HOLDING_RUN_STATES, STARTING_RUN_STATES
+from vonk_control.run_states import HOLDING_RUN_STATES, STARTING_RUN_STATES
 
 
 def run_not_ready_for_profile(

@@ -13,11 +13,12 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, update
+from vonk_forge_contracts import catalog_vocabulary
+
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.library.api import install_library_routes
 from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.models.cache import RecipeLibrarySyncRun
-from vonk_forge_contracts import catalog_vocabulary
 
 from .signed_recipe_release import signed_recipe_releases
 from .test_catalog_display_pass import World

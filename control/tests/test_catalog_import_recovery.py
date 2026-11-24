@@ -10,9 +10,17 @@ from typing import Any, cast
 
 import pytest
 from sqlalchemy import create_engine, delete, event, select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import (
+    PrebuiltImage,
+    RecipeApi,
+    RecipeDefinition,
+    document_sha256,
+)
+
 from vonk_control.auth import CursorCodec
-from vonk_control.catalog import entities
+from vonk_control.catalog import entities, revision_contract
 from vonk_control.catalog.revision_contract import (
     RecipeRevisionProjection,
     read_catalog_projection,
@@ -25,12 +33,6 @@ from vonk_control.models.catalog import (
     CatalogDocumentRevision,
 )
 from vonk_control.models.execution import RecipeInstallation, RecipeRun
-from vonk_forge_contracts import (
-    PrebuiltImage,
-    RecipeApi,
-    RecipeDefinition,
-    document_sha256,
-)
 
 from .display_fixtures import reword
 from .test_catalog_entities import (
@@ -112,7 +114,8 @@ def test_poisoned_candidate_releases_head_and_accepts_two_fresh_imports(
                     CatalogDocumentHead.slug == imported.slug,
                 )
             )
-            assert head is not None and head.candidate_revision_id is None
+            assert head is not None
+            assert head.candidate_revision_id is None
             assert head.active_revision_id == imported.id
         assert (
             catalog.get_recipe(first.recipe_id).content_sha256
@@ -183,7 +186,8 @@ def test_policy_fault_preserves_one_projection_and_repairs_healthy_siblings(
         return compile_policy(recipe)
 
     with monkeypatch.context() as patch:
-        patch.setattr(entities, "build_policy_projection", compile_with_fault)
+        for consumer in (entities, revision_contract):
+            patch.setattr(consumer, "build_policy_projection", compile_with_fault)
         deferred = catalog.refresh_build_policy()
         assert len(deferred) == 1
         assert views[0].content_sha256 is not None
@@ -195,21 +199,21 @@ def test_policy_fault_preserves_one_projection_and_repairs_healthy_siblings(
         broken, healthy = [
             session.get(CatalogDocumentRevision, view.id) for view in views
         ]
-        assert broken is not None and healthy is not None
+        assert broken is not None
+        assert healthy is not None
         assert _cores(session, broken.id) == 1
         assert _cores(session, healthy.id) == 8
     assert catalog.refresh_build_policy() == ()
     with catalog._sessions() as session:
         repaired = session.get(CatalogDocumentRevision, views[0].id)
-        assert repaired is not None and _cores(session, repaired.id) == 8
+        assert repaired is not None
+        assert _cores(session, repaired.id) == 8
     assert _request_import(catalog, documents[0]).id == views[0].id
 
 
 def test_projection_write_fault_rolls_back_only_its_row(
     catalog: CatalogService, monkeypatch
 ):
-    from sqlalchemy import event
-    from sqlalchemy.exc import OperationalError
 
     views = [
         _request_import(catalog, _recipe(_model(), slug=slug))
@@ -291,13 +295,10 @@ def test_partial_pin_observation_preserves_omitted_revisions(catalog: CatalogSer
     with catalog._sessions() as session:
         first = _projection(session, views[0].id)
         second = _projection(session, views[1].id)
-        assert (
-            isinstance(first, RecipeRevisionProjection) and first.prebuilt_image is None
-        )
-        assert (
-            isinstance(second, RecipeRevisionProjection)
-            and second.prebuilt_image == image
-        )
+        assert isinstance(first, RecipeRevisionProjection)
+        assert first.prebuilt_image is None
+        assert isinstance(second, RecipeRevisionProjection)
+        assert second.prebuilt_image == image
     catalog.record_published_facts({keys[0]: image}, {})
     assert _request_import(
         catalog, _recipe(_model(), slug="fresh-after-pin-withdrawal")
@@ -426,7 +427,8 @@ def test_kit_topology_change_promotes_head_and_preserves_exact_prior_revision(
     with catalog._sessions() as session:
         run = session.get(RecipeRun, run_id)
         installation = session.get(RecipeInstallation, installation_id)
-        assert run is not None and installation is not None
+        assert run is not None
+        assert installation is not None
         assert run.plan == prior_plan
         assert installation.recipe_revision_id == first.id
 

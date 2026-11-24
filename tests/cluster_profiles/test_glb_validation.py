@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import base64
+import contextlib
 import json
 import math
 import os
@@ -244,15 +245,13 @@ class ThreeDGlbValidationTests(unittest.TestCase):
         builder = Glb()
         content = builder.bytes(builder.document())
         metadata = _glb_metadata(content, "triangle-mesh")
-        self.assertEqual((metadata["mesh_count"], metadata["primitive_count"]), (1, 1))
+        assert (metadata["mesh_count"], metadata["primitive_count"]) == (1, 1)
         adopted = None
-        try:
+        with contextlib.suppress(ValueError):
             adopted = _glb_metadata(b"not-a-glb", "triangle-mesh")
-        except ValueError:
-            pass
-        self.assertIsNone(adopted)
+        assert adopted is None
         repaired = _glb_metadata(content, "triangle-mesh")
-        self.assertEqual(repaired, metadata)
+        assert repaired == metadata
 
     def validate(self, document: dict[str, object], builder: Glb, profile: str) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -275,8 +274,8 @@ class ThreeDGlbValidationTests(unittest.TestCase):
                 accepted = True
             except ValueError:
                 pass
-            self.assertFalse(accepted)
-            self.assertEqual(path.read_bytes(), content)
+            assert not accepted
+            assert path.read_bytes() == content
             repaired = Glb()
             path.write_bytes(repaired.bytes(repaired.document(profile)))
             load_validator(CONTEXTS[0]).validate_mesh_glb(path, profile=profile)
@@ -348,8 +347,8 @@ class ThreeDGlbValidationTests(unittest.TestCase):
             )
         )
 
-        self.assertTrue(recipe_validators)
-        self.assertTrue(all(value == platform_validator for value in recipe_validators))
+        assert recipe_validators
+        assert all(value == platform_validator for value in recipe_validators)
 
     def test_rejects_out_of_range_indices_and_nonfinite_or_degenerate_positions(
         self,
@@ -753,7 +752,7 @@ class ThreeDGlbValidationTests(unittest.TestCase):
         start = _json_int(raw_view["byteOffset"])
         length = _json_int(raw_view["byteLength"])
         bogus_jpeg = b"\xff\xd8\xff\xe0\x00\x04xx" + b"x" * (length - 10) + b"\xff\xd9"
-        self.assertEqual(len(bogus_jpeg), length)
+        assert len(bogus_jpeg) == length
         builder.blob[start : start + length] = bogus_jpeg
         _json_at(document, "images", 0)["mimeType"] = "image/jpeg"
         _json_array_at(document, "textures")[0] = {"source": 0}

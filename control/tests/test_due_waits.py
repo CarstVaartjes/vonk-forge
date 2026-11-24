@@ -7,27 +7,75 @@ import os
 import subprocess
 import sys
 from datetime import timedelta
+from uuid import uuid4
 
 import pytest
-from sqlalchemy import JSON, Column, MetaData, Table, cast, inspect, literal, null, text
+from sqlalchemy import (
+    JSON,
+    Column,
+    MetaData,
+    Table,
+    cast,
+    create_engine,
+    inspect,
+    literal,
+    null,
+    select,
+    text,
+)
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitOwnerKind
-from vonk_control.coordinator_failures import CoordinatorFailures
-from vonk_control.due_waits import DueWaitBackstop, WaitSource
-from vonk_control.jobs.queue import JobService
-from vonk_control.model_primitives import Base
-from vonk_control.models.jobs import Job
-from vonk_control.persisted_waits import schedule_wait
-from vonk_control.wait_contract import WaitEvidence
-from vonk_control.wait_redrive import WAIT_MODELS, wait_sources
-from vonk_control.worker.loop import Worker
 
 from tests.signed_recipe_release import signed_recipe_releases
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    WaitOwnerKind,
+    WaitReason,
+)
+from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
+from vonk_agent_protocol.state_machines import CatalogSyncState, CertificateRecordState
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.catalog.sync import (
+    AutomaticCatalogSync,
+    ManagedRecipeCatalogSyncService,
+)
+from vonk_control.coordinator_failures import CoordinatorFailures
+from vonk_control.due_waits import DueWaitBackstop, WaitSource
+from vonk_control.enrollment.service import EnrollmentService
+from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
+from vonk_control.jobs.queue import JobService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeLibrarySyncRun
+from vonk_control.models.fleet import AgentIssuedCertificateRevocation
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.operations.blockers import BlockingOperation, make_blocker
+from vonk_control.persisted_waits import read_wait, schedule_wait, write_wait
+from vonk_control.presence import ManagementAddressPolicy
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationProgressResult,
+    RecipeOperationResult,
+)
+from vonk_control.step_ca import StepCAUnavailable
+from vonk_control.stored.rows import read_row_column
+from vonk_control.wait_contract import WaitEvidence
+from vonk_control.wait_redrive import WAIT_MODELS, wait_sources
+from vonk_control.worker.assembly import assemble_production_worker
+from vonk_control.worker.loop import Worker
 
+from .recipe_operations_support import NOW as RECIPE_NOW
+from .recipe_operations_support import (
+    _job_phases,
+    installed_recipe,
+    setup_services,
+    start_evidence,
+)
+from .test_agent_jobs_postgres import RevokingAuthority
+from .test_catalog_sync import Inline, Reader, _fixture
 from .test_persisted_waits import NOW, _job
 
 
-@pytest.mark.parametrize("with_evidence", (True, False))
+@pytest.mark.parametrize("with_evidence", [True, False])
 def test_quiet_worker_reconstruction_redrives_the_same_fenced_job(
     postgres_engine, with_evidence
 ):
@@ -119,11 +167,12 @@ signal.pause()
     assert calls == [job.id]
     with sessions() as session:
         stored = session.get(Job, job.id)
-        assert stored is not None and stored.state == LifecycleState.SUCCEEDED
+        assert stored is not None
+        assert stored.state == LifecycleState.SUCCEEDED
         assert stored.current_attempt == 1
 
 
-@pytest.mark.parametrize("damage", ("structure", "identity", "kind", "clock"))
+@pytest.mark.parametrize("damage", ["structure", "identity", "kind", "clock"])
 def test_corrupt_first_row_cannot_starve_later_due_work(
     postgres_engine, caplog, damage
 ):
@@ -179,11 +228,14 @@ def test_corrupt_first_row_cannot_starve_later_due_work(
     assert seen == [good.id] * 10
     assert bad.id in caplog.text
     assert "private-test-marker" not in caplog.text
-    failures = lambda: [
-        record
-        for record in caplog.records
-        if "worker.due_wait_failed" in record.message
-    ]
+
+    def failures():
+        return [
+            record
+            for record in caplog.records
+            if "worker.due_wait_failed" in record.message
+        ]
+
     assert len(failures()) == 1
     # A changed corrupt snapshot earns one fresh report, not twenty more.
     with postgres_engine.begin() as connection:
@@ -208,8 +260,8 @@ def test_corrupt_first_row_cannot_starve_later_due_work(
     assert len(failures()) == 2
 
 
-@pytest.mark.parametrize("json_null", (True, False))
-@pytest.mark.parametrize("kind, model", tuple(WAIT_MODELS.items()))
+@pytest.mark.parametrize("json_null", [True, False])
+@pytest.mark.parametrize(("kind", "model"), tuple(WAIT_MODELS.items()))
 def test_every_due_source_redrives_without_evidence(
     postgres_engine, kind, model, json_null
 ):
@@ -289,9 +341,6 @@ def test_unevidenced_job_uses_its_owner_instead_of_first_table_binding(postgres_
 
 def test_logical_owners_sharing_a_table_get_independent_turns(postgres_engine):
     """Catches one Job kind consuming another kind's bounded observation turns."""
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_control.operations.blockers import BlockingOperation, make_blocker
-    from vonk_control.persisted_waits import write_wait
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -374,20 +423,12 @@ def test_cancellation_committed_after_selection_wins_before_retry(postgres_engin
     assert not calls
     with sessions() as session:
         current = session.get(Job, job.id)
-        assert current is not None and current.current_attempt == 0
+        assert current is not None
+        assert current.current_attempt == 0
 
 
 def test_owner_rotation_recovers_a_terminal_revocation_after_ca_outage(postgres_engine):
     """Catches an always-corrupt owner starving another owner's aliased due clock."""
-    from uuid import uuid4
-
-    from vonk_agent_protocol.state_machines import CertificateRecordState
-    from vonk_control.enrollment.service import EnrollmentService
-    from vonk_control.models.fleet import AgentIssuedCertificateRevocation
-    from vonk_control.persisted_waits import read_wait
-    from vonk_control.step_ca import StepCAUnavailable
-
-    from .test_agent_jobs_postgres import RevokingAuthority
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -415,7 +456,7 @@ def test_owner_rotation_recovers_a_terminal_revocation_after_ca_outage(postgres_
     revoked = []
 
     class Authority(RevokingAuthority):
-        def revoke_node(self, serial, observed_at):
+        def revoke_node(self, serial, now):
             if not available[0]:
                 raise StepCAUnavailable("CA transport unavailable")
             revoked.append(serial)
@@ -446,7 +487,8 @@ def test_owner_rotation_recovers_a_terminal_revocation_after_ca_outage(postgres_
         pending = session.get(AgentIssuedCertificateRevocation, row.serial)
         assert pending is not None
         wait = read_wait(pending)
-        assert wait is not None and wait.next_check > NOW
+        assert wait is not None
+        assert wait.next_check > NOW
     available[0] = True
     now[0] = wait.next_check
     restarted = construct()
@@ -455,14 +497,14 @@ def test_owner_rotation_recovers_a_terminal_revocation_after_ca_outage(postgres_
     assert revoked == [row.serial]
     with sessions() as session:
         settled = session.get(AgentIssuedCertificateRevocation, row.serial)
-        assert settled is not None and settled.ca_revoked_at == now[0]
+        assert settled is not None
+        assert settled.ca_revoked_at == now[0]
         assert settled.state == CertificateRecordState.REVOKED
         assert read_wait(settled) is None
 
 
 def test_owner_handler_runs_after_the_selection_connection_is_released(postgres_engine):
     """A one-connection pool catches selection holding SQL across owner I/O."""
-    from sqlalchemy import create_engine
 
     engine = create_engine(
         postgres_engine.url, pool_size=1, max_overflow=0, pool_timeout=30
@@ -478,7 +520,8 @@ def test_owner_handler_runs_after_the_selection_connection_is_released(postgres_
     def handler(request):
         with sessions() as session:
             current = session.get(Job, request.job_id)
-            assert current is not None and current.state == LifecycleState.RUNNING
+            assert current is not None
+            assert current.state == LifecycleState.RUNNING
         calls.append(request.job_id)
         return {}
 
@@ -506,9 +549,9 @@ def test_owner_handler_runs_after_the_selection_connection_is_released(postgres_
         engine.dispose()
 
 
-@pytest.mark.parametrize("with_evidence", (True, False))
+@pytest.mark.parametrize("with_evidence", [True, False])
 @pytest.mark.parametrize(
-    "superseded, missing_receipt", ((False, False), (True, False), (False, True))
+    ("superseded", "missing_receipt"), [(False, False), (True, False), (False, True)]
 )
 def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
     tmp_path,
@@ -520,20 +563,6 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
     with_evidence,
 ):
     """Catches registering a parent callback that only polls its cleanup paths."""
-    from sqlalchemy import select
-    from vonk_control.agent_jobs.service import AgentJobService
-    from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
-    from vonk_control.models.operations import AgentOperation
-    from vonk_control.presence import ManagementAddressPolicy
-    from vonk_control.worker.assembly import assemble_production_worker
-
-    from .recipe_operations_support import NOW as RECIPE_NOW
-    from .recipe_operations_support import (
-        _job_phases,
-        installed_recipe,
-        setup_services,
-        start_evidence,
-    )
 
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=3, engine=postgres_engine
@@ -576,12 +605,6 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
         )
     saved_result = None
     if missing_receipt:
-        from vonk_control.recipe_operations.lifecycle_contract import (
-            RecipeOperationProgressResult,
-            RecipeOperationResult,
-        )
-        from vonk_control.stored.json_values import read_row_column
-
         with sessions.begin() as session:
             parent = session.get(Job, started.id)
             assert parent is not None
@@ -595,8 +618,6 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
             ).model_dump(mode="json", exclude_none=True)
     now = RECIPE_NOW + timedelta(seconds=5)
     if superseded:
-        from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-
         with sessions.begin() as session:
             service._admit_workload_intent(
                 session,
@@ -631,14 +652,12 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
     assert backstop is not None
     backstop()
     if missing_receipt:
-        from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-        from vonk_control.persisted_waits import read_wait
-
         with sessions.begin() as session:
             parent = session.get(Job, started.id)
             assert parent is not None
             wait = read_wait(parent)
-            assert wait is not None and wait.reason is WaitReason.RECEIPT_MISSING
+            assert wait is not None
+            assert wait.reason is WaitReason.RECEIPT_MISSING
             assert set(
                 session.scalars(
                     select(AgentOperation.id).where(
@@ -660,7 +679,8 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
         if superseded:
             assert current == {child.id for child in children}
             parent = session.get(Job, started.id)
-            assert parent is not None and parent.state == LifecycleState.CANCELLED
+            assert parent is not None
+            assert parent.state == LifecycleState.CANCELLED
         else:
             assert current == expected
             assert current > {child.id for child in children}
@@ -671,16 +691,6 @@ def test_catalog_retry_clock_survives_dependency_recovery_and_reconstruction(
     tmp_path, postgres_engine, monkeypatch
 ):
     """Catches resampling a logged retry or a restarted catalog owner losing its wait."""
-    from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
-    from vonk_agent_protocol.state_machines import CatalogSyncState
-    from vonk_control.catalog.sync import (
-        AutomaticCatalogSync,
-        ManagedRecipeCatalogSyncService,
-    )
-    from vonk_control.models.cache import RecipeLibrarySyncRun
-
-    from .test_catalog_sync import Reader, _fixture
-    from .test_catalog_sync_retry import Inline
 
     sessions, catalog, reader, _item = _fixture(tmp_path, engine=postgres_engine)
     available = [False]
@@ -709,8 +719,10 @@ def test_catalog_retry_clock_survives_dependency_recovery_and_reconstruction(
 
     step = construct().advance_automatic(90)
     waiting = construct().latest()
-    assert waiting is not None and waiting.wait is not None
-    assert step.failures == 1 and len(jitter) == 1
+    assert waiting is not None
+    assert waiting.wait is not None
+    assert step.failures == 1
+    assert len(jitter) == 1
     assert waiting.wait.next_check == NOW + timedelta(seconds=step.delay_seconds)
     # A restarted worker's backstop runs the sync once its recorded check is due.
     now[0] = waiting.wait.next_check
@@ -732,7 +744,8 @@ def test_catalog_retry_clock_survives_dependency_recovery_and_reconstruction(
     )
     backstop.tick()
     recovered = service.latest()
-    assert recovered is not None and recovered.state is CatalogSyncState.CURRENT
+    assert recovered is not None
+    assert recovered.state is CatalogSyncState.CURRENT
     assert recovered.wait is not None
     assert recovered.wait.reason is CatalogSyncCode.REFRESH_SCHEDULED
     assert recovered.wait.next_check == now[0] + timedelta(seconds=90)

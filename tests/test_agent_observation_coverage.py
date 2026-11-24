@@ -7,7 +7,7 @@ by leaving the shared startup/tick dispatcher incomplete.
 import re
 from pathlib import Path
 
-from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "rust/crates/vonk-agent/src/executor/operation_observation.rs"

@@ -4,49 +4,93 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
-from vonk_agent_protocol.capability_reply import ControllerCapability
-from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
 from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
 import vonk_control
-
-from ..agent_jobs.contracts import controller_result_consumer
-from ..agent_services import build_agent_services
-from ..artifact_jobs.blob_store import ArtifactBlobStore
-from ..artifact_jobs.service import ArtifactJobService
-from ..auth import CursorCodec, TokenCodec
-from ..bounded_retry import REQUEST_PAUSES
-from ..browser_auth import BrowserAuthService
-from ..capabilities import CapabilityRegistry, CapabilityUnavailableError
-from ..catalog.service import CatalogService
-from ..catalog.sync import ManagedRecipeCatalogSyncService, catalog_sync_failure_reason
-from ..cluster_mappings import ClusterMappingService
-from ..compose_bundle import compose_bundle
-from ..distribution_executor.preparation import CompositeDistributionPhaseExecutor
-from ..failure_evidence import FailureEvidenceService
-from ..gateway.keys import GatewayKeyError, GatewayKeyService, keep_default_key
-from ..gateway.route_grants import recipe_key_routes
-from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
-from ..library.assessment import LibraryAssessment
-from ..library_projection.service import LibraryProjection
-from ..logging import configure_controller_logging
-from ..metrics.registry import MetricsRegistry, read_runnable_job_ages
-from ..model_cache.api import register_model_cache_operation_provider
-from ..model_cache.service import ModelCacheService
-from ..observation.platform import PlatformObserver
-from ..operator_projection_api.wiring import build_fleet_operator_services
-from ..recipe_builds.service import RecipeBuildService
-from ..recipe_operations.operation_worker import RecipeOperationWorker
-from ..recipe_operations.service import RecipeOperationService
-from ..run_switch_operations.service import RunSwitchOperationService
-from ..settings import (
+from vonk_agent_protocol.capability_reply import ControllerCapability
+from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
+from vonk_control.agent_jobs.contracts import controller_result_consumer
+from vonk_control.agent_services import build_agent_services
+from vonk_control.agent_upgrades.availability import UpgradeAvailability
+from vonk_control.agent_upgrades.service import AgentUpgradeService
+from vonk_control.api.application import create_app
+from vonk_control.api.common import _LOGGER, SpaFiles
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
+from vonk_control.artifact_jobs.service import ArtifactJobService
+from vonk_control.auth import CursorCodec, TokenCodec
+from vonk_control.availability_production.production import (
+    build_recipe_image_availability,
+)
+from vonk_control.bounded_retry import REQUEST_PAUSES
+from vonk_control.browser_auth import BrowserAuthService
+from vonk_control.capabilities import CapabilityRegistry, CapabilityUnavailableError
+from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync import (
+    ManagedRecipeCatalogSyncService,
+    catalog_sync_failure_reason,
+)
+from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.compose_bundle import compose_bundle
+from vonk_control.db.connections import build_engine, session_factory
+from vonk_control.distribution_executor.preparation import (
+    CompositeDistributionPhaseExecutor,
+)
+from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.failure_evidence import FailureEvidenceService
+from vonk_control.fleet_events import FleetEventRepository
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.fleet_projection.service import FleetProjection
+from vonk_control.fleet_stream import FleetStream
+from vonk_control.gateway.keys import (
+    GatewayKeyError,
+    GatewayKeyService,
+    keep_default_key,
+)
+from vonk_control.gateway.route_grants import recipe_key_routes
+from vonk_control.gateway.route_runtime import (
+    AtomicRouteBundlePublisher,
+    FileSupervisorAcknowledger,
+)
+from vonk_control.install_admission.service import InstallAdmissionService
+from vonk_control.inventory.repository import INVENTORY_MAX_AGE_SECONDS
+from vonk_control.jobs.queue import JobService
+from vonk_control.library.assessment import LibraryAssessment
+from vonk_control.library_projection.service import LibraryProjection
+from vonk_control.logging import configure_controller_logging, log_event, redact_text
+from vonk_control.metrics.registry import (
+    MetricsRegistry,
+    OperationalMetricsCollector,
+    read_runnable_job_ages,
+)
+from vonk_control.model_cache.api import register_model_cache_operation_provider
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.jobs import Job
+from vonk_control.observation.platform import PlatformObserver
+from vonk_control.operation_api.durable import durable_operation_services
+from vonk_control.operator_projection_api.wiring import build_fleet_operator_services
+from vonk_control.presence import ManagementAddressPolicy
+from vonk_control.recipe_builds.service import RecipeBuildService
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
+from vonk_control.recipe_routes.service import RecipeRouteService
+from vonk_control.run_admission import RunAdmissionService
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runtime_image_preparation.preparation import (
+    make_runtime_image_receipt_preparer,
+    stored_runtime_image_resolver,
+)
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
+from vonk_control.runtime_image_preparation.transport import OciLayoutImageTransport
+from vonk_control.settings import (
     AGENT_RELEASE_API_URL,
     ARTIFACT_JOB_RETENTION_SECONDS,
     ARTIFACT_JOB_STORAGE_MAX_BYTES,
@@ -59,9 +103,12 @@ from ..settings import (
     WORKER_MEMORY_REPORT_MAX_AGE_SECONDS,
     Settings,
 )
-from ..source_bundles import DatabaseSourceBundleStore
-from .application import create_app
-from .common import _LOGGER, SpaFiles
+from vonk_control.source_bundles import DatabaseSourceBundleStore
+from vonk_control.telemetry.samples import TelemetryRepository
+from vonk_control.worker.memory import (
+    read_worker_memory_report,
+    worker_memory_report_path,
+)
 
 
 class LibraryObservations:
@@ -209,7 +256,6 @@ async def _keep(
 
 async def _close_model_cache(model_cache: ModelCacheService) -> None:
     """Bound shutdown checkpoint retries; durable transfers resume on restart."""
-    from ..logging import log_event, redact_text
 
     for attempt in range(len(REQUEST_PAUSES) + 1):
         try:
@@ -238,37 +284,6 @@ async def _close_model_cache(model_cache: ModelCacheService) -> None:
 def production_app(settings: Settings | None = None) -> FastAPI:
     configure_controller_logging()
     capabilities = CapabilityRegistry()
-    from sqlalchemy import func, select
-
-    from ..agent_upgrades.availability import UpgradeAvailability
-    from ..agent_upgrades.service import AgentUpgradeService
-    from ..availability_production.production import build_recipe_image_availability
-    from ..db.connections import build_engine, session_factory
-    from ..execution_plan_service import ControllerExecutionPlanService
-    from ..fleet_events import FleetEventRepository
-    from ..fleet_projection.service import FleetProjection
-    from ..fleet_stream import FleetStream
-    from ..gateway.route_runtime import (
-        AtomicRouteBundlePublisher,
-        FileSupervisorAcknowledger,
-    )
-    from ..install_admission.service import InstallAdmissionService
-    from ..jobs.queue import JobService
-    from ..metrics.registry import OperationalMetricsCollector
-    from ..models.jobs import Job
-    from ..operation_api.durable import durable_operation_services
-    from ..presence import ManagementAddressPolicy
-    from ..recipe_routes.publisher import AtomicRecipeRoutePublisher
-    from ..recipe_routes.service import RecipeRouteService
-    from ..run_admission import RunAdmissionService
-    from ..runtime_image_preparation.preparation import (
-        make_runtime_image_receipt_preparer,
-        stored_runtime_image_resolver,
-    )
-    from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-    from ..runtime_image_preparation.transport import OciLayoutImageTransport
-    from ..telemetry.samples import TelemetryRepository
-    from ..worker.memory import read_worker_memory_report, worker_memory_report_path
 
     if settings is None:
         settings = Settings.from_env_and_secrets()
@@ -323,7 +338,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     )
 
     def build_cache() -> ModelCacheService:
-        cache = ModelCacheService(
+        return ModelCacheService(
             sessions,
             settings.model_cache_root,
             free_fraction=FREE_SPACE_FOR_COLOCATED_SERVICES_FRACTION,
@@ -333,7 +348,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             huggingface_token_path=settings.huggingface_token_path,
             runtime_archive_available=runtime_image_storage.build_archive_available,
         )
-        return cache
 
     model_cache = capabilities.guard(
         ControllerCapability.MODEL_CACHE,
@@ -460,7 +474,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     )
 
     def build_artifact_jobs() -> ArtifactJobService:
-        service = ArtifactJobService(
+        return ArtifactJobService(
             sessions,
             recipe_operations=recipe_operations,
             blob_store=ArtifactBlobStore(
@@ -470,7 +484,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             clock=clock,
             retention_seconds=ARTIFACT_JOB_RETENTION_SECONDS,
         )
-        return service
 
     artifact_jobs = capabilities.guard(
         ControllerCapability.ARTIFACT_STORAGE,
@@ -478,7 +491,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         build_artifact_jobs,
         initialize=lambda service: service.reconcile_storage(),
     )
-    from ..fleet_profiles.factory import build_production_fleet_profile_service
 
     fleet_profiles = build_production_fleet_profile_service(
         sessions,
@@ -541,7 +553,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
                     backup_completed_at = None
             except (OSError, ValueError):
                 pass
-        metrics.set_backup_successful(backup_completed_at is not None)
+        metrics.set_backup_successful(successful=backup_completed_at is not None)
         metrics.set_backup_age(
             None
             if backup_completed_at is None
@@ -556,7 +568,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
                     restore_completed_at = None
             except (OSError, ValueError):
                 pass
-        metrics.set_backup_restore_verified(restore_completed_at is not None)
+        metrics.set_backup_restore_verified(verified=restore_completed_at is not None)
         metrics.set_backup_restore_verification_age(
             None
             if restore_completed_at is None
@@ -604,7 +616,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     )
 
     @asynccontextmanager
-    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         capabilities.start_recovery()
         library_task = asyncio.create_task(
             _keep(
@@ -702,10 +714,8 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             ),
             model_cache,
         ),
-        catalog=catalog_service,
         managed_catalog_sync=managed_catalog_sync,
         browser_auth=browser_auth,
-        recipe_operations=recipe_operations,
         run_switch_operations=run_switch_operations,
         artifact_jobs=artifact_jobs,
         fleet_profiles=fleet_profiles,
@@ -715,7 +725,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             sessions=sessions,
         ),
         failure_evidence=FailureEvidenceService(sessions),
-        agent_upgrades=agent_upgrades,
         model_cache=model_cache,
         recipe_image_availability=recipe_image_production.service,
         gateway_keys=gateway_keys,
@@ -733,7 +742,6 @@ def admin_web_root() -> Path:
 
 
 def mount_admin_web(app: FastAPI) -> None:
-    from ..logging import log_event
 
     web_root = admin_web_root()
     if not web_root.is_dir():

@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
+
 from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
@@ -63,7 +64,10 @@ def test_installed_login_keeps_only_a_private_token_that_later_commands_use(
                 password_verifier=hash_password(_PASSWORD),
             )
         )
-    now = lambda: datetime.now(UTC)
+
+    def now():
+        return datetime.now(UTC)
+
     api = TestClient(
         create_app(
             jobs=JobService(sessions, clock=now),
@@ -86,7 +90,7 @@ def test_installed_login_keeps_only_a_private_token_that_later_commands_use(
             minted.append(response.headers["X-Vonk-Token-Expires-At"])
         return response
 
-    api.request = spy  # type: ignore[method-assign]
+    api.request = spy
     with _https_api_peer(tmp_path, api, {}) as (url, certificate, _peer):
         environment = _process_environment(
             tmp_path, url, certificate, {"Authorization": "Bearer unused"}

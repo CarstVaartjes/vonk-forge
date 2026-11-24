@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import (
     TYPE_CHECKING,
 )
@@ -10,25 +9,28 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
-
-from ..inventory.items import runtime_value
-from ..models.cache import RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.fleet import AgentNode
-from ..recipe_operations.errors import RecipeOperationConflict
-from ..revision_images import revision_source_bundle
-from ..run_switch_contract.evidence import FreshnessEvidence
-from ..run_switch_contract.requests import SparkGroup
-from .identity_helpers import _is_hex_digest
-from .interfaces import _BuildSelection
-from .planning_helpers import PlanInventory, _as_reason
+from vonk_control.inventory.items import runtime_value
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import AgentNode
+from vonk_control.recipe_operations.errors import RecipeOperationConflict
+from vonk_control.revision_images import revision_source_bundle
+from vonk_control.run_switch_contract.evidence import FreshnessEvidence
+from vonk_control.run_switch_contract.requests import SparkGroup
+from vonk_control.run_switch_operations.identity_helpers import _is_hex_digest
+from vonk_control.run_switch_operations.interfaces import _BuildSelection
+from vonk_control.run_switch_operations.planning_helpers import (
+    PlanInventory,
+    _as_reason,
+)
 
 if TYPE_CHECKING:
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 class BuildSelectionMixin:
@@ -40,7 +42,6 @@ class BuildSelectionMixin:
         candidate: RecipeBuild | None,
         group: SparkGroup,
         *,
-        now: datetime,
         inventory: PlanInventory,
         create_build: bool = True,
     ) -> _BuildSelection:
@@ -69,7 +70,7 @@ class BuildSelectionMixin:
         ):
             builder = session.get(AgentNode, candidate.builder_node_id)
             freshness, admissible = service._builder_admission(
-                session, builder, inventory=inventory
+                builder, inventory=inventory
             )
             if admissible:
                 return _BuildSelection(
@@ -115,7 +116,7 @@ class BuildSelectionMixin:
         saw_builder = False
         for node in ordered_nodes:
             freshness, admissible = service._builder_admission(
-                session, node, inventory=inventory
+                node, inventory=inventory
             )
             if not admissible:
                 continue
@@ -231,7 +232,6 @@ class BuildSelectionMixin:
 
     def _builder_admission(
         self,
-        session: Session,
         node: AgentNode | None,
         *,
         inventory: PlanInventory,

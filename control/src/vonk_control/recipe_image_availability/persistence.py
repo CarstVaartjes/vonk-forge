@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -18,24 +18,19 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-from vonk_agent_protocol.wire_model import OperationProgress
-
-from vonk_control.lifecycle.evidence import Residue
-
-from ..catalog.queries import active_head_revision
-from ..jobs import states as job_states
-from ..jobs.documents import AvailabilityJobPayload
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..model_cache.views import ModelCacheRemovalScope
-from ..models.catalog import CatalogDocumentRevision
-from ..models.jobs import Job
-from ..recipe_operations.availability_intent import (
-    RecipeSelectorIntent,
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
+from vonk_control.catalog.queries import active_head_revision
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import AvailabilityJobPayload
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
 )
-from ..revision_images import revision_images
-from ..stored.json_values import read_row_column
-from ..stored.states import CatalogRevisionState
-from .contracts import (
+from vonk_control.model_cache.views import ModelCacheRemovalScope
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability.contracts import (
     _ACTIVE,
     _SHA256,
     _WAITING,
@@ -50,23 +45,29 @@ from .contracts import (
     _read,
     _RecipeRemovalSelection,
 )
-from .reader_contract import (
+from vonk_control.recipe_image_availability.reader_contract import (
     RecoveredAvailabilityPayload,
     StoredAvailabilityIdentity,
 )
-from .removal_contract import (
+from vonk_control.recipe_image_availability.removal_contract import (
     RecipeCacheRemovalIntent,
     RecipeCacheRemovalOwner,
     RecipeCacheRemovalPlan,
     RecipeCacheRemovalResult,
 )
-from .view_contract import (
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeCacheRemovalStatus,
     RecipeImageAvailabilityView,
 )
+from vonk_control.recipe_operations.availability_intent import RecipeSelectorIntent
+from vonk_control.revision_images import revision_images
+from vonk_control.stored.rows import read_row_column
+from vonk_control.stored.states import CatalogRevisionState
 
 if TYPE_CHECKING:
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
 
 
 def _payload(
@@ -123,7 +124,6 @@ def _recipe_removal_selection_in_session(
         revision is None
         or revision.kind != "recipe"
         or revision.state != CatalogRevisionState.ACTIVE
-        or not isinstance(revision.content_digest, str)
     ):
         raise RecipeImageAvailabilityInvalid(
             RecipeImageCode.SELECTOR_MISSING,
@@ -171,7 +171,7 @@ def _recipe_removal_selection_in_session(
 
 
 def _resolve_recipe_selector(
-    self: RecipeImageAvailabilityService, selector: str
+    self: RecipeImageAvailabilityService, selector: object
 ) -> str:
     """Resolve logical selectors to the current head, retaining exact pins."""
 
@@ -339,7 +339,7 @@ def _removal_progress_document(
         checkpoint.image_reclaimed_bytes + checkpoint.model_reclaimed_bytes
     )
     successful = operation.state == LifecycleState.SUCCEEDED
-    progress = OperationProgress(
+    return OperationProgress(
         phase=(
             ProgressPhase.COMPLETED
             if successful
@@ -355,13 +355,11 @@ def _removal_progress_document(
         observed_at=_iso(operation.updated_at),
         activity=_ACTIVE if operation.state == LifecycleState.RUNNING else _WAITING,
     )
-    return progress
 
 
 def _read_removal_result(
     self: RecipeImageAvailabilityService,
     operation: Job,
-    intent: RecipeCacheRemovalIntent,
 ) -> RecipeCacheRemovalStatus:
     """Rebuild the read projection from the authoritative plan and checkpoint."""
     owner = self._read_removal_owner(operation)
@@ -375,7 +373,7 @@ def removal_status(
     intent = owner.plan.intent
     if operation.state == LifecycleState.SUCCEEDED:
         self._stored_removal_result(operation, intent, owner)
-    status = RecipeCacheRemovalStatus(
+    return RecipeCacheRemovalStatus(
         schema_version=SCHEMA_VERSION,
         action=intent.action,
         selector=intent.selector,
@@ -398,7 +396,6 @@ def removal_status(
         cancelled_builds=[],
         model_removals=[child.operation_id for child in owner.plan.model_children],
     )
-    return status
 
 
 def _stored_removal_result(
@@ -461,4 +458,4 @@ def _replay_removal(
             "request key was already used for another removal intent",
             reason=InvalidRequestReason.CONFLICT,
         )
-    return self._read_removal_result(operation, intent)
+    return self._read_removal_result(operation)

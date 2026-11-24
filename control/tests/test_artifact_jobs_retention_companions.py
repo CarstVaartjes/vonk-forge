@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -11,18 +12,33 @@ from threading import Event
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
-from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, LifecycleState
+
+from vonk_agent_protocol.agent_words import FailureStage
+from vonk_agent_protocol.contracts import AgentResult
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    AgentResultState,
+    LifecycleState,
+    OutcomeKind,
+    WaitReason,
+)
+from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeUnknown
 from vonk_agent_protocol.recipe_jobs import (
+    RecipeJobEvidence,
     RecipeJobFile,
+    RecipeJobOutputManifest,
     RecipeJobRunRequest,
     RecipeJobRunResult,
 )
 from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.recipe_operations import (
+    RecipeStopPayload,
+    RecipeStopResult,
+)
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control.agent_jobs.contracts import (
+    StaleAgentFence,
     controller_result_consumer,
 )
 from vonk_control.agent_jobs.service import AgentJobService
@@ -164,7 +180,7 @@ def test_reconcile_never_deletes_blobs_on_an_empty_reference_scan(tmp_path) -> N
         assert session.get(ArtifactJobBlob, digest) is not None
 
 
-@pytest.mark.parametrize("contended", (False, True))
+@pytest.mark.parametrize("contended", [False, True])
 def test_reconcile_reclaims_only_the_expired_jobs_own_blobs(
     tmp_path, contended
 ) -> None:
@@ -230,8 +246,6 @@ def test_reconcile_reclaims_only_the_expired_jobs_own_blobs(
     os.utime(seeded.path, (0, 0))
 
     if contended:
-        import fcntl
-
         with (root / ".quota.lock").open("a+b") as quota:
             fcntl.flock(quota.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             with pytest.raises(Exception):  # noqa: B017 -- ending witness; durable evidence asserted below
@@ -383,7 +397,8 @@ def test_artifact_input_manifest_damage_is_readable_and_fresh_work_is_admitted(
         row.input_manifest = manifest
     assert service.get(created.id).input_declarations is None
     ended = service.finalize(created.id)
-    assert ended.state in ajs.ENDED and ended.operation_id is None
+    assert ended.state in ajs.ENDED
+    assert ended.operation_id is None
     fresh = submitted_artifact_job(service, run_id, request_suffix=390)
     assert fresh.operation_id is not None
 
@@ -465,21 +480,14 @@ def test_artifact_cancel_preserves_declared_evidence_and_meaningful_values(
 
 
 @pytest.mark.postgres
-@pytest.mark.parametrize("expires", (False, True))
+@pytest.mark.parametrize("expires", [False, True])
 @pytest.mark.parametrize(
-    ("lease_lapses", "reconcile"), ((False, False), (True, False), (True, True))
+    ("lease_lapses", "reconcile"), [(False, False), (True, False), (True, True)]
 )
 def test_undelivered_job_outputs_resume_without_repeating_the_process(
     tmp_path, postgres_engine, expires, lease_lapses, reconcile
 ):
     """Ending on 413, losing the receipt, or resetting retention fails this flow."""
-    from vonk_agent_protocol.agent_words import FailureStage
-    from vonk_agent_protocol.lifecycle_vocabulary import OutcomeKind, WaitReason
-    from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeUnknown
-    from vonk_agent_protocol.recipe_jobs import (
-        RecipeJobEvidence,
-        RecipeJobOutputManifest,
-    )
 
     sessions, recipe_operations, _, service, run_id, node_id = running_artifact_service(
         tmp_path, engine=postgres_engine
@@ -538,8 +546,6 @@ def test_undelivered_job_outputs_resume_without_repeating_the_process(
     if reconcile:
         jobs.reconcile_orders()
     if lease_lapses:
-        from vonk_control.agent_jobs.contracts import StaleAgentFence
-
         with pytest.raises(StaleAgentFence):
             jobs.record_result(undelivered(first))
         # The HTTP ingress reconciles a stale result through this same path.
@@ -556,7 +562,8 @@ def test_undelivered_job_outputs_resume_without_repeating_the_process(
                 AgentOperation.parent_job_id == job.operation_id
             )
         )
-        assert order is not None and order.next_action_at is not None
+        assert order is not None
+        assert order.next_action_at is not None
         deadline = order.recovery_deadline
         due = order.next_action_at
         order_id = order.id
@@ -567,8 +574,8 @@ def test_undelivered_job_outputs_resume_without_repeating_the_process(
     restarted = AgentJobService(sessions, clock=clock)
     restarted.set_result_consumer(consume)
     second = claim_agent(restarted, node_id, "serial-0")
-    assert second is not None and second.fence != first.fence
-    from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
+    assert second is not None
+    assert second.fence != first.fence
 
     assert isinstance(second.payload, RecipeJobRunRequest)
     assert second.payload.output_delivery_only is True
@@ -580,7 +587,8 @@ def test_undelivered_job_outputs_resume_without_repeating_the_process(
         restarted.record_result(undelivered(second))
         with sessions() as session:
             retained = session.get(AgentOperation, order_id)
-            assert retained is not None and retained.recovery_deadline == deadline
+            assert retained is not None
+            assert retained.recovery_deadline == deadline
         clock.advance(seconds=24 * 60 * 60 + 1)
         for _ in range(3):
             restarted.reconcile_orders()
@@ -702,7 +710,8 @@ def _two_rank_claims(tmp_path, suffix: int):
     companion_node = next(node for node in nodes if node != owner_node)
     owner_claim = claims[owner_node]
     companion_claim = claims[companion_node]
-    assert owner_claim is not None and companion_claim is not None
+    assert owner_claim is not None
+    assert companion_claim is not None
     return (
         sessions,
         recipe_operations,
@@ -784,10 +793,6 @@ def test_a_rank_that_fails_ends_the_two_rank_job_and_stops_the_other(
 
     # The run's Stop removes the job's container on each Spark: one exact Stop
     # per rank, each naming the job, and the run is stopped once both receipt.
-    from vonk_agent_protocol.recipe_operations import (
-        RecipeStopPayload,
-        RecipeStopResult,
-    )
 
     plan_digest = recipe_operations.preview_stop(run_id).plan_digest
 
@@ -837,7 +842,8 @@ def test_a_rank_that_fails_ends_the_two_rank_job_and_stops_the_other(
     # The stopped run takes fresh work: a new job run is admitted on it.
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "stopped"
+        assert run is not None
+        assert run.state == "stopped"
         installation_id = run.installation_id
     fresh_plan = recipe_operations.preview_run(installation_id, "image-job")
     fresh = recipe_operations.activate_job_run(
@@ -863,10 +869,6 @@ def test_a_companion_receipt_without_files_never_ends_the_job_and_the_owner_does
         (_companion_node, companion),
         _nodes,
     ) = _two_rank_claims(tmp_path, 138)
-    from vonk_agent_protocol.recipe_jobs import (
-        RecipeJobEvidence,
-        RecipeJobOutputManifest,
-    )
 
     content = b"image"
     output = RecipeJobFile(
@@ -934,11 +936,6 @@ def test_a_running_companion_is_told_to_stop_when_the_owner_ends(
         tmp_path, 200 + 10 * ["cancelled", "exits-zero", "fails"].index(companion_ends)
     )
     if owner_outcome == "succeeded":
-        from vonk_agent_protocol.recipe_jobs import (
-            RecipeJobEvidence,
-            RecipeJobOutputManifest,
-        )
-
         content = b"image"
         output = RecipeJobFile(
             name="output.png",
@@ -1026,11 +1023,6 @@ def test_a_running_companion_is_told_to_stop_when_the_owner_ends(
             )
         )
     else:
-        from vonk_agent_protocol.recipe_jobs import (
-            RecipeJobEvidence,
-            RecipeJobOutputManifest,
-        )
-
         agent_jobs.succeed(
             companion,
             RecipeJobRunResult(
@@ -1054,7 +1046,8 @@ def test_a_running_companion_is_told_to_stop_when_the_owner_ends(
     assert parent_outcome() == (owner_outcome, owner_reason)
     # A fresh job on the same run is admitted.
     fresh = submitted_artifact_job(service, run_id, request_suffix=158)
-    assert fresh.id != submitted.id and fresh.state not in ajs.ENDED
+    assert fresh.id != submitted.id
+    assert fresh.state not in ajs.ENDED
 
 
 def test_a_companion_that_fails_first_makes_the_job_and_parent_failed(tmp_path) -> None:
@@ -1085,10 +1078,6 @@ def test_a_companion_that_fails_first_makes_the_job_and_parent_failed(tmp_path) 
         )
     )
     assert service.get(submitted.id).state == "failed"
-    from vonk_agent_protocol.recipe_jobs import (
-        RecipeJobEvidence,
-        RecipeJobOutputManifest,
-    )
 
     content = b"image"
     output = RecipeJobFile(

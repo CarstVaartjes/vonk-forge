@@ -15,6 +15,8 @@ from typing import Any, cast
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
@@ -52,7 +54,6 @@ from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImagePreparationError,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import RecipeDefinition
 
 from .non_blocking import assert_ended_without_blocking
 from .recipe_image_availability_support import (
@@ -161,11 +162,13 @@ def test_remove_recipe_does_not_cancel_accepted_build_or_preparation(
     assert observed.operation_id == result["operation_id"]
     with sessions() as session:
         build = session.get(RecipeBuild, "00000000-0000-4000-8000-000000000901")
-        assert build is not None and build.state == "building"
+        assert build is not None
+        assert build.state == "building"
     assert service.advance_removals(limit=1) == 1
     with sessions() as session:
         ended = session.scalar(select(Job).where(Job.id == str(result["operation_id"])))
-        assert ended is not None and ended.state == "succeeded"
+        assert ended is not None
+        assert ended.state == "succeeded"
     assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
         cast(Job | RecipeImageAvailabilityView, ended),
@@ -245,7 +248,8 @@ def test_removal_recovers_when_damaged_reference_observation_clears(
         observed[0] += timedelta(seconds=60)
         with sessions() as session:
             waiting = session.get(Job, accepted.operation_id)
-            assert waiting is not None and waiting.state == LifecycleState.BACKOFF
+            assert waiting is not None
+            assert waiting.state == LifecycleState.BACKOFF
             assert waiting.next_action_at is not None
         assert receipt_path.exists()
         assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
@@ -261,7 +265,8 @@ def test_removal_recovers_when_damaged_reference_observation_clears(
         observed[0] += timedelta(seconds=60)
     with sessions() as session:
         completed = session.get(Job, accepted.operation_id)
-        assert completed is not None and completed.state == LifecycleState.SUCCEEDED
+        assert completed is not None
+        assert completed.state == LifecycleState.SUCCEEDED
     assert not receipt_path.exists()
     fresh = service.start(
         "damaged-reference", actor="operator", request_id=str(uuid.uuid4())
@@ -384,9 +389,10 @@ def test_damaged_removal_owner_does_not_hold_up_later_request(
     with sessions() as session:
         bad = session.scalar(select(Job).where(Job.request_id == bad_key))
         good = session.scalar(select(Job).where(Job.request_id == good_key))
-        assert bad is not None and bad.state == LifecycleState.SUCCEEDED
-        assert good is not None and good.state == LifecycleState.SUCCEEDED
-        from vonk_control.models.cache import ArtifactLifecycleGate
+        assert bad is not None
+        assert bad.state == LifecycleState.SUCCEEDED
+        assert good is not None
+        assert good.state == LifecycleState.SUCCEEDED
 
         assert (
             session.scalar(
@@ -398,7 +404,8 @@ def test_damaged_removal_owner_does_not_hold_up_later_request(
         )
     with sessions() as session:
         ended = session.scalar(select(Job).where(Job.request_id == bad_key))
-        assert ended is not None and ended.state == LifecycleState.SUCCEEDED
+        assert ended is not None
+        assert ended.state == LifecycleState.SUCCEEDED
     assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
         cast(Job | RecipeImageAvailabilityView, ended),
@@ -462,7 +469,8 @@ def test_recipe_removal_request_key_rejects_changed_intent(
         )
     with sessions() as session:
         ended = session.scalar(select(Job).where(Job.request_id == request_id))
-        assert ended is not None and ended.state == "succeeded"
+        assert ended is not None
+        assert ended.state == "succeeded"
     assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
         cast(Job | RecipeImageAvailabilityView, ended),
@@ -510,7 +518,8 @@ def test_recipe_removal_request_key_replays_before_resolving_current_head(
     assert replay["with_model"] is False
     with sessions() as session:
         ended = session.scalar(select(Job).where(Job.request_id == request_id))
-        assert ended is not None and ended.state == "succeeded"
+        assert ended is not None
+        assert ended.state == "succeeded"
     assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
         cast(Job | RecipeImageAvailabilityView, ended),
@@ -847,7 +856,8 @@ def test_postgres_recipe_removal_retires_all_archives_in_one_step(
     for _ in range(5):
         service.advance_removals(limit=1)
         seen.append(_removal_owner(sessions, request_id).checkpoint.image_index)
-    assert set(seen) <= {0, 3} and 3 in seen
+    assert set(seen) <= {0, 3}
+    assert 3 in seen
     assert persists == [3]
     assert not any(path.exists() for path in receipts)
     ended = service.get_operator_request(request_id, actor="operator")

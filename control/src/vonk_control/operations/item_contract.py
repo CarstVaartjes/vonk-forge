@@ -28,33 +28,30 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from vonk_agent_protocol.contracts import (
-    AgentFailureResult,
-    AgentOperation,
-    validate_result_for_operation,
-)
+
+from vonk_agent_protocol.agent_operations import AgentFailureResult, AgentOperation
+from vonk_agent_protocol.contracts import validate_result_for_operation
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.optional_evidence import EvidenceDrop
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.wire_model import OperationProgress
-
-from .. import agent_operation_states
-from ..fleet_profile_contract.applications import (
+from vonk_control import agent_operation_states
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationCancellationView,
 )
-from ..model_cache.contract import ModelCacheCancellation
-from ..strict_json import StrictModel, read_stored_model
-from ..summary_cut import summary_cut
-from ..wait_contract import QueueWait
-from .blockers import OperationBlocker, read_blockers
-from .contract import (
+from vonk_control.model_cache.contract import ModelCacheCancellation
+from vonk_control.operations.blockers import OperationBlocker, read_blockers
+from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     OperationEvidenceDownload,
     OperationFailureEvidence,
     sanitize_failure_evidence,
 )
+from vonk_control.strict_json import StrictModel, read_stored_model
+from vonk_control.summary_cut import summary_cut
+from vonk_control.wait_contract import QueueWait
 
 #: The wire word for an agent operation kind.
 AGENT_OPERATION_KINDS = frozenset(operation.value for operation in AgentOperation)

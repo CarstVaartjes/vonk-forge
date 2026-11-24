@@ -2,22 +2,28 @@
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select, update
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.inventory import ModelStoreObject
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.cache_removal_review import CacheAssetDisposition, CacheRemovalReview
 from vonk_control.fleet_model_removal_contract import FleetRemovalReason
+from vonk_control.lifecycle.evidence import BookkeepingReason
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheSet
+from vonk_control.models.execution import RecipeInstallation
 from vonk_control.models.fleet import AgentNode, User
 from vonk_control.models.telemetry import NodeInventorySnapshot
-from vonk_forge_contracts import RecipeDefinition
 
 from .canonical_recipe_fixtures import canonical_example
+from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .test_catalog_revision_collection import NODE, Catalog
 from .test_fleet_model_removal_postgres import inventory, submit_model_download
 from .test_model_removal_worker_postgres import _prepare_removal_target
@@ -106,10 +112,12 @@ def test_review_of_shared_content_survives_partial_evidence_and_heals(
         if fault != "manifest":
             # A Spark without usable inventory that holds no installation of
             # the model cannot reference it, so it does not block removal.
-            assert not wire.blockers and wire.fleet.nas_remove
+            assert not wire.blockers
+            assert wire.fleet.nas_remove
             assert path.read_bytes() == b"shared weights"
             return
-        assert wire.blockers and all(
+        assert wire.blockers
+        assert all(
             item.code == ArtifactLifecycleCode.REFERENCE_SCAN_FAILED
             for item in wire.blockers
         )
@@ -136,7 +144,8 @@ def test_review_of_shared_content_survives_partial_evidence_and_heals(
                     ModelCacheSet.model_content_sha256 == model_digest
                 )
             )
-            assert row is not None and row.manifest == {}
+            assert row is not None
+            assert row.manifest == {}
             row.manifest = manifest
         now[0] += timedelta(seconds=1)
         inventory(world.sessions, NODE, now[0], [obj])
@@ -155,12 +164,6 @@ def test_unreadable_installation_is_unknown_and_next_review_recovers(
     postgres_engine, tmp_path: Path
 ) -> None:
     """Catches scanning an older installation plan before filtering its model."""
-    from uuid import uuid4
-
-    from vonk_control.lifecycle.evidence import BookkeepingReason
-    from vonk_control.models.execution import RecipeInstallation
-
-    from .recipe_operations_support import NOW, installed_recipe, setup_services
 
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine, nodes=2, mapping_node_count=1
@@ -170,7 +173,8 @@ def test_unreadable_installation_is_unknown_and_next_review_recovers(
     )
     with sessions.begin() as session:
         row = session.get(RecipeInstallation, installed.owner_id)
-        assert row is not None and row.model_content_sha256 is not None
+        assert row is not None
+        assert row.model_content_sha256 is not None
         digest, original = row.model_content_sha256, row.plan
         row.plan = {}
     now = NOW + timedelta(seconds=1)
@@ -180,7 +184,8 @@ def test_unreadable_installation_is_unknown_and_next_review_recovers(
         for node in nodes:
             inventory(sessions, node, now, [])
         review = cache.review_fleet_model_removal(digest)
-        assert review.fleet is not None and not review.fleet.nas_remove
+        assert review.fleet is not None
+        assert not review.fleet.nas_remove
         assert any(
             issue.subject == installed.owner_id
             and issue.reason == BookkeepingReason.PERSISTED_STATE_DAMAGED
@@ -192,10 +197,12 @@ def test_unreadable_installation_is_unknown_and_next_review_recovers(
         )
         with sessions.begin() as session:
             row = session.get(RecipeInstallation, installed.owner_id)
-            assert row is not None and row.plan == {}
+            assert row is not None
+            assert row.plan == {}
             row.plan = original
         healed = cache.review_fleet_model_removal(digest)
-        assert healed.fleet is not None and healed.fleet.nas_remove
+        assert healed.fleet is not None
+        assert healed.fleet.nas_remove
         assert not healed.blockers
     finally:
         cache.close()
@@ -205,9 +212,6 @@ def test_accepted_removal_waits_for_repaired_evidence_under_original_request(
     postgres_engine, tmp_path: Path
 ) -> None:
     """Catches treating a post-acceptance observation fault as permanent failure."""
-    from uuid import uuid4
-
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)
@@ -244,7 +248,8 @@ def test_accepted_removal_waits_for_repaired_evidence_under_original_request(
         cache.advance_removals()
         waiting = cache.get_operation(accepted.id)
         assert waiting.state == LifecycleState.BACKOFF
-        assert waiting.fleet is not None and accepted.fleet is not None
+        assert waiting.fleet is not None
+        assert accepted.fleet is not None
         assert waiting.fleet.deadline_at == accepted.fleet.deadline_at
         assert path.read_bytes() == b"weights"
         with world.sessions.begin() as session:

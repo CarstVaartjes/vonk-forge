@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import func, select, true
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.http_failure import TransientReason
 from vonk_agent_protocol.lifecycle_vocabulary import (
@@ -16,43 +17,49 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
-
-from ..agent_operation_facts import aware as _aware
-from ..artifact_jobs.lifecycle import ArtifactIdentity, has_pending_removal
-from ..bounded_json import require_integer
-from ..categorized_errors import InvalidValue
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..lifecycle.types import Effect, Lifecycle, Outcome, Reported, State, Tick
-from ..models.cache import ModelCacheOperation, ModelCacheSet
-from . import states as model_cache_states
-from .artifacts import ArtifactSetManifest, _unique_artifacts
-from .catalog_helpers import _iso
-from .constants import (
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.artifact_jobs.lifecycle import ArtifactIdentity, has_pending_removal
+from vonk_control.bounded_json import require_integer
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.lifecycle.types import (
+    Effect,
+    Lifecycle,
+    Outcome,
+    Reported,
+    State,
+    Tick,
+)
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, _unique_artifacts
+from vonk_control.model_cache.catalog_helpers import _iso
+from vonk_control.model_cache.constants import (
     _CREDENTIAL_FAILURE_PUBLIC_CODES,
     _MAX_PARALLEL_DOWNLOADS,
     _RETRY_BASE_SECONDS,
     _TRANSFER_CLAIM_SECONDS,
     SCHEMA_VERSION,
 )
-from .contract import (
+from vonk_control.model_cache.contract import (
     CacheOperationKind,
     ModelCacheDownloadPayload,
     ModelCacheDownloadResult,
     ModelCacheSetState,
     ModelCacheTransfer,
 )
-from .errors import ModelCacheError, _ArtifactWriterBusy
-from .persistence import (
+from vonk_control.model_cache.errors import ModelCacheError, _ArtifactWriterBusy
+from vonk_control.model_cache.persistence import (
     _cache_failure,
     _manifest_of,
     _store_operation_payload,
     _updated,
 )
-from .storage import RunningTransfers, TransferNeed
-from .views import _BackgroundTransfer
+from vonk_control.model_cache.storage import RunningTransfers, TransferNeed
+from vonk_control.model_cache.views import _BackgroundTransfer
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,7 +102,7 @@ def _claim_held(row: Lifecycle, now: datetime) -> bool:
     )
 
 
-def _claim_backing_off(row: Lifecycle, now: datetime, respect_backoff: bool) -> bool:
+def _claim_backing_off(row: Lifecycle, now: datetime, *, respect_backoff: bool) -> bool:
     return (
         respect_backoff
         and row.next_action_at is not None
@@ -586,7 +593,7 @@ class SchedulerMixin:
                     # nothing here is irreversible, so it is retried with backoff)
                     # instead of the next claimant stealing the claim.
                     row = cache._lifecycle.lapse(operation, now)
-                if _claim_backing_off(row, now, respect_backoff):
+                if _claim_backing_off(row, now, respect_backoff=respect_backoff):
                     continue
                 try:
                     manifest = _manifest_of(payload)
@@ -708,7 +715,8 @@ class SchedulerMixin:
                 running = row.state is State.RUNNING
                 # A running row's backoff is decided after the claim lapses it.
                 if _claim_held(row, now) or (
-                    not running and _claim_backing_off(row, now, respect_backoff)
+                    not running
+                    and _claim_backing_off(row, now, respect_backoff=respect_backoff)
                 ):
                     continue
                 payload = cache._transfer_or_none(operation)

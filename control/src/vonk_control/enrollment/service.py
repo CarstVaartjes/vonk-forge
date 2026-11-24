@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from cryptography import x509
 from sqlalchemy import select, true, update
 from sqlalchemy.exc import SQLAlchemyError
+
 from vonk_agent_protocol.enrollment import ExpiredRenewRequest
 from vonk_agent_protocol.lifecycle_vocabulary import (
     ErrorCategory,
@@ -23,49 +24,53 @@ from vonk_agent_protocol.state_machines import (
     EnrollmentRecordState,
     NodeIdentityState,
 )
-
-from ..agent_contacts import retire_contact
-from ..coordinator_failures import _RETRY_CAP_SECONDS
-from ..logging import log_event, redact_text
-from ..models.fleet import (
-    AgentCertificate,
-    AgentCertificateRotation,
-    AgentEnrollment,
-    AgentIssuedCertificateRevocation,
-    AgentNode,
+from vonk_control.agent_contacts import retire_contact
+from vonk_control.coordinator_failures import _RETRY_CAP_SECONDS
+from vonk_control.enrollment.contract import (
+    EnrollmentObservationOutcome,
+    EnrollmentRevocationStatus,
 )
-from ..models.jobs import Job
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..owner_liveness import OwnerKind, OwnerRef, owner
-from ..persisted_waits import read_wait, schedule_wait
-from ..pki import IssuedCertificate
-from ..security.enrollment import (
-    require_activation_identity,
-    require_certificate,
-    require_expired_proof,
-    require_node,
-    require_staged_certificate,
-)
-from ..security.enrollment import (
-    require_expired_source as _require_expired_source,
-)
-from ..step_ca import StepCAError, StepCAIssuancePending, StepCAUnavailable
-from .contract import EnrollmentObservationOutcome, EnrollmentRevocationStatus
-from .persistence import _issuance_binding
-from .rotation import RotationService
-from .types import (
+from vonk_control.enrollment.ending import retain_ended_effect
+from vonk_control.enrollment.persistence import _issuance_binding
+from vonk_control.enrollment.rotation import RotationService
+from vonk_control.enrollment.types import (
     EnrollmentIssuanceUncertain,
     RemoteRevocationUncertain,
     RenewalConflictRevocationUncertain,
     RenewalInProgress,
     RenewalIssuanceUncertain,
 )
-from .validation import (
+from vonk_control.enrollment.validation import (
     _stored_utc,
     _utc,
     _validate_actor,
     _validate_node_id,
 )
+from vonk_control.logging import log_event, redact_text
+from vonk_control.models.fleet import (
+    AgentCertificate,
+    AgentCertificateRotation,
+    AgentEnrollment,
+    AgentIssuedCertificateRevocation,
+    AgentNode,
+)
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
+from vonk_control.persisted_waits import read_wait, schedule_wait
+from vonk_control.pki import IssuedCertificate
+from vonk_control.security.enrollment import (
+    require_activation_identity,
+    require_certificate,
+    require_expired_proof,
+    require_node,
+    require_staged_certificate,
+    validate_issued_binding,
+)
+from vonk_control.security.enrollment import (
+    require_expired_source as _require_expired_source,
+)
+from vonk_control.step_ca import StepCAError, StepCAIssuancePending, StepCAUnavailable
 
 _LOGGER = logging.getLogger("vonk_control.enrollment")
 _REVOCATION_BATCH = 64
@@ -129,7 +134,6 @@ class EnrollmentService(RotationService):
             )
             if issued is None:
                 return False
-            from ..security.enrollment import validate_issued_binding
 
             validate_issued_binding(issued, binding)
             with self._transaction() as session:
@@ -194,7 +198,6 @@ class EnrollmentService(RotationService):
         they have been blocked. True when any row was confirmed or deleted.
         """
         now = _utc(self._clock())
-        from .ending import retain_ended_effect
 
         if serial is None:
             with self._transaction() as session:
@@ -373,7 +376,7 @@ class EnrollmentService(RotationService):
 
     def activate(
         self, node_id: str, serial: str, generation: int
-    ) -> None | UnknownError:
+    ) -> UnknownError | None:
         for delay in (0.0, 0.05, 0.1, 0.2):
             if delay:
                 time.sleep(delay)
@@ -387,7 +390,7 @@ class EnrollmentService(RotationService):
             state=LifecycleState.FAILED,
         )
 
-    def _activate_once(self, node_id: str, serial: str, generation: int) -> None:
+    def _activate_once(self, node_id: str, serial: str, generation: object) -> None:
         _validate_node_id(node_id)
         if (
             not serial.strip()
@@ -664,7 +667,7 @@ class EnrollmentService(RotationService):
             state=LifecycleState.FAILED if ended else LifecycleState.OBSERVING,
         )
 
-    def revoke_node(self, node_id: str, actor: str) -> None | UnknownError:
+    def revoke_node(self, node_id: str, actor: str) -> UnknownError | None:
         """Observe exact durable intent within a bounded exponential backoff."""
         for delay in (0.0, 0.05, 0.1, 0.2):
             if delay:

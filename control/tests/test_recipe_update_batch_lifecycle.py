@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.lifecycle.core import transition
 from vonk_control.lifecycle.recipe_update_batch import (
@@ -22,6 +23,9 @@ from vonk_control.lifecycle.types import CancelRequested, Outcome, Reported, Sta
 from vonk_control.models.jobs import Job
 from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityError,
+)
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationCancellationResult,
 )
 from vonk_control.recipe_update_batches.contract import (
     UPDATE_KIND,
@@ -131,7 +135,8 @@ def test_a_cancel_ends_when_every_child_settled() -> None:
     row = adapter.cancel_progress(
         job, None, NOW, settled_children=True, reason="stop it"
     )
-    assert row.state is State.CANCELLED and job.state == "cancelled"
+    assert row.state is State.CANCELLED
+    assert job.state == "cancelled"
 
 
 def test_a_cancel_that_cannot_confirm_ends_after_the_stop_budget() -> None:
@@ -139,9 +144,6 @@ def test_a_cancel_that_cannot_confirm_ends_after_the_stop_budget() -> None:
     document = _document("running")
     job = _job("observing")
     job.updated_at = NOW
-    from vonk_control.recipe_operations.lifecycle_contract import (
-        RecipeOperationCancellationResult,
-    )
 
     document.cancellation = RecipeOperationCancellationResult(
         cancel_requested=True,
@@ -239,7 +241,8 @@ def test_a_legacy_running_batch_with_no_claim_is_claimed_and_a_live_one_is_not(
     # the lease lapses (the worker died): the next pass claims it again
     now[0] += timedelta(seconds=11)
     second = service.claim_update(owner="w2")
-    assert second is not None and second.owner != first.owner
+    assert second is not None
+    assert second.owner != first.owner
     with sessions() as session:
         assert session.get(Job, parent.id).current_attempt == 2
 

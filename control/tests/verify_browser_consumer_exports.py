@@ -12,11 +12,13 @@ from cross_language_consumer_corpus import MODELS
 
 def assert_same_numeric_kinds(expected: object, actual: object, path: str) -> None:
     if isinstance(expected, dict):
-        assert isinstance(actual, dict) and expected.keys() == actual.keys(), path
+        assert isinstance(actual, dict), path
+        assert expected.keys() == actual.keys(), path
         for key, value in expected.items():
             assert_same_numeric_kinds(value, actual[key], f"{path}.{key}")
     elif isinstance(expected, list):
-        assert isinstance(actual, list) and len(expected) == len(actual), path
+        assert isinstance(actual, list), path
+        assert len(expected) == len(actual), path
         for index, (before, after) in enumerate(zip(expected, actual, strict=True)):
             assert_same_numeric_kinds(before, after, f"{path}[{index}]")
     elif type(expected) in (bool, int, float):

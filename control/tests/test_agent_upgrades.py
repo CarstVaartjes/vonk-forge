@@ -8,12 +8,25 @@ import httpx2
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentUpgradeResult, canonical_message
-from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
+
+from vonk_agent_protocol.agent_operations import AgentUpgradeResult
+from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import AgentResult
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    AgentResultState,
+    InvalidRequestReason,
+    LifecycleState,
+    ObservationCause,
+    OutcomeKind,
+    WaitReason,
+)
+from vonk_agent_protocol.outcome import OutcomeUnknown
+from vonk_agent_protocol.package_source import AgentPackageSource
 from vonk_agent_protocol.package_upgrade import PackageActivationOutcome
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states as aos
+from vonk_control.agent_jobs.retry import schedule_agent_upgrade_retry
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_upgrades import package as agent_upgrades_module
 from vonk_control.agent_upgrades.availability import UpgradeAvailability
@@ -23,10 +36,12 @@ from vonk_control.agent_upgrades.contract import (
     AgentUpgradeRequestIntent,
 )
 from vonk_control.agent_upgrades.errors import AgentUpgradeConflict, AgentUpgradeInvalid
+from vonk_control.agent_upgrades.intent import _request_intent
 from vonk_control.agent_upgrades.service import AgentUpgradeService
 from vonk_control.agent_upgrades.status import (
     AGENT_UPGRADE_AWAITING_IDENTITY_PREDECESSOR_REASON,
 )
+from vonk_control.evidence_repeats import note_repeat, owner_evidence
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.queue import AttemptFence, JobService, StaleAttempt
 from vonk_control.model_primitives import Base
@@ -42,6 +57,7 @@ from .runtime_identity_support import (
     inventory_items_fixture,
     set_inventory_identity,
 )
+from .test_evidence_repeats import LIMIT, _repeating
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -110,7 +126,6 @@ NEW_IDENTITY["package_activation"] = ACTIVATION_RECEIPT
 
 @pytest.fixture(autouse=True)
 def published_source(monkeypatch):
-    from vonk_agent_protocol.package_source import AgentPackageSource
 
     monkeypatch.setattr(
         "vonk_control.agent_upgrades.acceptance.load_package_source",
@@ -180,14 +195,16 @@ def test_every_spark_upgrades_independently_of_a_busy_one(tmp_path) -> None:
     _upgrade_node(operations, NODE_B, "serial-b")
     with sessions() as session:
         stored = session.get(Job, job.id)
-        assert stored is not None and stored.state == "queued"
+        assert stored is not None
+        assert stored.state == "queued"
 
     # Once the busy Spark's own work ends, it upgrades too.
     operations.succeed(busy, RecipeStopResult())
     _upgrade_node(operations, NODE_A, "serial-a")
     with sessions() as session:
         stored = session.get(Job, job.id)
-        assert stored is not None and stored.state == "succeeded"
+        assert stored is not None
+        assert stored.state == "succeeded"
 
 
 @pytest.mark.parametrize(
@@ -228,7 +245,8 @@ def test_failed_install_retries_behind_fence_without_budget_while_rollout_contin
                 )
             )
             parent = session.get(Job, job.id)
-            assert operation is not None and attempt is not None
+            assert operation is not None
+            assert attempt is not None
             assert operation.state in aos.PARKED
             assert operation.next_action_at is not None
             assert attempt.state == "failed"
@@ -236,7 +254,8 @@ def test_failed_install_retries_behind_fence_without_budget_while_rollout_contin
             if deadline.tzinfo is None:
                 deadline = deadline.replace(tzinfo=UTC)
             assert deadline == clock() + _AGENT_UPGRADE_RECOVERY_FENCE
-            assert parent is not None and parent.state == "queued"
+            assert parent is not None
+            assert parent.state == "queued"
         # The failed Spark does not hold the next one.
         assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
         clock.advance(seconds=959)
@@ -254,7 +273,8 @@ def test_failed_install_retries_behind_fence_without_budget_while_rollout_contin
     _upgrade_node(operations, NODE_A, "serial-a")
     with sessions() as session:
         parent = session.get(Job, job.id)
-        assert parent is not None and parent.state == "succeeded"
+        assert parent is not None
+        assert parent.state == "succeeded"
 
 
 def test_fenced_retry_never_waits_for_another_spark_installing(tmp_path) -> None:
@@ -280,7 +300,8 @@ def test_fenced_retry_never_waits_for_another_spark_installing(tmp_path) -> None
     assert fenced_operation(sessions, second).node_id == NODE_B
     with sessions() as session:
         parent = session.get(Job, job.id)
-        assert parent is not None and parent.state == "queued"
+        assert parent is not None
+        assert parent.state == "queued"
 
 
 def test_a_requeued_order_replaces_the_rollouts_refusal_of_its_ended_attempt(
@@ -304,15 +325,18 @@ def test_a_requeued_order_replaces_the_rollouts_refusal_of_its_ended_attempt(
     )
     with sessions() as session:
         parent = session.get(Job, job.id)
-        assert parent is not None and "refused" in (parent.status_reason or "")
+        assert parent is not None
+        assert "refused" in (parent.status_reason or "")
 
     clock.advance(seconds=60)
     assert operations.claim(NODE_A, "serial-a", runtime_identity=OLD_IDENTITY) is None
     with sessions() as session:
         parent = session.get(Job, job.id)
         order = session.get(AgentOperation, fenced_operation(sessions, first).id)
-        assert parent is not None and order is not None
-        assert order.state in aos.PARKED and order.current_attempt == 1
+        assert parent is not None
+        assert order is not None
+        assert order.state in aos.PARKED
+        assert order.current_attempt == 1
         assert parent.state == "queued"
         assert "refused" not in (parent.status_reason or "")
         assert parent.status_reason == order.status_reason
@@ -324,14 +348,17 @@ def test_a_requeued_order_replaces_the_rollouts_refusal_of_its_ended_attempt(
         if retry is not None:
             break
 
-    assert retry is not None and fenced_attempt(sessions, retry).attempt == 2
+    assert retry is not None
+    assert fenced_attempt(sessions, retry).attempt == 2
     with sessions() as session:
         parent = session.get(Job, job.id)
-        assert parent is not None and parent.state == "queued"
+        assert parent is not None
+        assert parent.state == "queued"
         assert "refused" not in (parent.status_reason or "")
     # The ended attempt stays as evidence of how it ended.
     previous = fenced_attempt(sessions, first)
-    assert previous.attempt == 1 and previous.state != "running"
+    assert previous.attempt == 1
+    assert previous.state != "running"
 
 
 def test_controller_recovery_fence_survives_restart_without_a_retry_budget(
@@ -347,7 +374,7 @@ def test_controller_recovery_fence_survives_restart_without_a_retry_budget(
     # This is a controller safety contract, independent of how the package
     # helper durably recovers apt/dpkg state. The not-before value and sole
     # automatic retry are persisted on the operation attempt.
-    assert _AGENT_UPGRADE_RECOVERY_FENCE == timedelta(seconds=960)
+    assert timedelta(seconds=960) == _AGENT_UPGRADE_RECOVERY_FENCE
     with sessions() as session:
         operation = session.scalar(
             select(AgentOperation).where(
@@ -451,7 +478,8 @@ def test_operator_resume_requeues_agent_operation_without_resetting_plan_or_audi
                 AgentOperation.node_id == NODE_A,
             )
         )
-        assert before is not None and operation is not None
+        assert before is not None
+        assert operation is not None
         immutable = (
             before.authority_revision,
             before.payload_digest,
@@ -485,7 +513,8 @@ def test_operator_resume_requeues_agent_operation_without_resetting_plan_or_audi
                 AgentOperation.node_id == NODE_A,
             )
         )
-        assert resumed is not None and operation is not None
+        assert resumed is not None
+        assert operation is not None
         assert resumed.state == "queued"
         assert resumed.status_reason is None
         assert (
@@ -585,7 +614,9 @@ def test_operator_resume_always_sets_fresh_install_safety_fence(
                 == fenced_attempt(sessions, first).attempt,
             )
         )
-        assert parent is not None and operation is not None and attempt is not None
+        assert parent is not None
+        assert operation is not None
+        assert attempt is not None
         parent.state = "needs-operator"
         parent.status_reason = "runtime identity was not proven"
         operation.state = "needs-operator"
@@ -672,11 +703,15 @@ def test_resume_recovers_delayed_worker_failure_by_exact_identity_without_reinst
         worker_attempt = session.scalar(
             select(JobAttempt).where(JobAttempt.job_id == job.id)
         )
-        assert parent is not None and parent.state == "queued"
-        assert operation is not None and operation.state == "succeeded"
+        assert parent is not None
+        assert parent.state == "queued"
+        assert operation is not None
+        assert operation.state == "succeeded"
         assert operation.current_attempt == 1
-        assert len(attempts) == 1 and attempts[0].fence == child.fence
-        assert worker_attempt is not None and worker_attempt.state == "failed"
+        assert len(attempts) == 1
+        assert attempts[0].fence == child.fence
+        assert worker_attempt is not None
+        assert worker_attempt.state == "failed"
         assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
 
 
@@ -719,8 +754,10 @@ def test_resume_quiesces_stale_old_identity_without_duplicate_mutation(
         )
         # No duplicate mutation: the expired install is fenced and retried
         # automatically only after the dpkg safety window.
-        assert parent is not None and parent.state == "queued"
-        assert operation is not None and operation.state in aos.PARKED
+        assert parent is not None
+        assert parent.state == "queued"
+        assert operation is not None
+        assert operation.state in aos.PARKED
         assert operation.next_action_at is not None
         assert operation.current_attempt == 1
         assert len(attempts) == 1
@@ -752,10 +789,13 @@ def test_resume_rejects_legacy_running_worker_dispatch_before_lease_deadline(
         worker_attempt = session.scalar(
             select(JobAttempt).where(JobAttempt.job_id == job.id)
         )
-        assert parent is not None and parent.state == "running"
-        assert operation is not None and operation.state == "running"
+        assert parent is not None
+        assert parent.state == "running"
+        assert operation is not None
+        assert operation.state == "running"
         assert operation.current_attempt == 1
-        assert worker_attempt is not None and worker_attempt.state == "running"
+        assert worker_attempt is not None
+        assert worker_attempt.state == "running"
         assert fenced_attempt(sessions, child).attempt == 1
 
 
@@ -791,11 +831,15 @@ def test_resume_recovers_expired_legacy_running_worker_without_duplicate(
                 )
             )
         )
-        assert parent is not None and parent.state == "queued"
-        assert worker_attempt is not None and job_states.attempt_lapsed(worker_attempt)
-        assert operation is not None and operation.state == "running"
+        assert parent is not None
+        assert parent.state == "queued"
+        assert worker_attempt is not None
+        assert job_states.attempt_lapsed(worker_attempt)
+        assert operation is not None
+        assert operation.state == "running"
         assert operation.current_attempt == 1
-        assert len(child_attempts) == 1 and child_attempts[0].fence == child.fence
+        assert len(child_attempts) == 1
+        assert child_attempts[0].fence == child.fence
 
     # An old identity cannot reclaim the uncertain mutation immediately. The
     # existing child is fenced and retried automatically, without attempt 2
@@ -816,8 +860,10 @@ def test_resume_recovers_expired_legacy_running_worker_without_duplicate(
                 AgentOperation.node_id == NODE_A,
             )
         )
-        assert parent is not None and parent.state == "queued"
-        assert operation is not None and operation.current_attempt == 1
+        assert parent is not None
+        assert parent.state == "queued"
+        assert operation is not None
+        assert operation.current_attempt == 1
         assert operation.state in aos.PARKED
         assert operation.next_action_at is not None
 
@@ -845,9 +891,12 @@ def test_waiting_upgrade_resume_rejects_live_delayed_worker_fence(tmp_path) -> N
                 AgentOperation.node_id == NODE_A,
             )
         )
-        assert parent is not None and parent.state == "queued"
-        assert worker_attempt is not None and worker_attempt.state == "running"
-        assert operation is not None and operation.current_attempt == 1
+        assert parent is not None
+        assert parent.state == "queued"
+        assert worker_attempt is not None
+        assert worker_attempt.state == "running"
+        assert operation is not None
+        assert operation.current_attempt == 1
         assert worker_fence.attempt == 1
 
 
@@ -893,7 +942,8 @@ def test_waiting_upgrade_resume_expires_worker_fence_without_shortening_helper_f
         worker_attempt = session.scalar(
             select(JobAttempt).where(JobAttempt.job_id == job.id)
         )
-        assert worker_attempt is not None and job_states.attempt_lapsed(worker_attempt)
+        assert worker_attempt is not None
+        assert job_states.attempt_lapsed(worker_attempt)
 
 
 def test_resume_restores_success_after_late_legacy_failure_of_completed_rollout(
@@ -920,10 +970,12 @@ def test_resume_restores_success_after_late_legacy_failure_of_completed_rollout(
         worker_attempt = session.scalar(
             select(JobAttempt).where(JobAttempt.job_id == job.id)
         )
-        assert parent is not None and parent.state == "succeeded"
+        assert parent is not None
+        assert parent.state == "succeeded"
         assert parent.status_reason is None
         assert child_states == ["succeeded", "succeeded"]
-        assert worker_attempt is not None and worker_attempt.state == "failed"
+        assert worker_attempt is not None
+        assert worker_attempt.state == "failed"
 
 
 @pytest.mark.parametrize(
@@ -962,9 +1014,11 @@ def test_success_result_cannot_advance_without_exact_fresh_agent_identity(
         stored = session.get(Job, job.id)
         # The unproven handoff keeps this Spark in flight; it is retried
         # behind the safety fence unless exact identity arrives first.
-        assert operation is not None and operation.state in aos.PARKED
+        assert operation is not None
+        assert operation.state in aos.PARKED
         assert operation.next_action_at is not None
-        assert stored is not None and stored.state == "queued"
+        assert stored is not None
+        assert stored.state == "queued"
 
 
 def test_success_result_uses_signed_digests_over_version_metadata(tmp_path) -> None:
@@ -992,8 +1046,10 @@ def test_success_result_uses_signed_digests_over_version_metadata(tmp_path) -> N
             )
         )
         stored = session.get(Job, job.id)
-        assert operation is not None and operation.state == "succeeded"
-        assert stored is not None and stored.state == "queued"
+        assert operation is not None
+        assert operation.state == "succeeded"
+        assert stored is not None
+        assert stored.state == "queued"
 
 
 def test_exact_identity_reconciles_a_retrying_spark_while_the_next_one_upgrades(
@@ -1020,14 +1076,16 @@ def test_exact_identity_reconciles_a_retrying_spark_while_the_next_one_upgrades(
     )
     with sessions() as session:
         operation_a = session.get(AgentOperation, fenced_operation(sessions, first).id)
-        assert operation_a is not None and operation_a.state == "succeeded"
+        assert operation_a is not None
+        assert operation_a.state == "succeeded"
         failed = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.operation_id == operation_a.id,
                 AgentOperationAttempt.attempt == 1,
             )
         )
-        assert failed is not None and failed.state == "failed"
+        assert failed is not None
+        assert failed.state == "failed"
     assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
 
 
@@ -1054,13 +1112,15 @@ def test_failed_upgrade_on_a_spark_already_at_target_resolves_to_succeeded(
         operations.claim(NODE_A, "serial-a", runtime_identity=without_receipt)
     with sessions() as session:
         operation = session.get(AgentOperation, fenced_operation(sessions, first).id)
-        assert operation is not None and operation.state == "succeeded"
+        assert operation is not None
+        assert operation.state == "succeeded"
         assert operation.next_action_at is None
         assert operation.next_action_at is None
     _upgrade_node(operations, NODE_B, "serial-b")
     with sessions() as session:
         parent = session.get(Job, job.id)
-        assert parent is not None and parent.state == "succeeded"
+        assert parent is not None
+        assert parent.state == "succeeded"
 
 
 def test_failed_upgrade_retries_by_itself_and_names_the_failure(tmp_path) -> None:
@@ -1151,7 +1211,8 @@ def test_a_waiting_order_whose_spark_drifts_ineligible_is_skipped(
         # The Spark that can no longer take the package is skipped and named;
         # its never-attempted order is withdrawn, and the rollout finishes.
         assert states == {NODE_A: "succeeded", NODE_B: "cancelled"}
-        assert stored is not None and stored.state == "succeeded"
+        assert stored is not None
+        assert stored.state == "succeeded"
         assert stored.result == {"skipped": {NODE_B: reason}}
         assert f"Spark {NODE_B} {reason}" in (stored.status_reason or "")
     assert fenced_attempt(sessions, first).attempt == 1
@@ -1166,8 +1227,10 @@ def test_upgrade_failure_on_one_spark_does_not_block_the_next(tmp_path) -> None:
     with sessions() as session:
         parent = session.get(Job, job.id)
         failed = session.get(AgentOperation, fenced_operation(sessions, first).id)
-        assert failed is not None and failed.next_action_at is not None
-        assert parent is not None and parent.state == "queued"
+        assert failed is not None
+        assert failed.next_action_at is not None
+        assert parent is not None
+        assert parent.state == "queued"
     second = _claim_upgrade(operations, NODE_B, "serial-b", OLD_IDENTITY)
     assert fenced_operation(sessions, second).id != fenced_operation(sessions, first).id
 
@@ -1230,7 +1293,8 @@ def test_offline_spark_is_deferred_and_upgraded_when_it_reconnects(tmp_path) -> 
     )
     with sessions() as session:
         stored = session.get(Job, job.id)
-        assert stored is not None and stored.state == "queued"
+        assert stored is not None
+        assert stored.state == "queued"
         assert "not currently online" in (stored.status_reason or "")
     assert _operation_nodes(sessions, job.id) == []
 
@@ -1255,7 +1319,8 @@ def test_offline_spark_is_deferred_and_upgraded_when_it_reconnects(tmp_path) -> 
     _upgrade_node(operations, NODE_A, "serial-a")
     with sessions() as session:
         stored = session.get(Job, job.id)
-        assert stored is not None and stored.state == "succeeded"
+        assert stored is not None
+        assert stored.state == "succeeded"
 
 
 def test_current_candidate_is_derived_from_the_published_arm64_release(
@@ -1367,7 +1432,10 @@ def test_an_unresolvable_release_is_an_actionable_refusal(
     engine = create_engine(f"sqlite:///{tmp_path / 'candidate.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 8, 27, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 8, 27, tzinfo=UTC)
+
     upgrades = AgentUpgradeService(
         sessions,
         AgentJobService(sessions, clock=clock),
@@ -1441,7 +1509,10 @@ def test_a_release_that_is_mid_publication_is_fetched_again(
     engine = create_engine(f"sqlite:///{tmp_path / 'candidate.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 8, 27, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 8, 27, tzinfo=UTC)
+
     upgrades = AgentUpgradeService(
         sessions,
         AgentJobService(sessions, clock=clock),
@@ -1486,7 +1557,8 @@ def test_resume_of_a_damaged_stored_plan_ends_the_rollout_instead_of_raising(
         ended = session.get(Job, job.id)
         assert ended is not None
         assert ended.state == "failed"
-        assert ended.status_reason is not None and "is invalid" in ended.status_reason
+        assert ended.status_reason is not None
+        assert "is invalid" in ended.status_reason
 
 
 def _operation_nodes(sessions, job_id: str) -> list[str]:
@@ -1704,7 +1776,8 @@ def test_exact_candidate_contact_requires_acknowledged_matching_root_receipt(
     assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
     with sessions() as session:
         parent = session.get(Job, job.id)
-        assert parent is not None and parent.state != "succeeded"
+        assert parent is not None
+        assert parent.state != "succeeded"
 
 
 def test_root_rollback_receipt_retries_the_spark_and_preserves_typed_outcome(tmp_path):
@@ -1733,7 +1806,8 @@ def test_root_rollback_receipt_retries_the_spark_and_preserves_typed_outcome(tmp
         assert attempt.result["package_activation"] == receipt
         assert attempt.state == "failed"
         operation = session.get(AgentOperation, attempt.operation_id)
-        assert operation is not None and operation.next_action_at is not None
+        assert operation is not None
+        assert operation.next_action_at is not None
         assert "rolled_back" in (operation.status_reason or "")
     # The restored Spark retries behind the fence; the rollout moves on.
     assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
@@ -1780,9 +1854,12 @@ def test_latest_request_supersedes_an_older_paused_rollout(
             AgentOperation, fenced_operation(sessions, old_claim).id
         )
         old_parent = session.get(Job, old_job.id)
-        assert claim_operation is not None and claim_operation.state == "succeeded"
-        assert old_operation is not None and old_operation.state == "cancelled"
-        assert old_parent is not None and old_parent.state == "cancelled"
+        assert claim_operation is not None
+        assert claim_operation.state == "succeeded"
+        assert old_operation is not None
+        assert old_operation.state == "cancelled"
+        assert old_parent is not None
+        assert old_parent.state == "cancelled"
         assert current.id in (old_parent.status_reason or "")
     assert set(_operation_nodes(sessions, current.id)) == {NODE_A, NODE_B}
 
@@ -1821,7 +1898,8 @@ def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(
             assert operation.next_action_at is not None
             assert operation.current_attempt == 1
             queued = session.get(Job, job.id)
-            assert queued is not None and queued.state == "queued"
+            assert queued is not None
+            assert queued.state == "queued"
     clock.advance(seconds=int(_AGENT_UPGRADE_RECOVERY_FENCE.total_seconds()))
     monkeypatch.setattr(
         "vonk_control.agent_upgrades.dispatch.secrets.token_hex", lambda _: "8" * 64
@@ -1868,7 +1946,8 @@ def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(
         final_operation = session.get(
             AgentOperation, fenced_operation(sessions, first).id
         )
-        assert final_operation is not None and final_operation.state == "succeeded"
+        assert final_operation is not None
+        assert final_operation.state == "succeeded"
     assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
 
 
@@ -1918,7 +1997,8 @@ def test_predecessor_agent_handoff_is_reconcilable_not_a_failed_upgrade(
     )
     with sessions() as session:
         operation = session.get(AgentOperation, fenced_operation(sessions, first).id)
-        assert operation is not None and operation.state == "succeeded"
+        assert operation is not None
+        assert operation.state == "succeeded"
     assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
 
 
@@ -1955,11 +2035,13 @@ def test_fleet_upgrade_all_treats_an_already_current_spark_as_a_no_op(
     with sessions() as session:
         # The latest request supersedes the first rollout's queued order.
         superseded = session.get(Job, first.id)
-        assert superseded is not None and superseded.state == "cancelled"
+        assert superseded is not None
+        assert superseded.state == "cancelled"
     _upgrade_node(operations, NODE_B, "serial-b")
     with sessions() as session:
         stored = session.get(Job, job.id)
-        assert stored is not None and stored.state == "succeeded"
+        assert stored is not None
+        assert stored.state == "succeeded"
         assert stored.result == {
             "skipped": {NODE_A: "already runs the requested agent build"}
         }
@@ -2004,12 +2086,12 @@ def test_a_conflict_names_a_spark_only_by_its_canonical_identifier() -> None:
 
 
 def test_invalid_upgrade_intent_has_no_targets_and_valid_intent_is_accepted() -> None:
-    from vonk_control.agent_upgrades.intent import _request_intent
 
     with pytest.raises(Exception):  # noqa: B017 -- effects and subsequent admission witness rejection
         _request_intent({"all": "yes", "selectors": None}, None)
     intent = _request_intent({"all": True, "selectors": None}, None)
-    assert intent.all is True and intent.selectors is None
+    assert intent.all is True
+    assert intent.selectors is None
 
 
 def test_upgrade_identity_warning_names_its_order_and_clears_on_confirmation(
@@ -2017,19 +2099,6 @@ def test_upgrade_identity_warning_names_its_order_and_clears_on_confirmation(
     postgres_engine,
     monkeypatch,
 ) -> None:
-    from vonk_agent_protocol.contracts import AgentResult
-    from vonk_agent_protocol.lifecycle_vocabulary import (
-        AgentResultState,
-        LifecycleState,
-        OutcomeKind,
-        WaitReason,
-    )
-    from vonk_agent_protocol.outcome import OutcomeUnknown
-    from vonk_control.evidence_repeats import note_repeat, owner_evidence
-    from vonk_control.models.operations import AgentOperation
-
-    from .agent_fences import fenced_operation
-    from .test_evidence_repeats import LIMIT, _repeating
 
     # Exercise the real PostgreSQL producer/store/projection/confirmation seam.
     monkeypatch.setattr(f"{__name__}.create_engine", lambda *_: postgres_engine)
@@ -2068,7 +2137,8 @@ def test_upgrade_identity_warning_names_its_order_and_clears_on_confirmation(
             )
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.recovery_deadline is not None
+        assert stored is not None
+        assert stored.recovery_deadline is not None
         deadline = (
             stored.recovery_deadline.replace(tzinfo=clock().tzinfo)
             .isoformat()
@@ -2087,7 +2157,8 @@ def test_upgrade_identity_warning_names_its_order_and_clears_on_confirmation(
     assert _repeating(sessions, NODE_A, clock()) == []
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state == LifecycleState.SUCCEEDED
+        assert stored is not None
+        assert stored.state == LifecycleState.SUCCEEDED
         assert any(item.code is None for item in owner_evidence(stored) or [])
 
     # A retained aggregate whose operation already resolved is not an open wait,
@@ -2116,13 +2187,6 @@ def test_idle_worker_adopts_only_exact_retained_upgrade_receipt(
     The same stored report must settle on a reconstructed worker, without a
     claim, contact renewal, reinstall or adoption under changed authority.
     """
-    from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
-    from vonk_agent_protocol.lifecycle_vocabulary import (
-        AgentResultState,
-        LifecycleState,
-        ObservationCause,
-    )
-    from vonk_control.agent_jobs.retry import schedule_agent_upgrade_retry
 
     monkeypatch.setattr(f"{__name__}.create_engine", lambda *_: postgres_engine)
     clock = Clock()
@@ -2144,12 +2208,10 @@ def test_idle_worker_adopts_only_exact_retained_upgrade_receipt(
         )
         node = session.get(AgentNode, NODE_A)
         parent = session.get(Job, job.id)
-        assert (
-            operation is not None
-            and attempt is not None
-            and node is not None
-            and parent is not None
-        )
+        assert operation is not None
+        assert attempt is not None
+        assert node is not None
+        assert parent is not None
         operation_id = operation.id
         # Retained authenticated evidence, with the fresh contact already
         # committed before the previous Controller worker died.
@@ -2191,7 +2253,9 @@ def test_idle_worker_adopts_only_exact_retained_upgrade_receipt(
                 AgentOperationAttempt.fence == claim.fence
             )
         )
-        assert operation is not None and node is not None and attempt is not None
+        assert operation is not None
+        assert node is not None
+        assert attempt is not None
         assert (operation.state == LifecycleState.SUCCEEDED) is (change is None)
         assert contact_row(node).last_seen_at == contact
         assert attempt.lease_deadline == deadline

@@ -15,6 +15,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor
 from vonk_control.fleet_projection.service import FleetProjection

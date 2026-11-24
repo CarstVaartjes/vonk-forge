@@ -6,9 +6,10 @@ from datetime import timedelta
 from uuid import uuid4
 
 from sqlalchemy import select
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_contacts import record_contact
 from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignmentInput,
@@ -45,7 +46,8 @@ def test_preview_reviews_partial_cleanup_when_a_dual_model_spark_is_revoked(
     with sessions() as session:
         mapping_id = session.scalar(select(ClusterMapping.id))
         build_id = session.scalar(select(RecipeBuild.id))
-        assert mapping_id is not None and build_id is not None
+        assert mapping_id is not None
+        assert build_id is not None
     installation = installed_recipe(
         lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
     )
@@ -95,7 +97,10 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
     lifecycle = planner._lifecycle
     assert lifecycle is not None
     now = [lifecycle._clock()]
-    clock = lambda: now[0]
+
+    def clock():
+        return now[0]
+
     profiles._clock = planner._clock = lifecycle._clock = clock
     with sessions() as session:
         mapping_id = session.scalar(select(ClusterMapping.id))
@@ -105,7 +110,8 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
                 CatalogDocumentRevision.kind == "recipe"
             )
         )
-        assert mapping_id is not None and build_id is not None
+        assert mapping_id is not None
+        assert build_id is not None
         assert revision is not None
         selector = f"{revision.publisher}/{revision.slug}"
 
@@ -319,19 +325,7 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
         if active_child is not None
         else None
     )
-    assert (
-        current.state == "running"
-        and adapter is not None
-        and any(child.queue_index == 0 for child in adapter.children)
-        and any(child.kind == "install" for child in adapter.pending_children)
-        and pending_install is not None
-        and pending_install.queue_index == 1
-        and adapter.queue[pending_install.queue_index].kind == pending_install.kind
-        and active_child is not None
-        and active_child.action == "install"
-        and active_child.state in {"queued", "running"}
-        and active_child.node_ids == list(unrelated_nodes)
-    ), (
+    diagnostic = (
         current.state,
         current.status_reason,
         adapter.position if adapter is not None else None,
@@ -340,6 +334,21 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
         else None,
         child_status,
     )
+    assert current.state == "running", diagnostic
+    assert adapter is not None, diagnostic
+    assert any(child.queue_index == 0 for child in adapter.children), diagnostic
+    assert any(child.kind == "install" for child in adapter.pending_children), (
+        diagnostic
+    )
+    assert pending_install is not None, diagnostic
+    assert pending_install.queue_index == 1, diagnostic
+    assert adapter.queue[pending_install.queue_index].kind == pending_install.kind, (
+        diagnostic
+    )
+    assert active_child is not None, diagnostic
+    assert active_child.action == "install", diagnostic
+    assert active_child.state in {"queued", "running"}, diagnostic
+    assert active_child.node_ids == list(unrelated_nodes), diagnostic
     with sessions() as session:
         stored_run = session.get(RecipeRun, run.owner_id)
         assert stored_run is not None
@@ -389,7 +398,8 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
             item.amount_bytes for item in live_memory_claims
         )
         stop_operation = session.get(Job, stop_job.id)
-        assert stop_operation is not None and stop_operation.state == "succeeded"
+        assert stop_operation is not None
+        assert stop_operation.state == "succeeded"
         run_switch = session.scalar(
             select(Job).where(
                 Job.kind == "recipe.stop.v2",

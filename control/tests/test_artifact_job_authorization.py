@@ -4,6 +4,7 @@ import hashlib
 
 import pytest
 from fastapi.testclient import TestClient
+
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 
@@ -87,7 +88,8 @@ def test_create_app_enforces_artifact_mutation_roles_before_owner_effect(
         )
         assert refused.status_code == status
         unchanged = service.get(job_id)
-        assert unchanged.preparation == "ready" and unchanged.operation_id is None
+        assert unchanged.preparation == "ready"
+        assert unchanged.operation_id is None
 
     submitted = client.post(
         submit_path,
@@ -120,7 +122,8 @@ def test_create_app_enforces_artifact_mutation_roles_before_owner_effect(
         )
         assert refused.status_code == status
         unchanged = service.get(cancel_job_id)
-        assert unchanged.preparation == "draft" and unchanged.result_evidence is None
+        assert unchanged.preparation == "draft"
+        assert unchanged.result_evidence is None
 
     cancelled = client.post(
         cancel_path,

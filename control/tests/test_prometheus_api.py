@@ -14,6 +14,7 @@ import httpx2 as httpx
 import pytest
 from fastapi.testclient import TestClient
 from starlette import status
+
 from vonk_agent_protocol.gpu_clock import GpuClockObservation
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.swap import SwapObservation
@@ -97,7 +98,8 @@ def test_every_query_window_covers_the_step_and_scrapes(metric, range):
     windows = {int(w) for w in re.findall(r"\[(\d+)s\]", query.series("", step))}
     assert len(windows) == 1
     window = windows.pop()
-    assert window >= step and window >= 2 * query.scrape
+    assert window >= step
+    assert window >= 2 * query.scrape
     if query.counted:
         assert window >= step + query.scrape
 
@@ -138,7 +140,8 @@ def test_gateway_estimates_read_buckets_and_divide_summed_rates():
     assert p95.startswith("histogram_quantile(0.95, sum by (alias, le) (label_replace(")
     assert "litellm_llm_api_time_to_first_token_metric_bucket" in p95
     speed = QUERIES["gateway_generation_speed"].series("", 300)
-    assert speed.count("sum by (alias)") == 2 and " / " in speed
+    assert speed.count("sum by (alias)") == 2
+    assert " / " in speed
 
 
 def test_engine_speeds_divide_summed_rates_and_filter_by_alias(reader, monkeypatch):
@@ -160,7 +163,8 @@ def test_engine_speeds_divide_summed_rates_and_filter_by_alias(reader, monkeypat
 
     mock_prometheus(monkeypatch, handle)
     asyncio.run(reader.series("decode_speed", "1h", NODE, lambda node: ["glm-5"]))
-    assert seen and all(r'{alias=~"^(glm\\-5)$"}' in query for query in seen)
+    assert seen
+    assert all(r'{alias=~"^(glm\\-5)$"}' in query for query in seen)
 
 
 def test_catalogue_lists_every_metric(client):
@@ -207,7 +211,8 @@ def test_series_carry_their_summary(client, monkeypatch, metric):
     if metric == "output_token_rate":
         # The fleet line leads, has no label and carries the fleet total the shares divide by.
         line, *series = series
-        assert line.labels == {} and (line.summary.latest, line.summary.total) == (
+        assert line.labels == {}
+        assert (line.summary.latest, line.summary.total) == (
             8,
             400,
         )
@@ -242,10 +247,12 @@ def test_node_filter_on_a_model_metric_is_the_aliases_it_serves(reader, monkeypa
         reader.series("request_rate", "1h", NODE, lambda node: ["glm-5.1", 'a"b'])
     )
     expected = r'{requested_model=~"^(glm\\-5\\.1|a\"b)$"}'
-    assert seen and all(expected in query for query in seen)
+    assert seen
+    assert all(expected in query for query in seen)
     seen.clear()
     response = asyncio.run(reader.series("request_rate", "1h", NODE, lambda node: []))
-    assert response.series == [] and not seen
+    assert response.series == []
+    assert not seen
 
 
 @pytest.mark.parametrize(
@@ -473,7 +480,8 @@ def test_exporter_publishes_the_spark_facts_that_trend():
     )
     node = snapshot.nodes[0]
     inventory = node.inventory
-    assert inventory is not None and node.telemetry is not None
+    assert inventory is not None
+    assert node.telemetry is not None
     clock = GpuClockObservation(graphics_mhz=2190)
     node.telemetry.sample = node.telemetry.sample.model_copy(
         update={"gpu_clock": clock, "system_memory_bytes": 5}

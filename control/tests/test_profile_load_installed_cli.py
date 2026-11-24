@@ -15,8 +15,8 @@ import ssl
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import Generator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -30,6 +30,8 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+
+from tests.subprocess_environment import install_cli_wheel, isolated_environment
 from vonk_control.models.fleet import FleetProfileApplication
 
 from .test_profile_load_submission import _profile_api, _stopping_profile_api
@@ -62,7 +64,7 @@ def _https_api_peer(
     headers: dict[str, str],
     *,
     drop_load_answer: bool = False,
-) -> Iterator[tuple[str, Path, _PeerState]]:
+) -> Generator[tuple[str, Path, _PeerState]]:
     key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
     now = datetime.now(UTC)
@@ -154,10 +156,8 @@ def _https_api_peer(
                     return
                 if state.discard_held_response:
                     self.close_connection = True
-                    try:
+                    with suppress(OSError):
                         self.connection.shutdown(socket.SHUT_RDWR)
-                    except OSError:
-                        pass
                     self.connection.close()
                     return
             if (
@@ -175,10 +175,8 @@ def _https_api_peer(
                 state.profile_edit_status = edited.status_code
                 state.drop_load_answer = False
                 self.close_connection = True
-                try:
+                with suppress(OSError):
                     self.connection.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
                 self.connection.close()
                 return
 
@@ -186,10 +184,8 @@ def _https_api_peer(
                 state.drop_responses.remove(response_key)
                 state.dropped_responses.append(response_key)
                 self.close_connection = True
-                try:
+                with suppress(OSError):
                     self.connection.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
                 self.connection.close()
                 return
 
@@ -218,7 +214,7 @@ def _https_api_peer(
             self.wfile.write(response_body)
             self.close_connection = True
 
-        def log_message(self, *_args: object) -> None:
+        def log_message(self, format: str, *_args: object) -> None:
             pass
 
     server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -246,7 +242,7 @@ def installed_vonkctl(tmp_path_factory: pytest.TempPathFactory) -> Path:
         root = root.parent
     workspace = root / "installed-profile-cli"
     complete = workspace / "complete"
-    with open(root / "installed-profile-cli.lock", "a") as lock:
+    with (root / "installed-profile-cli.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if not complete.is_file():
             shutil.rmtree(workspace, ignore_errors=True)
@@ -266,7 +262,6 @@ def _build_installed_vonkctl(workspace: Path) -> Path:
     workspace.mkdir(parents=True, exist_ok=True)
     wheel_directory = workspace / "wheel"
     wheel_directory.mkdir()
-    from tests.subprocess_environment import isolated_environment
 
     environment = isolated_environment(
         workspace / "build-home",
@@ -297,7 +292,6 @@ def _build_installed_vonkctl(workspace: Path) -> Path:
     wheels = list(wheel_directory.glob("vonk_cluster_profiles-*-py3-none-any.whl"))
     assert len(wheels) == 1
     venv = workspace / "venv"
-    from tests.subprocess_environment import install_cli_wheel
 
     python = install_cli_wheel(uv, venv, wheels[0], environment)
     executable = venv / "bin" / "vonkctl"
@@ -333,7 +327,6 @@ def _process_environment(
     token.write_text(headers["Authorization"].removeprefix("Bearer "), encoding="utf-8")
     token.chmod(0o600)
     default_recipe_root = "/opt/vonk-forge-recipes"
-    from tests.subprocess_environment import isolated_environment
 
     return isolated_environment(
         Path(tmp_path) / "cli-home",
@@ -429,7 +422,8 @@ def _run_pty(
             process.communicate(timeout=30)
         os.close(master)
     returncode = process.returncode
-    assert returncode is not None and stdout is not None
+    assert returncode is not None
+    assert stdout is not None
     return returncode, stdout.decode(), transcript.decode(errors="replace")
 
 

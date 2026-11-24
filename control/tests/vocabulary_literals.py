@@ -613,11 +613,8 @@ def _string_leaves(node: ast.AST | None) -> Iterator[ast.expr]:
     """String constants and f-strings an expression can evaluate to."""
 
     if (
-        isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and node.value
-        or isinstance(node, ast.JoinedStr)
-    ):
+        isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value
+    ) or isinstance(node, ast.JoinedStr):
         yield node
     elif isinstance(node, ast.IfExp):
         yield from _string_leaves(node.body)

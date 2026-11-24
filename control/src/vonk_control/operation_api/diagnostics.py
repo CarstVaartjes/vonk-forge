@@ -7,29 +7,29 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
-from .. import agent_operation_states
-from ..agent_upgrades.contract import AgentUpgradePackage
-from ..agent_upgrades.status import (
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_control import agent_operation_states
+from vonk_control.agent_upgrades.contract import AgentUpgradePackage
+from vonk_control.agent_upgrades.status import (
     GENERIC_AGENT_UPGRADE_REASONS,
     RECOVERABLE_AGENT_UPGRADE_REASONS,
     agent_upgrade_next_action,
     operator_agent_upgrade_reason,
 )
-from ..bounded_json import mapping
-from ..inventory.items import runtime_value
-from ..lifecycle.agent_operation import retry_scheduled
-from ..logging import redact_text
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..strict_json import read_stored_model, warn_unreadable_once
-from .contracts import (
+from vonk_control.bounded_json import mapping
+from vonk_control.inventory.items import runtime_value
+from vonk_control.lifecycle.agent_operation import retry_scheduled
+from vonk_control.logging import redact_text
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operation_api.contracts import (
     AgentUpgradeDiagnosticsResponse,
     AgentUpgradeIdentityResponse,
     AgentUpgradeTargetDiagnosticsResponse,
 )
+from vonk_control.strict_json import read_stored_model, warn_unreadable_once
 
 
 def _aware(value: datetime) -> datetime:

@@ -7,15 +7,16 @@ from typing import Annotated, Any, Literal
 
 from pydantic import Field, ValidationError, model_validator
 
-from .compiled_execution_plan import CompiledExecutionPlan
-from .contracts import (
-    AgentOperation,
+from vonk_agent_protocol.agent_operations import AgentOperation
+from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
+from vonk_agent_protocol.gpu_clock import GpuClockIntent
+from vonk_agent_protocol.wire_model import (
+    MAX_RUN_GENERATION,
     AgentProtocolError,
+    Uuid4Text,
+    WireModel,
     canonical_message,
 )
-from .gpu_clock import GpuClockIntent
-from .host_helper import RecipeReconciliationIdentity
-from .wire_model import MAX_RUN_GENERATION, WireModel
 
 RECIPE_OPERATIONS = frozenset(
     {
@@ -142,6 +143,13 @@ class RecipeStopResult(_StrictPayload):
 
 class RecipeUninstallResult(_StrictPayload):
     """An uninstall succeeds with an empty result."""
+
+
+class RecipeReconciliationIdentity(WireModel):
+    """The install a reconciliation removes, carried through the cleanup grant."""
+
+    installation_id: Uuid4Text
+    plan_digest: Digest
 
 
 class RecipeReconcilePayload(RecipeReconciliationIdentity):

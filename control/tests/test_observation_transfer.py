@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import time
 from datetime import UTC, datetime
@@ -18,18 +19,25 @@ from jsonschema import Draft202012Validator
 from pydantic import JsonValue, TypeAdapter
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol.contracts import canonical_message
+
+from cluster_profiles.control_client.errors import ControlClientError
+from cluster_profiles.control_client.schema import source_schema_validator
+from cluster_profiles.control_client.transfers import ControlClient
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.api import routes_platform as api
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.fleet_projection.common import (
     FleetSnapshot,
     UnavailableRecipePresence,
+    UnavailableRunPresence,
 )
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.fleet_stream_contract import FleetRefreshEvent
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentNode, AgentNodeContact
+from vonk_control.observation.platform_errors import ObservationCaptureUnavailable
 from vonk_control.observation.transfer import (
     ObservationTransferChunk,
     ObservationTransferComplete,
@@ -38,10 +46,6 @@ from vonk_control.observation.transfer import (
     observation_response,
 )
 from vonk_control.strict_json import serialize_json_value
-
-from cluster_profiles.control_client.errors import ControlClientError
-from cluster_profiles.control_client.schema import source_schema_validator
-from cluster_profiles.control_client.transfers import ControlClient
 
 from .observation_transfer_peer import (
     ObservationHTTPPeer,
@@ -202,8 +206,12 @@ def test_capture_is_frozen_before_first_network_suspension(tmp_path):
 
     async def collect() -> bytes:
         pieces: list[bytes] = []
-        async for part in response.body_iterator:
-            pieces.append(part.encode() if isinstance(part, str) else bytes(part))
+        pieces.extend(
+            [
+                part.encode() if isinstance(part, str) else bytes(part)
+                async for part in response.body_iterator
+            ]
+        )
         return b"".join(pieces)
 
     peer = Response(
@@ -258,7 +266,6 @@ def test_transfer_identity_and_hash_owner_and_export_reject_terminal_newline():
 
 
 def test_whole_membership_has_no_observation_only_512_group_cap(tmp_path):
-    from vonk_control.fleet_projection.common import UnavailableRunPresence
 
     snapshot = _large_snapshot(tmp_path)
     node = snapshot.nodes[0]
@@ -358,10 +365,8 @@ def test_stream_authentication_error_retains_declared_json_media(tmp_path, path)
     assert validator.is_valid(response.json())
     client = _client(tmp_path, response)
     adopted = None
-    try:
+    with contextlib.suppress(ControlClientError):
         adopted = client.request("GET", path)
-    except ControlClientError:
-        pass
     assert adopted is None
     fresh = _peer(snapshot).get("/api/fleet")
     client._opener = lambda _request, **_kwargs: ObservationHTTPPeer(fresh)
@@ -391,10 +396,8 @@ def test_global_validation_error_bytes_match_streamed_route_and_cli_contract(tmp
     ).is_valid(response.json())
     client = _client(tmp_path, response)
     adopted = None
-    try:
+    with contextlib.suppress(ControlClientError):
         adopted = client.request("GET", "/api/platform", timeout_seconds=0.01)
-    except ControlClientError:
-        pass
     assert adopted is None
     fresh = _peer(snapshot).get("/api/fleet")
     client._opener = lambda _request, **_kwargs: ObservationHTTPPeer(fresh)
@@ -404,8 +407,6 @@ def test_global_validation_error_bytes_match_streamed_route_and_cli_contract(tmp
 def test_platform_capture_failure_bytes_preserve_retry_through_cli(
     tmp_path, monkeypatch
 ):
-    from vonk_control.api import routes_platform as api
-    from vonk_control.observation.platform_errors import ObservationCaptureUnavailable
 
     def unreadable_capture():
         raise ObservationCaptureUnavailable(phase="stored-worker-validation")
@@ -435,7 +436,8 @@ def test_platform_capture_failure_bytes_preserve_retry_through_cli(
             sleep=lambda delay: now.__setitem__(0, now[0] + delay),
         ),
     )
-    assert time.monotonic is real_monotonic and time.sleep is real_sleep
+    assert time.monotonic is real_monotonic
+    assert time.sleep is real_sleep
     client = _client(tmp_path, response)
     peers = []
 
@@ -446,12 +448,12 @@ def test_platform_capture_failure_bytes_preserve_retry_through_cli(
 
     client._opener = opener
     adopted = None
-    try:
+    with contextlib.suppress(ControlClientError):
         adopted = client.request("GET", "/api/platform")
-    except ControlClientError:
-        pass
-    assert adopted is None and now[0] == 115.0
-    assert len(peers) == 3 and all(peer._body.closed for peer in peers)
+    assert adopted is None
+    assert now[0] == 115.0
+    assert len(peers) == 3
+    assert all(peer._body.closed for peer in peers)
     monkeypatch.undo()
     fresh = _peer(snapshot).get("/api/fleet")
     client._opener = lambda _request, **_kwargs: ObservationHTTPPeer(fresh)

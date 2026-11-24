@@ -30,7 +30,7 @@ def _test_file(case: ET.Element, root: Path) -> str | None:
 def collect(report: str | Path, *, root: str | Path = ".") -> dict[str, float]:
     root_path = Path(root).resolve()
     durations: defaultdict[str, float] = defaultdict(float)
-    for case in ET.parse(report).getroot().iter("testcase"):
+    for case in ET.parse(report).getroot().iter("testcase"):  # noqa: S314 - the job's own pytest report
         file_name = _test_file(case, root_path)
         if not file_name:
             continue

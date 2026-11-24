@@ -5,16 +5,15 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter
-from vonk_agent_protocol.enrollment import EnrollmentSubmitRequest, ExpiredRenewRequest
 
-from ..openapi_numbers import install_canonical_openapi
-from ..operator_acceptance import OperatorReceiptResolver
-from ..strict_json import ControllerAPIRoute
-from .artifacts import install_artifacts_routes
-from .authority import install_authority_routes
-from .common import AgentApiServices, EnrollmentRateLimiter
-from .enrollment import install_enrollment_routes
-from .observations import install_observations_routes
+from vonk_agent_protocol.enrollment import EnrollmentSubmitRequest, ExpiredRenewRequest
+from vonk_control.agent_api.artifacts import install_artifacts_routes
+from vonk_control.agent_api.authority import install_authority_routes
+from vonk_control.agent_api.common import AgentApiServices, EnrollmentRateLimiter
+from vonk_control.agent_api.enrollment import install_enrollment_routes
+from vonk_control.agent_api.observations import install_observations_routes
+from vonk_control.openapi_numbers import install_canonical_openapi
+from vonk_control.operator_acceptance import ControllerAPIRoute, OperatorReceiptResolver
 
 
 def install_agent_routes(

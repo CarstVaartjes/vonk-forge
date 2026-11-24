@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor
 from vonk_control.fleet_projection.service import FleetProjection
@@ -152,7 +153,8 @@ def test_installed_fleet_remove_requires_consent_and_uses_canonical_node(
 
     after_atlas = _owner_state(sessions, NODE_A)
     after_borealis = _owner_state(sessions, NODE_B)
-    assert after_atlas[0] == "retired" and after_atlas[1] is not None
+    assert after_atlas[0] == "retired"
+    assert after_atlas[1] is not None
     assert len(after_atlas[2]) == 1
     assert after_atlas[2][0][1] == "revoked"
     assert after_atlas[2][0][2] is not None

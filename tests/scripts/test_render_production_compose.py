@@ -168,12 +168,12 @@ def test_render_replaces_every_control_image_without_resolving_operator_inputs(
 
 @pytest.mark.parametrize(
     "image",
-    (
+    [
         "ghcr.io/carstvaartjes/vonk-forge-api:latest",
         f"ghcr.io/carstvaartjes/vonk-forge-api:latest@sha256:{DIGEST}",
         f"ghcr.io/carstvaartjes/vonk-forge-api:dev@sha256:{DIGEST}",
         f"ghcr.io/example/vonk-forge-api:latest@sha256:{DIGEST}",
-    ),
+    ],
 )
 def test_render_rejects_nonproduction_or_unpinned_images(
     tmp_path: Path, image: str

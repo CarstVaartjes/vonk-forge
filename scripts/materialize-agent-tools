@@ -39,7 +39,9 @@ def download(url: str) -> bytes:
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
             if response.status != 200:
-                raise MaterializationError("tool download returned an unexpected status")
+                raise MaterializationError(
+                    "tool download returned an unexpected status"
+                )
             chunks: list[bytes] = []
             total = 0
             while chunk := response.read(1024 * 1024):
@@ -88,7 +90,7 @@ def atomic_install(path: Path, raw: bytes, mode: int) -> None:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
-    os.replace(temporary, path)
+    temporary.replace(path)
     path.chmod(mode)
 
 

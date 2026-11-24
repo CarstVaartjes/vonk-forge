@@ -7,12 +7,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, event, func, select, text
+from sqlalchemy import create_engine, delete, event, func, inspect, select, text
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.telemetry import TelemetrySample
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.auth import TokenCodec
 from vonk_control.db.connections import session_factory
 from vonk_control.fleet_event_contract import (
@@ -25,6 +26,7 @@ from vonk_control.fleet_events import (
     FleetEventDraft,
     FleetEventRecorder,
     FleetEventRepository,
+    _FleetStoredEventGap,
     _walk_payload,
 )
 from vonk_control.fleet_stream_contract import FleetChangeEvent
@@ -48,6 +50,8 @@ from vonk_control.operation_api.durable import durable_operation_services
 from vonk_control.stored.json_values import write_guard_mode
 from vonk_control.telemetry.samples import TelemetryRepository
 
+from .runtime_identity_support import set_inventory_hostname
+
 NOW = datetime(2026, 8, 15, 12, tzinfo=UTC)
 
 
@@ -64,8 +68,7 @@ def _rows_carry_private_values_on_purpose():
 def sessions(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'fleet-events.sqlite'}")
     Base.metadata.create_all(engine)
-    factory = sessionmaker(engine, expire_on_commit=False)
-    return factory
+    return sessionmaker(engine, expire_on_commit=False)
 
 
 def _draft(
@@ -227,7 +230,8 @@ def test_committed_cursor_and_events_survive_repository_recreation(sessions) -> 
     reader = FleetEventRepository(sessions, clock=lambda: NOW)
     assert reader.high_watermark() == 1
     replay = reader.after(0, NOW, limit=1)
-    assert len(replay) == 1 and replay[0].id == 1
+    assert len(replay) == 1
+    assert replay[0].id == 1
     with sessions.begin() as session:
         reader.append_in_session(session, _draft(entity_id="fresh"))
     assert [(row.id, row.entity_id) for row in reader.after(1, NOW, limit=2)] == [
@@ -340,13 +344,16 @@ def test_sqlite_ids_follow_commit_order_not_append_order(tmp_path) -> None:
 def test_repository_rollback_removes_source_event_and_cursor_advance(sessions) -> None:
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
 
+    def expected_failure(session):
+        session.add(_job("job-rollback"))
+        repository.append_in_session(session, _draft(entity_id="job-rollback"))
+        raise RuntimeError("forced rollback")
+
     with (
         pytest.raises(Exception),  # noqa: B017 -- observable effects and recovery establish the rejection
         sessions.begin() as session,
     ):
-        session.add(_job("job-rollback"))
-        repository.append_in_session(session, _draft(entity_id="job-rollback"))
-        raise RuntimeError("forced rollback")
+        expected_failure(session)
 
     with sessions() as session:
         assert session.scalar(select(func.count()).select_from(Job)) == 0
@@ -373,9 +380,12 @@ def test_repository_rollback_removes_source_event_and_cursor_advance(sessions) -
 def test_invalid_draft_fails_the_source_transaction(sessions, draft) -> None:
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
 
-    with pytest.raises(Exception), sessions.begin() as session:  # noqa: B017 -- observable effects and recovery establish the rejection
+    def expected_failure(session):
         session.add(_job("job-invalid"))
         repository.append_in_session(session, draft)
+
+    with pytest.raises(Exception), sessions.begin() as session:  # noqa: B017 -- observable effects and recovery establish the rejection
+        expected_failure(session)
 
     with sessions() as session:
         assert session.scalar(select(func.count()).select_from(Job)) == 0
@@ -608,8 +618,6 @@ def test_recorder_emits_bounded_profile_events_when_agent_hostname_changes(
             )
         )
     with sessions.begin() as session:
-        from .runtime_identity_support import set_inventory_hostname
-
         set_inventory_hostname(session, node_id, "spark-3542")
 
     rows = _event_rows(sessions)
@@ -771,14 +779,17 @@ def test_recorder_source_flush_and_event_are_rolled_back_together(sessions) -> N
         session.add(_job("job-1"))
     assert len(_event_rows(sessions)) == 1
 
-    with (
-        pytest.raises(Exception),  # noqa: B017 -- observable effects and recovery establish the rejection
-        sessions.begin() as session,
-    ):
+    def expected_failure(session):
         job = session.get(Job, "job-1")
         job.state = "running"
         session.flush()
         raise RuntimeError("forced rollback")
+
+    with (
+        pytest.raises(Exception),  # noqa: B017 -- observable effects and recovery establish the rejection
+        sessions.begin() as session,
+    ):
+        expected_failure(session)
 
     with sessions() as session:
         assert session.get(Job, "job-1").state == "queued"
@@ -950,7 +961,6 @@ def test_outbox_preserves_current_values_without_field_presence(sessions) -> Non
 
 
 def test_projection_damage_preserves_source_then_capture_and_fresh_events(sessions):
-    from vonk_control.fleet_events import _FleetStoredEventGap
 
     FleetEventRecorder.install(sessions, clock=lambda: NOW)
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
@@ -974,7 +984,6 @@ def test_projection_damage_preserves_source_then_capture_and_fresh_events(sessio
 
 
 def test_missing_cursor_repairs_without_losing_source_or_next_event(sessions):
-    from sqlalchemy import delete
 
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
     with sessions.begin() as session:
@@ -992,7 +1001,6 @@ def test_missing_cursor_repairs_without_losing_source_or_next_event(sessions):
 
 def test_recorder_watchers_reference_current_owner_fields() -> None:
     """Catches stale field registrations after moving a fact to another mapper."""
-    from sqlalchemy import inspect
 
     for owner, fields in FleetEventRecorder._tracked_fields.items():
         mapper = inspect(owner)

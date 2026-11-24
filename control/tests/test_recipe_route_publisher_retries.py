@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+
 from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_control.gateway import route_runtime
 from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher

@@ -10,15 +10,17 @@ from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
 from vonk_agent_protocol.outcome import SecurityRefusalError
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
-
-from ..compiled_execution_plan import DistributionObjectReceipt, VerifiedModelObject
-from ..model_cache.errors import ModelCacheNotFound
+from vonk_control.compiled_execution_plan import (
+    DistributionObjectReceipt,
+    VerifiedModelObject,
+)
+from vonk_control.model_cache.errors import ModelCacheNotFound
 
 if TYPE_CHECKING:
-    from ..model_cache.service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
-from .types import (
+from vonk_control.distribution.types import (
     DistributionError,
     DistributionRefused,
     DistributionUnknown,
@@ -83,7 +85,7 @@ class ModelCacheObjectSource:
             return self._open_cache_object(digest, expected_bytes)
         return self._open_object(digest, expected_bytes)
 
-    def verify_runtime_image(self, image_digest: str, archive_sha256: str) -> bool:
+    def verify_runtime_image(self, _image_digest: str, _archive_sha256: str) -> bool:
         return False
 
     @classmethod

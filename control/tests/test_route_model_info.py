@@ -16,12 +16,22 @@ from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import select, update
+from vonk_forge_contracts import read_recipe, read_recipe_api
+
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.state_machines import GatewayRouteState, RoutePublicationState
+from vonk_agent_protocol.state_machines import RouteState as RunRouteState
+from vonk_control.catalog.revision_contract import (
+    read_catalog_document,
+    rederive_projection,
+    write_catalog_projection,
+)
 from vonk_control.gateway import route_model_info as module
 from vonk_control.gateway.litellm import (
     LiteLlmConfig,
@@ -44,29 +54,44 @@ from vonk_control.gateway.route_runtime import (
     AtomicRouteBundlePublisher,
     verify_active_route_bundle,
 )
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.operation_api.durable import _DurableOperationProjection
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operations.runtime_specs import split_option_choices
+from vonk_control.recipe_routes import publisher as publisher_module
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
-from vonk_control.recipe_routes.shared import _RecipeEndpoint
-from vonk_forge_contracts import read_recipe, read_recipe_api
+from vonk_control.recipe_routes.shared import (
+    _SQLITE_ROUTE_PUBLICATION_LOCK,
+    _RecipeEndpoint,
+)
+
+from .recipe_routes_support import (
+    NOW,
+    MutableClock,
+    add_running_run,
+    atomic_service,
+    setup,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures" / "route_model_info"
 EXAMPLES = files("vonk_forge_contracts").joinpath("examples")
 VECTORS = json.loads((FIXTURES / "vectors.json").read_text(encoding="utf-8"))
 
 
-def _document(name: str) -> dict:
+def _document(name: str) -> dict[str, Any]:
     return json.loads(EXAMPLES.joinpath(name).read_text(encoding="utf-8"))
 
 
-def _api(vector: dict) -> dict:
+def _api(vector: dict[str, Any]) -> dict[str, Any]:
     """The shipped recipe-api example, with the vector's patch over its base block."""
     document = _document(vector["api"])
     document["api"] = {**document["api"], **vector.get("api_patch", {})}
     return document
 
 
-def _built(vector: dict) -> LiteLlmModelInfo:
+def _built(vector: dict[str, Any]) -> LiteLlmModelInfo:
     return build_model_info(
         read_recipe(_document(vector["recipe"])),
         read_recipe_api(_api(vector)),
@@ -75,7 +100,9 @@ def _built(vector: dict) -> LiteLlmModelInfo:
 
 
 @pytest.mark.parametrize("vector", VECTORS, ids=lambda vector: vector["name"])
-def test_vector_builds_the_expected_model_info_and_entry(vector: dict) -> None:
+def test_vector_builds_the_expected_model_info_and_entry(
+    vector: dict[str, Any],
+) -> None:
     info = _built(vector)
     assert info.model_dump(mode="json", exclude_none=True) == vector["model_info"]
 
@@ -162,7 +189,7 @@ def test_max_tokens_is_the_output_cap() -> None:
         LiteLlmModelInfo.model_validate({**fields, "max_tokens": 5})
 
 
-def _vector(name: str) -> dict:
+def _vector(name: str) -> dict[str, Any]:
     return next(vector for vector in VECTORS if vector["name"] == name)
 
 
@@ -175,8 +202,10 @@ def test_an_audio_route_needs_no_generation_settings() -> None:
     )
     info = _built(vector)
     assert info.mode == "audio_transcription"
-    assert info.max_input_tokens is None and info.max_output_tokens is None
-    assert info.supports_audio_input and not info.supports_audio_output
+    assert info.max_input_tokens is None
+    assert info.max_output_tokens is None
+    assert info.supports_audio_input
+    assert not info.supports_audio_output
 
 
 def test_the_audio_endpoint_is_the_mode_never_a_recipe_choice() -> None:
@@ -202,7 +231,7 @@ def test_the_speech_health_check_voice_is_the_first_voice() -> None:
     ],
     ids=["tokens", "output-tokens", "missing-block", "foreign-block", "voice", "mode"],
 )
-def test_the_mode_decides_which_audio_fields_apply(change: dict) -> None:
+def test_the_mode_decides_which_audio_fields_apply(change: dict[str, Any]) -> None:
     fields = _built(_vector("speech")).model_dump()
     with pytest.raises(ValidationError):
         LiteLlmModelInfo.model_validate({**fields, **change})
@@ -226,7 +255,7 @@ def _identity(info: LiteLlmModelInfo | None) -> RouteRunIdentity:
     )
 
 
-def _digest(document: dict) -> str:
+def _digest(document: dict[str, Any]) -> str:
     return hashlib.sha256(
         json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -310,15 +339,10 @@ def test_a_retained_route_keeps_its_facts(tmp_path: Path) -> None:
     assert publisher.served_model_info().routes == {"model": (run_id, info)}
 
 
-def _store_api(base, api_document: dict | None, *, corrupt: bool = False) -> None:
+def _store_api(
+    base, api_document: dict[str, Any] | None, *, corrupt: bool = False
+) -> None:
     """Record the facts beside the run's revision the way the catalog sync does."""
-    from sqlalchemy import select, update
-    from vonk_control.catalog.revision_contract import (
-        read_catalog_document,
-        rederive_projection,
-        write_catalog_projection,
-    )
-    from vonk_control.models.catalog import CatalogDocumentRevision
 
     with base.sessions.begin() as session:
         revision = session.scalars(
@@ -341,21 +365,22 @@ def _store_api(base, api_document: dict | None, *, corrupt: bool = False) -> Non
         )
 
 
-def _source_build_api() -> dict:
+def _source_build_api() -> dict[str, Any]:
     api = _document("recipe-api-source-build.json")
     api["identity"]["slug"] = "qwen"
     return api
 
 
-def _source_build_api_with_output(tokens: int) -> dict:
+def _source_build_api_with_output(tokens: int) -> dict[str, Any]:
     api = _source_build_api()
     api["api"]["default_output_tokens"] = {"value": tokens}
     return api
 
 
-def _published_entries(root: Path) -> dict[str, dict]:
+def _published_entries(root: Path) -> dict[str, dict[str, Any]]:
     verified = verify_active_route_bundle(root)
-    assert not isinstance(verified, UnknownError) and verified.litellm is not None
+    assert not isinstance(verified, UnknownError)
+    assert verified.litellm is not None
     return {
         entry.model_name: entry.model_dump(mode="json", exclude_none=True)
         for entry in verified.litellm.model_list
@@ -366,7 +391,6 @@ def _published_entries(root: Path) -> dict[str, dict]:
 def test_the_published_route_carries_its_recipes_facts_and_never_depends_on_them(
     tmp_path: Path, stored: str
 ) -> None:
-    from .recipe_routes_support import setup
 
     service, _publisher, applied, run_id = setup(tmp_path, ranks=1)
     _store_api(
@@ -393,8 +417,6 @@ def test_the_published_route_carries_its_recipes_facts_and_never_depends_on_them
 
 
 def _choose_an_unknown_option(service) -> None:
-    from sqlalchemy import update
-    from vonk_control.models.mapping import ClusterMapping
 
     with service.sessions.begin() as session:
         session.execute(
@@ -407,7 +429,6 @@ def _choose_an_unknown_option(service) -> None:
 def test_unusable_facts_are_reported_and_the_route_still_publishes(
     tmp_path: Path,
 ) -> None:
-    from .recipe_routes_support import setup
 
     service, _publisher, applied, run_id = setup(tmp_path, ranks=1)
     _store_api(service, _source_build_api())
@@ -422,7 +443,6 @@ def test_unusable_facts_are_reported_and_the_route_still_publishes(
 def test_a_bug_in_the_builder_is_not_swallowed_as_missing_facts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from .recipe_routes_support import setup
 
     service, _publisher, _applied, run_id = setup(tmp_path, ranks=1)
     _store_api(service, _source_build_api())
@@ -437,15 +457,6 @@ def test_a_bug_in_the_builder_is_not_swallowed_as_missing_facts(
 
 def test_a_serving_route_keeps_its_facts_until_it_changes(tmp_path: Path) -> None:
     """New facts never rewrite a running route's gateway entry (no restart)."""
-    from vonk_agent_protocol.state_machines import RouteState as RunRouteState
-
-    from .recipe_routes_support import (
-        NOW,
-        MutableClock,
-        add_running_run,
-        atomic_service,
-        setup,
-    )
 
     clock = MutableClock(NOW)
     base, _, _, first = setup(tmp_path / "database", clock=clock)
@@ -471,10 +482,6 @@ def test_the_bundle_is_never_read_inside_the_publication_transaction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Our own files are verified before the owner lock, not under row locks."""
-    from vonk_control.recipe_routes import publisher as publisher_module
-    from vonk_control.recipe_routes.shared import _SQLITE_ROUTE_PUBLICATION_LOCK
-
-    from .recipe_routes_support import NOW, MutableClock, atomic_service, setup
 
     clock = MutableClock(NOW)
     base, _, _, run_id = setup(tmp_path / "database", clock=clock)
@@ -490,18 +497,14 @@ def test_the_bundle_is_never_read_inside_the_publication_transaction(
     service.publish_run(run_id)
     service.maintain()
     service.withdraw_run(run_id)
-    assert held and not any(held)
+    assert held
+    assert not any(held)
 
 
 def test_a_recovery_restart_of_the_same_run_applies_the_current_facts(
     tmp_path: Path,
 ) -> None:
     """A restarted run is a route change: its facts are read again, not frozen."""
-    from sqlalchemy import update
-    from vonk_agent_protocol.state_machines import RouteState as RunRouteState
-    from vonk_control.models.execution import RecipeRun, RunNode
-
-    from .recipe_routes_support import NOW, MutableClock, atomic_service, setup
 
     clock = MutableClock(NOW)
     base, _, _, run_id = setup(tmp_path / "database", clock=clock)
@@ -540,7 +543,6 @@ def test_a_recovery_restart_of_the_same_run_applies_the_current_facts(
 
 def _endpoint_read_fails(base, root: Path) -> bool:
     """Whether the durable endpoint projection cannot verify the live bundle."""
-    from vonk_control.operation_api.durable import _DurableOperationProjection
 
     projection = _DurableOperationProjection(
         base.sessions,
@@ -568,7 +570,6 @@ def test_an_earlier_bundle_is_republished_once_by_maintenance(
     policy: no count cap, pre-call checks off. That is the one LiteLLM restart
     the upgrade causes; the next pass finds the bundle current and does nothing.
     """
-    from .recipe_routes_support import NOW, MutableClock, atomic_service, setup
 
     clock = MutableClock(NOW)
     base, _, _, run_id = setup(tmp_path / "database", clock=clock)
@@ -577,7 +578,8 @@ def test_an_earlier_bundle_is_republished_once_by_maintenance(
     live = tmp_path / "live"
     published = verify_active_route_bundle(live)
     assert not isinstance(published, UnknownError)
-    assert published.routes is not None and published.litellm is not None
+    assert published.routes is not None
+    assert published.litellm is not None
 
     # The same route as the earlier Controller wrote it: a count cap per
     # deployment and pre-call checks on.
@@ -599,7 +601,7 @@ def test_an_earlier_bundle_is_republished_once_by_maintenance(
     ).encode()
     runtime = AtomicRouteBundlePublisher(live)
     # The current validator refuses these bytes; the earlier Controller's did not.
-    runtime._validate_litellm = lambda _bytes: True  # type: ignore[method-assign]
+    runtime._validate_litellm = lambda _bytes: True
     with runtime._locked() as uncertainty:
         assert uncertainty is None
         marker = runtime._activate(
@@ -627,7 +629,8 @@ def test_an_earlier_bundle_is_republished_once_by_maintenance(
     assert isinstance(verify_active_route_bundle(live), UnknownError)
     assert service._publisher.active_marker_digest() == marker.digest
     served = service._publisher.served_model_info()
-    assert served.routes == {} and served.unreadable
+    assert served.routes == {}
+    assert served.unreadable
     # Every endpoint read fails until the bundle is republished.
     assert _endpoint_read_fails(base, live)
 
@@ -639,7 +642,8 @@ def test_an_earlier_bundle_is_republished_once_by_maintenance(
     assert "rpm" not in entries["qwen"]["litellm_params"]
     assert "tpm" not in entries["qwen"]["litellm_params"]
     after = verify_active_route_bundle(live)
-    assert not isinstance(after, UnknownError) and after.litellm is not None
+    assert not isinstance(after, UnknownError)
+    assert after.litellm is not None
     assert after.litellm.router_settings.enable_pre_call_checks is False
     assert not _endpoint_read_fails(base, live)
 
@@ -661,7 +665,6 @@ def test_a_route_published_without_facts_gets_them_once_after_an_upgrade(
     records ``api`` again; the route that serves with no facts takes them once
     (a frozen absence is not frozen), and real facts stay frozen after that.
     """
-    from .recipe_routes_support import NOW, MutableClock, atomic_service, setup
 
     effort_api = _source_build_api()
     effort_api["api"]["reasoning"] = {
@@ -682,7 +685,8 @@ def test_a_route_published_without_facts_gets_them_once_after_an_upgrade(
     service.publish_run(run_id)
     published = verify_active_route_bundle(live)
     assert not isinstance(published, UnknownError)
-    assert published.routes is not None and published.litellm is not None
+    assert published.routes is not None
+    assert published.litellm is not None
 
     # The live file as the earlier Controller wrote it: no effort kind.
     earlier = json.loads(published.litellm.model_dump_json(exclude_none=True))
@@ -692,7 +696,7 @@ def test_a_route_published_without_facts_gets_them_once_after_an_upgrade(
         json.dumps(earlier, sort_keys=True, separators=(",", ":")) + "\n"
     ).encode()
     runtime = AtomicRouteBundlePublisher(live)
-    runtime._validate_litellm = lambda _bytes: True  # type: ignore[method-assign]
+    runtime._validate_litellm = lambda _bytes: True
     with runtime._locked() as uncertainty:
         assert uncertainty is None
         marker = runtime._activate(

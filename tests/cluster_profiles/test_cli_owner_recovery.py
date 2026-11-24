@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 from dataclasses import replace
+from uuid import UUID
 
 import pytest
 from controller_cli_support import FakeClient, run
 
 from cluster_profiles import cli
+from cluster_profiles.cli_files import PrivateOutput
 from cluster_profiles.cli_states_generated import OBSERVING, QUEUED, SUCCEEDED
 from cluster_profiles.control_client.errors import (
     ControlHTTPError,
@@ -23,6 +26,8 @@ from cluster_profiles.controller_cli import observation as observation_module
 from cluster_profiles.controller_cli import profile_load as profile_load_module
 from cluster_profiles.controller_cli import selection
 from cluster_profiles.error_reporting import protocol_context
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 
 KEY = "11111111-1111-4111-8111-111111111111"
 FRESH = "22222222-2222-4222-8222-222222222222"
@@ -154,7 +159,6 @@ def test_first_fleet_read_recovers_and_exhaustion_does_not_block_fresh_read(
 
 
 def test_delivery_io_repairs_with_bounded_attempts_then_fresh_io_succeeds(tmp_path):
-    from cluster_profiles.cli_files import PrivateOutput
 
     attempts = []
     destination = tmp_path / "grant.json"
@@ -175,10 +179,8 @@ def test_delivery_io_repairs_with_bounded_attempts_then_fresh_io_succeeds(tmp_pa
         raise OSError("storage unavailable")
 
     before = len(attempts)
-    try:
+    with contextlib.suppress(OSError):
         fleet_module._delivery_io(unavailable)
-    except OSError:
-        pass
     assert len(attempts) - before == 3
     fresh = tmp_path / "fresh.json"
     with fleet_module._delivery_io(lambda: PrivateOutput(fresh)) as output:
@@ -213,7 +215,8 @@ def test_malformed_domain_http_evidence_reobserves_exact_key_then_fresh_request(
         }
     )
     status, result = run(("model", "download", "chosen", "--detach", "--json"), client)
-    assert status == 0 and result == accepted
+    assert status == 0
+    assert result == accepted
     assert [call[0] for call in client.calls] == ["POST", "GET", "GET"]
     fresh = accepted | {"request_key": FRESH, "operation_id": "fresh"}
     client.responses[("POST", post)] = fresh
@@ -350,7 +353,8 @@ def test_cancellation_lookup_reobserves_old_metadata_without_local_conflict():
         "--json",
     )
     status, result = run(argv, client)
-    assert status == 0 and result == accepted
+    assert status == 0
+    assert result == accepted
     assert [call[0] for call in client.calls] == ["POST", "GET", "GET"]
     client.responses[("POST", path + "/cancel")] = accepted | {
         "cancellation": cancellation | {"request_key": FRESH}
@@ -362,22 +366,22 @@ def test_cancellation_lookup_reobserves_old_metadata_without_local_conflict():
 
 
 def test_missing_attempt_reobserves_before_writing_evidence(tmp_path):
-    path = f"/api/operations/{KEY}"
+    operation_path = f"/api/operations/{KEY}"
     bundle = {"operation_id": KEY, "attempt": 2}
 
     class EvidenceClient(FakeClient):
-        def _validate_request(self, method, target, payload, query):
-            if target.startswith(path):
+        def _validate_request(self, method, path, payload, query):
+            if path.startswith(operation_path):
                 return
-            super()._validate_request(method, target, payload, query)
+            super()._validate_request(method, path, payload, query)
 
     client = EvidenceClient(
         {
-            ("GET", path): [
+            ("GET", operation_path): [
                 ControlUnavailable(503, "attempt unavailable"),
                 {"id": KEY, "attempt": 2},
             ],
-            ("GET", path + "/evidence"): bundle,
+            ("GET", operation_path + "/evidence"): bundle,
         }
     )
     destination = tmp_path / "evidence.json"
@@ -389,7 +393,11 @@ def test_missing_attempt_reobserves_before_writing_evidence(tmp_path):
         == 0
     )
     assert json.loads(destination.read_text()) == bundle
-    assert [call[1] for call in client.calls] == [path, path, path + "/evidence"]
+    assert [call[1] for call in client.calls] == [
+        operation_path,
+        operation_path,
+        operation_path + "/evidence",
+    ]
     fresh = tmp_path / "fresh.json"
     assert (
         cli.main(
@@ -433,9 +441,6 @@ def test_malformed_upgrade_replays_same_owner_request_without_new_effect():
 def test_unique_profile_successors_share_one_budget_then_fresh_follow_succeeds(
     bounded_clock,
 ):
-    from uuid import UUID
-
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
     class Successors(FakeClient):
         def __init__(self):
@@ -519,7 +524,6 @@ def test_profile_save_keeps_typed_cause_after_inconclusive_reconciliation(
     vonkctl_json,
 ):
     """Catches replacing an intact owner wait with a bare exit-2 observation."""
-    from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 
     definition = {"name": "original", "assignments": []}
     view = {"id": KEY, "number": 1, "revision": 3, "definition": definition}

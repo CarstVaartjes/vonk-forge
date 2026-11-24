@@ -501,13 +501,13 @@ def _read_objects(store: ObjectStore, keys: list[str]) -> dict[str, bytes]:
     if len(keys) != len(set(keys)):
         raise StateError("object read set is invalid")
     return _bounded_object_operations(
-        {key: b"" for key in keys},
+        dict.fromkeys(keys, b""),
         lambda key, _raw: store.read(key),
     )
 
 
 def _write_objects(store: ObjectStore, objects: dict[str, bytes]) -> None:
-    _bounded_object_operations(objects, lambda key, raw: store.write(key, raw))
+    _bounded_object_operations(objects, store.write)
 
 
 def _write_immutable_objects(
@@ -655,7 +655,7 @@ def prepare_candidate(store: ObjectStore, publication: dict[str, Any]) -> Prepar
             high is None or high_version != requested["version"]
         ):
             raise StateError("publication epoch conflicts with latest pointer")
-    if high_version is not None:
+    if high is not None and high_version is not None:
         comparison = _compare_versions(requested["version"], high_version)
         if comparison < 0:
             raise StateError("refusing to roll back apt channel")
@@ -736,8 +736,9 @@ def publish_committed(
         name
         for name in public_files
         if name.startswith("pool/")
-        or name.startswith(f"dists/{receipt['distribution']}/")
-        and "/by-hash/" in name
+        or (
+            name.startswith(f"dists/{receipt['distribution']}/") and "/by-hash/" in name
+        )
     }
     _write_immutable_objects(
         public_store,
@@ -1324,7 +1325,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise StateError("work directory is required")
             work = _work_directory(arguments.work_dir)
         if arguments.command == "prepare":
-            _prepare(work, receipt)
+            _prepare(work, receipt)  # pyright: ignore[reportPossiblyUnboundVariable]  # bound above for this command
         elif arguments.command == "compact":
             if (
                 arguments.aptly_config is None
@@ -1343,9 +1344,9 @@ def main(argv: list[str] | None = None) -> int:
                 arguments.phase,
             )
         elif arguments.command == "bundle":
-            _bundle(work, receipt)
+            _bundle(work, receipt)  # pyright: ignore[reportPossiblyUnboundVariable]  # bound above for this command
         elif arguments.command == "commit":
-            _commit(work, receipt)
+            _commit(work, receipt)  # pyright: ignore[reportPossiblyUnboundVariable]  # bound above for this command
         else:
             _publish(receipt)
     except (OSError, StateError, KeyError, subprocess.TimeoutExpired) as error:

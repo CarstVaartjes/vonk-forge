@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -11,6 +10,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx2
 from sqlalchemy import and_, func, or_, select
+
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
@@ -21,36 +21,43 @@ from vonk_agent_protocol.reason_codes.model_cache import (
     ModelAccessReason,
     ModelCacheCode,
 )
-
-from ..bounded_retry import bounded_attempts
-from ..cached_file_verification import verified_files
-from ..lifecycle.types import Effect, Outcome, Reported, Tick
-from ..models.cache import ModelCacheOperation
-from ..runtime_init import RuntimeSecretError, read_runtime_secret
-from . import states as model_cache_states
-from .artifacts import ArtifactSetManifest, ArtifactSpec, _unique_artifacts
-from .constants import (
+from vonk_control.bounded_retry import bounded_attempts
+from vonk_control.cached_file_verification import verified_files
+from vonk_control.lifecycle.types import Effect, Outcome, Reported, Tick
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.artifacts import (
+    ArtifactSetManifest,
+    ArtifactSpec,
+    _unique_artifacts,
+)
+from vonk_control.model_cache.constants import (
     _CREDENTIAL_FAILURE_PUBLIC_CODES,
     _MAX_HTTP_REDIRECTS,
 )
-from .errors import (
+from vonk_control.model_cache.errors import (
     ModelCacheCredentialPathUnsafe,
     ModelCacheStorageRefused,
     ModelCacheStorageUnknown,
     _huggingface_access_url,
     _retry_after_seconds,
 )
-from .persistence import _operation_progress, _store_operation_payload, _updated
-from .progress import cache_phase, progress_document
-from .source_helpers import (
+from vonk_control.model_cache.persistence import (
+    _operation_progress,
+    _store_operation_payload,
+    _updated,
+)
+from vonk_control.model_cache.progress import cache_phase, progress_document
+from vonk_control.model_cache.source_helpers import (
     _fsync_directory,
     _is_allowed_huggingface_redirect,
     _is_hf_authority,
     _is_hf_canonical_url,
 )
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.runtime_init import RuntimeSecretError, read_runtime_secret
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 def _token_fingerprint(token: str | None) -> str:
@@ -418,5 +425,5 @@ class HttpMixin:
         # Atomic overwrite preserves both the pathname and already-open
         # readers until the verified replacement is ready. Moving the old
         # object aside first creates an availability gap (and a crash window).
-        os.replace(verified, target)
+        verified.replace(target)
         _fsync_directory(target.parent)

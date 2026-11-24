@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import pytest
-from vonk_agent_protocol.contracts import AgentProtocolError
+
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
+from vonk_agent_protocol.wire_model import AgentProtocolError
 
 RUN = {
     "run_id": "10000000-0000-4000-8000-000000000001",

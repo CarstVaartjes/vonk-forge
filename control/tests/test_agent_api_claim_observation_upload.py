@@ -6,9 +6,11 @@ import asyncio
 import hashlib
 import io
 import json
+import logging
 import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from datetime import UTC, timedelta
 from importlib.resources import files
 from threading import Event
@@ -18,10 +20,21 @@ from fastapi.testclient import TestClient
 from httpx2 import ASGITransport, AsyncClient, Response
 from sqlalchemy import event
 from starlette.types import Message
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.agent_api.common import (
+    _commit_recipe_image_upload,
+    _prepare_recipe_image_upload,
+)
+from vonk_control.agent_jobs.contracts import AgentContactIdentityMismatch
 from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
+from vonk_control.categorized_errors import BookkeepingUnknown
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.inventory.items import runtime_value
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import (
@@ -30,8 +43,7 @@ from vonk_control.models.catalog import (
     RecipeSourceBundle,
 )
 from vonk_control.models.fleet import AgentCertificate, AgentNode
-from vonk_control.source_bundles import generate_source_bundle
-from vonk_forge_contracts import RecipeDefinition, document_sha256
+from vonk_control.source_bundles import SourceBundleUnknown, generate_source_bundle
 
 from .agent_api_support import NODE_A, NODE_B, Jobs, agent_headers
 from .node_contacts import contact_row
@@ -57,8 +69,6 @@ def _canonical_recipe_fixture(
 def test_claim_security_refusal_stays_403_and_unknown_outcome_keeps_its_wait(
     agent_system, monkeypatch
 ) -> None:
-    from vonk_control.agent_jobs.contracts import AgentContactIdentityMismatch
-    from vonk_control.categorized_errors import BookkeepingUnknown
 
     client, services, _, _clock = agent_system
     headers = agent_headers(NODE_A, "serial-a")
@@ -85,10 +95,6 @@ def test_incomplete_observation_warns_with_counts_and_recovers_in_fleet_health(
 ):
     # Wrong implementation: incomplete bodies are info-only, and authenticated
     # delivery failures disappear from fleet health while evidence is lost.
-    import logging
-
-    from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
-    from vonk_control.fleet_projection.service import FleetProjection
 
     client, services, _, clock = agent_system
     payload = canonical_message(
@@ -253,9 +259,6 @@ def test_builder_can_download_only_its_authorized_canonical_source_bundle(
                 updated_at=clock.now,
             )
         )
-
-    from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
-    from vonk_control.source_bundles import SourceBundleUnknown
 
     exact_get = services.source_bundles.get
     attempts = []
@@ -423,7 +426,6 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
     if stored_damage:
         destination = services.artifact_root / "image-cache" / layout_digest
         destination.write_bytes(b"damaged")
-    from vonk_control.agent_api.common import _commit_recipe_image_upload
 
     active = set()
 
@@ -482,18 +484,13 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
 
 
 def test_recipe_image_upload_lock_preserves_interrupted_bytes(tmp_path) -> None:
-    import os
-
-    from vonk_control.agent_api.common import _prepare_recipe_image_upload
 
     descriptor, partial = _prepare_recipe_image_upload(tmp_path, "a" * 64)
     try:
         os.write(descriptor, b"partial archive")
         competing = None
-        try:
+        with suppress(Exception):  # cursor preservation and fresh admission decide
             competing = _prepare_recipe_image_upload(tmp_path, "a" * 64)
-        except Exception:  # noqa: BLE001, S110 -- cursor preservation and fresh admission decide
-            pass
         if competing is not None:
             os.close(competing[0])
         assert competing is None
@@ -671,7 +668,7 @@ def test_unauthenticated_agent_gate_returns_without_reading_request_body() -> No
     start = next(
         message for message in sent if message["type"] == "http.response.start"
     )
-    headers = dict(start["headers"])  # type: ignore[arg-type]
+    headers = dict(start["headers"])
     assert start["status"] == 401
     assert body_reads == 0
     assert headers[b"x-content-type-options"] == b"nosniff"
@@ -775,12 +772,13 @@ def test_authenticated_claim_persists_certificate_bound_source(agent_system) -> 
         )
         assert contact_row(presence).management_address == "10.0.0.42"
         observed = contact_row(presence).management_observed_at
-        assert observed is not None and observed.replace(tzinfo=UTC) == clock.now
+        assert observed is not None
+        assert observed.replace(tzinfo=UTC) == clock.now
 
 
 @pytest.mark.parametrize(
     "hostname",
-    ("", "-spark", "spark_3542", "spark 3542", "spark..lab", "a" * 256),
+    ["", "-spark", "spark_3542", "spark 3542", "spark..lab", "a" * 256],
 )
 def test_authenticated_claim_drops_an_invalid_reported_hostname(
     agent_system, hostname: str
@@ -802,14 +800,14 @@ def test_authenticated_claim_drops_an_invalid_reported_hostname(
 
 @pytest.mark.parametrize(
     ("removed_field", "removed_value"),
-    (
+    [
         ("active_slot", "B"),
         ("agent_sha256", "c" * 64),
         ("platform_version", "1.2.3"),
         ("supervisor_generation", 7),
         ("supervisor_ready_generation", 7),
         ("activation_deadline", "2026-08-20T12:00:00Z"),
-    ),
+    ],
 )
 def test_claim_rejects_retired_supervisor_identity_fields(
     agent_system, removed_field: str, removed_value: object
@@ -836,7 +834,7 @@ def test_claim_rejects_retired_supervisor_identity_fields(
         assert runtime_value(node, lambda identity: identity.semantic_version) is None
 
 
-@pytest.mark.parametrize("architecture", ("linux-amd64", "linux-arm64"))
+@pytest.mark.parametrize("architecture", ["linux-amd64", "linux-arm64"])
 def test_claim_accepts_independently_valid_packaged_build_and_binary_digests(
     agent_system, architecture: str
 ) -> None:

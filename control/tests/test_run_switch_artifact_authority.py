@@ -5,11 +5,20 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import event
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.catalog import LibraryAssessmentCode
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheBlockerCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.state_machines import (
+    InstallationNodeState,
+    InstallationState,
+    ReservationState,
+)
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.covered_installation_claims import (
+    release_covered_installation_claims,
+)
 from vonk_control.disk_reservations import runtime_images_named_on_nodes
 from vonk_control.inventory.repository import (
     INVENTORY_MAX_AGE,
@@ -20,6 +29,11 @@ from vonk_control.inventory.repository import (
 from vonk_control.library.assessment import LibraryAssessment
 from vonk_control.library.contract import RecipeReadinessCheck
 from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    ResourceReservation,
+)
 from vonk_control.models.jobs import Job
 from vonk_control.run_switch_contract.evidence import RunSwitchReason
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
@@ -229,7 +243,8 @@ def test_replan_after_a_failed_target_copy_waits_for_a_scan_received_after_it(
     def fail_attempt() -> None:
         with sessions.begin() as session:
             row = session.get(Job, op_id)
-            assert row is not None and row.result is not None
+            assert row is not None
+            assert row.result is not None
             progress = _read_progress(row.result)
             progress.force_replan = True
             progress.subphase = "target-copy"
@@ -291,7 +306,8 @@ def test_new_plan_after_a_definite_target_copy_failure_waits_for_a_newer_scan(
     )
     with sessions.begin() as session:
         row = session.get(Job, operation.operation_id)
-        assert row is not None and row.result is not None
+        assert row is not None
+        assert row.result is not None
         progress = _read_progress(row.result)
         progress.subphase = "target-copy"
         row.result = _persisted_result(progress)
@@ -343,19 +359,6 @@ def test_scan_floor_reads_jobs_once_however_many_nodes(tmp_path) -> None:
 
 def test_covered_claims_read_each_newest_report_in_one_statement(tmp_path) -> None:
     """Catches one newest-report query per reservation."""
-    from vonk_agent_protocol.state_machines import (
-        InstallationNodeState,
-        InstallationState,
-        ReservationState,
-    )
-    from vonk_control.covered_installation_claims import (
-        release_covered_installation_claims,
-    )
-    from vonk_control.models.execution import (
-        InstallationNode,
-        RecipeInstallation,
-        ResourceReservation,
-    )
 
     sessions, _lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path, nodes=3

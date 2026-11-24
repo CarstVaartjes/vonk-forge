@@ -11,8 +11,10 @@ def test_agent_progress_validators_have_an_attempt_key_boundary():
     violations = []
     for directory in ("control/src", "agent_protocol/src"):
         for path in (ROOT / directory).rglob("*.py"):
-            for line in scan_source(path.read_text()):
-                violations.append(f"{path.relative_to(ROOT)}:{line}")
+            violations.extend(
+                f"{path.relative_to(ROOT)}:{line}"
+                for line in scan_source(path.read_text())
+            )
     assert not violations, (
         "monotonic progress validation without attempt key: " + ", ".join(violations)
     )

@@ -7,7 +7,7 @@ from typing import Annotated
 
 from pydantic import StringConstraints
 
-from ..strict_json import StrictModel
+from vonk_control.strict_json import StrictModel
 
 _UUID_PATTERN = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"

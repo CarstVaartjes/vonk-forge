@@ -6,8 +6,8 @@ The Controller owns every word; the vectors are
 
 from __future__ import annotations
 
-from ..generated_control.models.host_check_advice import HostCheckAdvice
-from .common import _text
+from cluster_profiles.cli_render.common import _text
+from cluster_profiles.generated_control.models.host_check_advice import HostCheckAdvice
 
 
 def host_check_lines(advice: HostCheckAdvice) -> list[str]:

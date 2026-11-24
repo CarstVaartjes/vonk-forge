@@ -7,7 +7,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol.contracts import canonical_message
+
+from cluster_profiles import runtime_identity
+from tests.observation_transfer_peer import observation_document
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import build_identity
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
@@ -18,8 +21,6 @@ from vonk_control.observation import platform as platform_observation
 from vonk_control.observation.platform import PlatformObservation, PlatformObserver
 from vonk_control.operation_api.openapi import admin_openapi_schema
 from vonk_control.worker.liveness import WorkerHeartbeatRecorder
-
-from cluster_profiles import runtime_identity
 
 
 class Jobs:
@@ -124,7 +125,8 @@ def test_authenticated_contract_complete_membership_fault_recovery(
         assert failure.headers["Cache-Control"] == "no-store"
         problem = failure.json()
         assert damaged_identity not in failure.text
-        assert "workers" not in problem and "worker_count" not in problem
+        assert "workers" not in problem
+        assert "worker_count" not in problem
     with sessions.begin() as session:
         session.execute(
             update(ControlProcessHeartbeat)
@@ -138,7 +140,6 @@ def test_authenticated_contract_complete_membership_fault_recovery(
     assert repaired_platform.status_code == 200
     # The same failed observation re-captures its complete membership after the
     # exact stored-row repair; a healthy sibling route is not repair evidence.
-    from tests.observation_transfer_peer import observation_document
 
     repaired_observation = PlatformObservation.model_validate_json(
         canonical_message(observation_document(repaired_platform)), strict=True

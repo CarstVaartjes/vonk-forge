@@ -1,27 +1,56 @@
 from __future__ import annotations
 
 import copy
+import importlib.util
 import json
+import runpy
+import subprocess
+import sys
+import time
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from importlib import import_module
 from pathlib import Path
+from typing import Any
 
+import httpx2
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Table, create_engine, select, update
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import Table, create_engine, event, select, update
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+    published_json,
+    read_model_display,
+    read_recipe_display,
+)
+
+import tests
+from tests.recipe_library_source import recipe_library_root
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.catalog.api import _managed_sync
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
 )
 from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.library.api import install_library_routes
-from vonk_control.library.contract import _MAX_PAGE_RECIPES, ModelLibraryResponse
+from vonk_control.library.contract import (
+    _MAX_PAGE_RECIPES,
+    ModelLibraryResponse,
+    RecipeDetailResponse,
+    RecipeLibraryResponse,
+)
+from vonk_control.library_projection import catalog, local_state
+from vonk_control.library_projection import common as library_projection
 from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.model_cache.contract import ModelCacheOperationProgress
 from vonk_control.model_primitives import Base
@@ -34,18 +63,10 @@ from vonk_control.models.catalog import (
 from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.mapping import ClusterMapping
+from vonk_control.operator_acceptance import ControllerAPIRoute
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_control.strict_json import ControllerAPIRoute, serialize_json_value
-from vonk_forge_contracts import (
-    ModelDefinition,
-    RecipeDefinition,
-    document_sha256,
-    published_json,
-    read_model_display,
-    read_recipe_display,
-)
-
-from tests.recipe_library_source import recipe_library_root
+from vonk_control.source_bundles import SourceBundleStore
+from vonk_control.strict_json import serialize_json_value
 
 from .display_fixtures import create_draft, display_of_model, display_of_recipe, reword
 from .runtime_image_fixtures import place_test_image
@@ -84,7 +105,7 @@ def _model_cache_set(
 
 
 def _insert_canonical_rows(
-    sessions: sessionmaker,
+    sessions: sessionmaker[Session],
     *,
     kind: str,
     template: dict[str, object],
@@ -195,7 +216,10 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     engine = create_engine(f"sqlite:///{tmp_path / 'library.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 9, 5, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 9, 5, tzinfo=UTC)
+
     entities = CatalogEntityService(
         sessions, clock=clock, cursors=TokenCodec(b"l" * 32).cursor_codec()
     )
@@ -493,7 +517,6 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     assert detail_payload["document"]["topology"] == serialize_json_value(
         expected_recipe.topology
     )
-    from vonk_control.library.contract import RecipeDetailResponse
 
     consumed_detail = RecipeDetailResponse.model_validate_json(
         json.dumps(detail_payload)
@@ -1121,7 +1144,6 @@ _SMALL_WIRE_BUDGET = 64 * 1024
 
 @pytest.fixture
 def small_wire_budget(monkeypatch: pytest.MonkeyPatch) -> int:
-    from vonk_control.library_projection import common as library_projection
 
     monkeypatch.setattr(
         library_projection, "MAX_CONTROL_DOCUMENT_BYTES", _SMALL_WIRE_BUDGET
@@ -1378,10 +1400,6 @@ def test_detail_and_page_scope_history_and_latest_request_by_time(
     tmp_path, monkeypatch, caplog
 ):
     """Catches catalog/history scans and reverse-UUID recency overriding a request."""
-    from datetime import timedelta
-
-    from sqlalchemy import event
-    from vonk_control.library_projection import catalog, local_state
 
     index = json.loads((ROOT / "catalog-index.json").read_text())
     engine = create_engine(f"sqlite:///{tmp_path / 'scoped-library.sqlite'}")
@@ -1494,20 +1512,21 @@ def test_detail_and_page_scope_history_and_latest_request_by_time(
     assert observed == [digest]
     observed.clear()
     page = projection.models(limit=1, sort="name")
-    assert len(page.models) == 1 and page.models[0].local == detail.local
+    assert len(page.models) == 1
+    assert page.models[0].local == detail.local
     assert observed == []  # parsed catalog index, not another full catalog read
     histories = [
         statement
         for statement, _ in queries
         if "FROM model_cache_operations" in statement
     ]
-    assert histories and all("WHERE" in statement for statement in histories)
+    assert histories
+    assert all("WHERE" in statement for statement in histories)
     assert len(histories) == 2  # One latest-request batch per detail/list read.
     assert "cache progress" not in caplog.text
 
     # Optional SQL observation failure leaves readable catalog content usable.
     def unavailable(*args):
-        from sqlalchemy.exc import OperationalError
 
         raise OperationalError("optional local read", {}, ConnectionError("offline"))
 
@@ -1525,21 +1544,6 @@ def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
         "VONK_SYNTHETIC_CANARY_INDEX",
         "tests/fixtures/canonical-synthetic-canary/index.json",
     )
-    import importlib.util
-    import sys
-    from importlib import import_module
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    from vonk_control.auth import TokenCodec
-    from vonk_control.catalog.api import _managed_sync
-    from vonk_control.catalog.service import CatalogService
-    from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
-    from vonk_control.library_projection.service import LibraryProjection
-    from vonk_control.model_primitives import Base
-    from vonk_control.source_bundles import SourceBundleStore
-
-    import tests
 
     # Keep the Controller test package and its pass clocks while loading the
     # shared acceptance consumer; restore package search paths after this test.
@@ -1551,7 +1555,8 @@ def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
     specification = importlib.util.spec_from_file_location(
         "spark_canary_catalog_import", lifecycle.CANARY_CATALOG_IMPORT
     )
-    assert specification is not None and specification.loader is not None
+    assert specification is not None
+    assert specification.loader is not None
     program = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(program)
     index = json.loads(fixture.index_bytes)
@@ -1562,7 +1567,10 @@ def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 10, 15, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 10, 15, tzinfo=UTC)
+
     reader = program.FixtureReader(index, {digest: archive})
     sync = ManagedRecipeCatalogSyncService(
         sessions,
@@ -1647,20 +1655,21 @@ def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
 
 def test_list_shared_vector_preserves_sweep_inputs_without_executable_documents():
     """The transport must carry pins and selectors without executable documents."""
-    from vonk_control.library.contract import RecipeLibraryResponse
 
     vector = Path(__file__).resolve().parents[2] / "tests/fixtures/library-list.json"
     raw = json.loads(vector.read_text())
     parsed = RecipeLibraryResponse.model_validate_json(vector.read_bytes())
     assert "document" not in raw["recipes"][0]
-    assert parsed.library is not None and parsed.library.commit == "a" * 40
+    assert parsed.library is not None
+    assert parsed.library.commit == "a" * 40
     recipe = parsed.recipes[0]
     assert recipe.selector == "vonk-forge/synthetic-tiny-build"
     assert recipe.model_selectors == [
         f"{reference.publisher}/{reference.slug}"
         for reference in recipe.projected.models
     ]
-    assert recipe.projected.interfaces and recipe.projected.validation.serving.checks
+    assert recipe.projected.interfaces
+    assert recipe.projected.validation.serving.checks
     # The published hardware status crosses the boundary as the contract type.
     assert recipe.qualification is not None
     assert recipe.qualification.status == "Working"
@@ -1678,12 +1687,6 @@ def test_connected_consumers_read_documents_only_from_detail(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Catch API/CLI acceptance readers that still expect documents in lists."""
-    import runpy
-    import subprocess
-    import time
-    from typing import Any
-
-    import httpx2
 
     repository = Path(__file__).resolve().parents[2]
     consumer = runpy.run_path(
@@ -1706,7 +1709,10 @@ def test_connected_consumers_read_documents_only_from_detail(
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime.now(UTC)
+
+    def clock():
+        return datetime.now(UTC)
+
     codec = TokenCodec(b"a" * 32)
     catalog = CatalogEntityService(sessions, clock=clock, cursors=codec.cursor_codec())
     for row in [*index["catalog_entities"], entry]:

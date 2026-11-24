@@ -7,10 +7,14 @@ import json
 import re
 from collections.abc import Mapping
 
-from .contracts import _DIGEST, FixtureError
-from .media import _safe_zip_entries
-from .output_values import _parse_json_object
-from .values import _integer, _object, _string_list_value
+from cluster_profiles.qualification_fixtures.contracts import _DIGEST, FixtureError
+from cluster_profiles.qualification_fixtures.media import _safe_zip_entries
+from cluster_profiles.qualification_fixtures.output_values import _parse_json_object
+from cluster_profiles.qualification_fixtures.values import (
+    _integer,
+    _object,
+    _string_list_value,
+)
 
 
 def _validate_document_archive(content: bytes, assertion: Mapping[str, object]) -> None:

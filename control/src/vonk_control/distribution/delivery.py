@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from sqlalchemy import select, update
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
@@ -22,23 +23,31 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeStartPayload,
 )
 from vonk_agent_protocol.state_machines import DistributionAssignmentState
-
-from ..distribution_assignment import NodeDistributionAssignment
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import (
+from vonk_control.agent_jobs.stored import column_field, column_value
+from vonk_control.agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
+from vonk_control.distribution_assignment import NodeDistributionAssignment
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import (
     AgentOperation,
     AgentOperationAttempt,
     ArtifactDistributionAssignment,
 )
 
 if TYPE_CHECKING:
-    from .service import DistributionService
+    from vonk_control.distribution.service import DistributionService
 
-from .assignments import _may_replace
-from .constants import _AUTHORIZATION_CACHE_ENTRIES, _AUTHORIZATION_TTL_SECONDS
-from .locations import _LOCATION_CACHE_ENTRIES, ObjectLocation, _still_stored
-from .types import (
+from vonk_control.distribution.assignments import _may_replace
+from vonk_control.distribution.constants import (
+    _AUTHORIZATION_CACHE_ENTRIES,
+    _AUTHORIZATION_TTL_SECONDS,
+)
+from vonk_control.distribution.locations import (
+    _LOCATION_CACHE_ENTRIES,
+    ObjectLocation,
+    _still_stored,
+)
+from vonk_control.distribution.types import (
     DistributionError,
     DistributionRefused,
     DistributionUnknown,
@@ -56,8 +65,6 @@ class DeliveryMixin:
         Storage verification happens after releasing the database session.
         """
         service = cast("DistributionService", self)
-        from ..agent_jobs.contracts import _WORKLOAD_INTENT_OPERATIONS
-        from ..agent_jobs.stored import column_field, column_value
 
         if service.sessions is None:
             return

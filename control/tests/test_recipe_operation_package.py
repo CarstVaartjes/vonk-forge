@@ -5,14 +5,19 @@ from __future__ import annotations
 from importlib import import_module
 
 import pytest
+
 from vonk_agent_protocol.gpu_clock import GpuClockRange
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, WaitReason
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
+from vonk_control.gateway.route_runtime import (
+    AtomicRouteBundlePublisher,
+    RouteRuntimeError,
+)
 from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 @pytest.mark.parametrize(
-    "method,once,args,kwargs",
+    ("method", "once", "args", "kwargs"),
     [
         ("check_build_source", "_check_build_source_once", ("revision",), {}),
         ("preview_build", "_preview_build_once", ("revision", "builder"), {}),
@@ -86,7 +91,7 @@ def test_request_reobserves_identical_input_with_a_finite_budget(
 
 
 @pytest.mark.parametrize(
-    "method,once,args,kwargs",
+    ("method", "once", "args", "kwargs"),
     [
         ("check_build_source", "_check_build_source_once", ("revision",), {}),
         ("preview_build", "_preview_build_once", ("revision", "builder"), {}),
@@ -151,7 +156,7 @@ def test_request_does_not_retry_an_authority_refusal(
 
 
 @pytest.mark.parametrize(
-    "authority,plan,evidence",
+    ("authority", "plan", "evidence"),
     [
         ("malformed", "a" * 64, "b" * 64),
         ("AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA", "a" * 64, "b" * 64),
@@ -163,10 +168,6 @@ def test_publication_input_validation_leaves_a_fresh_input_eligible(
 ):
     # The wrong implementation treats caller syntax as stored-state damage,
     # or keeps a busy publication owner after rejecting the input.
-    from vonk_control.gateway.route_runtime import (
-        AtomicRouteBundlePublisher,
-        RouteRuntimeError,
-    )
 
     with pytest.raises(RouteRuntimeError):
         AtomicRouteBundlePublisher._identity(authority, plan, evidence)

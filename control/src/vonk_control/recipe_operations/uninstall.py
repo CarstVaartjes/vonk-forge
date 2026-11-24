@@ -10,8 +10,8 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.reason_codes.recipes import ReconcileCode
 from vonk_agent_protocol.recipe_operations import (
@@ -19,8 +19,8 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeUninstallPayload,
 )
 from vonk_agent_protocol.state_machines import InstallationNodeState, InstallationState
-
-from ..admission_locking import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.admission_locking import (
     AdmissionLockBusy,
     ConstraintReplay,
     acquire_admission_keys,
@@ -30,21 +30,24 @@ from ..admission_locking import (
     is_admission_contention,
     node_admission_key,
 )
-from ..agent_operation_facts import aware
-from ..install_admission.contracts import InstallAdmissionBusy
-from ..jobs.documents import controller_recipe_document
-from ..lifecycle.evidence import Residue
-from ..models.execution import InstallationNode, RecipeInstallation
-from ..persisted_waits import schedule_wait
-from ..run_admission import RunAdmissionBusy
-from ..run_switch_contract.requests import RunSwitchReconciliationAuthority
-from ..strict_json import serialize_json_value
-from .contracts import RecipeInstallationAbandonResult, RecipeInstallationDisposal
-from .errors import RecipeRequestInvalid
-from .interfaces import RecipeOperationView
+from vonk_control.agent_operation_facts import aware
+from vonk_control.install_admission.contracts import InstallAdmissionBusy
+from vonk_control.jobs.documents import controller_recipe_document
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.execution import InstallationNode, RecipeInstallation
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recipe_operations.contracts import (
+    RecipeInstallationAbandonResult,
+    RecipeInstallationDisposal,
+)
+from vonk_control.recipe_operations.errors import RecipeRequestInvalid
+from vonk_control.recipe_operations.interfaces import RecipeOperationView
+from vonk_control.run_admission import RunAdmissionBusy
+from vonk_control.run_switch_contract.requests import RunSwitchReconciliationAuthority
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class UninstallMixin:

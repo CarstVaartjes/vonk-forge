@@ -7,18 +7,17 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationWire
 from vonk_agent_protocol.state_machines import RouteState, RunState
-
+from vonk_control.agent_api.common import _LOGGER
 from vonk_control.enrollment.responses import _now
-
-from ..logging import log_event
-from ..models.execution import RecipeRun, RunNode
-from ..owner_liveness import run_has_live_operation
-from ..persisted_waits import schedule_wait
-from ..recipe_operations.stop_payloads import durable_run_stop_payloads
-from ..run_states import ENDED_RUN_STATES
-from .common import _LOGGER
+from vonk_control.logging import log_event
+from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.owner_liveness import run_has_live_operation
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recipe_operations.stop_payloads import durable_run_stop_payloads
+from vonk_control.run_states import ENDED_RUN_STATES
 
 
 def reopen_ended_runs_still_running(
@@ -114,7 +113,6 @@ def _stoppable(session: Session, run: RecipeRun) -> bool:
             tuple(session.scalars(select(RunNode).where(RunNode.run_id == run.id))),
             run_generation=run.run_generation,
             cancel_pending_start=True,
-            allow_missing_nodes=False,
         )
     except ValueError:
         # No exact authority, or stored rows that do not parse: either way no

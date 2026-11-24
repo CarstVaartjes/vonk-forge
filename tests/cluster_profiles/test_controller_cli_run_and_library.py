@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from importlib.resources import files
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from controller_cli_support import (
@@ -64,7 +64,8 @@ def test_fleet_progress_never_reports_another_job(follow: bool) -> None:
 
     status, payload = run(tuple(arguments), client)
 
-    assert status == 0 and payload == repaired
+    assert status == 0
+    assert payload == repaired
     assert [call[1] for call in client.calls] == [path] * (3 if follow else 2)
 
 
@@ -371,7 +372,8 @@ def test_run_reviews_and_waits_before_reporting_endpoint(
             raise AssertionError((method, path, payload))
 
         def profile_endpoints(self, number, alias=None):
-            assert number == 1 and alias is None
+            assert number == 1
+            assert alias is None
             return FleetProfileEndpointsView.from_dict(
                 {
                     "assignments": [],
@@ -557,7 +559,8 @@ def test_run_lost_load_response_reports_the_submission_to_reconnect_to(
         control_client=client,
         request_id_factory=lambda: _RUN_KEY,
     )
-    assert status == 0 and fresh["application"]["request_key"] == _RUN_KEY
+    assert status == 0
+    assert fresh["application"]["request_key"] == _RUN_KEY
 
 
 @pytest.mark.parametrize("flags", [(), ("--no-input",), ("--json",)])
@@ -574,10 +577,10 @@ def test_run_that_cannot_be_confirmed_saves_nothing(flags) -> None:
     assert _effects(client) == []
 
 
-def _bodies(client: FakeClient, method: str, path: str) -> list[dict]:
+def _bodies(client: FakeClient, method: str, path: str) -> list[dict[str, Any]]:
     """The request bodies sent to one route, in order."""
     return [
-        cast(dict, call[2])
+        cast(dict[str, Any], call[2])
         for call in client.calls
         if call[0] == method and call[1] == path
     ]
@@ -646,7 +649,7 @@ def test_run_rebuilds_on_the_newest_profile_when_the_save_conflicts(
 ) -> None:
     base = _run_responses()
     older = base[("GET", "/api/profile/1/definition")]
-    older = cast(dict, older)
+    older = cast(dict[str, Any], older)
     newest = {
         **older,
         "revision": 5,
@@ -702,7 +705,7 @@ def test_run_converges_when_the_profile_already_holds_the_assignment(
         base
         | {
             ("GET", "/api/profile/1/definition"): {
-                **cast(dict, base[("GET", "/api/profile/1/definition")]),
+                **cast(dict[str, Any], base[("GET", "/api/profile/1/definition")]),
                 "revision": 1,
                 "definition": held,
             }
@@ -777,12 +780,12 @@ _RUN_OPTIONS = [
 _ATLAS_ID = "spk_" + "a" * 32
 
 
-def _option_run(definitions: list[dict]) -> FakeClient:
+def _option_run(definitions: list[dict[str, Any]]) -> FakeClient:
     """A run whose recipe declares options and whose first save hits a race."""
     base = _run_responses()
-    detail = cast(dict, base[("GET", "/api/recipe/vonk-forge%2Fqwen-code")])
+    detail = cast(dict[str, Any], base[("GET", "/api/recipe/vonk-forge%2Fqwen-code")])
     detail["projected"]["options"] = _RUN_OPTIONS
-    view = cast(dict, base[("GET", "/api/profile/1/definition")])
+    view = cast(dict[str, Any], base[("GET", "/api/profile/1/definition")])
     return FakeClient(
         base
         | {
@@ -800,7 +803,7 @@ def _option_run(definitions: list[dict]) -> FakeClient:
     )
 
 
-def _empty_definition() -> dict:
+def _empty_definition() -> dict[str, Any]:
     return {
         "name": "Default",
         "description": "",
@@ -811,7 +814,7 @@ def _empty_definition() -> dict:
     }
 
 
-def _assignment(choices: dict[str, str]) -> dict:
+def _assignment(choices: dict[str, str]) -> dict[str, Any]:
     return {
         "recipe_selector": "vonk-forge/qwen-code",
         "spark_ids": [_ATLAS_ID],
@@ -820,7 +823,7 @@ def _assignment(choices: dict[str, str]) -> dict:
     }
 
 
-def _saved_choices(client: FakeClient) -> list[dict]:
+def _saved_choices(client: FakeClient) -> list[dict[str, Any]]:
     return [
         put["assignments"][0]["option_choices"]
         for put in _bodies(client, "PUT", "/api/profile/1")

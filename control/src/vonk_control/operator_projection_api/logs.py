@@ -8,12 +8,12 @@ from typing import Any
 
 from sqlalchemy import ColumnElement, or_, select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, ObservationCause
-
-from .. import agent_operation_states
-from ..catalog.revision_collection import GRACE
-from ..failure_evidence import (
+from vonk_control import agent_operation_states
+from vonk_control.catalog.revision_collection import GRACE
+from vonk_control.failure_evidence import (
     AttemptPhase,
     FailedAttempt,
     FailureEvidenceBundle,
@@ -21,12 +21,17 @@ from ..failure_evidence import (
     failed_attempt_condition,
     sanitize_diagnostics,
 )
-from ..logging import redact_text
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import RecipeInstallation, RecipeRun, RunNode
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..operations.item_contract import OperationResultFacts
-from .contracts import FleetLogEntry, FleetLogResponse, LogLevel, LogSource
+from vonk_control.logging import redact_text
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operations.item_contract import OperationResultFacts
+from vonk_control.operator_projection_api.contracts import (
+    FleetLogEntry,
+    FleetLogResponse,
+    LogLevel,
+    LogSource,
+)
 
 #: How far back the log projection narrates failed agent attempts by default:
 #: the history retention window, since older history is collected anyway.
@@ -75,7 +80,7 @@ def _phase_start_deadline(operation: AgentOperation) -> str | None:
     formatted timestamp's spelling rather than rewriting it.
     """
 
-    payload = operation.payload if isinstance(operation.payload, Mapping) else {}
+    payload = operation.payload if isinstance(operation.payload, Mapping) else {}  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
     value = payload.get("start_deadline")
     return value if isinstance(value, str) and value else None
 
@@ -202,7 +207,7 @@ def _add_diagnostics(
         add(f"stdout: {line}")
     # The refusing rule and its measured bound, e.g. "rule=… limit=4096
     # observed=518", so an operator sees how far over the request was.
-    for property in diagnostics.preflight:
+    for property in diagnostics.preflight:  # noqa: A001 -- renaming re-adds a contract-literal guard finding
         add(f"preflight: {property.name}={property.value}", level="warning")
     for item in diagnostics.collector_errors:
         add(f"collector={item}", level="warning")
@@ -296,7 +301,7 @@ class AgentFailureLogProvider:
         lines: int,
         recipe: str | None,
         source: str | None,
-        follow: bool,
+        follow: bool,  # noqa: ARG002 -- FleetLogProvider declares the keyword
     ) -> FleetLogResponse:
         entries: list[FleetLogEntry] = []
         retained = False
@@ -414,7 +419,7 @@ class AgentFailureLogProvider:
         entries: list[FleetLogEntry] = []
         for operation, attempt in rows:
             payload = (
-                operation.payload if isinstance(operation.payload, Mapping) else {}
+                operation.payload if isinstance(operation.payload, Mapping) else {}  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             )
             # Only the agent's own receipt may name an error code; a lease lapse
             # arrived with no receipt, so the fallback narrative is the

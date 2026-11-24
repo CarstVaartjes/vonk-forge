@@ -8,34 +8,37 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
+
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
-from vonk_agent_protocol.wire_model import OperationMemberProgress, OperationProgress
-
-from vonk_control.lifecycle.evidence import Residue
-
-from ..failure_classification import is_definite, is_redownload
-from ..jobs import states as job_states
-from ..jobs.documents import AvailabilityJobResult, AvailabilityUnknownEnd
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..lifecycle.image_availability import preparation_deadline
-from ..lifecycle.types import State
-from ..model_cache.errors import ModelCacheError
-from ..models.jobs import Job
-from ..operations.blockers import make_blocker
-from ..operations.contract import (
+from vonk_agent_protocol.wire_model import (
+    OperationMemberProgress,
+    OperationProgress,
+    canonical_message,
+)
+from vonk_control.failure_classification import is_definite, is_redownload
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import AvailabilityJobResult, AvailabilityUnknownEnd
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
+)
+from vonk_control.lifecycle.image_availability import preparation_deadline
+from vonk_control.lifecycle.types import State
+from vonk_control.model_cache.errors import ModelCacheError
+from vonk_control.models.jobs import Job
+from vonk_control.operations.blockers import make_blocker
+from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     sanitize_failure_evidence,
 )
-from ..operations.progress import aggregate_progress
-from ..persisted_waits import read_wait, schedule_wait
-from ..stored.json_values import read_row_column
-from ..strict_json import serialize_json_value
-from .contracts import (
+from vonk_control.operations.progress import aggregate_progress
+from vonk_control.persisted_waits import read_wait, schedule_wait
+from vonk_control.recipe_image_availability.contracts import (
     _INTEGRITY_FAILURE_CODES,
     _LOGGER,
     OPERATION_KIND,
@@ -50,15 +53,20 @@ from .contracts import (
     _retry_after,
     availability_disposition,
 )
-from .reader_contract import (
+from vonk_control.recipe_image_availability.reader_contract import (
     StoredAvailabilityIdentity,
 )
-from .view_contract import (
+from vonk_control.recipe_image_availability.scheduling import _expire_preparation
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeImageAvailabilityView,
 )
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
 
 
 def note_waiting_for_worker(self: RecipeImageAvailabilityService, busy: int) -> None:
@@ -149,8 +157,6 @@ def _fail(
             operation.created_at, payload.progress_advanced_at
         )
         if now >= deadline and operation.current_attempt > 0:
-            from .scheduling import _expire_preparation
-
             _expire_preparation(self, session, operation, payload, now)
             return
         # A preparation that stopped progressing ends at its stall deadline
@@ -206,7 +212,7 @@ def _fail(
                     "code": str(code)[:64],
                     "detail": str(detail)[:512],
                     "recovery_actions": list(getattr(error, "recovery_actions", ()))
-                    or _recovery_actions(str(code), retryable),
+                    or _recovery_actions(str(code), retryable=retryable),
                     "retryable": retryable,
                     "retry_time": preserved_retry_time
                     if isinstance(preserved_retry_time, str)
@@ -347,11 +353,8 @@ def _view(
     state = operation.state
     residue = observation_residue
     if (
-        state == "succeeded"
-        and (result is None or failure is not None)
-        or state == "failed"
-        and failure is None
-    ):
+        state == LifecycleState.SUCCEEDED and (result is None or failure is not None)
+    ) or (state == LifecycleState.FAILED and failure is None):
         # Missing terminal evidence is typed unknown, not confirmed success
         # or an assertion that this terminal row is executing again.
         residue = retire_as_unknown(

@@ -8,16 +8,14 @@ from typing import (
     TypeGuard,
 )
 
-from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_forge_contracts import read_recipe
 from vonk_forge_contracts.recipe import RecipeDefinition
 
-from ..cluster_mappings import (
-    ClusterMappingPlacement,
-)
-from ..recipe_operations.interfaces import RecipeOperationView
-from ..run_switch_contract.requests import SparkGroupNode
-from .errors import RunSwitchRetryLater
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_control.cluster_mappings import ClusterMappingPlacement
+from vonk_control.recipe_operations.interfaces import RecipeOperationView
+from vonk_control.run_switch_contract.requests import SparkGroupNode
+from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
 
 
 def _stated_bytes(value: object) -> int | None:
@@ -124,7 +122,6 @@ def _started_operation_id(value: object) -> str:
 
 
 def _mapping_node(node: SparkGroupNode) -> ClusterMappingPlacement:
-    from ..cluster_mappings import ClusterMappingPlacement
 
     return ClusterMappingPlacement(
         node_id=node.node_id,

@@ -13,6 +13,10 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import document_sha256, read_recipe_display
+
+from tests.recipe_library_source import recipe_library_root
+from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_sequence
 from vonk_control.catalog.service import CatalogService
@@ -30,10 +34,6 @@ from vonk_control.models.catalog import (
 )
 from vonk_control.recipe_packages.client import load_recipe_package
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import document_sha256, read_recipe_display
-
-from tests.recipe_library_source import recipe_library_root
-from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
 from .display_fixtures import reword
 
@@ -53,7 +53,8 @@ def _publisher_fixture() -> tuple[Path, Path, dict[str, object]]:
         and row["document"].get("kind") == "model"
         for row in entities
     )
-    assert isinstance(recipes, list) and recipes
+    assert isinstance(recipes, list)
+    assert recipes
     fixture = root / "packages"
     assert (root / recipes[0]["package"]["path"]).is_file()
     return fixture, index_path, descriptor
@@ -322,7 +323,8 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
         model_reference_count = session.scalar(
             select(func.count()).select_from(CatalogRecipeModelReference)
         )
-        assert model_reference_count is not None and model_reference_count > 0
+        assert model_reference_count is not None
+        assert model_reference_count > 0
 
     changed_index = copy.deepcopy(original_index)
     changed_row = require_sequence(changed_index["recipes"], "catalog index recipes")[0]

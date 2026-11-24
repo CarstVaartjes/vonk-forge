@@ -8,8 +8,8 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -21,34 +21,43 @@ from vonk_agent_protocol.state_machines import (
     ReservationState,
     RunState,
 )
-
-from .. import agent_operation_states
-from ..agent_operation_facts import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.contracts import OperatorRetirementRefused
+from vonk_control.agent_jobs.retry import _retry_authorized_for_current_attempt
+from vonk_control.agent_jobs.scope import _lock_target_scopes, _target_scope
+from vonk_control.agent_jobs.stored import (
+    column_field,
+    column_is_document,
+    column_value,
+)
+from vonk_control.agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
+from vonk_control.agent_operation_facts import (
     attempt_holds_open_launch_budget as _attempt_holds_open_launch_budget,
 )
-from ..agent_operation_facts import aware as _aware
-from ..categorized_errors import InvalidValue, MissingRecord
-from ..installation_transitions import end_unfinished_installation
-from ..jobs import states as job_states
-from ..lifecycle.agent_operation import (
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.categorized_errors import InvalidValue, MissingRecord
+from vonk_control.installation_transitions import end_unfinished_installation
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.agent_operation import (
     AgentOperationAdapter,
     set_parent_state,
 )
-from ..lifecycle.evidence import Residue
-from ..lifecycle.types import CancelRequested, OperatorAction, Reported
-from ..models.execution import RecipeInstallation, RecipeRun, ResourceReservation
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..persisted_waits import schedule_wait
-from ..recipe_operations.lifecycle_contract import (
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.types import CancelRequested, OperatorAction, Reported
+from vonk_control.models.execution import (
+    RecipeInstallation,
+    RecipeRun,
+    ResourceReservation,
+)
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationCancellationResult,
 )
-from .contracts import _WORKLOAD_INTENT_OPERATIONS, OperatorRetirementRefused
-from .retry import _retry_authorized_for_current_attempt
-from .scope import _target_scope
-from .stored import column_field, column_is_document, column_value
 
 
 def release_owned_reservations_in_session(
@@ -68,7 +77,7 @@ def release_owned_reservations_in_session(
 
 
 def operator_resume_candidates_in_session(
-    session: Session, job_id: str, now: datetime
+    session: Session, job_id: str, _now: datetime
 ) -> tuple[StoredOperation, ...]:
     """Return the parked children whose current Job owner still has intent.
 
@@ -245,9 +254,7 @@ def retire_exhausted_operations_in_session(
     if job is None:
         raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
     scope = _target_scope(column_value(job, "targets"))
-    from .service import AgentJobService
-
-    if not scope or not AgentJobService._lock_target_scopes(
+    if not scope or not _lock_target_scopes(
         session, {"retire": (job_id, scope)}, scope[0]
     ):
         raise OperatorRetirementRefused(job_id, "its target scope changed")
@@ -372,7 +379,7 @@ def retire_exhausted_operations_in_session(
                 ),
                 strict=True,
             ).model_dump(mode="json", exclude_none=True)
-    _release_retired_owner_in_session(session, job, job_reason, now)
+    _release_retired_owner_in_session(session, job, now)
     if isinstance(column_value(job, "result"), RecipeOperationCancellationResult):
         schedule_wait(
             job,
@@ -385,7 +392,7 @@ def retire_exhausted_operations_in_session(
 
 
 def _release_retired_owner_in_session(
-    session: Session, job: Job, reason: str, now: datetime
+    session: Session, job: Job, now: datetime
 ) -> None:
     """Retain uncertain effects for the normal exact cleanup lifecycle.
 

@@ -2,19 +2,29 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Callable
+from concurrent.futures import Executor, Future
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-import vonk_control.catalog.entities as catalog_entities_module
-import vonk_control.catalog.service as catalog_service_module
-import vonk_control.catalog.sync as catalog_sync_module
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import (
+    RecipeDefinition,
+    document_sha256,
+)
+
+import vonk_control.catalog.entities as catalog_entities_module
+import vonk_control.catalog.revision_contract as catalog_revision_contract_module
+import vonk_control.catalog.service as catalog_service_module
+import vonk_control.catalog.sync as catalog_sync_module
+from tests.recipe_library_source import recipe_library_root
+from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog.api import ManagedCatalogSyncResponse, _managed_sync
 from vonk_control.catalog.queries import active_head_revision
@@ -23,6 +33,7 @@ from vonk_control.catalog.revision_contract import (
 )
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import (
+    AutomaticCatalogSync,
     ManagedRecipeCatalogSyncService,
     _empty_result,
 )
@@ -50,13 +61,6 @@ from vonk_control.source_bundles import (
     generate_source_bundle,
     parse_source_bundle,
 )
-from vonk_forge_contracts import (
-    RecipeDefinition,
-    document_sha256,
-)
-
-from tests.recipe_library_source import recipe_library_root
-from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
 from .display_fixtures import reword
 
@@ -130,7 +134,7 @@ def _item_with_document(
 
 def _fixture(
     tmp_path: Path, *, engine: Engine | None = None
-) -> tuple[sessionmaker, CatalogService, Reader, RecipeLibraryItem]:
+) -> tuple[sessionmaker[Session], CatalogService, Reader, RecipeLibraryItem]:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     index["recipes"] = index["recipes"][:1]
     client = SignedRecipeRelease.from_library(index, ROOT).client(tmp_path / "packages")
@@ -325,9 +329,8 @@ def test_unchanged_catalog_refreshes_build_policy_without_refetching_recipe(
 
     # Persist the previous compiler output through the real import path.
     with monkeypatch.context() as previous:
-        previous.setattr(
-            catalog_entities_module, "build_policy_projection", previous_policy
-        )
+        for consumer in (catalog_entities_module, catalog_revision_contract_module):
+            previous.setattr(consumer, "build_policy_projection", previous_policy)
         first = sync.automatic()
     builds = RecipeBuildService(
         sessions, bundles=SourceBundleStore(tmp_path / "bundles")
@@ -477,6 +480,7 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
                 CatalogDocumentHead.slug == original.slug,
             )
         )
+        assert head is not None
         assert head.active_revision_id == first.identity.recipe_revision_id
         assert head.candidate_revision_id is None
         assert head.generation == 3
@@ -499,9 +503,9 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
             second.recipe_revision_id,
         }
         assert {row.id for row in revisions if row.state == "failed"} == {pending.id}
-        assert read_catalog_projection(
-            session.get(CatalogDocumentRevision, pending.id)
-        ).failure_reason == (
+        pending_row = session.get(CatalogDocumentRevision, pending.id)
+        assert pending_row is not None
+        assert read_catalog_projection(pending_row).failure_reason == (
             f"Superseded by imported recipe {original.content_sha256}."
         )
 
@@ -510,7 +514,9 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
     assert repeated.unchanged_count == 1
     assert repeated.updated_count == 0
     with sessions() as session:
-        assert session.get(CatalogDocumentHead, head.id).generation == 3
+        repeated_head = session.get(CatalogDocumentHead, head.id)
+        assert repeated_head is not None
+        assert repeated_head.generation == 3
 
 
 def test_sync_keys_local_revisions_by_publisher_and_slug(tmp_path: Path) -> None:
@@ -650,7 +656,8 @@ def test_sync_keeps_unresolvable_candidate_out_and_admits_next_verified_import(
             actor="test",
         )
     )
-    assert recovered.completed_at is not None and recovered.imported_count == 1
+    assert recovered.completed_at is not None
+    assert recovered.imported_count == 1
     assert (
         service.recipe_catalog_local_revisions([(item.publisher, item.slug)])[
             (item.publisher, item.slug)
@@ -725,9 +732,6 @@ def test_worker_sync_runs_when_due_and_leaves_a_live_import_alone(
     tmp_path: Path,
 ) -> None:
     """Catches an early re-read, or a second read beside a live request-led import."""
-    from vonk_control.catalog.sync import AutomaticCatalogSync
-
-    from .test_catalog_sync_retry import Inline
 
     sessions, service, reader, _item_value = _fixture(tmp_path)
     now = [datetime(2026, 9, 5, tzinfo=UTC)]
@@ -736,7 +740,8 @@ def test_worker_sync_runs_when_due_and_leaves_a_live_import_alone(
     )
     sync.advance_automatic(60)
     latest = sync.latest()
-    assert latest is not None and latest.wait is not None
+    assert latest is not None
+    assert latest.wait is not None
     reads: list[str] = []
     listed = reader.list
 
@@ -759,6 +764,7 @@ def test_worker_sync_runs_when_due_and_leaves_a_live_import_alone(
     )
     with sessions.begin() as session:
         run = session.get(RecipeLibrarySyncRun, latest.id)
+        assert run is not None
         run.state, run.active_slot = "running", "managed-recipes"
         run.completed_at, run.heartbeat_at = None, now[0]
     assert cadence.tick() is False  # a live import holds the slot
@@ -766,13 +772,16 @@ def test_worker_sync_runs_when_due_and_leaves_a_live_import_alone(
 
     with sessions.begin() as session:
         run = session.get(RecipeLibrarySyncRun, latest.id)
+        assert run is not None
         run.heartbeat_at = now[0] - SYNC_HEARTBEAT_WINDOW - timedelta(seconds=1)
     # A dead claim no longer holds the slot: the worker observes the library
     # and the stale run is replaced.
     assert cadence.tick() is True
     assert reads
     with sessions() as session:
-        assert session.get(RecipeLibrarySyncRun, latest.id).state != "running"
+        replaced = session.get(RecipeLibrarySyncRun, latest.id)
+        assert replaced is not None
+        assert replaced.state != "running"
 
 
 def test_a_display_note_leaves_the_sync_current_and_the_next_tick_reuses_it(
@@ -816,10 +825,12 @@ def test_the_newer_major_note_reaches_the_stored_sync_and_clears_with_the_listin
     cleared = sync.automatic()
 
     assert before.problems == ()
-    assert noted.id != before.id and noted.state == "current"
+    assert noted.id != before.id
+    assert noted.state == "current"
     assert [problem.detail for problem in noted.problems] == [note.detail]
     assert repeated.id == noted.id
-    assert cleared.id != noted.id and cleared.problems == ()
+    assert cleared.id != noted.id
+    assert cleared.problems == ()
 
 
 def test_automatic_sync_retries_partial_same_commit_without_refetching_successes(
@@ -964,7 +975,8 @@ def test_catalog_review_binds_content_and_accepts_identical_republication(
                 RecipeLibrarySyncRun.request_key == request_key
             )
         ).all()
-        assert len(rows) == 1 and rows[0].id == result.id
+        assert len(rows) == 1
+        assert rows[0].id == result.id
         assert rows[0].active_slot is None
     fresh = sync.sync(
         ManagedCatalogSyncRequest(
@@ -974,7 +986,8 @@ def test_catalog_review_binds_content_and_accepts_identical_republication(
             reviewed_content_sha256=reviewed_catalog_content(reviewed),
         )
     )
-    assert fresh.completed_at is not None and fresh.unchanged_count == 1
+    assert fresh.completed_at is not None
+    assert fresh.unchanged_count == 1
 
 
 def test_sync_marks_reader_failure_failed_and_releases_active_slot(
@@ -1022,7 +1035,8 @@ def test_sync_marks_reader_failure_failed_and_releases_active_slot(
             actor="test",
         )
     )
-    assert fresh.id != latest.id and fresh.completed_at is not None
+    assert fresh.id != latest.id
+    assert fresh.completed_at is not None
 
 
 @pytest.mark.parametrize(
@@ -1042,7 +1056,8 @@ def test_sync_heals_an_unreadable_stored_result_by_resync(tmp_path, damage):
     assert sync.get(result.id) == result
     with sessions.begin() as session:
         row = session.get(RecipeLibrarySyncRun, result.id)
-        damaged = dict(row.result)
+        assert row is not None
+        damaged: dict[str, object] | None = dict(row.result)
         if damage == "missing-problems":
             del damaged["problems"]
         elif damage == "string-count":
@@ -1053,7 +1068,9 @@ def test_sync_heals_an_unreadable_stored_result_by_resync(tmp_path, damage):
             damaged["problems"] = [{"detail": "missing code"}]
         else:
             damaged["undeclared"] = None
-        row.result = damaged
+        # The stored record is deliberately damaged (null included): reading
+        # must treat it as unknown, never fail.
+        row.result = damaged  # pyright: ignore[reportAttributeAccessIssue]
     # Reading never fails: the record is unknown, so it reads as partial.
     assert sync.get(result.id).state == "partial"
     # The next automatic sync does not trust it, re-syncs and overwrites it.
@@ -1081,6 +1098,7 @@ def test_old_and_new_stored_results_both_read(tmp_path):
     ):
         with sessions.begin() as session:
             row = session.get(RecipeLibrarySyncRun, result.id)
+            assert row is not None
             stored = dict(row.result)
             stored["withdrawn_count"] = len(withdrawn)
             stored["withdrawn_recipes"] = withdrawn
@@ -1245,7 +1263,8 @@ def test_sync_reports_skipped_index_documents_as_partial(tmp_path: Path) -> None
             actor="test",
         )
     )
-    assert fresh.unchanged_count == 1 and fresh.completed_at is not None
+    assert fresh.unchanged_count == 1
+    assert fresh.completed_at is not None
     assert result.processed_count == result.total_count
 
 
@@ -1357,14 +1376,17 @@ def test_stale_running_sync_never_blocks_a_new_sync(tmp_path: Path) -> None:
         assert sync.get(live).id == live
     with sessions() as session:
         row = session.get(RecipeLibrarySyncRun, live)
-        assert row is not None and row.active_slot is not None
+        assert row is not None
+        assert row.active_slot is not None
     # The owner deadline, rather than manual deletion, releases the old slot.
     sync._clock = lambda: now + timedelta(hours=1)
     recovered = sync.automatic()
-    assert recovered.completed_at is not None and recovered.imported_count == 1
+    assert recovered.completed_at is not None
+    assert recovered.imported_count == 1
     with sessions() as session:
         row = session.get(RecipeLibrarySyncRun, live)
-        assert row is not None and row.completed_at is not None
+        assert row is not None
+        assert row.completed_at is not None
         assert row.active_slot is None
     fresh = sync.sync(
         ManagedCatalogSyncRequest(
@@ -1373,7 +1395,8 @@ def test_stale_running_sync_never_blocks_a_new_sync(tmp_path: Path) -> None:
             actor="test",
         )
     )
-    assert fresh.completed_at is not None and fresh.unchanged_count == 1
+    assert fresh.completed_at is not None
+    assert fresh.unchanged_count == 1
 
 
 @pytest.mark.parametrize("package_present", [False, True])
@@ -1398,7 +1421,8 @@ def test_sync_reimports_a_republished_package_with_an_unchanged_recipe_document(
         )
     )
     assert first.state == "current"
-    assert item.package_handle is not None and item.source_bundle is not None
+    assert item.package_handle is not None
+    assert item.source_bundle is not None
     with sessions() as session:
         revision = session.scalar(
             select(CatalogDocumentRevision).where(
@@ -1549,6 +1573,7 @@ def test_automatic_sync_repairs_exact_local_content_at_the_same_commit(tmp_path,
                 CatalogDocumentRevision.kind == kind, active_head_revision()
             )
         )
+        assert revision is not None
         exact_id = revision.id
         exact_digest = revision.content_digest
     with sessions.begin() as session:
@@ -1558,14 +1583,16 @@ def test_automatic_sync_repairs_exact_local_content_at_the_same_commit(tmp_path,
             .values(document={"broken": True})
         )
     restored = sync.automatic()
-    assert restored.completed_at is not None and restored.commit == accepted.commit
+    assert restored.completed_at is not None
+    assert restored.commit == accepted.commit
     with sessions() as session:
         selected = session.scalar(
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.id == exact_id, active_head_revision()
             )
         )
-        assert selected is not None and selected.content_digest == exact_digest
+        assert selected is not None
+        assert selected.content_digest == exact_digest
         assert read_catalog_projection(selected) is not None
     projection = LibraryProjection(
         sessions, cursors=TokenCodec(b"s" * 32).cursor_codec()
@@ -1585,7 +1612,8 @@ def test_automatic_sync_repairs_exact_local_content_at_the_same_commit(tmp_path,
             reviewed_content_sha256=reviewed_catalog_content(reader.snapshot),
         )
     )
-    assert fresh.completed_at is not None and fresh.unchanged_count == 1
+    assert fresh.completed_at is not None
+    assert fresh.unchanged_count == 1
     reader.snapshot = replace(
         reader.snapshot, commit="b" * 40, repository="authorized-republication"
     )
@@ -1619,7 +1647,8 @@ def test_exact_replay_keeps_request_binding_when_progress_is_damaged(tmp_path):
             reviewed_content_sha256=reviewed_catalog_content(reader.snapshot),
         )
     )
-    assert replay.id == accepted.id and replay.request_key == key
+    assert replay.id == accepted.id
+    assert replay.request_key == key
     assert replay.completed_at is not None
     with sessions() as session:
         assert (
@@ -1638,7 +1667,8 @@ def test_exact_replay_keeps_request_binding_when_progress_is_damaged(tmp_path):
             reviewed_content_sha256=reviewed_catalog_content(reader.snapshot),
         )
     )
-    assert fresh.completed_at is not None and fresh.unchanged_count == 1
+    assert fresh.completed_at is not None
+    assert fresh.unchanged_count == 1
 
 
 def test_sync_retracts_every_document_kind_absent_from_the_published_library(
@@ -1736,3 +1766,14 @@ def test_sync_retracts_every_document_kind_absent_from_the_published_library(
     assert "dropped-upstream-model" not in {
         model.identity.slug for model in library.models(limit=100).models
     }
+
+
+class Inline(Executor):
+    """Run the sync in the calling thread: the next tick collects its outcome."""
+
+    def submit[**P, T](
+        self, fn: Callable[P, T], /, *args: P.args, **kwargs: P.kwargs
+    ) -> Future[T]:
+        done: Future[T] = Future()
+        done.set_result(fn(*args, **kwargs))
+        return done

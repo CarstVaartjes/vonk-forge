@@ -9,15 +9,15 @@ import pytest
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.engine import Connection, Engine, ExecutionContext
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import document_sha256
+
+from tests.recipe_library_source import recipe_library_root
+from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import document_sha256
-
-from tests.recipe_library_source import recipe_library_root
-from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
 from .display_fixtures import reword
 
@@ -63,7 +63,8 @@ def test_import_persists_canonical_model_recipe_and_package_identity(
         source_bundle_sha256=item.source_bundle_sha256,
     )
     assert view.schema_version == 2
-    assert view.recipe_id and view.id
+    assert view.recipe_id
+    assert view.id
     with service._sessions() as session:
         recipe = service.get_recipe(view.recipe_id)
         assert recipe.content_sha256 == item.content_sha256
@@ -129,9 +130,9 @@ def test_import_binds_captured_published_documents_before_sql(
     finally:
         event.remove(engine, "before_cursor_execute", mutate_caller)
         client.close()
-    assert (
-        mutated and recipe != captured_recipe and dependencies != captured_dependencies
-    )
+    assert mutated
+    assert recipe != captured_recipe
+    assert dependencies != captured_dependencies
     actual = service.get_recipe(imported.recipe_id)
     assert actual.document == captured_recipe
     assert actual.content_sha256 == expected_digest
@@ -160,7 +161,8 @@ def test_import_rejects_malformed_batch_before_any_revision_is_written(
     malformed = copy.deepcopy(dependencies[0])
     malformed["identity"] = ["not-a-canonical-identity"]
     try:
-        with pytest.raises(Exception) as _ending:
+
+        def expected_failure():
             if damage == "model":
                 service.import_catalog_models("test", [*dependencies, malformed])
             else:
@@ -177,6 +179,9 @@ def test_import_rejects_malformed_batch_before_any_revision_is_written(
                     expected_content_sha256=digest,
                     dependency_documents=dependencies,
                 )
+
+        with pytest.raises(Exception) as _ending:
+            expected_failure()
         with service._sessions() as session:
             assert session.scalars(select(CatalogDocumentRevision)).all() == []
     finally:

@@ -13,12 +13,10 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import (
-    AgentOperation,
-    AgentResult,
-    AgentResultPayload,
-)
+from vonk_agent_protocol.contracts import AgentResult, AgentResultPayload
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     FailureCode,
@@ -403,7 +401,7 @@ def test_a_legacy_body_that_is_no_valid_failure_is_refused() -> None:
         agent_outcome("recipe.stop", "failed", {"unexpected": True})
 
 
-@pytest.mark.parametrize("refusals", (1, 3))
+@pytest.mark.parametrize("refusals", [1, 3])
 def test_typed_success_receipt_retries_bounded_admission_refusal(
     monkeypatch: pytest.MonkeyPatch, refusals: int
 ) -> None:

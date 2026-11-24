@@ -266,7 +266,9 @@ def _image_bytes(blob: bytes, view: tuple[int, int], mime_type: str) -> None:
     )
     if valid and mime_type in {"image/jpeg", "image/webp"}:
         try:
-            from PIL import Image
+            from PIL import (  # noqa: PLC0415 -- AST twin of the recipe library's adapter; Pillow is optional where it runs
+                Image,
+            )
 
             with Image.open(BytesIO(value)) as image:
                 image.verify()

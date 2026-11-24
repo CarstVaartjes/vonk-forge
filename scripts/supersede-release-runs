@@ -23,6 +23,7 @@ import argparse
 import json
 import subprocess
 import sys
+from typing import TypedDict
 
 WORKFLOW = "installer-publication.yml"
 MAIN_EVENTS = ("push", "workflow_dispatch")
@@ -42,7 +43,18 @@ def gh(*args: str) -> str:
     ).stdout
 
 
-def in_flight_main_runs(repository: str) -> list[dict]:
+class WorkflowRun(TypedDict):
+    """The fields of a GitHub Actions workflow run this script reads."""
+
+    id: int
+    run_number: int
+    status: str
+    event: str
+    head_branch: str
+    head_sha: str
+
+
+def in_flight_main_runs(repository: str) -> list[WorkflowRun]:
     runs = json.loads(
         gh(
             f"/repos/{repository}/actions/workflows/{WORKFLOW}/runs?branch=main&per_page=50"
@@ -72,7 +84,7 @@ def committed(repository: str, run_id: int) -> bool:
     return any(name in COMMITTED_JOBS for name in names)
 
 
-def obsolete_runs(repository: str, run_number: int, sha: str) -> list[dict]:
+def obsolete_runs(repository: str, run_number: int, sha: str) -> list[WorkflowRun]:
     older = sorted(
         (
             run

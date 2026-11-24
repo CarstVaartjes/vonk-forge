@@ -10,15 +10,17 @@ import os
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from .control_client.errors import (
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlForbidden,
     ControlUnauthorized,
 )
-from .qualification_fixtures.contracts import FixtureError
+from cluster_profiles.control_client.transfers import ControlClient
+from cluster_profiles.qualification_fixtures.contracts import FixtureError
 
 
 def _request_root(directory: Path | None) -> Path:
@@ -73,10 +75,9 @@ def _durable_key(directory: Path | None, scope: str) -> str:
 
 def _forget_key(directory: Path | None, scope: str, key: str) -> None:
     root = _request_root(directory) / hashlib.sha256(scope.encode()).hexdigest()
-    try:
+    # terminal identity remains observable; never holds remote resources
+    with suppress(OSError):
         (root / key).unlink(missing_ok=True)
-    except OSError:
-        pass  # terminal identity remains observable; never holds remote resources
 
 
 def _durable_deadline(
@@ -161,7 +162,6 @@ class _BudgetClient:
     def upload_file(self, *args, **kwargs):
         # Transfers use a new client with the remaining deadline, never the
         # original normal timeout. Injected test peers implement this boundary.
-        from .control_client.transfers import ControlClient
 
         client = self.client
         if isinstance(client, ControlClient):
@@ -170,7 +170,6 @@ class _BudgetClient:
         return client.upload_file(*args, **kwargs)
 
     def download_file(self, *args, **kwargs):
-        from .control_client.transfers import ControlClient
 
         client = self.client
         if isinstance(client, ControlClient):

@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, event, select
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleError
@@ -244,7 +245,8 @@ def test_unused_acceptance_refuses_what_another_removal_owns(
 
     with world.sessions() as session:
         gate = session.get(ArtifactLifecycleGate, (kind, digest))
-        assert gate is not None and gate.removal_owner_id == foreign
+        assert gate is not None
+        assert gate.removal_owner_id == foreign
         assert (
             session.scalar(
                 select(ModelCacheOperation.id).where(

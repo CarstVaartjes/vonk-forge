@@ -51,7 +51,8 @@ the call: `# wall-clock: <reason>` (`control/tests/short_wall_clocks.py`).
 
 A control test holds threads together with
 `insert_collision_support.Rendezvous`, never a raw `threading.Barrier`
-(`control/tests/raw_barriers.py`). A barrier in a patched product method waits
+(Ruff `TID251` banned-api; `insert_collision_support.py` is the one exempt
+file). A barrier in a patched product method waits
 again when the product re-enters that method on the same thread (a replay after
 a unique-key conflict, a replan), and the test then breaks the barrier at random
 instead of naming the re-entry. Each thread passes a rendezvous once; a second
@@ -181,6 +182,6 @@ which end nothing; a name with an ending word never counts as the fresh request.
 `upgrade_continuity.assert_upgrade_keeps_serving` checks serving continuity with
 real observations and an upgrade/restart callback in its owning lane.
 
-The data-contract registry, pyright exceptions, serde/TypeScript shape registries
+The data-contract registry, serde/TypeScript shape registries
 and generated-contract checks retain their existing role. Controller startup and
 exclude-unset registries describe semantic exceptions rather than debt counts.

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
@@ -21,28 +22,27 @@ from vonk_agent_protocol.state_machines import (
     GatewayRouteState,
 )
 from vonk_agent_protocol.wire_model import OperationProgress
-
-from .. import agent_operation_states
-from ..compose_bundle import ComposeBundle
-from ..jobs import states as job_states
-from ..jobs.queue import without_agent_operation
-from ..models.fleet import AgentCertificate, AgentNode, AgentNodeContact
-from ..models.jobs import Job
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..operations.progress import project_progress
-from ..strict_json import read_stored_model
-from ..terminal_history_collection import history_rows_past_grace
-from ..worker.memory_contract import WorkerMemoryReport, WorkerTraceState
-from .readings import (
+from vonk_control import agent_operation_states
+from vonk_control.compose_bundle import ComposeBundle
+from vonk_control.fleet_projection.common import FleetSnapshot
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.queue import without_agent_operation
+from vonk_control.metrics.readings import (
     engine_reading_lines,
     host_reading_lines,
     node_fact_lines,
     node_facts,
 )
+from vonk_control.models.fleet import AgentCertificate, AgentNode, AgentNodeContact
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operations.progress import project_progress
+from vonk_control.strict_json import read_stored_model
+from vonk_control.terminal_history_collection import history_rows_past_grace
+from vonk_control.worker.memory_contract import WorkerMemoryReport, WorkerTraceState
 
 if TYPE_CHECKING:
-    from ..fleet_projection.common import FleetSnapshot
-    from ..telemetry.samples import LiveEngineReading
+    from vonk_control.telemetry.samples import LiveEngineReading
 
 _NODE = re.compile(r"spk_[0-9a-f]{32}")
 _METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
@@ -95,7 +95,7 @@ def _aware(value: datetime) -> datetime:
 
 
 def protocol_version_bucket(
-    version: int | None,
+    version: object,
     *,
     minimum: int = 1,
     maximum: int = 1,
@@ -134,7 +134,7 @@ def runnable_job_ages(
         created = created_at
         if created.tzinfo is None:
             created = created.replace(tzinfo=UTC)
-        ages[kind] = max(ages.get(kind, 0.0), max(0.0, (now - created).total_seconds()))
+        ages[kind] = max(ages.get(kind, 0.0), 0.0, (now - created).total_seconds())
     return ages
 
 
@@ -292,7 +292,7 @@ class MetricsRegistry:
             self._worker_memory_age = age
 
     @staticmethod
-    def _number(value: float, field: str) -> float:
+    def _number(value: object, field: str) -> float:
         if (
             isinstance(value, bool)
             or not isinstance(value, (int, float))
@@ -313,10 +313,8 @@ class MetricsRegistry:
         self._engine_source = source
 
     @staticmethod
-    def _fleet_values(snapshot: FleetSnapshot):
+    def _fleet_values(snapshot: object):
         """Project the typed FleetSnapshot without inventing node health."""
-
-        from ..fleet_projection.common import FleetSnapshot
 
         if not isinstance(snapshot, FleetSnapshot):
             raise TypeError("fleet metrics require a typed FleetSnapshot")
@@ -402,13 +400,13 @@ class MetricsRegistry:
         with self._lock:
             self._backup_age = age
 
-    def set_backup_successful(self, successful: bool) -> None:
+    def set_backup_successful(self, *, successful: object) -> None:
         if not isinstance(successful, bool):
             raise TypeError("backup success must be a boolean")
         with self._lock:
             self._backup_successful = successful
 
-    def set_backup_restore_verified(self, verified: bool) -> None:
+    def set_backup_restore_verified(self, *, verified: object) -> None:
         if not isinstance(verified, bool):
             raise TypeError("backup restore verification must be a boolean")
         with self._lock:
@@ -512,10 +510,10 @@ class MetricsRegistry:
             "# HELP vonk_route_state Current inference route state.",
             "# TYPE vonk_route_state gauge",
         ]
-        for state in sorted(_ROUTE_STATES):
-            lines.append(
-                f'vonk_route_state{{state="{state}"}} {1 if state == route_state else 0}'
-            )
+        lines.extend(
+            f'vonk_route_state{{state="{state}"}} {1 if state == route_state else 0}'
+            for state in sorted(_ROUTE_STATES)
+        )
         if backup_age is not None:
             lines.extend(
                 (
@@ -567,26 +565,26 @@ class MetricsRegistry:
             gpu_utilization,
         ) in sorted(nodes.items()):
             label = f'node_id="{node_id}"'
-            for state in _CONNECTION_STATES:
-                lines.append(
-                    f'vonk_node_connection_state{{{label},state="{state}"}} '
-                    f"{1 if state == connection_state else 0}"
-                )
-            for state in _CERTIFICATE_STATES:
-                lines.append(
-                    f'vonk_node_certificate_state{{{label},state="{state}"}} '
-                    f"{1 if state == certificate_state else 0}"
-                )
-            for state in _INVENTORY_FRESHNESS:
-                lines.append(
-                    f'vonk_node_inventory_freshness{{{label},state="{state}"}} '
-                    f"{1 if state == inventory_freshness else 0}"
-                )
-            for state in _TELEMETRY_FRESHNESS:
-                lines.append(
-                    f'vonk_node_telemetry_freshness{{{label},state="{state}"}} '
-                    f"{1 if state == telemetry_freshness else 0}"
-                )
+            lines.extend(
+                f'vonk_node_connection_state{{{label},state="{state}"}} '
+                f"{1 if state == connection_state else 0}"
+                for state in _CONNECTION_STATES
+            )
+            lines.extend(
+                f'vonk_node_certificate_state{{{label},state="{state}"}} '
+                f"{1 if state == certificate_state else 0}"
+                for state in _CERTIFICATE_STATES
+            )
+            lines.extend(
+                f'vonk_node_inventory_freshness{{{label},state="{state}"}} '
+                f"{1 if state == inventory_freshness else 0}"
+                for state in _INVENTORY_FRESHNESS
+            )
+            lines.extend(
+                f'vonk_node_telemetry_freshness{{{label},state="{state}"}} '
+                f"{1 if state == telemetry_freshness else 0}"
+                for state in _TELEMETRY_FRESHNESS
+            )
             if memory is not None:
                 lines.append(
                     f"vonk_node_inventory_host_memory_free_bytes{{{label}}} {memory}"
@@ -935,10 +933,10 @@ class OperationalMetricsCollector:
             leases[key] = max(leases.get(key, 0.0), age)
 
         lines: list[str] = []
-        for node_id, (state, version, seen, expiry) in sorted(nodes.items()):
+        for node_id, (stored_state, version, seen, expiry) in sorted(nodes.items()):
             if _NODE.fullmatch(node_id) is None:
                 continue
-            state = state if state in _AGENT_STATES else "other"
+            state = stored_state if stored_state in _AGENT_STATES else "other"
             lines.append(f'vonk_agent_state{{node_id="{node_id}",state="{state}"}} 1')
             lines.append(
                 f'vonk_agent_version_compatibility{{node_id="{node_id}",version_bucket="{version}"}} 1'
@@ -951,10 +949,12 @@ class OperationalMetricsCollector:
                 lines.append(
                     f'vonk_agent_certificate_expiry_seconds{{node_id="{node_id}"}} {expiry:g}'
                 )
-        for (node_id, operation), age in sorted(leases.items()):
+        for (node_id, stored_operation), age in sorted(leases.items()):
             if _NODE.fullmatch(node_id) is None:
                 continue
-            operation = operation if operation in _AGENT_OPERATIONS else "other"
+            operation = (
+                stored_operation if stored_operation in _AGENT_OPERATIONS else "other"
+            )
             lines.append(
                 f'vonk_agent_operation_lease_age_seconds{{node_id="{node_id}",operation="{operation}"}} {age:g}'
             )

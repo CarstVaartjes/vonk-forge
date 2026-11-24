@@ -55,8 +55,8 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, object_session, sessionmaker
+
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     WaitOwnerKind,
@@ -64,29 +64,19 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
-
-from ..agent_operation_facts import aware
-from ..jobs import states as job_states
-from ..lifecycle_preflight import end_unclaimed_probes
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..operations.blockers import OperationBlocker, make_blocker
-from ..persisted_waits import lifecycle_wait, schedule_wait, typed_wait_reason, wait_due
-from ..run_switch_contract.observation import (
-    RunSwitchStoredChildIdentity,
-    RunSwitchStoredIdentity,
-    RunSwitchStoredLifecycle,
-)
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.progress import RunSwitchMemberReceipt
-from ..run_switch_contract.vocabulary import RunSwitchMemberState
-from .adapter import Dispatch
-from .agent_operation import AgentOperationAdapter
-from .composite import aggregate
-from .core import transition
-from .reconciler import Settled
-from .reconciler import settle as settle_event
-from .types import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.contracts import _ABANDONABLE_OPERATIONS
+from vonk_control.agent_jobs.retry import abandon_idempotent_job_in_session
+from vonk_control.agent_operation_facts import aware
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.adapter import Dispatch
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.composite import aggregate
+from vonk_control.lifecycle.core import transition
+from vonk_control.lifecycle.reconciler import Settled
+from vonk_control.lifecycle.reconciler import settle as settle_event
+from vonk_control.lifecycle.types import (
     TERMINAL_STATES,
     CancelRequested,
     Decision,
@@ -100,6 +90,22 @@ from .types import (
     StopResult,
     Tick,
 )
+from vonk_control.lifecycle_preflight import end_unclaimed_probes
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.operations.blockers import OperationBlocker, make_blocker
+from vonk_control.persisted_waits import lifecycle_wait, schedule_wait, wait_due
+from vonk_control.run_switch_contract.observation import (
+    RunSwitchStoredChildIdentity,
+    RunSwitchStoredIdentity,
+    RunSwitchStoredLifecycle,
+)
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.progress import RunSwitchMemberReceipt
+from vonk_control.run_switch_contract.vocabulary import RunSwitchMemberState
+from vonk_control.run_switch_operations.awaited_children import child_job_ids
+from vonk_control.run_switch_operations.observation_window import checkpoint_deadline
+from vonk_control.wait_contract import typed_wait_reason
 
 KIND = "run-switch"
 WAITING = LifecycleState.NEEDS_OPERATOR.value
@@ -174,10 +180,6 @@ def end_unclaimed_children(
     the caller offers it again on its next check.
     """
     # agent_jobs builds on the lifecycle core; import its writers at use.
-    from .. import agent_operation_states
-    from ..agent_jobs.contracts import _ABANDONABLE_OPERATIONS
-    from ..agent_jobs.retry import abandon_idempotent_job_in_session
-    from ..run_switch_operations.awaited_children import child_job_ids
 
     children = child_job_ids(progress)
     probes = progress.preflight.pending_jobs.values() if progress.preflight else ()
@@ -314,13 +316,12 @@ class RunSwitchAdapter:
             effect = Effect.UNKNOWN
         else:
             effect = Effect.ISSUED if issued else Effect.NONE
-        requested_at, request_key = self._cancel_request(progress, now)
+        requested_at, request_key = self._cancel_request(progress)
         count = _count(progress.retry_attempt)
         # The checkpoint window bounds the wait, not the core's finite retry
         # count: a hold for evidence that has not arrived (post-stop inventory,
         # capacity, a busy lock) must outlive the backoff steps, and the
         # service ends it with a typed retryable code when the window closes.
-        from ..run_switch_operations.observation_window import checkpoint_deadline
 
         return Lifecycle(
             id=job.id,
@@ -340,33 +341,33 @@ class RunSwitchAdapter:
             reason=job.status_reason,
             recovery_deadline=(
                 None
-                if job.created_at is None
+                if job.created_at is None  # pyright: ignore[reportUnnecessaryComparison]  # an unflushed Job has no created_at yet
                 else checkpoint_deadline(job, progress, now)
             ),
         )
 
     @staticmethod
     def _cancel_request(
-        progress: RunSwitchOperationResult, now: datetime
+        progress: RunSwitchOperationResult,
     ) -> tuple[datetime | None, str | None]:
         cancellation = progress.cancellation
         if cancellation is None:
             return None, None
         requested = aware(cancellation.requested_at)
         key = cancellation.request_key
-        return requested, key if isinstance(key, str) else None
+        return requested, key if isinstance(key, str) else None  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
 
     # ----------------------------------------------------- the kind's facts
 
-    def irreversible(self, row: Lifecycle) -> bool:
+    def irreversible(self, _row: Lifecycle) -> bool:
         """A composite has no effect of its own: its children own theirs."""
 
         return False
 
-    def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
+    def retry_not_before(self, _row: Lifecycle, _now: datetime) -> datetime | None:
         return None
 
-    def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
+    def execute(self, _row: Lifecycle, _attempt: int) -> Dispatch:
         """The phase executor is driven by the operation's own tick, not here."""
 
         return Dispatch(issued=False)
@@ -423,7 +424,7 @@ class RunSwitchAdapter:
                 return StopResult.CONFIRMED
         return StopResult.UNCONFIRMED
 
-    def actions(self, row: Lifecycle) -> tuple[str, ...]:
+    def actions(self, _row: Lifecycle) -> tuple[str, ...]:
         """None: a Run/Switch has no ``resume`` or ``retire``; its Stop is Cancel."""
 
         return ()
@@ -434,7 +435,6 @@ class RunSwitchAdapter:
         self,
         job: Job,
         progress: RunSwitchOperationResult | None,
-        before: Lifecycle,
         after: Lifecycle,
         now: datetime,
         *,
@@ -580,7 +580,7 @@ class RunSwitchAdapter:
             # not mistaken for one that is already being driven.
             row = replace(row, cancel_requested_at=None, cancel_request_key=None)
 
-        def save(before: Lifecycle, after: Lifecycle) -> bool:
+        def save(_before: Lifecycle, after: Lifecycle) -> bool:
             options = dict(write)
             if (
                 after.state is State.OBSERVING
@@ -600,7 +600,7 @@ class RunSwitchAdapter:
                 )
             if after.state is State.CANCELLED:
                 options["reason"] = self._cancelled_reason(progress, after, options)
-            self.apply(job, progress, before, after, now, **options)
+            self.apply(job, progress, after, now, **options)
             return True
 
         def residue(_row: Lifecycle, _reason: str) -> None:
@@ -619,7 +619,7 @@ class RunSwitchAdapter:
             given
             if explicit
             else cancellation.reason
-            if cancellation is not None and isinstance(cancellation.reason, str)
+            if cancellation is not None and isinstance(cancellation.reason, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             else None
         )
         if after.effect is Effect.UNKNOWN and not explicit:
@@ -732,7 +732,7 @@ class RunSwitchAdapter:
         return self.settled(
             job,
             progress,
-            CancelRequested(self._cancel_request(progress, self.now())[1], reason),
+            CancelRequested(self._cancel_request(progress)[1], reason),
             now,
             unflag=True,
         ).row
@@ -811,7 +811,6 @@ class RunSwitchAdapter:
         self.apply(
             job,
             progress,
-            before,
             after,
             now,
             visible=visible,

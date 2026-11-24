@@ -18,22 +18,25 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.state_machines import RouteState, RunState
-
-from ..distributed_recovery.common import ended_run_state
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..models.execution import RecipeInstallation, RecipeRun, RunNode
-from ..models.jobs import Job
-from ..stored.json_values import read_row_column
-from .observation_helpers import _active_recipe_revision
-from .progress import _role_phases, _topology_order
-from .stop_payloads import RecipeStopAuthorityError, durable_run_stop_payloads
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.distributed_recovery.common import ended_run_state
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_operations.observation_helpers import _active_recipe_revision
+from vonk_control.recipe_operations.progress import _role_phases, _topology_order
+from vonk_control.recipe_operations.stop_payloads import (
+    RecipeStopAuthorityError,
+    durable_run_stop_payloads,
+)
+from vonk_control.stored.rows import read_row_column
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 def withdraw_for_cleanup(run: RecipeRun, now: datetime, *, note: str) -> None:
@@ -106,7 +109,6 @@ def end_unfinished_run(
                 stop_nodes,
                 run_generation=run.run_generation,
                 cancel_pending_start=True,
-                allow_missing_nodes=False,
             )
         )
     except RecipeStopAuthorityError:

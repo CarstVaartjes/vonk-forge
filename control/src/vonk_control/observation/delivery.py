@@ -8,12 +8,12 @@ from datetime import UTC, datetime
 
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
-from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 
-from ..agent_api.common import AgentApiServices
-from ..agent_contacts import record_observation_delivery
-from ..auth import agent_identity_from_scope
-from ..logging import log_event
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_control.agent_api.common import AgentApiServices
+from vonk_control.agent_contacts import record_observation_delivery
+from vonk_control.auth import agent_identity_from_scope
+from vonk_control.logging import log_event
 
 _LOGGER = logging.getLogger(__name__)
 

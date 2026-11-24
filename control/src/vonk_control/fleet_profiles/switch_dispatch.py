@@ -7,6 +7,7 @@ from typing import cast as _typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import (
     ProfileChildJobKind,
     ProfileChildPhase,
@@ -14,52 +15,59 @@ from vonk_agent_protocol.agent_words import (
 )
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
-
-from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract.definitions import FleetProfileAssignment
-from ..fleet_profile_contract.review import FleetProfilePreview
-from ..fleet_profile_contract.switch_state import FleetProfileSwitchQueueItem
-from ..fleet_profile_contract.vocabulary import profile_switch_child_request_key
-from ..jobs.documents import RunSwitchJobPayload
-from ..lifecycle.evidence import (
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profile_contract.switch_state import FleetProfileSwitchQueueItem
+from vonk_control.fleet_profile_contract.vocabulary import (
+    profile_switch_child_request_key,
+)
+from vonk_control.fleet_profiles.assessment_support import (
+    _disk_shortfalls,
+    _require_recovery_preparation,
+    operation_blocker_of,
+)
+from vonk_control.fleet_profiles.colocation import colocated_memory_overcommit
+from vonk_control.fleet_profiles.contracts import (
+    FleetProfileChildPlanBlocked,
+    FleetProfileInvalid,
+    FleetProfileReviewStale,
+)
+from vonk_control.fleet_profiles.dependencies import (
+    _DISK_REFUSALS,
+    ENDING_BLOCKER_CODES,
+)
+from vonk_control.fleet_profiles.persistence import (
+    _intended_profile,
+    _persisted_profile_plan,
+    _persisted_profile_progress,
+    _reviewed_profile_plan,
+)
+from vonk_control.fleet_profiles.switch_children import _assignment_intent
+from vonk_control.jobs.documents import RunSwitchJobPayload
+from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
     Residue,
     retire_as_unknown,
 )
-from ..models.fleet import FleetProfileApplication
-from ..models.jobs import Job
-from ..operations.blockers import OperationBlocker, make_blocker
-from ..run_switch_contract.operations import (
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.operations.blockers import OperationBlocker, make_blocker
+from vonk_control.run_switch_contract.operations import (
     RunSwitchOperation,
     RunSwitchOperationResult,
 )
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.requests import (
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.requests import (
     RunSwitchCleanupApplyRequest,
     RunSwitchCleanupPreviewRequest,
     RunSwitchStopApplyRequest,
     RunSwitchStopPreviewRequest,
 )
-from ..stored.json_values import read_row_column
-from .assessment_support import (
-    _disk_shortfalls,
-    _require_recovery_preparation,
-    operation_blocker_of,
-)
-from .colocation import colocated_memory_overcommit
-from .contracts import (
-    FleetProfileChildPlanBlocked,
-    FleetProfileInvalid,
-    FleetProfileReviewStale,
-)
-from .dependencies import _DISK_REFUSALS, ENDING_BLOCKER_CODES
-from .persistence import (
-    _persisted_profile_plan,
-    _persisted_profile_progress,
-)
+from vonk_control.stored.rows import read_row_column
 
 if TYPE_CHECKING:
-    from .run_switch_adapter import (
+    from vonk_control.fleet_profiles.run_switch_adapter import (
         RunSwitchFleetProfileAdapter as _RunSwitchFleetProfileAdapter,
     )
 
@@ -72,7 +80,6 @@ class RunSwitchFleetProfileAdapter:
         assignments: tuple[FleetProfileAssignment, ...],
         scope_node_ids: tuple[str, ...],
         actor: str,
-        request_id: str,
         position: int,
         workload_intent_ordinal: int | None,
     ) -> RunSwitchOperation | Residue:
@@ -81,7 +88,6 @@ class RunSwitchFleetProfileAdapter:
         A :class:`Residue` is that element's unknown: the caller records it as
         that assignment's failure and continues with the next element.
         """
-        from .service import FleetProfileService
 
         self = _typing_cast("_RunSwitchFleetProfileAdapter", self)  # noqa: PLW0642 -- assembled mixin interface
 
@@ -115,7 +121,7 @@ class RunSwitchFleetProfileAdapter:
             return reviewed
         if kind == ProfileChildPhase.CLEANUP.value:
             installation_id = item.id
-            if not isinstance(installation_id, str):
+            if not isinstance(installation_id, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # an unexpected value is treated as unknown, not trusted
                 return retire_as_unknown(
                     "profile-child",
                     application_id,
@@ -123,8 +129,7 @@ class RunSwitchFleetProfileAdapter:
                     "a cleanup item has no installation identity",
                 )
             cleanup_preview = self._run_switch.preview_cleanup(
-                RunSwitchCleanupPreviewRequest(installation_id=installation_id),
-                actor=actor,
+                RunSwitchCleanupPreviewRequest(installation_id=installation_id)
             )
             self._validate_child_effects(
                 reviewed, cleanup_preview, execution_scope=scope_node_ids
@@ -139,7 +144,7 @@ class RunSwitchFleetProfileAdapter:
             )
         if kind == ProfileChildPhase.STOP.value:
             run_id = item.id
-            if not isinstance(run_id, str):
+            if not isinstance(run_id, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # an unexpected value is treated as unknown, not trusted
                 return retire_as_unknown(
                     "profile-child",
                     application_id,
@@ -149,12 +154,10 @@ class RunSwitchFleetProfileAdapter:
             profile_stop_scope = item.profile_stop_scope
             preview = (
                 self._run_switch.preview_stop(
-                    RunSwitchStopPreviewRequest(run_id=run_id), actor=actor
+                    RunSwitchStopPreviewRequest(run_id=run_id)
                 )
                 if profile_stop_scope is None
-                else self._run_switch.preview_profile_stop(
-                    run_id, profile_stop_scope, actor=actor
-                )
+                else self._run_switch.preview_profile_stop(run_id, profile_stop_scope)
             )
             self._validate_child_effects(
                 reviewed, preview, execution_scope=scope_node_ids
@@ -163,7 +166,6 @@ class RunSwitchFleetProfileAdapter:
                 return self._run_switch.apply_profile_stop(
                     run_id,
                     profile_stop_scope,
-                    plan_digest=preview.plan_digest,
                     request_key=child_request_key,
                     actor=actor,
                     workload_intent_ordinal=workload_intent_ordinal,
@@ -201,9 +203,7 @@ class RunSwitchFleetProfileAdapter:
                 raise MissingRecord(
                     application_id, reason=InvalidRequestReason.NOT_FOUND
                 )
-            accepted = FleetProfileService._reviewed_profile_plan(
-                application, session=session
-            )
+            accepted = _reviewed_profile_plan(application, session=session)
             if isinstance(accepted, Residue):
                 return accepted
             progress = _persisted_profile_progress(application)
@@ -253,12 +253,11 @@ class RunSwitchFleetProfileAdapter:
     def _child_review(
         session: Session, application_id: str
     ) -> FleetProfilePreview | Residue:
-        from .service import FleetProfileService
 
         application = session.get(FleetProfileApplication, application_id)
         if application is None:
             raise MissingRecord(application_id, reason=InvalidRequestReason.NOT_FOUND)
-        intended = FleetProfileService._intended_profile(application, session=session)
+        intended = _intended_profile(application, session=session)
         if isinstance(intended, Residue):
             return intended
         return _persisted_profile_plan(application)
@@ -349,7 +348,7 @@ class RunSwitchFleetProfileAdapter:
             if job is None:
                 return None
             kind = item.kind
-            if not isinstance(kind, str):
+            if not isinstance(kind, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # an unexpected value is treated as unknown, not trusted
                 return unknown(
                     BookkeepingReason.ROW_INCOMPLETE, "the queue item names no kind"
                 )
@@ -434,9 +433,7 @@ class RunSwitchFleetProfileAdapter:
                     (value for value in assignments if value.id == owner_id), None
                 )
                 expected = (
-                    self._assignment_intent(assignment)
-                    if assignment is not None
-                    else None
+                    _assignment_intent(assignment) if assignment is not None else None
                 )
                 valid = (
                     assignment is not None

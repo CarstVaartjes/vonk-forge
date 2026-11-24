@@ -32,6 +32,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
 from sqlalchemy import select
+
 from vonk_control.agent_operation_facts import aware as _aware
 from vonk_control.models.cache import (
     ArtifactLifecycleGate,
@@ -227,7 +228,7 @@ class ReachMonitor(Monitor):
                 f" {deadline}",
             )
             for operation_id, kind, deadline in rows
-            if deadline is not None and now - _aware(deadline) > LAPSED_LEASE_WINDOW
+            if now - _aware(deadline) > LAPSED_LEASE_WINDOW
         ]
 
     def _failures(self) -> list[Violation]:

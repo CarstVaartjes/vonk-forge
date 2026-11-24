@@ -3,29 +3,28 @@
 from __future__ import annotations
 
 from pydantic import ValidationError
+
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
-
-from ..artifact_jobs.lifecycle import (
-    ArtifactReferenceUnverified,
-)
-from ..content_identity import ImageContent, differing_image_fields
-from ..fleet_profile_contract.review import FleetProfilePreview
-from ..models.execution import RecipeInstallation
-from ..models.jobs import Job
-from ..recipe_operations.execution_contract import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.artifact_jobs.lifecycle import ArtifactReferenceUnverified
+from vonk_control.content_identity import ImageContent, differing_image_fields
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     StoredInstallationPlan,
     parse_stored_installation_plan,
 )
-from ..run_switch_contract.operations import (
+from vonk_control.run_switch_contract.operations import (
     RunSwitchOperationResult,
     RunSwitchRuntimeImageReferenceIntent,
 )
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..strict_json import read_stored_model
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.constants import _OPERATION_KINDS
+from vonk_control.strict_json import read_stored_model
 
 
 def _profile_plan(value: object) -> FleetProfilePreview:
@@ -79,7 +78,7 @@ def _installation_plan(
 
 
 def _stated(value: int | None) -> int | None:
-    return value if value else None
+    return value or None
 
 
 def _approved_images(plan: RunSwitchPlan) -> tuple[ImageContent, ...]:
@@ -166,6 +165,5 @@ def _run_switch_runtime_image_intent(
 
 
 def _run_switch_kinds() -> frozenset[str]:
-    from ..run_switch_operations.constants import _OPERATION_KINDS
 
     return frozenset(_OPERATION_KINDS)

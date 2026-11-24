@@ -297,8 +297,11 @@ def test_stale_well_formed_ci_child_is_selected_and_deleted(
     urlopen = _install_urlopen(
         lifecycle,
         monkeypatch,
-        [_Response({"access_token": "factory-list-token"}), _listing_response(child)]
-        + _child_delete_responses("tailnet_stale_999"),
+        [
+            _Response({"access_token": "factory-list-token"}),
+            _listing_response(child),
+            *_child_delete_responses("tailnet_stale_999"),
+        ],
     )
 
     lifecycle.cleanup()
@@ -338,9 +341,9 @@ def test_two_stale_children_are_both_deleted_by_their_own_exact_ids(
         [
             _Response({"access_token": "factory-list-token"}),
             _listing_response(oldest, newer),
-        ]
-        + _child_delete_responses("tailnet_stale_111")
-        + _child_delete_responses("tailnet_stale_222"),
+            *_child_delete_responses("tailnet_stale_111"),
+            *_child_delete_responses("tailnet_stale_222"),
+        ],
     )
 
     lifecycle.cleanup()
@@ -451,8 +454,11 @@ def test_ci_child_at_the_stale_boundary_is_deleted(
     urlopen = _install_urlopen(
         lifecycle,
         monkeypatch,
-        [_Response({"access_token": "factory-list-token"}), _listing_response(child)]
-        + _child_delete_responses("tailnet_boundary_456"),
+        [
+            _Response({"access_token": "factory-list-token"}),
+            _listing_response(child),
+            *_child_delete_responses("tailnet_boundary_456"),
+        ],
     )
 
     lifecycle.cleanup()
@@ -493,8 +499,11 @@ def test_young_explicit_child_id_is_refused_rather_than_deleted(
     fresh = _install_urlopen(
         lifecycle,
         monkeypatch,
-        [_Response({"access_token": "factory-list-token"}), _listing_response(stale)]
-        + _child_delete_responses("tailnet_stale_456"),
+        [
+            _Response({"access_token": "factory-list-token"}),
+            _listing_response(stale),
+            *_child_delete_responses("tailnet_stale_456"),
+        ],
     )
     lifecycle.cleanup(child_id="tailnet_stale_456")
     assert _deleted_ids(fresh) == ["tailnet_stale_456"]
@@ -735,8 +744,11 @@ def test_cleanup_never_prints_the_credential_or_an_access_token(
     _install_urlopen(
         lifecycle,
         monkeypatch,
-        [_Response({"access_token": "factory-list-token"}), _listing_response(child)]
-        + _child_delete_responses("tailnet_stale_999"),
+        [
+            _Response({"access_token": "factory-list-token"}),
+            _listing_response(child),
+            *_child_delete_responses("tailnet_stale_999"),
+        ],
     )
 
     lifecycle.cleanup()
@@ -762,8 +774,8 @@ def test_create_configures_only_the_child_and_delete_uses_its_exact_id(
     urlopen = _install_urlopen(
         lifecycle,
         monkeypatch,
-        _success_create_responses()
-        + [
+        [
+            *_success_create_responses(),
             _Response({"access_token": "child-delete-token"}),
             _Response({}),
         ],
@@ -1053,8 +1065,8 @@ def test_environment_write_failure_deletes_exact_child(
     urlopen = _install_urlopen(
         lifecycle,
         monkeypatch,
-        _success_create_responses()
-        + [
+        [
+            *_success_create_responses(),
             _Response({"access_token": "child-delete-token"}),
             _Response({}),
         ],
@@ -1514,7 +1526,7 @@ def test_missing_factory_secrets_fail_before_any_api_request(
 
 @pytest.mark.parametrize(
     ("failure", "cause"),
-    (
+    [
         (
             urllib.error.URLError(ConnectionRefusedError(61, "Connection refused")),
             "ConnectionRefusedError",
@@ -1525,7 +1537,7 @@ def test_missing_factory_secrets_fail_before_any_api_request(
         ),
         (urllib.error.URLError(TimeoutError("timed out")), "TimeoutError"),
         (TimeoutError("timed out"), "TimeoutError"),
-    ),
+    ],
 )
 def test_transport_failure_names_the_underlying_cause(
     lifecycle: ModuleType,

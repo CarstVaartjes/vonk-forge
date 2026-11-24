@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import json
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.route_activation import SupervisorPhase
@@ -19,6 +18,7 @@ from vonk_agent_protocol.state_machines import (
     RouteState,
     RunState,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.bounded_json import require_mapping
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
@@ -32,6 +32,7 @@ from vonk_control.gateway.route_runtime import (
 from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.model_primitives import Base
 from vonk_control.models.execution import (
+    STOPPABLE_RUN_STATES,
     RecipeRun,
     RunNode,
 )
@@ -46,6 +47,7 @@ from vonk_control.recipe_operations.lifecycle_contract import (
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 
 from .agent_fences import fenced_operation
+from .insert_collision_support import Rendezvous
 from .recipe_operations_support import (
     NOW,
     ConcurrentPublisher,
@@ -577,8 +579,6 @@ def test_every_failed_start_leaves_what_it_launched_stoppable_or_queues_its_stop
     is queued (under the intent that owns the Sparks now, never taking a new one),
     or, with no single owner, the run stays stoppable for its owner."""
 
-    from vonk_control.models.execution import STOPPABLE_RUN_STATES
-
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2
     )
@@ -630,9 +630,11 @@ def test_every_failed_start_leaves_what_it_launched_stoppable_or_queues_its_stop
         if newer_intent == "one-node":
             # No single intent owns both Sparks: nothing may take authority over
             # either, and the run stays stoppable for whoever does.
-            assert cleanups == () and run.state == "lost"
+            assert cleanups == ()
+            assert run.state == "lost"
         else:
-            assert len(cleanups) == 1 and run.state == "stopping"
+            assert len(cleanups) == 1
+            assert run.state == "stopping"
             assert (
                 cleanups[0].payload["workload_intent_ordinal"] == owner_ordinals.pop()
             )
@@ -791,7 +793,7 @@ def test_concurrent_final_rank_results_serialize_gang_cleanup(
         evidence = start_evidence(child.payload)
     # Every rank launches in one phase; the last two results race.
     service.record_node_result(start.id, nodes[0], succeeded=True, evidence={})
-    barrier = threading.Barrier(2)
+    barrier = Rendezvous(2)
 
     def result(node_id: str, succeeded: bool) -> None:
         barrier.wait()
@@ -881,7 +883,7 @@ def test_postgres_disjoint_stops_serialize_one_route_candidate(
         first.owner_id: service.preview_stop(first.owner_id),
         second_run_id: service.preview_stop(second_run_id),
     }
-    start = threading.Barrier(2)
+    start = Rendezvous(2)
 
     def stop(item: tuple[str, str]) -> str:
         run_id, request_key = item

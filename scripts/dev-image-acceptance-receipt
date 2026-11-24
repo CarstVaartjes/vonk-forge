@@ -223,8 +223,8 @@ def _write_json(output: Path, document: dict[str, Any]) -> None:
         with os.fdopen(descriptor, "w") as stream:
             json.dump(document, stream, indent=2, sort_keys=True)
             stream.write("\n")
-        os.chmod(temporary, 0o600)
-        os.replace(temporary, output)
+        temporary.chmod(0o600)
+        temporary.replace(output)
     finally:
         temporary.unlink(missing_ok=True)
 

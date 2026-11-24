@@ -21,6 +21,8 @@ from typing import IO, Any, Self, cast
 
 import httpx2
 
+from cluster_profiles.control_client.errors import ControlTransportUnsupported
+
 _DNS_LOCK = threading.Lock()
 _DNS_PENDING: dict[tuple[object, ...], Future[Any]] = {}
 
@@ -131,7 +133,11 @@ class HTTPSResponse(io.BufferedIOBase):
             work.close()
 
     async def _open(
-        self, request: urllib.request.Request, timeout: float, *, trust_env: bool
+        self,
+        request: urllib.request.Request,
+        timeout: float,  # noqa: ASYNC109 -- the timeout configures the HTTP client, not this coroutine's wait
+        *,
+        trust_env: bool,
     ) -> httpx2.Response:
         try:
             self._client = httpx2.AsyncClient(
@@ -142,8 +148,7 @@ class HTTPSResponse(io.BufferedIOBase):
             )
         except ImportError:
             # A proxy scheme whose package is missing: a typed error, not a
-            # traceback. Imported here to avoid an import cycle.
-            from .control_client.errors import ControlTransportUnsupported
+            # traceback.
 
             raise ControlTransportUnsupported from None
         data = request.data
@@ -188,7 +193,7 @@ class HTTPSResponse(io.BufferedIOBase):
                     self._ended = True
         return bytes(result)
 
-    def read(self, amount: int = -1, /) -> bytes:
+    def read(self, amount: int = -1, /) -> bytes:  # pyright: ignore[reportIncompatibleMethodOverride]  # an HTTPS read needs a byte bound; read(None) is refused
         if amount < 0:
             raise ValueError("HTTPS reads must have a byte bound")
         if self._closed:

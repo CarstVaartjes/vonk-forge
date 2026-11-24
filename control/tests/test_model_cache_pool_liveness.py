@@ -21,10 +21,12 @@ from typing import cast
 
 import httpx2
 import pytest
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.bounded_json import text
 from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
+from vonk_control.model_cache.scheduler import SchedulerMixin
 from vonk_control.model_cache.views import _BackgroundTransfer
 
 from .test_model_cache_availability_regressions import (
@@ -198,7 +200,6 @@ def test_freed_slots_go_to_waiting_downloads_before_a_large_one_refills(
 def test_a_file_ending_while_the_claim_facts_are_read_still_serves_the_waiting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from vonk_control.model_cache.scheduler import SchedulerMixin
 
     original = SchedulerMixin._claim_facts
     stalled: list[bool] = []
@@ -416,8 +417,7 @@ def test_slot_sharing_never_serves_a_started_download_before_a_waiting_one(
             files = shuffle.randint(1, 8)
             started = shuffle.randint(0, files)
             in_flight: list[Future[None]] = []
-            for _ in range(shuffle.randint(0, started)):
-                in_flight.append(Future())
+            in_flight.extend(Future() for _ in range(shuffle.randint(0, started)))
             record = _BackgroundTransfer(
                 set_digest="0" * 64,
                 manifest=cast(ArtifactSetManifest, None),

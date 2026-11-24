@@ -3,10 +3,13 @@
 import io
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from threading import Event
 
 import pytest
 from sqlalchemy import select, text, update
+from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_control import source_bundles
 from vonk_control.catalog.revision_contract import (
@@ -15,18 +18,24 @@ from vonk_control.catalog.revision_contract import (
     write_catalog_projection,
 )
 from vonk_control.fleet_profile_contract.review import FleetProfilePreviewResponse
+from vonk_control.fleet_profiles.read_observation import profile_read
+from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import (
     CatalogDocumentRevision,
     RecipeSourceBundle,
     SourceBundleArchive,
 )
+from vonk_control.models.fleet import AgentNode, AgentNodeContact
+from vonk_control.recipe_builds.common import RecipeBuildResolution
 from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.source_bundles import (
     DatabaseSourceBundleStore,
+    SourceBundleStore,
     generate_source_bundle,
 )
 
+from .test_fleet_profiles_canonical import _sessions
 from .test_profile_capacity_admission import _capacity_profile
 
 
@@ -161,10 +170,6 @@ def test_slow_ingress_finishes_once_and_dual_previews_become_loadable(
 
 def test_profile_observation_cannot_turn_statement_reads_into_writes(postgres_engine):
     """Catches a new projection writer silently committing in autocommit mode."""
-    from sqlalchemy.orm import sessionmaker
-    from vonk_control.fleet_profiles.read_observation import profile_read
-    from vonk_control.model_primitives import Base
-    from vonk_control.models.fleet import AgentNode, AgentNodeContact
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine)
@@ -190,13 +195,6 @@ def test_build_resolution_is_memoized_within_a_read_but_fresh_for_the_next(
     tmp_path, monkeypatch, overlap
 ):
     """Catches retaining a revision's old receipt after a new build completes."""
-    from dataclasses import replace
-
-    from vonk_control.fleet_profiles.read_observation import profile_read
-    from vonk_control.recipe_builds.common import RecipeBuildResolution
-    from vonk_control.source_bundles import SourceBundleStore
-
-    from .test_fleet_profiles_canonical import _sessions
 
     builds = RecipeBuildService(_sessions(), bundles=SourceBundleStore(tmp_path))
     resolution = RecipeBuildResolution(

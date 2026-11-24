@@ -8,20 +8,24 @@ from datetime import UTC, datetime
 
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.state_machines import InstallationState, ReservationState
 
-from .content_identity import same_image
-from .fleet_profiles.capacity import reservation_visible
-from .inventory.repository import MAX_INVENTORY_FUTURE_SKEW
-from .machine_states import rank_installed
-from .models.cache import RecipeBuild
-from .models.execution import InstallationNode, RecipeInstallation, ResourceReservation
-from .owner_liveness import OwnerKind, build_holds_disk
-from .recipe_operations.execution_contract import (
+from vonk_agent_protocol.state_machines import InstallationState, ReservationState
+from vonk_control.content_identity import same_image
+from vonk_control.fleet_profiles.capacity import reservation_visible
+from vonk_control.inventory.repository import MAX_INVENTORY_FUTURE_SKEW
+from vonk_control.machine_states import rank_installed
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    ResourceReservation,
+)
+from vonk_control.owner_liveness import OwnerKind, build_holds_disk
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )
-from .reservation_owners import reservation_owner
+from vonk_control.reservation_owners import reservation_owner
 
 
 def model_sets_stored_on_nodes(
@@ -221,9 +225,9 @@ def outstanding_disk_charges(
         materialized = 0
         if (
             inventory_observed_at is not None
-            and installation is not None
+            and installation is not None  # pyright: ignore[reportUnnecessaryComparison]  # outer-joined rows can be missing
             and installation.state == InstallationState.INSTALLED
-            and node is not None
+            and node is not None  # pyright: ignore[reportUnnecessaryComparison]  # outer-joined rows can be missing
             and rank_installed(node.state)
             and _aware(inventory_observed_at)
             > _aware(node.updated_at) + MAX_INVENTORY_FUTURE_SKEW

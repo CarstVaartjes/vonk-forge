@@ -86,7 +86,7 @@ def test_verifier_accepts_exact_identity_bound_binary_set(tmp_path: Path) -> Non
     }
 
 
-@pytest.mark.parametrize("mutation", ("architecture", "identity", "extra", "symlink"))
+@pytest.mark.parametrize("mutation", ["architecture", "identity", "extra", "symlink"])
 def test_verifier_rejects_unsafe_or_unbound_binary_sets(
     tmp_path: Path, mutation: str
 ) -> None:

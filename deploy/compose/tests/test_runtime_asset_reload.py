@@ -27,6 +27,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
+
 from vonk_control.runtime_init import (
     stage_runtime_assets,
     write_runtime_asset_inventory,

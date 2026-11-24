@@ -60,8 +60,8 @@ class SandboxError(RuntimeError):
 def _policy(document: str) -> dict[str, str]:
     section = ""
     result: dict[str, str] = {}
-    for line in document.splitlines():
-        line = line.strip()
+    for raw_line in document.splitlines():
+        line = raw_line.strip()
         if line.startswith("["):
             section = line
         if section != "[Service]":
@@ -141,7 +141,7 @@ def prepare_local_sandbox() -> None:
     # drop-in. Leave OrbStack's generator and every unrelated service untouched.
     for unit in UNITS:
         target = Path("/etc/systemd/system") / f"{unit}.d" / LOCAL_OVERRIDE
-        if target.is_symlink() and os.readlink(target) == "/dev/null":
+        if target.is_symlink() and target.readlink() == Path("/dev/null"):
             continue
         if target.exists() or target.is_symlink():
             raise SandboxError(

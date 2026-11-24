@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import or_, select, true
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.lifecycle_vocabulary import (
@@ -15,27 +16,12 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     OperatorActionName,
 )
 from vonk_agent_protocol.state_machines import RouteState, RunState
-
-from ..distributed_lifecycle import DistributedLifecycleError
-from ..failure_classification import is_definite
-from ..jobs import states as job_states
-from ..jobs.documents import DistributedRecoveryMarker
-from ..lifecycle.evidence import BookkeepingReason, Residue
-from ..logging import log_event
-from ..models.execution import STOPPABLE_RUN_STATES, RecipeRun, RunNode
-from ..models.jobs import Job
-from ..persisted_waits import read_wait, schedule_wait
-from ..recipe_operations.execution_contract import (
-    RecipeExecutionContractError,
-    parse_stored_run_plan,
-    run_plan_document,
+from vonk_control.distributed_lifecycle import DistributedLifecycleError
+from vonk_control.distributed_recovery.authority import (
+    _enqueue_recovery_stop,
+    _recovery_authority,
 )
-from ..recipe_operations.start_payloads import (
-    validate_distributed_start_timeout_seconds,
-)
-from ..recovery_policy import DISTRIBUTED_RECOVERY
-from .authority import _enqueue_recovery_stop, _recovery_authority
-from .common import (
+from vonk_control.distributed_recovery.common import (
     _DAMAGED,
     _MISMATCH,
     _MISSING,
@@ -59,8 +45,28 @@ from .common import (
     release_inactive_run_claims_in_session,
     settle_observed_absent_runs_in_session,
 )
-from .run_reaper import RunEndings, end_orphaned_runs_in_session
-from .singleton import _singleton_recovery_authority
+from vonk_control.distributed_recovery.run_reaper import (
+    RunEndings,
+    end_orphaned_runs_in_session,
+)
+from vonk_control.distributed_recovery.singleton import _singleton_recovery_authority
+from vonk_control.failure_classification import is_definite
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import DistributedRecoveryMarker
+from vonk_control.lifecycle.evidence import BookkeepingReason, Residue
+from vonk_control.logging import log_event
+from vonk_control.models.execution import STOPPABLE_RUN_STATES, RecipeRun, RunNode
+from vonk_control.models.jobs import Job
+from vonk_control.persisted_waits import read_wait, schedule_wait
+from vonk_control.recipe_operations.execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_run_plan,
+    run_plan_document,
+)
+from vonk_control.recipe_operations.start_payloads import (
+    validate_distributed_start_timeout_seconds,
+)
+from vonk_control.recovery_policy import DISTRIBUTED_RECOVERY
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -306,7 +312,7 @@ class DistributedRecoveryCoordinator:
                             )
                             run.plan = run_plan_document(run_plan)
                             for node, observation in zip(
-                                run_nodes, previous_observations
+                                run_nodes, previous_observations, strict=False
                             ):
                                 (
                                     node.observed_run_generation,
@@ -343,7 +349,6 @@ class DistributedRecoveryCoordinator:
                         run_nodes[0].observation_failure_diagnostics = None
                         run_nodes[0].observation_observed_at = None
                         run_nodes[0].observation_endpoint_ready = None
-                    if singleton:
                         if self._recovery_run_stops is None:
                             unowned = _unproven(
                                 run.id,
@@ -357,7 +362,7 @@ class DistributedRecoveryCoordinator:
                         start_phases = authority.start_phases
                         workload_intent_ordinal = authority.workload_intent_ordinal
                         if (
-                            not isinstance(deadline, str)
+                            not isinstance(deadline, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                             or not start_phases
                             or type(workload_intent_ordinal) is not int
                             or workload_intent_ordinal < 1

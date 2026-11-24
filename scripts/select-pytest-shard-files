@@ -74,7 +74,7 @@ def select_files(
         raise ValueError("fewer test files than shards")
 
     shards: list[list[str]] = [[] for _ in range(total)]
-    weights = [0] * total
+    weights: list[float] = [0] * total
     measured = durations or {}
     measured_counts = [
         (measured[path], count)

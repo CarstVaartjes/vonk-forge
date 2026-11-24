@@ -13,10 +13,14 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.jobs.queue import JobService
+from vonk_control.lifecycle.image_availability import PREPARATION_STALL_WINDOW
+from vonk_control.lifecycle.types import Effect, Observed
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocument
 from vonk_control.models.jobs import Job
@@ -28,7 +32,6 @@ from vonk_control.recipe_image_availability.service import (
 )
 from vonk_control.recipe_operations.availability_intent import RecipeRetryIntent
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import RecipeDefinition
 
 from .display_fixtures import reworded
 from .recipe_image_availability_support import _add_revision, _recipe, _runtime
@@ -96,13 +99,11 @@ def test_installed_retry_preserves_frozen_intent_after_catalog_change_and_lost_r
     )
     # End the request through its owning lifetime budget, not a fake terminal
     # classification of recoverable source loss.
-    from vonk_control.lifecycle.image_availability import PREPARATION_STALL_WINDOW
 
     now += PREPARATION_STALL_WINDOW
     with sessions.begin() as session:
         row = session.get(Job, original.id)
         assert row is not None
-        from vonk_control.lifecycle.types import Effect, Observed
 
         service._lifecycle._drive(row, Observed(Effect.UNKNOWN), now)
     failed = service.get(original.id)
@@ -187,7 +188,8 @@ def test_installed_retry_preserves_frozen_intent_after_catalog_change_and_lost_r
             assert len(rows) == 2
             parent = session.get(Job, original.id)
             retry = session.get(Job, response["id"])
-            assert parent is not None and retry is not None
+            assert parent is not None
+            assert retry is not None
             assert retry.authority_revision == parent.authority_revision == revision_id
             assert retry.targets == parent.targets == [revision_id]
             assert parent.state == "failed" and parent.request_id == PARENT_KEY

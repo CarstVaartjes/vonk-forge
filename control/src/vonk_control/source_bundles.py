@@ -6,7 +6,7 @@ import json
 import os
 import tarfile
 import tempfile
-from collections.abc import Collection, Iterator, Mapping
+from collections.abc import Collection, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -15,7 +15,7 @@ from types import MappingProxyType
 from typing import IO, TYPE_CHECKING, Protocol, runtime_checkable
 
 from sqlalchemy import literal_column, select
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     SecurityRefusalReason,
@@ -32,8 +32,10 @@ from vonk_agent_protocol.source_bundles import (
     SourceBundleFile,
     SourceBundleManifest,
 )
-
-from .source_bundle_contract import SourceBundleVerification
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.identity_insert import insert_identity
+from vonk_control.models.catalog import RecipeSourceBundle, SourceBundleArchive
+from vonk_control.source_bundle_contract import SourceBundleVerification
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session, sessionmaker
@@ -118,7 +120,7 @@ def generate_source_bundle(files: Mapping[str, bytes]) -> GeneratedSourceBundle:
         for raw_path in sorted(files, key=lambda value: value.encode("utf-8")):
             path = _safe_path(raw_path)
             content = files[raw_path]
-            if not isinstance(content, bytes):
+            if not isinstance(content, bytes):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                 raise SourceBundleError(
                     SourceBundleCode.FILE_INVALID, "source bundle file is not binary"
                 )
@@ -179,7 +181,7 @@ def _publish_verification(path: Path, manifest: SourceBundleManifest) -> None:
             stream.write(canonical_message(receipt))
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path.with_suffix(".verified.json"))
+        temporary.replace(path.with_suffix(".verified.json"))
         descriptor = os.open(path.parent, os.O_RDONLY)
         try:
             os.fsync(descriptor)
@@ -196,7 +198,7 @@ class SourceBundleStore:
 
     @staticmethod
     @contextmanager
-    def _storage_access() -> Iterator[None]:
+    def _storage_access() -> Generator[None]:
         """Preserve the storage boundary's explicit denial and unavailable causes."""
         try:
             yield
@@ -235,10 +237,9 @@ class SourceBundleStore:
         if destination.exists():
             try:
                 existing = destination.read_bytes()
-                present = existing == archive
             except FileNotFoundError:
-                present = False
-            if present:
+                existing = None
+            if existing is not None and existing == archive:
                 _publish_verification(destination, manifest)
                 return StoredBundle(destination, manifest, len(existing))
             # A stored copy that no longer verifies is damaged data, and the
@@ -254,7 +255,7 @@ class SourceBundleStore:
                 stream.write(archive)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary, destination)
+            temporary.replace(destination)
             directory_descriptor = os.open(directory, os.O_RDONLY)
             try:
                 os.fsync(directory_descriptor)
@@ -349,8 +350,6 @@ class DatabaseSourceBundleStore:
         manifest = _inspect_archive(archive, self._limits)
         if manifest.sha256 != expected_sha256:
             raise SourceBundleIntegrityRefused("source bundle digest does not match")
-        from .identity_insert import insert_identity
-        from .models.catalog import RecipeSourceBundle, SourceBundleArchive
 
         with self._sessions.begin() as session:
             metadata, _ = insert_identity(
@@ -400,7 +399,6 @@ class DatabaseSourceBundleStore:
         self, sha256: str, *, include_archive: bool
     ) -> tuple[SourceBundleManifest, bytes]:
         _validate_digest(sha256, SourceBundleCode.DIGEST_INVALID)
-        from .models.catalog import RecipeSourceBundle, SourceBundleArchive
 
         with self._sessions() as session:
             row = session.execute(
@@ -432,7 +430,6 @@ class DatabaseSourceBundleStore:
         wanted = set(digests)
         if not wanted:
             return set()
-        from .models.catalog import RecipeSourceBundle, SourceBundleArchive
 
         with self._sessions() as session:
             rows = session.execute(
@@ -518,7 +515,7 @@ def _generated_bundle(
 
 def _read_archive(payload: IO[bytes], limits: BundleLimits) -> bytes:
     archive = payload.read(limits.max_archive_bytes + 1)
-    if not isinstance(archive, bytes):
+    if not isinstance(archive, bytes):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         raise SourceBundleError(
             SourceBundleCode.READ_FAILED, "source bundle is not binary"
         )

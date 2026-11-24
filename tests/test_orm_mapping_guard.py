@@ -18,6 +18,7 @@ import pytest
 from sqlalchemy import JSON, Column, ForeignKey, MetaData, String, Table, inspect
 from sqlalchemy.orm import configure_mappers
 from sqlalchemy.types import TypeDecorator
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.telemetry import HostResourceSample
@@ -25,12 +26,8 @@ from vonk_control import models
 from vonk_control.inventory.items_contract import AgentInventoryItems
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentNodeContact
-from vonk_control.stored.json_values import (
-    ContractJSON,
-    JsonColumn,
-    bindings,
-    column_violations,
-)
+from vonk_control.stored.json_values import ContractJSON, JsonColumn, column_violations
+from vonk_control.stored.rows import bindings
 
 SNAPSHOT = Path(__file__).resolve().parents[1] / "tools/orm-mapping-snapshot.txt"
 
@@ -379,10 +376,10 @@ def node_fact_violations(
     for name in ("agent_nodes", "agent_node_contacts", "agent_node_profiles"):
         table = metadata.tables.get(name)
         if table is not None:
-            for field in claimed_fields.intersection(table.columns.keys()):
-                problems.append(
-                    f"{name}.{field}: agent report belongs in typed inventory"
-                )
+            problems.extend(
+                f"{name}.{field}: agent report belongs in typed inventory"
+                for field in claimed_fields.intersection(table.columns.keys())
+            )
     # Contact facts have one owner row; agent_nodes is the identity/intent row
     # admission locks, so a contact column there brings the lock back.
     nodes = metadata.tables.get("agent_nodes")
@@ -395,12 +392,12 @@ def node_fact_violations(
         )
     telemetry = metadata.tables.get("node_telemetry_samples")
     if telemetry is not None:
-        for field in set(HostResourceSample.model_fields).intersection(
-            telemetry.columns.keys()
-        ):
-            problems.append(
-                f"node_telemetry_samples.{field}: measurement belongs in typed inventory"
+        problems.extend(
+            f"node_telemetry_samples.{field}: measurement belongs in typed inventory"
+            for field in set(HostResourceSample.model_fields).intersection(
+                telemetry.columns.keys()
             )
+        )
     return sorted(problems)
 
 
@@ -540,10 +537,15 @@ def _table_declaring_modules_outside_models(
 
 def _modules_imported_by_models(source: Path) -> set[str]:
     tree = ast.parse((source / "models/__init__.py").read_text())
+    # ``from vonk_control import journal_models`` (absolute, as TID252 requires
+    # inside the package) or ``from vonk_control.x import y``.
     return {
-        node.module or alias.name
+        alias.name if node.module == "vonk_control" else node.module.split(".")[1]
         for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.level == 2
+        if isinstance(node, ast.ImportFrom)
+        and node.module is not None
+        and (node.module == "vonk_control" or node.module.startswith("vonk_control."))
+        and not node.module.startswith("vonk_control.models")
         for alias in node.names
     }
 

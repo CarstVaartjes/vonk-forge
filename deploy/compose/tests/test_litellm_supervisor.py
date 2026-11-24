@@ -22,7 +22,8 @@ def _module() -> Any:
     spec = importlib.util.spec_from_file_location(
         "litellm_config_supervisor", SUPERVISOR
     )
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -745,7 +746,7 @@ def test_development_image_compose_mounts_staged_acknowledging_supervisor() -> N
     assert "control-signer" not in worker["depends_on"]
 
 
-@pytest.mark.parametrize("health_after,accepted", [(90, True), (121, False)])
+@pytest.mark.parametrize(("health_after", "accepted"), [(90, True), (121, False)])
 def test_health_must_arrive_within_the_total_startup_window(
     monkeypatch, health_after, accepted
 ):

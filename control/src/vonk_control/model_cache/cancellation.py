@@ -8,34 +8,36 @@ from typing import TYPE_CHECKING, cast
 from pydantic import ValidationError
 from sqlalchemy import select, true
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-
-from ..agent_operation_facts import aware as _aware
-from ..lifecycle.evidence import Residue
-from ..lifecycle.types import CancelRequested, State, Tick
-from ..models.cache import ModelCacheOperation
-from . import states as model_cache_states
-from .artifacts import ArtifactSetManifest, _unique_artifacts
-from .catalog_helpers import _iso
-from .contract import (
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.model_cache import ModelCacheStore
+from vonk_control.lifecycle.reconciler import Reconciler
+from vonk_control.lifecycle.types import CancelRequested, State, Tick
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, _unique_artifacts
+from vonk_control.model_cache.catalog_helpers import _iso
+from vonk_control.model_cache.contract import (
     CacheOperationKind,
     ModelCacheCancellation,
     ModelCacheCancellationRequest,
     ModelCacheOperationPayload,
 )
-from .errors import ModelCacheConflictInvalid
-from .persistence import (
+from vonk_control.model_cache.errors import ModelCacheConflictInvalid
+from vonk_control.model_cache.persistence import (
     _operation_cancellation,
     _operation_payload,
     _operation_progress,
     _store_operation_payload,
 )
-from .progress import cache_phase, progress_document
-from .views import CacheOperationView
+from vonk_control.model_cache.progress import cache_phase, progress_document
+from vonk_control.model_cache.views import CacheOperationView
+from vonk_control.models.cache import ModelCacheOperation
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class CancellationMixin:
@@ -94,7 +96,7 @@ class CancellationMixin:
                 select(ModelCacheOperation)
                 .where(
                     ModelCacheOperation.id == operation_id
-                    if operation_id is not None
+                    if operation_id is not None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
                     else true()
                 )
                 .where(ModelCacheOperation.id == operation_id)
@@ -137,7 +139,7 @@ class CancellationMixin:
 
         with cache._session() as session:
             candidates = [
-                (operation.id, cache._payload_of(operation))
+                (operation.id, _payload_of(operation))
                 for operation in session.scalars(
                     select(ModelCacheOperation)
                     .where(
@@ -162,8 +164,6 @@ class CancellationMixin:
                 settled += int(cache._try_settle_cancellation(operation_id))
         if requested_id is None:
             return settled + cache._reconciler.reconcile().changed
-        from ..lifecycle.model_cache import ModelCacheStore
-        from ..lifecycle.reconciler import Reconciler
 
         reconciler = Reconciler(
             ModelCacheStore(cache._session, cache._lifecycle, cache, requested_id),
@@ -172,13 +172,6 @@ class CancellationMixin:
             enabled=True,
         )
         return settled + reconciler.reconcile().changed
-
-    @staticmethod
-    def _payload_of(
-        operation: ModelCacheOperation,
-    ) -> ModelCacheOperationPayload | None:
-        value = _operation_payload(operation)
-        return None if isinstance(value, Residue) else value  # no readable intent
 
     def _cancellation_intent(
         self, *, actor: str, request_key: str, reason: str
@@ -333,3 +326,10 @@ class CancellationMixin:
         # only a prompt to workers already sampling or reading a source.
         cache.signal_cancelled_operation(operation_id)
         return cache.get_operation(operation_id)
+
+
+def _payload_of(
+    operation: ModelCacheOperation,
+) -> ModelCacheOperationPayload | None:
+    value = _operation_payload(operation)
+    return None if isinstance(value, Residue) else value  # no readable intent

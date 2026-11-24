@@ -23,6 +23,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, OutcomeKind
 from vonk_agent_protocol.outcome import OutcomeDone
@@ -59,7 +60,8 @@ def installed_vonkctl(tmp_path_factory):
     root = Path(__file__).resolve().parents[2]
     workspace = tmp_path_factory.mktemp("effect-consumer-cli")
     source = os.environ["VONK_EFFECT_PLATFORM_SOURCE_SHA"]
-    assert len(source) == 40 and all(c in "0123456789abcdef" for c in source)
+    assert len(source) == 40
+    assert all(c in "0123456789abcdef" for c in source)
     environment = isolated_environment(
         workspace / "build-home",
         extra={
@@ -359,7 +361,8 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
         assert fenced_operation(sessions, fresh).state == "running"
         assert _claims(sessions, nodes[0]) == before_claims
         still_pending = cleanup.stop_effects(observe())
-        assert still_pending is not None and len(still_pending) == 1
+        assert still_pending is not None
+        assert len(still_pending) == 1
         assert cleanup.same_effect(pending, still_pending[0])
         assert not cleanup.stopped(still_pending[0])
 

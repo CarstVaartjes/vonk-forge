@@ -3,11 +3,11 @@ from __future__ import annotations
 import copy
 
 import pytest
+
+from tests.canonical_recipe_fixtures import canonical_example, source_policy_recipe
 from vonk_control.recipe_builds.common import inspect_package_source_policy
 from vonk_control.source_bundles import generate_source_bundle, parse_source_bundle
 from vonk_control.source_policy import SourcePolicyError, enforce_build_source_policy
-
-from tests.canonical_recipe_fixtures import canonical_example, source_policy_recipe
 
 
 @pytest.fixture

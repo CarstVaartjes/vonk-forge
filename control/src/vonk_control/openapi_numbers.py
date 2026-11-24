@@ -32,6 +32,9 @@ from fastapi.openapi.utils import (
 from pydantic.json_schema import models_json_schema
 from starlette.routing import BaseRoute
 
+from vonk_control.fleet_projection.common import FleetSnapshot
+from vonk_control.observation.platform import PlatformObservation
+
 UPSTREAM_ASSEMBLER_SHA256 = (
     "41a50551f99619f9333ac64edf7cd397b64f721244b89a82916c69f233239def"
 )
@@ -57,7 +60,7 @@ def _restore_numeric_keywords(raw: Any, rendered: Any) -> None:
             elif key in rendered:
                 _restore_numeric_keywords(value, rendered[key])
     elif isinstance(raw, list) and isinstance(rendered, list):
-        for original, item in zip(raw, rendered):
+        for original, item in zip(raw, rendered, strict=False):
             _restore_numeric_keywords(original, item)
 
 
@@ -133,8 +136,6 @@ def canonical_openapi(
     # Streaming observations transport bytes of these original canonical
     # models. They remain generated payload contracts even though an individual
     # HTTP record carries a transfer envelope rather than the whole model.
-    from .fleet_projection.common import FleetSnapshot
-    from .observation.platform import PlatformObservation
 
     _, payload_graph = models_json_schema(
         [(FleetSnapshot, "serialization"), (PlatformObservation, "serialization")],

@@ -10,29 +10,28 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
+
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
-
-from ..distribution_assignment import NodeDistributionAssignment
-from ..model_cache.contract import ModelCacheDownloadResult
-from ..operations.blockers import MAX_BLOCKERS, OperationBlocker
-from ..runtime_image_preparation.contracts import RuntimeImageReceipt
-from ..strict_json import StrictModel
-from .identity import NodeId, UuidId
-from .progress import (
+from vonk_control.distribution_assignment import NodeDistributionAssignment
+from vonk_control.model_cache.contract import ModelCacheDownloadResult
+from vonk_control.operations.blockers import MAX_BLOCKERS, OperationBlocker
+from vonk_control.run_switch_contract.identity import NodeId, UuidId
+from vonk_control.run_switch_contract.progress import (
     ArtifactVerificationEvidence,
     RunSwitchChildProgress,
     RunSwitchMemberReceipt,
     RunSwitchRankReceipt,
     _FailureText,
 )
-from .vocabulary import (
+from vonk_control.run_switch_contract.vocabulary import (
     Digest,
     RunSwitchContainerBuildState,
-    RunSwitchPhaseKind,
     RunSwitchSubphase,
 )
+from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
+from vonk_control.strict_json import StrictModel
 
 
 class ArtifactVerificationResult(StrictModel):
@@ -53,18 +52,7 @@ class ArtifactVerificationResult(StrictModel):
     evidence: list[ArtifactVerificationEvidence] = Field(default_factory=list)
 
 
-class _RunSwitchPhaseBase(StrictModel):
-    # `subphase` is declared by each concrete result rather than here. A default
-    # on this base makes every subclass that narrows the field to its own
-    # Literal an override that drops the default, which pyright reports nine
-    # times; a base field without a default instead makes it required on the
-    # four results that do not narrow it, changing the committed OpenAPI. Each
-    # result declaring the field it actually publishes keeps both quiet without
-    # touching a published schema.
-    phase: RunSwitchPhaseKind
-
-
-class RunSwitchContainerBuildResult(_RunSwitchPhaseBase):
+class RunSwitchContainerBuildResult(StrictModel):
     phase: Literal["prepare"]
     subphase: Literal["container-build"]
     build_id: UuidId
@@ -87,7 +75,7 @@ class RunSwitchContainerBuildResult(_RunSwitchPhaseBase):
         return self
 
 
-class RunSwitchRuntimeImageResult(_RunSwitchPhaseBase):
+class RunSwitchRuntimeImageResult(StrictModel):
     phase: Literal["prepare"]
     subphase: Literal["runtime-image"]
     runtime_image: RuntimeImageReceipt
@@ -130,7 +118,7 @@ class RunSwitchModelDownloadResult(ModelCacheDownloadResult):
         return self
 
 
-class RunSwitchModelDownloadPendingResult(_RunSwitchPhaseBase):
+class RunSwitchModelDownloadPendingResult(StrictModel):
     phase: Literal["transfer"]
     subphase: Literal["model-download"]
     schema_version: Literal[2] = 2
@@ -146,7 +134,7 @@ class RunSwitchModelDownloadPendingResult(_RunSwitchPhaseBase):
     next_attempt_at: AwareDatetime | None = None
 
 
-class RunSwitchTargetTransferResult(_RunSwitchPhaseBase):
+class RunSwitchTargetTransferResult(StrictModel):
     phase: Literal["transfer"]
     subphase: Literal["target-copy"]
     cached_nodes: list[NodeId] = Field(default_factory=list, max_length=32)
@@ -158,7 +146,7 @@ class RunSwitchTargetTransferEvidenceResult(ArtifactVerificationEvidence):
     subphase: Literal["target-copy"]
 
 
-class RunSwitchCachedTransferResult(_RunSwitchPhaseBase):
+class RunSwitchCachedTransferResult(StrictModel):
     phase: Literal["transfer"]
     subphase: Literal["target-copy"]
     skipped: Literal[True]
@@ -180,7 +168,7 @@ class RunSwitchVerifyResult(ArtifactVerificationResult):
     subphase: Literal["target-copy"]
 
 
-class RunSwitchRuntimePlanResult(_RunSwitchPhaseBase):
+class RunSwitchRuntimePlanResult(StrictModel):
     phase: Literal["prepare"]
     subphase: Literal["runtime-plan"]
     installation_id: UuidId
@@ -191,31 +179,31 @@ class RunSwitchRuntimePlanResult(_RunSwitchPhaseBase):
     compiled_plan_persisted: Literal[True]
 
 
-class RunSwitchPreparedResult(_RunSwitchPhaseBase):
+class RunSwitchPreparedResult(StrictModel):
     phase: Literal["prepare"]
     subphase: Literal["runtime-plan"]
     prepared: Literal[True]
 
 
-class RunSwitchRuntimeInstallResult(_RunSwitchPhaseBase):
+class RunSwitchRuntimeInstallResult(StrictModel):
     phase: Literal["prepare"]
     subphase: Literal["runtime-install"]
     installation_id: UuidId
 
 
-class RunSwitchStopResult(_RunSwitchPhaseBase):
+class RunSwitchStopResult(StrictModel):
     phase: Literal["stop"]
     subphase: RunSwitchSubphase | None = None
     run_id: UuidId
 
 
-class RunSwitchStartResult(_RunSwitchPhaseBase):
+class RunSwitchStartResult(StrictModel):
     phase: Literal["start"]
     subphase: RunSwitchSubphase | None = None
     run_id: UuidId
 
 
-class RunSwitchUninstallResult(_RunSwitchPhaseBase):
+class RunSwitchUninstallResult(StrictModel):
     """The removal of one installation that is no longer desired."""
 
     phase: Literal["uninstall"]
@@ -227,7 +215,7 @@ class RunSwitchUninstallResult(_RunSwitchPhaseBase):
     reason: Annotated[str, StringConstraints(max_length=512)] | None = None
 
 
-class RunSwitchCleanupVerifyResult(_RunSwitchPhaseBase):
+class RunSwitchCleanupVerifyResult(StrictModel):
     """Observed removal of the installation, derived from durable state."""
 
     phase: Literal["final_verify"]
@@ -251,7 +239,7 @@ class RunSwitchCleanupVerifyResult(_RunSwitchPhaseBase):
         return self
 
 
-class RunSwitchFinalVerifyResult(_RunSwitchPhaseBase):
+class RunSwitchFinalVerifyResult(StrictModel):
     phase: Literal["final_verify"]
     subphase: RunSwitchSubphase | None = None
     final_verified: bool
@@ -264,7 +252,7 @@ class RunSwitchFinalVerifyResult(_RunSwitchPhaseBase):
     execution_mode: Literal["one-shot-jobs"] | None = None
 
 
-class RunSwitchInstallationVerifyResult(_RunSwitchPhaseBase):
+class RunSwitchInstallationVerifyResult(StrictModel):
     """Exact installed membership observed without a serving workload."""
 
     phase: Literal["final_verify"]
@@ -299,7 +287,7 @@ class RunSwitchDistributionChildResult(StrictModel):
     error_code: _FailureText | None = None
 
 
-class RunSwitchDistributionEndedResult(_RunSwitchPhaseBase):
+class RunSwitchDistributionEndedResult(StrictModel):
     """A missing durable distribution child; no node effect is asserted."""
 
     phase: Literal[ProfileChildPhase.TRANSFER]

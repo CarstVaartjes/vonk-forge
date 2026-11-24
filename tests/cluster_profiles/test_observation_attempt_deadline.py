@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,8 +10,6 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.fleet_projection.service import FleetProjection
-from vonk_control.model_primitives import Base
 
 from cluster_profiles import observation_transfer_reader
 from cluster_profiles.control_client import client as control_client
@@ -18,6 +17,8 @@ from cluster_profiles.control_client.errors import ControlTransportError
 from cluster_profiles.control_client.transfers import ControlClient
 from control.tests.observation_transfer_peer import ObservationHTTPPeer, fleet_authority
 from control.tests.test_observation_transfer import _peer
+from vonk_control.fleet_projection.service import FleetProjection
+from vonk_control.model_primitives import Base
 
 
 def test_late_complete_payload_validation_is_not_adopted_and_next_attempt_recovers(
@@ -61,14 +62,13 @@ def test_late_complete_payload_validation_is_not_adopted_and_next_attempt_recove
         "https://control.invalid", token, opener=opener, timeout_seconds=1
     )
     observed = None
-    try:
+    with contextlib.suppress(ControlTransportError):
         observed = client.request("GET", "/api/fleet")
-    except ControlTransportError:
-        pass
     assert observed is None
     assert now[0] >= 100.0 + client.request_timeout_seconds
     assert len(peers) == 1
     assert peers[0]._body.closed
     late[0] = False
     assert fleet_authority(client.request("GET", "/api/fleet")) == snapshot
-    assert len(peers) == 2 and all(peer._body.closed for peer in peers)
+    assert len(peers) == 2
+    assert all(peer._body.closed for peer in peers)
